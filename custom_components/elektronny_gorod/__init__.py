@@ -1,4 +1,4 @@
-"""The Elektronny Gorod Connect integration."""
+"""The Elektronny Gorod integration."""
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
@@ -13,7 +13,7 @@ PLATFORMS: list[Platform] = [Platform.LIGHT]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up Elektronny Gorod Connect from a config entry."""
+    """Set up Elektronny Gorod from a config entry."""
 
     hass.data.setdefault(DOMAIN, {})
     # TODO 1. Create API instance
