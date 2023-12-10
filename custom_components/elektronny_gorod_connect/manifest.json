@@ -9,5 +9,6 @@
   "documentation": "https://github.com/gentslava/HA-ElektronnyGorodConnect/wiki",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/gentslava/HA-ElektronnyGorodConnect/issues",
-  "requirements": []
+  "requirements": [],
+  "version": "0.0.1"
 }
