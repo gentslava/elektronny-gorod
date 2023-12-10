@@ -1,0 +1,13 @@
+{
+  "domain": "elektronny_gorod_connect",
+  "name": "Elektronny Gorod Connect",
+  "codeowners": [
+    "@gentslava"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/gentslava/HA-ElektronnyGorodConnect/wiki",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/gentslava/HA-ElektronnyGorodConnect/issues",
+  "requirements": []
+}
