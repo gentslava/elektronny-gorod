@@ -14,7 +14,13 @@
               "data": {
                   "phone": "Phone number or contract"
               }
-          }
+          },
+          "contract": {
+            "data": {
+                "contract": "Contracts"
+            },
+            "description": "Choose your contract"
+        }
       }
   }
 }
