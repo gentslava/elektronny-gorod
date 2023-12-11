@@ -29,6 +29,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         self.entry: ConfigEntry | None = None
         self.phone: str | None = None
         self.contract: object | None = None
+        self.contracts: list | None = None
         self.sms: str | None = None
         self.access_token: str | None = None
         self.refresh_token: str | None = None
@@ -49,9 +50,13 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             if not contracts:
                 errors[CONF_PHONE] = "no_contracts"
             else:
+                self.contracts = contracts
+                # Prepare contract choices for user
+                contract_choices = {str(contract["subscriberId"]): contract["address"] for contract in contracts}
+
                 return self.async_show_form(
                     step_id="contract",
-                    data_schema=vol.Schema({vol.Required(CONF_CONTRACT): vol.In(contracts)}),
+                    data_schema=vol.Schema({vol.Required(CONF_CONTRACT): vol.In(contract_choices)}),
                     errors=errors,
                 )
 
@@ -71,6 +76,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             self.contract = user_input[CONF_CONTRACT]
             _LOGGER.info("Selected contract is %s", self.contract)
 
+            pass
             # Request SMS code for the selected contract
             await self.api.request_sms_code(self.contract)
 
