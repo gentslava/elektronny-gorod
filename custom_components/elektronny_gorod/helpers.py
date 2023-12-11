@@ -11,7 +11,7 @@ def contains(list, condition):
     return any(condition(item) for item in list)
 
 def find(list, condition):
-    return next(
-        (item for item in list if condition(item)),
-        None
-    )
+    for item in list:
+        if condition(item):
+            return item
+    return None
