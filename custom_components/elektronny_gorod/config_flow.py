@@ -80,7 +80,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             _LOGGER.info("Selected contract is %s", user_input[CONF_CONTRACT])
             self.contract = find(
                 self.contracts,
-                lambda contract: contract["subscriberId"] == user_input[CONF_CONTRACT]
+                lambda contract: str(contract["subscriberId"]) == user_input[CONF_CONTRACT]
             )
             _LOGGER.info("Contract object is %s", self.contract)
 
