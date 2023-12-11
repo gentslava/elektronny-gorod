@@ -20,7 +20,13 @@
                 "contract": "Contracts"
             },
             "description": "Choose your contract"
-        }
+          },
+          "sms": {
+            "data": {
+                "sms": "SMS"
+            },
+            "description": "Enter the code from SMS"
+          }
       }
   }
 }

@@ -31,7 +31,6 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         self.phone: str | None = None
         self.contract: object | None = None
         self.contracts: list | None = None
-        self.sms: str | None = None
         self.access_token: str | None = None
         self.refresh_token: str | None = None
 
@@ -99,7 +98,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             code = user_input[CONF_SMS]
 
             # Verify the SMS code
-            if await self.api.verify_sms_code(code):
+            if await self.api.verify_sms_code(self.contract, code):
                 # If code is verified, create config entry
                 return self.async_create_entry(title=f"Electronic City ({self.contract})", data={CONF_CONTRACT: self.contract})
 

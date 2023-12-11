@@ -41,10 +41,19 @@ class ElektronnyGorodAPI:
 
         return await self.request(api_url, data, method="POST")
 
-    async def verify_sms_code(self, code):
+    async def verify_sms_code(self, contract:object, code:str):
         """Verify the SMS code."""
-        api_url = f"{self.base_url}/verify_sms_code"
-        data = {"code": code}
+        api_url = f"{self.base_url}/auth/v2/auth/{self.phone}/confirmation"
+        data = json.dumps(
+            {
+                "accountId": contract["accountId"],
+                "confirm1": code,
+                "confirm2": code,
+                "login": self.phone,
+                "operatorId": contract["operatorId"],
+                "subscriberId": contract["subscriberId"],
+            }
+        )
 
         return await self.request(api_url, data, method="POST")
 
