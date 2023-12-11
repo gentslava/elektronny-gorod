@@ -1,6 +1,7 @@
 from homeassistant.core import HomeAssistant
 import logging
 import aiohttp
+from .helpers import is_json
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,7 +21,8 @@ class ElektronnyGorodAPI:
         self.phone = phone
         api_url = f"{self.base_url}/auth/v2/login/{self.phone}"
 
-        return await self.request(api_url)
+        contracts = await self.request(api_url)
+        return contracts if contracts else []
 
     async def request_sms_code(self, contract):
         """Request SMS code for the selected contract."""
@@ -43,7 +45,7 @@ class ElektronnyGorodAPI:
         data: object | None=None,
         method: str="GET"
     ):
-        """Make a HTTP request"""
+        """Make a HTTP request."""
         _LOGGER.info("Sending API request %s", url)
         async with aiohttp.ClientSession() as session:
             if method == "GET":
@@ -51,9 +53,10 @@ class ElektronnyGorodAPI:
             elif method == "POST":
                 response = await session.post(url, data, headers=self.headers)
 
+            text = await response.text()
             if response.status == 200 or response.status == 300:
-                _LOGGER.info("Response is %s", await response.text())
-                return await response.json()
+                _LOGGER.info("Response is %s", text)
+                return await response.json() if is_json(text) else text
             else:
                 _LOGGER.error("Could not get data from API: %s", response)
-                raise aiohttp.ClientError(response.status, await response.text())
+                raise aiohttp.ClientError(response.status, text)
