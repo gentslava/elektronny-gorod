@@ -77,12 +77,11 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step to select a contract."""
         if user_input is not None:
             # Save the selected contract ID
-            _LOGGER.info("Selected contract is %s", user_input[CONF_CONTRACT])
             self.contract = find(
                 self.contracts,
                 lambda contract: str(contract["subscriberId"]) == user_input[CONF_CONTRACT]
             )
-            _LOGGER.info("Contract object is %s", self.contract)
+            _LOGGER.info("Selected contract is %s. Contract object is %s", user_input[CONF_CONTRACT], self.contract)
 
             # Request SMS code for the selected contract
             await self.api.request_sms_code(self.contract)
