@@ -60,9 +60,9 @@ class ElektronnyGorodAPI:
         _LOGGER.info("Sending API request")
         async with aiohttp.ClientSession() as session:
             if method == "GET":
-                response = session.get(url, headers=self.headers)
+                response = await session.get(url, headers=self.headers)
             elif method == "POST":
-                response = session.post(url, data, headers=self.headers)
+                response = await session.post(url, data, headers=self.headers)
 
             if response.status == 200 or response.status == 300:
                 _LOGGER.debug(f"{await response.text()}")
