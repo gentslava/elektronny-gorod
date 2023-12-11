@@ -56,10 +56,10 @@ class ElektronnyGorodAPI:
             if method == "GET":
                 response = await session.get(url, headers=self.headers)
             elif method == "POST":
-                response = await session.post(url, data, headers=self.headers)
+                response = await session.post(url, data=data, headers=self.headers)
 
             text = await response.text()
-            if response.status == 200 or response.status == 300:
+            if response.status in (200, 300):
                 _LOGGER.info("Response is %s - %s", response.status, text)
                 return await response.json() if is_json(text) else text
             else:
