@@ -12,7 +12,8 @@ from .const import (
   CONF_REFRESH_TOKEN,
   CONF_PHONE,
   CONF_CONTRACT,
-  CONF_SMS
+  CONF_SMS,
+  CONF_OPERATOR_ID
 )
 from .api import ElektronnyGorodAPI
 from .helpers import find
@@ -31,8 +32,6 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         self.phone: str | None = None
         self.contract: object | None = None
         self.contracts: list | None = None
-        self.access_token: str | None = None
-        self.refresh_token: str | None = None
 
     async def async_step_user(self, user_input=None):
         """Step to gather the user's input."""
@@ -97,10 +96,18 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             code = user_input[CONF_SMS]
 
+            auth = await self.api.verify_sms_code(self.contract, code)
             # Verify the SMS code
-            if await self.api.verify_sms_code(self.contract, code):
+            if auth:
                 # If code is verified, create config entry
-                return self.async_create_entry(title=f"Electronic City ({self.contract})", data={CONF_CONTRACT: self.contract})
+                return self.async_create_entry(
+                    title=f"Electronic City ({self.contract})",
+                    data={
+                        CONF_ACCESS_TOKEN: auth["accessToken"],
+                        CONF_REFRESH_TOKEN: auth["refreshToken"],
+                        CONF_OPERATOR_ID: auth["operatorId"]
+                    }
+                )
 
             # SMS code verification failed
             return self.async_show_form(
