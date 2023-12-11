@@ -73,6 +73,8 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_contract(self, user_input):
         """Step to select a contract."""
+        errors = {}
+
         if user_input is not None:
             # Save the selected contract ID
             self.contract = find(
@@ -82,17 +84,27 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             _LOGGER.info("Selected contract is %s. Contract object is %s", user_input[CONF_CONTRACT], self.contract)
 
             # Request SMS code for the selected contract
-            await self.api.request_sms_code(self.contract)
+            try:
+                await self.api.request_sms_code(self.contract)
+            except:
+                return self.async_show_form(
+                    step_id="sms",
+                    data_schema=vol.Schema({vol.Required(CONF_SMS): str}),
+                    errors={CONF_CONTRACT: "limit_exceeded"}
+                )
 
             return self.async_show_form(
                 step_id="sms",
                 data_schema=vol.Schema({vol.Required(CONF_SMS): str}),
+                errors=errors
             )
 
         return self.async_abort(reason="unknown")
 
     async def async_step_sms(self, user_input):
         """Step to input SMS code."""
+        errors = {}
+
         if user_input is not None:
             code = user_input[CONF_SMS]
 

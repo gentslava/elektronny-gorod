@@ -5,8 +5,8 @@
           "already_configured": "Device is already configured"
       },
       "error": {
-          "cannot_connect": "Failed to connect",
-          "invalid_auth": "Invalid authentication",
+          "invalid_code": "Invalid code",
+          "limit_exceeded": "The call limit has been exceeded. Please try again later.",
           "unknown": "Unexpected error"
       },
       "step": {
