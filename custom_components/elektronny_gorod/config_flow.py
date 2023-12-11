@@ -49,12 +49,9 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             if not contracts:
                 errors[CONF_PHONE] = "no_contracts"
             else:
-                # Prepare contract choices for user
-                contract_choices = {contract["id"]: contract["name"] for contract in contracts}
-
                 return self.async_show_form(
                     step_id="contract",
-                    data_schema=vol.Schema({vol.Required(CONF_CONTRACT): vol.In(contract_choices)}),
+                    data_schema=vol.Schema({vol.Required(CONF_CONTRACT): vol.In(contracts)}),
                     errors=errors,
                 )
 
