@@ -55,7 +55,7 @@ class ElektronnyGorodAPI:
 
             text = await response.text()
             if response.status == 200 or response.status == 300:
-                _LOGGER.info("Response is %s", text)
+                _LOGGER.info("Response is %s - %s", response.status, text)
                 return await response.json() if is_json(text) else text
             else:
                 _LOGGER.error("Could not get data from API: %s", response)
