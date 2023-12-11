@@ -52,7 +52,10 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             else:
                 self.contracts = contracts
                 # Prepare contract choices for user
-                contract_choices = {str(contract["subscriberId"]): contract["address"] for contract in contracts}
+                contract_choices = {
+                    str(contract["subscriberId"]): f"{contract['address']} (Account ID: {contract['accountId']})"
+                    for contract in contracts
+                }
 
                 return self.async_show_form(
                     step_id="contract",
