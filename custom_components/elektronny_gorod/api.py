@@ -76,5 +76,5 @@ class ElektronnyGorodAPI:
                 _LOGGER.info("Response is %s - %s", response.status, text)
                 return await response.json() if is_json(text) else text
             else:
-                _LOGGER.error("Could not get data from API: %s", response)
+                _LOGGER.error("Could not get data from API: %s - %s", response, text)
                 raise aiohttp.ClientError(response.status, text)
