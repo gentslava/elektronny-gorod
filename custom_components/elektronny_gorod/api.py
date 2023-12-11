@@ -26,9 +26,14 @@ class ElektronnyGorodAPI:
 
     async def request_sms_code(self, contract):
         """Request SMS code for the selected contract."""
-        api_url = f"{self.base_url}/request_sms_code"
+        api_url = f"{self.base_url}/auth/v2/login/{self.phone}"
         self.headers["Content-Type"] = "application/json; charset=UTF-8"
-        data = {"contract_id": contract}
+        data = {
+            "accountId": contract.accountId,
+            "address": contract.address,
+            "operatorId": contract.operatorId,
+            "subscriberId": contract.subscriberId
+        }
 
         return await self.request(api_url, data, method="POST")
 

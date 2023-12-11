@@ -15,6 +15,7 @@ from .const import (
   CONF_SMS
 )
 from .api import ElektronnyGorodAPI
+from .helpers import find
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -76,10 +77,12 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step to select a contract."""
         if user_input is not None:
             # Save the selected contract ID
-            self.contract = user_input[CONF_CONTRACT]
+            self.contract = find(
+                self.contracts,
+                lambda contract: contract["subscriberId"] == user_input[CONF_CONTRACT]
+            )
             _LOGGER.info("Selected contract is %s", self.contract)
 
-            pass
             # Request SMS code for the selected contract
             await self.api.request_sms_code(self.contract)
 
