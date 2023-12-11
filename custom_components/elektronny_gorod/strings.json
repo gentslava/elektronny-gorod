@@ -1,17 +1,28 @@
 {
+  "title": "Elektronny Gorod Connect",
   "config": {
     "step": {
       "user": {
         "data": {
-          "host": "[%key:common::config_flow::data::host%]",
-          "username": "[%key:common::config_flow::data::username%]",
-          "password": "[%key:common::config_flow::data::password%]"
+          "phone": "Phone number or contract"
         }
+      },
+      "contract": {
+        "data": {
+          "contract": "Contracts"
+        },
+        "description": "Choose your contract"
+      },
+      "sms": {
+        "data": {
+          "sms": "SMS"
+        },
+        "description": "Enter the code from SMS"
       }
     },
     "error": {
-      "cannot_connect": "[%key:common::config_flow::error::cannot_connect%]",
-      "invalid_auth": "[%key:common::config_flow::error::invalid_auth%]",
+      "invalid_code": "Invalid code",
+      "limit_exceeded": "The call limit has been exceeded. Please try again later.",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
