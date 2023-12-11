@@ -1,10 +1,9 @@
 import logging
 import voluptuous as vol
-from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResult
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
-    # OptionsFlow,
 )
 from .const import (
   DOMAIN,
@@ -33,7 +32,10 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         self.contract: object | None = None
         self.contracts: list | None = None
 
-    async def async_step_user(self, user_input=None):
+    async def async_step_user(
+        self,
+        user_input: dict[str] | None = None
+    ) -> FlowResult:
         """Step to gather the user's input."""
         errors = {}
 
@@ -50,17 +52,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors[CONF_PHONE] = "no_contracts"
             else:
                 self.contracts = contracts
-                # Prepare contract choices for user
-                contract_choices = {
-                    str(contract["subscriberId"]): f"{contract['address']} (Account ID: {contract['accountId']})"
-                    for contract in contracts
-                }
-
-                return self.async_show_form(
-                    step_id="contract",
-                    data_schema=vol.Schema({vol.Required(CONF_CONTRACT): vol.In(contract_choices)}),
-                    errors=errors,
-                )
+                return await self.async_step_contract()
 
         _LOGGER.info("Failed to get phone")
         return self.async_show_form(
@@ -71,9 +63,18 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors
         )
 
-    async def async_step_contract(self, user_input):
+    async def async_step_contract(
+        self,
+        user_input: dict[str] | None = None
+    ) -> FlowResult:
         """Step to select a contract."""
         errors = {}
+
+        # Prepare contract choices for user
+        contract_choices = {
+            str(contract["subscriberId"]): f"{contract['address']} (Account ID: {contract['accountId']})"
+            for contract in self.contracts
+        }
 
         if user_input is not None:
             # Save the selected contract ID
@@ -86,22 +87,20 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             # Request SMS code for the selected contract
             try:
                 await self.api.request_sms_code(self.contract)
+                return await self.async_step_sms()
             except:
-                return self.async_show_form(
-                    step_id="sms",
-                    data_schema=vol.Schema({vol.Required(CONF_SMS): str}),
-                    errors={CONF_CONTRACT: "limit_exceeded"}
-                )
+                errors[CONF_CONTRACT] = "limit_exceeded"
 
-            return self.async_show_form(
-                step_id="sms",
-                data_schema=vol.Schema({vol.Required(CONF_SMS): str}),
-                errors=errors
-            )
+        return self.async_show_form(
+            step_id="contract",
+            data_schema=vol.Schema({vol.Required(CONF_CONTRACT): vol.In(contract_choices)}),
+            errors=errors,
+        )
 
-        return self.async_abort(reason="unknown")
-
-    async def async_step_sms(self, user_input):
+    async def async_step_sms(
+        self,
+        user_input: dict[str] | None = None
+    ) -> FlowResult:
         """Step to input SMS code."""
         errors = {}
 
@@ -122,11 +121,11 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
 
             # SMS code verification failed
-            return self.async_show_form(
-                step_id="sms",
-                data_schema=vol.Schema({vol.Required(CONF_SMS): str}),
-                errors={CONF_SMS: "invalid_code"},
-            )
+            errors[CONF_SMS] = "invalid_code"
 
-        return self.async_abort(reason="unknown")
+        return self.async_show_form(
+            step_id="sms",
+            data_schema=vol.Schema({vol.Required(CONF_SMS): str}),
+            errors=errors
+        )
 
