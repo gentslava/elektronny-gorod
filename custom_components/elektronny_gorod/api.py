@@ -1,9 +1,11 @@
 from homeassistant.core import HomeAssistant
 import logging
 import aiohttp
+import json
 from .helpers import is_json
 
 _LOGGER = logging.getLogger(__name__)
+
 
 class ElektronnyGorodAPI:
     def __init__(self, base_url: str, hass: HomeAssistant):
@@ -28,12 +30,14 @@ class ElektronnyGorodAPI:
         """Request SMS code for the selected contract."""
         api_url = f"{self.base_url}/auth/v2/login/{self.phone}"
         self.headers["Content-Type"] = "application/json; charset=UTF-8"
-        data = {
-            "accountId": contract["accountId"],
-            "address": contract["address"],
-            "operatorId": contract["operatorId"],
-            "subscriberId": contract["subscriberId"]
-        }
+        data = json.dumps(
+            {
+                "accountId": contract["accountId"],
+                "address": contract["address"],
+                "operatorId": contract["operatorId"],
+                "subscriberId": contract["subscriberId"],
+            }
+        )
 
         return await self.request(api_url, data, method="POST")
 
@@ -51,7 +55,7 @@ class ElektronnyGorodAPI:
         method: str="GET"
     ):
         """Make a HTTP request."""
-        _LOGGER.info("Sending API request %s", url)
+        _LOGGER.info("Sending API request to %s with data=%s", url, data)
         async with aiohttp.ClientSession() as session:
             if method == "GET":
                 response = await session.get(url, headers=self.headers)
