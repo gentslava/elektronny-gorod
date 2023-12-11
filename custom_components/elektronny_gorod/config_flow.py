@@ -1,3 +1,5 @@
+import logging
+import voluptuous as vol
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -10,8 +12,8 @@ from .const import (
   CONF_PHONE,
   CONF_SMS
 )
-import voluptuous as vol
 
+_LOGGER = logging.getLogger(__name__)
 
 class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     """Elektronny Gorod config flow."""
@@ -26,12 +28,16 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         self.access_token: str | None = None
         self.refresh_token: str | None = None
 
-    async def async_step_user(self, info):
+    async def async_step_user(self, user_input=None):
         errors = {}
 
-        if info is not None:
-            pass  # TODO: process info
+        if user_input is not None:
+            phone = user_input[CONF_PHONE]
 
+            _LOGGER.info("Elekrony gorod: Phone is %s", phone)
+            pass
+
+        _LOGGER.info("Elekrony gorod: Failed to get phone")
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
