@@ -21,13 +21,6 @@ class ElektronnyGorodAPI:
         api_url = f"{self.base_url}/auth/v2/login/{self.phone}"
 
         return await self.request(api_url)
-        response = await requests.get(api_url, headers=self.headers)
-
-        _LOGGER.info("Elekrony gorod: Response is %s", response)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            return []
 
     async def request_sms_code(self, contract):
         """Request SMS code for the selected contract."""
@@ -36,9 +29,6 @@ class ElektronnyGorodAPI:
         data = {"contract_id": contract}
 
         return await self.request(api_url, data, method="POST")
-        response = await requests.post(api_url, data)
-
-        return response.status_code == 200
 
     async def verify_sms_code(self, code):
         """Verify the SMS code."""
@@ -46,9 +36,6 @@ class ElektronnyGorodAPI:
         data = {"code": code}
 
         return await self.request(api_url, data, method="POST")
-        response = await requests.post(api_url, data)
-
-        return response.status_code == 200
 
     async def request(
         self,
@@ -57,7 +44,7 @@ class ElektronnyGorodAPI:
         method: str="GET"
     ):
         """Make a HTTP request"""
-        _LOGGER.info("Sending API request")
+        _LOGGER.info("Sending API request %s", url)
         async with aiohttp.ClientSession() as session:
             if method == "GET":
                 response = await session.get(url, headers=self.headers)
@@ -65,7 +52,8 @@ class ElektronnyGorodAPI:
                 response = await session.post(url, data, headers=self.headers)
 
             if response.status == 200 or response.status == 300:
-                _LOGGER.debug(f"{await response.text()}")
+                _LOGGER.info("Response is %s", await response.text())
                 return await response.json()
             else:
+                _LOGGER.error("Could not get data from API: %s", response)
                 raise aiohttp.ClientError(response.status, await response.text())

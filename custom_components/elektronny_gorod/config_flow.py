@@ -39,12 +39,12 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self.phone = user_input[CONF_PHONE]
-            _LOGGER.info("Elekrony gorod: Phone is %s", self.phone)
+            _LOGGER.info("Phone is %s", self.phone)
 
             self.api = ElektronnyGorodAPI(base_url="https://myhome.novotelecom.ru", hass=self.hass)
             # Query list of contracts for the given phone number
             contracts = await self.api.query_contracts(self.phone)
-            _LOGGER.info("Elekrony gorod: Contracts is %s", contracts)
+            _LOGGER.info("Contracts is %s", contracts)
 
             if not contracts:
                 errors[CONF_PHONE] = "no_contracts"
@@ -55,7 +55,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors=errors,
                 )
 
-        _LOGGER.info("Elekrony gorod: Failed to get phone")
+        _LOGGER.info("Failed to get phone")
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
@@ -69,7 +69,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             # Save the selected contract ID
             self.contract = user_input[CONF_CONTRACT]
-            _LOGGER.info("Elekrony gorod: Selected contract is %s", self.contract)
+            _LOGGER.info("Selected contract is %s", self.contract)
 
             # Request SMS code for the selected contract
             await self.api.request_sms_code(self.contract)
