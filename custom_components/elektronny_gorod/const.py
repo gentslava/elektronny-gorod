@@ -3,7 +3,7 @@ from typing import Final
 """Constants for the Elektronny Gorod integration."""
 
 DOMAIN = "elektronny_gorod"
-LOGGER = logging.getLogger(__package__)
+LOGGER = logging.getLogger(__name__)
 
 CONF_ACCESS_TOKEN: Final = "access_token"
 CONF_REFRESH_TOKEN: Final = "refresh_token"

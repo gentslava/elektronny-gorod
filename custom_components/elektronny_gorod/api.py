@@ -3,8 +3,7 @@ import logging
 import aiohttp
 import json
 from .helpers import is_json
-
-_LOGGER = logging.getLogger(__name__)
+from .const import LOGGER
 
 
 class ElektronnyGorodAPI:
@@ -64,7 +63,7 @@ class ElektronnyGorodAPI:
         method: str="GET"
     ):
         """Make a HTTP request."""
-        _LOGGER.info("Sending API request to %s with data=%s", url, data)
+        LOGGER.info("Sending API request to %s with data=%s", url, data)
         async with aiohttp.ClientSession() as session:
             if method == "GET":
                 response = await session.get(url, headers=self.headers)
@@ -73,8 +72,8 @@ class ElektronnyGorodAPI:
 
             text = await response.text()
             if response.status in (200, 300):
-                _LOGGER.info("Response is %s - %s", response.status, text)
+                LOGGER.info("Response is %s - %s", response.status, text)
                 return await response.json() if is_json(text) else text
             else:
-                _LOGGER.error("Could not get data from API: %s - %s", response, text)
+                LOGGER.error("Could not get data from API: %s - %s", response, text)
                 raise aiohttp.ClientError(response.status, text)

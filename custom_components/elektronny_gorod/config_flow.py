@@ -7,6 +7,7 @@ from homeassistant.config_entries import (
 )
 from .const import (
   DOMAIN,
+  LOGGER,
   CONF_ACCESS_TOKEN,
   CONF_REFRESH_TOKEN,
   CONF_PHONE,
@@ -16,8 +17,6 @@ from .const import (
 )
 from .api import ElektronnyGorodAPI
 from .helpers import find
-
-_LOGGER = logging.getLogger(__name__)
 
 class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     """Elektronny Gorod config flow."""
@@ -41,12 +40,12 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             self.phone = user_input[CONF_PHONE]
-            _LOGGER.info("Phone is %s", self.phone)
+            LOGGER.info("Phone is %s", self.phone)
 
             self.api = ElektronnyGorodAPI(base_url="https://myhome.novotelecom.ru", hass=self.hass)
             # Query list of contracts for the given phone number
             contracts = await self.api.query_contracts(self.phone)
-            _LOGGER.info("Contracts is %s", contracts)
+            LOGGER.info("Contracts is %s", contracts)
 
             if not contracts:
                 errors[CONF_PHONE] = "no_contracts"
@@ -54,7 +53,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.contracts = contracts
                 return await self.async_step_contract()
 
-        _LOGGER.info("Failed to get phone")
+        LOGGER.info("Failed to get phone")
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
@@ -82,7 +81,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.contracts,
                 lambda contract: str(contract["subscriberId"]) == user_input[CONF_CONTRACT]
             )
-            _LOGGER.info("Selected contract is %s. Contract object is %s", user_input[CONF_CONTRACT], self.contract)
+            LOGGER.info("Selected contract is %s. Contract object is %s", user_input[CONF_CONTRACT], self.contract)
 
             # Request SMS code for the selected contract
             try:
