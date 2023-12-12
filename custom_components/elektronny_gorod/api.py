@@ -67,7 +67,7 @@ class ElektronnyGorodAPI:
         api_url = f"{self.base_url}/rest/v1/forpost/cameras"
 
         cameras = await self.request(api_url)
-        return cameras if cameras else []
+        return cameras["data"] if cameras else []
 
     async def request(
         self,
