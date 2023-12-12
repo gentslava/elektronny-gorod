@@ -12,13 +12,11 @@ from .const import (
 class ElektronnyGorodAPI:
     def __init__(
         self,
-        hass: HomeAssistant,
         access_token: str | None = None,
         refresh_token: str | None = None,
         headers: dict = {}
     ):
         self.base_url: str = BASE_API_URL
-        self.hass: HomeAssistant = hass
         self.headers: object = {**{
             "User-Agent": "Android-7.1.1-1.0.0-ONEPLUS | ntk | 6.2.0 (6020005) |  | 0 | bee3aeb0602e82fb"
         }, **headers}

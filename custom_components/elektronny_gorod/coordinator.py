@@ -26,7 +26,6 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
         self.refresh_token = entry.data[CONF_REFRESH_TOKEN]
         self.operatorId = entry.data[CONF_OPERATOR_ID]
         self.api = ElektronnyGorodAPI(
-            hass=self.hass,
             access_token=self.access_token,
             refresh_token=self.refresh_token,
             headers={
