@@ -44,7 +44,6 @@ class ElektronnyGorodAPI:
                 "subscriberId": contract["subscriberId"],
             }
         )
-
         return await self.request(api_url, data, method="POST")
 
     async def verify_sms_code(self, contract:object, code:str):
@@ -60,8 +59,15 @@ class ElektronnyGorodAPI:
                 "subscriberId": contract["subscriberId"],
             }
         )
-
         return await self.request(api_url, data, method="POST")
+
+
+    async def query_cameras(self):
+        """Query the list of cameras for access token."""
+        api_url = f"{self.base_url}/rest/v1/forpost/cameras"
+
+        cameras = await self.request(api_url)
+        return cameras if cameras else []
 
     async def request(
         self,

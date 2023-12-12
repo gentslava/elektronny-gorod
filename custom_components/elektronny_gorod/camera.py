@@ -35,23 +35,27 @@ class ElektronnyGorogCamera(Entity):
     def __init__(
         self,
         coordinator: ElektronnyGorogDataUpdateCoordinator,
-        camera_info
+        camera_info: dict
     ) -> None:
         self.coordinator = coordinator
         self.camera_info = camera_info
 
     @property
-    def unique_id(self):
-        return f"{self.camera_info['id']}_{self.camera_info['name']}"
+    def unique_id(self) -> str:
+        return f"{self.camera_info['ID']}_{self.camera_info['Name']}"
 
     @property
-    def name(self):
-        return self.camera_info["name"]
+    def name(self) -> str:
+        return self.camera_info["Name"]
 
     @property
-    def is_recording(self):
-        return self.camera_info["is_recording"]
+    def is_on(self) -> bool:
+        return self.camera_info["IsActive"] == 1
 
-    async def async_update(self):
+    @property
+    def is_recording(self) -> bool:
+        return self.camera_info["RecordType"] == 1
+
+    async def async_update(self) -> None:
         # Обновляем состояние камеры, если необходимо
         await self.coordinator.update_camera_state(self.camera_info["id"])
