@@ -46,18 +46,22 @@ class ElektronnyGorogCamera(Camera):
 
     @property
     def unique_id(self) -> str:
+        """Return camera unique_id."""
         return f"{self.camera_info['ID']}_{self.camera_info['Name']}"
 
     @property
     def name(self) -> str:
+        """Return camera name."""
         return self.camera_info["Name"]
 
     @property
     def is_on(self) -> bool:
+        """Return camera state is_on."""
         return self.camera_info["IsActive"] == 1
 
     @property
     def is_recording(self) -> bool:
+        """Return camera state is_recording."""
         return self.camera_info["RecordType"] == 1
 
     async def async_camera_image(
