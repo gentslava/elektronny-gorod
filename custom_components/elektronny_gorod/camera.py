@@ -58,6 +58,14 @@ class ElektronnyGorogCamera(Camera):
     def is_recording(self) -> bool:
         return self.camera_info["RecordType"] == 1
 
+    async def async_camera_image(
+        self,
+        width: int | None = None,
+        height: int | None = None
+    ) -> bytes | None:
+        """Return bytes of camera image."""
+        return await self.coordinator.get_camera_snapshot(self.camera_info["ID"])
+
     async def async_update(self) -> None:
         # Обновляем состояние камеры, если необходимо
-        await self.coordinator.update_camera_state(self.camera_info["id"])
+        await self.coordinator.update_camera_state(self.camera_info["ID"])

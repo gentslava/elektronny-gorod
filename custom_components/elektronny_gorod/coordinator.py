@@ -65,6 +65,10 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
         LOGGER.info("Get cameras info")
         return await self.api.query_cameras()
 
+    async def get_camera_snapshot(self, id) -> bytes:
+        LOGGER.info("Get camera %s snapshot", id)
+        return await self.api.query_camera_snapshot(id)
+
     async def update_camera_state(self, id):
         LOGGER.info("Update camera %s state", id)
         pass

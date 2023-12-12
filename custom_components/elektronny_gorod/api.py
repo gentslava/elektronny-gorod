@@ -61,13 +61,17 @@ class ElektronnyGorodAPI:
         )
         return await self.request(api_url, data, method="POST")
 
-
     async def query_cameras(self):
         """Query the list of cameras for access token."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras"
 
         cameras = await self.request(api_url)
         return cameras["data"] if cameras else []
+
+    async def query_camera_snapshot(self, id):
+        """Query the camera snapshot for the id."""
+        api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/snapshots"
+        return await self.request(api_url)
 
     async def request(
         self,
