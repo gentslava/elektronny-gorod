@@ -61,10 +61,10 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
             LOGGER.error("Integration start failed: %s", traceback.format_exc())
             raise UpdateFailed(ex) from ex
 
-    async def get_cameras_info() -> list:
+    async def get_cameras_info(self) -> list:
         LOGGER.info("Get cameras info")
         return []
 
-    async def update_camera_state(id):
+    async def update_camera_state(self, id):
         LOGGER.info("Update camera %s state", id)
         pass

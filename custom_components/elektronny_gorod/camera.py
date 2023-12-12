@@ -21,7 +21,7 @@ async def async_setup_entry(
     # Get cameras info
     cameras = await coordinator.get_cameras_info()
 
-    LOGGER.info("Setiing up camera entries %s", cameras)
+    LOGGER.info("Setting up camera entries %s", cameras)
     # Create camera entities
     async_add_entities(
         ElektronnyGorogCamera(
