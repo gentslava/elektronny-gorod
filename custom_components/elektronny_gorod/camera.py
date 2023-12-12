@@ -40,6 +40,8 @@ class ElektronnyGorogCamera(Camera):
     ) -> None:
         self.coordinator = coordinator
         self.camera_info = camera_info
+        self._image: bytes | None = None
+        self.content_type = "image/jpg"
         LOGGER.info("ElektronnyGorogCamera init %s", camera_info)
 
     @property
@@ -64,7 +66,10 @@ class ElektronnyGorogCamera(Camera):
         height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
-        return await self.coordinator.get_camera_snapshot(self.camera_info["ID"])
+        image = await self.coordinator.get_camera_snapshot(self.camera_info["ID"])
+        if image:
+            self._image = image
+        return self._image
 
     async def async_update(self) -> None:
         """Update camera state."""

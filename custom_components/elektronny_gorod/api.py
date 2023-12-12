@@ -1,6 +1,4 @@
-from homeassistant.core import HomeAssistant
-import logging
-import aiohttp
+from aiohttp import ClientSession, ClientError
 import json
 from .helpers import is_json
 from .const import (
@@ -46,7 +44,7 @@ class ElektronnyGorodAPI:
         )
         return await self.request(api_url, data, method="POST")
 
-    async def verify_sms_code(self, contract:object, code:str):
+    async def verify_sms_code(self, contract:object, code:str) -> dict:
         """Verify the SMS code."""
         api_url = f"{self.base_url}/auth/v2/auth/{self.phone}/confirmation"
         data = json.dumps(
@@ -61,33 +59,36 @@ class ElektronnyGorodAPI:
         )
         return await self.request(api_url, data, method="POST")
 
-    async def query_cameras(self):
+    async def query_cameras(self) -> list:
         """Query the list of cameras for access token."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras"
 
         cameras = await self.request(api_url)
         return cameras["data"] if cameras else []
 
-    async def query_camera_snapshot(self, id):
+    async def query_camera_snapshot(self, id) -> bytes:
         """Query the camera snapshot for the id."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/snapshots"
-        return await self.request(api_url)
+        return await self.request(api_url, binary=True)
 
     async def request(
         self,
         url: str,
-        data: object | None=None,
-        method: str="GET"
+        data: object | None = None,
+        method: str = "GET",
+        binary: bool = False
     ):
         """Make a HTTP request."""
         if self.access_token is not None: self.headers["Authorization"] = f"Bearer {self.access_token}"
 
-        async with aiohttp.ClientSession() as session:
+        async with ClientSession() as session:
             LOGGER.info("Sending API request to %s with headers=%s and data=%s", url, self.headers, data)
             if method == "GET":
                 response = await session.get(url, headers=self.headers)
             elif method == "POST":
                 response = await session.post(url, data=data, headers=self.headers)
+
+            if binary: return await response.read()
 
             text = await response.text()
             if response.status in (200, 300):
@@ -95,4 +96,4 @@ class ElektronnyGorodAPI:
                 return await response.json() if is_json(text) else text
             else:
                 LOGGER.error("Could not get data from API: %s - %s", response, text)
-                raise aiohttp.ClientError(response.status, text)
+                raise ClientError(response.status, text)
