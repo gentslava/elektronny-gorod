@@ -2,6 +2,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.components.camera import Camera
 
 from .const import (
   DOMAIN,
@@ -31,7 +32,7 @@ async def async_setup_entry(
         for camera_info in cameras
     )
 
-class ElektronnyGorogCamera(Entity):
+class ElektronnyGorogCamera(Camera):
     def __init__(
         self,
         coordinator: ElektronnyGorogDataUpdateCoordinator,
@@ -39,6 +40,7 @@ class ElektronnyGorogCamera(Entity):
     ) -> None:
         self.coordinator = coordinator
         self.camera_info = camera_info
+        LOGGER.info("ElektronnyGorogCamera init %s", camera_info)
 
     @property
     def unique_id(self) -> str:
