@@ -56,9 +56,9 @@ class ElektronnyGorogCamera(Camera):
     def is_on(self) -> bool:
         return self.camera_info["IsActive"] == 1
 
-    # @property
-    # def is_recording(self) -> bool:
-    #     return self.camera_info["RecordType"] == 1
+    @property
+    def is_recording(self) -> bool:
+        return self.camera_info["RecordType"] == 1
 
     async def async_camera_image(
         self,
