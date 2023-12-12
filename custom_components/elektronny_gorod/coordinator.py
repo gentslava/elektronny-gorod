@@ -48,3 +48,11 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
             persistent_notification.SIGNAL_PERSISTENT_NOTIFICATIONS_UPDATED,
             self._notification_dismiss_listener,
         )
+
+    async def get_cameras_info() -> list:
+        LOGGER.info("Get cameras info")
+        return []
+
+    async def update_camera_state(id):
+        LOGGER.info("Update camera %s state", id)
+        pass
