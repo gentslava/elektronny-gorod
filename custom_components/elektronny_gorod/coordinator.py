@@ -48,6 +48,9 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
             self._notification_dismiss_listener,
         )
 
+    def _notification_dismiss_listener(self, type, data) -> None:
+        pass
+
     async def get_cameras_info() -> list:
         LOGGER.info("Get cameras info")
         return []
