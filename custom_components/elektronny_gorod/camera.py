@@ -54,9 +54,9 @@ class ElektronnyGorogCamera(Camera):
     def is_on(self) -> bool:
         return self.camera_info["IsActive"] == 1
 
-    @property
-    def is_recording(self) -> bool:
-        return self.camera_info["RecordType"] == 1
+    # @property
+    # def is_recording(self) -> bool:
+    #     return self.camera_info["RecordType"] == 1
 
     async def async_camera_image(
         self,
@@ -67,5 +67,5 @@ class ElektronnyGorogCamera(Camera):
         return await self.coordinator.get_camera_snapshot(self.camera_info["ID"])
 
     async def async_update(self) -> None:
-        # Обновляем состояние камеры, если необходимо
-        await self.coordinator.update_camera_state(self.camera_info["ID"])
+        """Update camera state."""
+        self.camera_info = await self.coordinator.update_camera_state(self.camera_info["ID"])

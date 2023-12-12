@@ -13,6 +13,7 @@ from .const import (
   CONF_OPERATOR_ID,
 )
 from .api import ElektronnyGorodAPI
+from .helpers import find
 
 class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Elektronny Gorod data from single endpoint."""
@@ -69,6 +70,11 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
         LOGGER.info("Get camera %s snapshot", id)
         return await self.api.query_camera_snapshot(id)
 
-    async def update_camera_state(self, id):
+    async def update_camera_state(self, id) -> dict:
         LOGGER.info("Update camera %s state", id)
-        pass
+
+        cameras = await self.api.query_cameras()
+        return find(
+            cameras,
+            lambda camera: camera["ID"] == id
+        )
