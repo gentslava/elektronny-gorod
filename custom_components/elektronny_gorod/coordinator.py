@@ -30,7 +30,7 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
             access_token=self.access_token,
             refresh_token=self.refresh_token,
             headers={
-                "Operator": self.operatorId,
+                "Operator": str(self.operatorId),
                 "Content-Type": "application/json"
             }
         )
