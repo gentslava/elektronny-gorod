@@ -5,6 +5,7 @@ from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
 )
+from homeassistant.const import CONF_NAME
 from .const import (
   DOMAIN,
   LOGGER,
@@ -110,9 +111,11 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             # Verify the SMS code
             if auth:
                 # If code is verified, create config entry
+                name = f"Electronic City ({self.contract})"
                 return self.async_create_entry(
-                    title=f"Electronic City ({self.contract})",
+                    title=name,
                     data={
+                        CONF_NAME: name,
                         CONF_ACCESS_TOKEN: auth["accessToken"],
                         CONF_REFRESH_TOKEN: auth["refreshToken"],
                         CONF_OPERATOR_ID: auth["operatorId"]
