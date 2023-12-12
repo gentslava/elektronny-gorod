@@ -9,17 +9,17 @@ from .const import DOMAIN
 
 # TODO List the platforms that you want to support.
 # For your initial PR, limit it to 1 platform.
-PLATFORMS: list[Platform] = [Platform.LIGHT]
+PLATFORMS: list[Platform] = [
+    Platform.CAMERA,
+]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elektronny Gorod from a config entry."""
+    coordinator = DreameVacuumDataUpdateCoordinator(hass, entry=entry)
+    await coordinator.async_config_entry_first_refresh()
 
-    hass.data.setdefault(DOMAIN, {})
-    # TODO 1. Create API instance
-    # TODO 2. Validate the API connection (and authentication)
-    # TODO 3. Store an API object for your platforms to access
-    # hass.data[DOMAIN][entry.entry_id] = MyApi(...)
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
 
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
