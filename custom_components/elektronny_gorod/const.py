@@ -3,6 +3,7 @@ from typing import Final
 """Constants for the Elektronny Gorod integration."""
 
 DOMAIN = "elektronny_gorod"
+BASE_API_URL: Final = "https://myhome.novotelecom.ru"
 LOGGER = logging.getLogger(__name__)
 
 CONF_ACCESS_TOKEN: Final = "access_token"

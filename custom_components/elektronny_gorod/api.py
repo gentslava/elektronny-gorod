@@ -3,19 +3,28 @@ import logging
 import aiohttp
 import json
 from .helpers import is_json
-from .const import LOGGER
+from .const import (
+    LOGGER,
+    BASE_API_URL,
+)
 
 
 class ElektronnyGorodAPI:
-    def __init__(self, base_url: str, hass: HomeAssistant):
-        self.base_url: str = base_url
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        access_token: str | None = None,
+        refresh_token: str | None = None,
+        headers: dict = {}
+    ):
+        self.base_url: str = BASE_API_URL
         self.hass: HomeAssistant = hass
-        self.headers: object = {
+        self.headers: object = {**{
             "User-Agent": "Android-7.1.1-1.0.0-ONEPLUS | ntk | 6.2.0 (6020005) |  | 0 | bee3aeb0602e82fb"
-        }
+        }, **headers}
         self.phone: str | None = None
-        self.access_token: str | None = None
-        self.refresh_token: str | None = None
+        self.access_token: str | None = access_token
+        self.refresh_token: str | None = refresh_token
 
     async def query_contracts(self, phone: str):
         """Query the list of contracts for the given phone number."""
@@ -63,8 +72,10 @@ class ElektronnyGorodAPI:
         method: str="GET"
     ):
         """Make a HTTP request."""
-        LOGGER.info("Sending API request to %s with data=%s", url, data)
+        if self.access_token is not None: self.headers["Authorization"] = f"Bearer {self.access_token}"
+
         async with aiohttp.ClientSession() as session:
+            LOGGER.info("Sending API request to %s with headers=%s and data=%s", url, self.headers, data)
             if method == "GET":
                 response = await session.get(url, headers=self.headers)
             elif method == "POST":

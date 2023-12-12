@@ -42,7 +42,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             self.phone = user_input[CONF_PHONE]
             LOGGER.info("Phone is %s", self.phone)
 
-            self.api = ElektronnyGorodAPI(base_url="https://myhome.novotelecom.ru", hass=self.hass)
+            self.api = ElektronnyGorodAPI(hass=self.hass)
             # Query list of contracts for the given phone number
             contracts = await self.api.query_contracts(self.phone)
             LOGGER.info("Contracts is %s", contracts)
