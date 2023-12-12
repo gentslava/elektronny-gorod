@@ -1,9 +1,10 @@
+import traceback
 from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.const import CONF_NAME
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .const import (
   DOMAIN,
   LOGGER,
@@ -50,6 +51,15 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
 
     def _notification_dismiss_listener(self, type, data) -> None:
         pass
+
+    async def _async_update_data(self) -> None:
+        """Handle device update. This function is only called once when the integration is added to Home Assistant."""
+        try:
+            LOGGER.info("Integration starting...")
+            pass
+        except Exception as ex:
+            LOGGER.error("Integration start failed: %s", traceback.format_exc())
+            raise UpdateFailed(ex) from ex
 
     async def get_cameras_info() -> list:
         LOGGER.info("Get cameras info")
