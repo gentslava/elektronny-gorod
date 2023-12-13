@@ -1,4 +1,5 @@
 import json
+import uuid
 
 def is_json(value: str):
     try:
@@ -15,3 +16,12 @@ def find(list, condition):
         if condition(item):
             return item
     return None
+
+def generate_user_agent(
+    iphone: str = "iPhone15,3",
+    ios: str = "iOS 17.1.2",
+    app_ver: str = "6.16.5 (build 1)",
+    account_id: str = "_",
+    operator: str = "1"
+):
+    return f"{iphone} | {ios} | ntk | {app_ver} | {account_id} | {operator} | {str(uuid.uuid4()).upper()}"

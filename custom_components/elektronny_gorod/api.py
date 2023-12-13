@@ -1,6 +1,9 @@
 from aiohttp import ClientSession, ClientError
 import json
-from .helpers import is_json
+from .helpers import (
+    is_json,
+    generate_user_agent
+)
 from .const import (
     LOGGER,
     BASE_API_URL,
@@ -17,7 +20,7 @@ class ElektronnyGorodAPI:
         self.base_url: str = BASE_API_URL
         self.headers: object = {**{
             "Host": "api-mh.ertelecom.ru",
-            "User-Agent": "iPhone15,3 | iOS 17.1.2 | ntk | 6.16.5 (build 1) | _ | 1 | 04498926-35A4-431D-AFB3-039B7CD0060F",
+            "User-Agent": generate_user_agent(),
             "Content-Type": "application/json; charset=UTF-8",
             "Authorization": "",
             "Accept": "*/*",
