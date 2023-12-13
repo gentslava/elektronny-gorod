@@ -16,7 +16,12 @@ class ElektronnyGorodAPI:
     ):
         self.base_url: str = BASE_API_URL
         self.headers: object = {**{
-            "User-Agent": "Android-7.1.1-1.0.0-ONEPLUS | ntk | 6.2.0 (6020005) |  | 0 | bee3aeb0602e82fb"
+            "Host": "api-mh.ertelecom.ru",
+            "User-Agent": "iPhone15,3 | iOS 17.1.2 | ntk | 6.16.5 (build 1) | _ | 1 | 04498926-35A4-431D-AFB3-039B7CD0060F",
+            "Content-Type": "application/json; charset=UTF-8",
+            "Authorization": "",
+            "Accept": "*/*",
+            "Accept-Language": "ru"
         }, **headers}
         self.phone: str | None = None
         self.access_token: str | None = access_token
@@ -33,7 +38,6 @@ class ElektronnyGorodAPI:
     async def request_sms_code(self, contract: object):
         """Request SMS code for the selected contract."""
         api_url = f"{self.base_url}/auth/v2/confirmation/{self.phone}"
-        self.headers["Content-Type"] = "application/json; charset=UTF-8"
         data = json.dumps(
             {
                 "accountId": contract["accountId"],
