@@ -20,49 +20,58 @@ async def async_setup_entry(
     coordinator: ElektronnyGorogDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     # Get cameras info
-    cameras = await coordinator.get_cameras_info()
+    cameras = []
+    cameras_info = await coordinator.get_cameras_info()
+    for camera_info in cameras_info:
+        stream_url = await coordinator.get_camera_stream()
+        camera = {
+            camera_info,
+            stream_url
+        }
+        cameras.append(camera)
 
     LOGGER.info("Setting up camera entries %s", cameras)
     # Create camera entities
     async_add_entities(
         ElektronnyGorogCamera(
             coordinator,
-            camera_info
+            camera
         )
-        for camera_info in cameras
+        for camera in cameras
     )
 
 class ElektronnyGorogCamera(Camera):
     def __init__(
         self,
         coordinator: ElektronnyGorogDataUpdateCoordinator,
-        camera_info: dict
+        camera: dict
     ) -> None:
-        self.coordinator = coordinator
-        self.camera_info = camera_info
+        LOGGER.info("ElektronnyGorogCamera init %s", camera)
+        self._coordinator: ElektronnyGorogDataUpdateCoordinator = coordinator
+        self._camera_info: dict = camera.camera_info
+        self._stream_url: str | None = camera.stream_url
         self._image: bytes | None = None
         self.content_type = "image/jpg"
-        LOGGER.info("ElektronnyGorogCamera init %s", camera_info)
 
     @property
     def unique_id(self) -> str:
         """Return camera unique_id."""
-        return f"{self.camera_info['ID']}_{self.camera_info['Name']}"
+        return f"{self._camera_info['ID']}_{self._camera_info['Name']}"
 
     @property
     def name(self) -> str:
         """Return camera name."""
-        return self.camera_info["Name"]
+        return self._camera_info["Name"]
 
     @property
     def is_on(self) -> bool:
         """Return camera state is_on."""
-        return self.camera_info["IsActive"] == 1
+        return self._camera_info["IsActive"] == 1
 
     @property
     def is_recording(self) -> bool:
         """Return camera state is_recording."""
-        return self.camera_info["RecordType"] == 1
+        return self._camera_info["RecordType"] == 1
 
     async def async_camera_image(
         self,
@@ -70,11 +79,15 @@ class ElektronnyGorogCamera(Camera):
         height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
-        image = await self.coordinator.get_camera_snapshot(self.camera_info["ID"])
+        image = await self._coordinator.get_camera_snapshot(self._camera_info["ID"])
         if image:
             self._image = image
         return self._image
 
+    async def stream_source(self) -> str | None:
+        """Return the source of the stream."""
+        return self._stream_url
+
     async def async_update(self) -> None:
         """Update camera state."""
-        self.camera_info = await self.coordinator.update_camera_state(self.camera_info["ID"])
+        self._camera_info = await self._coordinator.update_camera_state(self._camera_info["ID"])
