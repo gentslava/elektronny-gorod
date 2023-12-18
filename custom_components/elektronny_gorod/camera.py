@@ -23,7 +23,7 @@ async def async_setup_entry(
     cameras = []
     cameras_info = await coordinator.get_cameras_info()
     for camera_info in cameras_info:
-        stream_url = await coordinator.get_camera_stream()
+        stream_url = await coordinator.get_camera_stream(id=camera_info["ID"])
         camera = {
             camera_info,
             stream_url
