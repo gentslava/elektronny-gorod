@@ -80,9 +80,9 @@ class ElektronnyGorodAPI:
         camera_stream = await self.request(api_url)
         return camera_stream["data"]["URL"] if camera_stream else None
 
-    async def query_camera_snapshot(self, id) -> bytes:
+    async def query_camera_snapshot(self, id, width, height) -> bytes:
         """Query the camera snapshot for the id."""
-        api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/snapshots"
+        api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/snapshots?width={width}&height={height}"
         return await self.request(api_url, binary=True)
 
     async def request(

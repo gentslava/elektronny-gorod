@@ -12,3 +12,6 @@ CONF_PHONE: Final = "phone"
 CONF_CONTRACT: Final = "contract"
 CONF_SMS: Final = "sms"
 CONF_OPERATOR_ID: Final = "operatorId"
+
+CONF_WIDTH: Final = 300
+CONF_HEIGHT: Final = 300

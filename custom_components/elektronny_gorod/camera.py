@@ -6,7 +6,9 @@ from homeassistant.components.camera import Camera
 
 from .const import (
   DOMAIN,
-  LOGGER
+  LOGGER,
+  CONF_WIDTH,
+  CONF_HEIGHT
 )
 
 from .coordinator import ElektronnyGorogDataUpdateCoordinator
@@ -72,11 +74,11 @@ class ElektronnyGorogCamera(Camera):
 
     async def async_camera_image(
         self,
-        width: int | None = None,
-        height: int | None = None
+        width: int | None = CONF_WIDTH,
+        height: int | None = CONF_HEIGHT
     ) -> bytes | None:
         """Return bytes of camera image."""
-        image = await self._coordinator.get_camera_snapshot(self._id)
+        image = await self._coordinator.get_camera_snapshot(self._id, width, height)
         if image:
             self._image = image
         return self._image
