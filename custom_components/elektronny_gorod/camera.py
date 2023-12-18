@@ -1,16 +1,13 @@
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import Entity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.components.camera import Camera
-
+from homeassistant.components.camera import Camera, CameraEntityFeature
 from .const import (
   DOMAIN,
   LOGGER,
   CONF_WIDTH,
   CONF_HEIGHT
 )
-
 from .coordinator import ElektronnyGorogDataUpdateCoordinator
 
 async def async_setup_entry(
@@ -48,7 +45,9 @@ class ElektronnyGorogCamera(Camera):
         self._id = self._camera_info["ID"]
         self._name = self._camera_info["Name"]
         self._is_on = self._camera_info["IsActive"] == 1
+        self._is_streaming = self._camera_info["State"] == 1
         self._is_recording = self._camera_info["RecordType"] == 1
+        self._attr_supported_features = CameraEntityFeature.STREAM
         self._stream_url: str | None = stream_url
         self._image: bytes | None = None
 
@@ -66,6 +65,11 @@ class ElektronnyGorogCamera(Camera):
     def is_on(self) -> bool:
         """Return camera state is_on."""
         return self._is_on
+
+    @property
+    def is_streaming(self) -> bool:
+        """Return camera state is_streaming."""
+        return self._is_streaming
 
     @property
     def is_recording(self) -> bool:
