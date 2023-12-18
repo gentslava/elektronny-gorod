@@ -66,12 +66,16 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
         LOGGER.info("Get cameras info")
         return await self.api.query_cameras()
 
-    async def get_camera_snapshot(self, id) -> bytes:
-        LOGGER.info("Get camera %s snapshot", id)
-        return await self.api.query_camera_snapshot(id)
+    async def get_camera_stream(self, id) -> str | None:
+        LOGGER.info("Get camera stream")
+        return await self.api.query_camera_stream(id)
+
+    async def get_camera_snapshot(self, id, width, height) -> bytes:
+        LOGGER.info(f"Get camera {id} snapshot with size {width}x{height}")
+        return await self.api.query_camera_snapshot(id, width, height)
 
     async def update_camera_state(self, id) -> dict:
-        LOGGER.info("Update camera %s state", id)
+        LOGGER.info(f"Update camera {id} state")
 
         cameras = await self.api.query_cameras()
         return find(
