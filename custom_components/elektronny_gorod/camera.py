@@ -22,14 +22,17 @@ async def async_setup_entry(
     cameras = await coordinator.get_cameras_info()
 
     # Create camera entities
-    async_add_entities(
-        ElektronnyGorogCamera(
-            coordinator,
-            camera,
-            stream_url = await coordinator.get_camera_stream(camera["ID"])
+    entities = []
+    for camera in cameras:
+        stream_url = await coordinator.get_camera_stream(camera["ID"])
+        entities.append(
+            ElektronnyGorogCamera(
+                coordinator,
+                camera,
+                stream_url
+            )
         )
-        for camera in cameras
-    )
+    async_add_entities(entities)
 
 class ElektronnyGorogCamera(Camera):
     def __init__(
