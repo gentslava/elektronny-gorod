@@ -25,8 +25,8 @@ async def async_setup_entry(
     for camera_info in cameras_info:
         stream_url = await coordinator.get_camera_stream(id=camera_info["ID"])
         camera = {
-            camera_info,
-            stream_url
+            "camera_info": camera_info,
+            "stream_url": stream_url
         }
         cameras.append(camera)
 
@@ -48,8 +48,8 @@ class ElektronnyGorogCamera(Camera):
     ) -> None:
         LOGGER.info("ElektronnyGorogCamera init %s", camera)
         self._coordinator: ElektronnyGorogDataUpdateCoordinator = coordinator
-        self._camera_info: dict = camera.camera_info
-        self._stream_url: str | None = camera.stream_url
+        self._camera_info: dict = camera["camera_info"]
+        self._stream_url: str | None = camera["stream_url"]
         self._image: bytes | None = None
         self.content_type = "image/jpg"
 
