@@ -85,6 +85,13 @@ class ElektronnyGorodAPI:
         api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/snapshots?width={width}&height={height}"
         return await self.request(api_url, binary=True)
 
+    async def query_places(self) -> list:
+        """Query the list of places for subscriber."""
+        api_url = f"{self.base_url}/rest/v1/subscriberplaces"
+
+        places = await self.request(api_url)
+        return places["data"] if places else []
+
     async def request(
         self,
         url: str,

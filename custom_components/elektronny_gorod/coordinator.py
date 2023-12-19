@@ -82,3 +82,24 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
             cameras,
             lambda camera: camera["ID"] == id
         )
+
+    async def get_locks_info(self) -> list:
+        LOGGER.info("Get locks info")
+
+        subscriber_places = await self.api.query_places()
+        locks = []
+        for subscriber_place in subscriber_places:
+            place = subscriber_place["place"]
+            access_controls = place["accessControls"]
+            for access_control in access_controls:
+                entrances = access_control["entrances"]
+                for entrance in entrances:
+                    lock = {
+                        "place_id": place["id"],
+                        "access_control_id": access_control["id"],
+                        "entrance_id": entrance["id"],
+                        "name": entrance["name"],
+                        "openable": entrance["allowOpen"]
+                    }
+                    locks.append(lock)
+        return locks
