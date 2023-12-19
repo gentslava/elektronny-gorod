@@ -1,6 +1,6 @@
 from typing import Any
 
-from homeassistant.components.lock import LockEntity, LockEntityFeature
+from homeassistant.components.lock import LockEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -42,8 +42,7 @@ class ElektronnyGorogLock(LockEntity):
         self._entrance_id = self._lock_info["entrance_id"]
         self._name = self._lock_info["name"]
         self._openable = self._lock_info["openable"]
-        if self._openable:
-            self._attr_supported_features = LockEntityFeature.OPEN
+        self._locked = True
 
     @property
     def unique_id(self) -> str:
@@ -55,13 +54,26 @@ class ElektronnyGorogLock(LockEntity):
         """Return lock name."""
         return self._name
 
+    @property
+    def is_locked(self) -> bool | None:
+        """Return true if lock is locked."""
+        return self._locked
+
+    @property
+    def is_unlocking(self) -> bool | None:
+        """Return true if lock is unlocking."""
+        return not self._locked
+
+    async def async_lock(self, **kwargs: Any) -> None:
+        """Lock the device."""
+        LOGGER.info("Not supported")
+
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock all or specified locks."""
         LOGGER.info(f"Unlock {self.unique_id}")
+        self._locked = False
 
     async def async_update(self) -> None:
         """Update lock state."""
-        self._lock_info = await self._coordinator.update_lock_state(self._place_id, self._access_control_id, self._entrance_id)
-        self._openable = self._lock_info["openable"]
-        if self._openable:
-            self._attr_supported_features = LockEntityFeature.OPEN
+        # self._lock_info = await self._coordinator.update_lock_state(self._place_id, self._access_control_id, self._entrance_id)
+        # self._openable = self._lock_info["openable"]
