@@ -108,18 +108,22 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
         LOGGER.info(f"Update lock {place_id}_{access_control_id}_{entrance_id} state")
 
         subscriber_places = await self.api.query_places()
-        place = find(
+        subscriber_place = find(
             subscriber_places,
-            lambda place: place["id"] == place_id
+            lambda subscriber_place: subscriber_place["place"]["id"] == place_id
         )
+        place = subscriber_place["place"]
+
         access_control = find(
             place["accessControls"],
             lambda access_control: access_control["id"] == access_control_id
         )
+
         entrance = find(
             access_control["entrances"],
             lambda entrance: entrance["id"] == entrance_id
         )
+
         return {
             "place_id": place["id"],
             "access_control_id": access_control["id"],
