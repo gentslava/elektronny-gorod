@@ -55,6 +55,11 @@ class ElektronnyGorogLock(LockEntity):
         return self._name
 
     @property
+    def available(self) -> bool:
+        """Return lock is available."""
+        return self._openable
+
+    @property
     def is_locked(self) -> bool | None:
         """Return true if lock is locked."""
         return self._locked
