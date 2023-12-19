@@ -55,9 +55,9 @@ class ElektronnyGorogLock(LockEntity):
         """Return lock name."""
         return self._name
 
-    @property
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock all or specified locks."""
+        LOGGER.info(f"Unlock {self.unique_id}")
 
     async def async_update(self) -> None:
         """Update lock state."""
