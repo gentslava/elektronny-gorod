@@ -131,3 +131,7 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
             "name": entrance["name"],
             "openable": entrance["allowOpen"]
         }
+
+    async def open_lock(self, place_id, access_control_id, entrance_id) -> None:
+        LOGGER.info(f"Open lock {place_id}_{access_control_id}_{entrance_id}")
+        await self.api.open_lock(place_id, access_control_id, entrance_id)

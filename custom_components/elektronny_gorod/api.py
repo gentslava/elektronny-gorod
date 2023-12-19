@@ -92,6 +92,16 @@ class ElektronnyGorodAPI:
         places = await self.request(api_url)
         return places["data"] if places else []
 
+    async def open_lock(self, place_id, access_control_id, entrance_id) -> list:
+        """Query the list of places for subscriber."""
+        api_url = f"{self.base_url}/rest/v1/places/{place_id}/accesscontrols/{access_control_id}/entrances/{entrance_id}/actions"
+        data = json.dumps(
+            {
+                "name": "accessControlOpen"
+            }
+        )
+        return await self.request(api_url, data, method="POST")
+
     async def request(
         self,
         url: str,

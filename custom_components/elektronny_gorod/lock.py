@@ -76,6 +76,7 @@ class ElektronnyGorogLock(LockEntity):
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock all or specified locks."""
         LOGGER.info(f"Unlock {self.unique_id}")
+        await self._coordinator.open_lock(self._place_id, self._access_control_id, self._entrance_id)
         self._locked = False
 
     async def async_update(self) -> None:
