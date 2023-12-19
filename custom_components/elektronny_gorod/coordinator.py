@@ -103,3 +103,27 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
                     }
                     locks.append(lock)
         return locks
+
+    async def update_lock_state(self, place_id, access_control_id, entrance_id) -> dict:
+        LOGGER.info(f"Update lock {place_id}_{access_control_id}_{entrance_id} state")
+
+        subscriber_places = await self.api.query_places()
+        place = find(
+            subscriber_places,
+            lambda place: place["id"] == place_id
+        )
+        access_control = find(
+            place["accessControls"],
+            lambda access_control: access_control["id"] == access_control_id
+        )
+        entrance = find(
+            access_control["entrances"],
+            lambda entrance: entrance["id"] == entrance_id
+        )
+        return {
+            "place_id": place["id"],
+            "access_control_id": access_control["id"],
+            "entrance_id": entrance["id"],
+            "name": entrance["name"],
+            "openable": entrance["allowOpen"]
+        }

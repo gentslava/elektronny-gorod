@@ -58,3 +58,10 @@ class ElektronnyGorogLock(LockEntity):
     @property
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock all or specified locks."""
+
+    async def async_update(self) -> None:
+        """Update lock state."""
+        self._lock_info = await self._coordinator.update_lock_state(self._place_id, self._access_control_id, self._entrance_id)
+        self._openable = self._lock_info["openable"]
+        if self._openable:
+            self._attr_supported_features = LockEntityFeature.OPEN
