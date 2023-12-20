@@ -9,6 +9,7 @@ from homeassistant.const import (
     STATE_JAMMED,
     STATE_LOCKED,
     STATE_LOCKING,
+    STATE_UNLOCKED,
     STATE_UNLOCKING,
 )
 
@@ -97,11 +98,19 @@ class ElektronnyGorogLock(LockEntity):
         """Unlock all or specified locks."""
         LOGGER.info(f"Unlock {self.unique_id}")
         self._state = STATE_UNLOCKING
+        self.async_write_ha_state()
         await self._coordinator.open_lock(self._place_id, self._access_control_id, self._entrance_id)
+        self._state = STATE_UNLOCKED
+        self.async_write_ha_state()
+
+    async def fake_timer_lock(self) -> None:
         await asyncio.sleep(LOCK_UNLOCK_DELAY)
         self._state = STATE_LOCKED
+        self.async_write_ha_state()
 
     async def async_update(self) -> None:
         """Update lock state."""
+        if self._state == STATE_UNLOCKED:
+            await self.fake_timer_lock()
         # self._lock_info = await self._coordinator.update_lock_state(self._place_id, self._access_control_id, self._entrance_id)
         # self._openable = self._lock_info["openable"]
