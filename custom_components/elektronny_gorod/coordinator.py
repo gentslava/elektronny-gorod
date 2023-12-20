@@ -82,3 +82,56 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
             cameras,
             lambda camera: camera["ID"] == id
         )
+
+    async def get_locks_info(self) -> list:
+        LOGGER.info("Get locks info")
+
+        subscriber_places = await self.api.query_places()
+        locks = []
+        for subscriber_place in subscriber_places:
+            place = subscriber_place["place"]
+            access_controls = place["accessControls"]
+            for access_control in access_controls:
+                entrances = access_control["entrances"]
+                for entrance in entrances:
+                    lock = {
+                        "place_id": place["id"],
+                        "access_control_id": access_control["id"],
+                        "entrance_id": entrance["id"],
+                        "name": entrance["name"],
+                        "openable": entrance["allowOpen"]
+                    }
+                    locks.append(lock)
+        return locks
+
+    async def update_lock_state(self, place_id, access_control_id, entrance_id) -> dict:
+        LOGGER.info(f"Update lock {place_id}_{access_control_id}_{entrance_id} state")
+
+        subscriber_places = await self.api.query_places()
+        subscriber_place = find(
+            subscriber_places,
+            lambda subscriber_place: subscriber_place["place"]["id"] == place_id
+        )
+        place = subscriber_place["place"]
+
+        access_control = find(
+            place["accessControls"],
+            lambda access_control: access_control["id"] == access_control_id
+        )
+
+        entrance = find(
+            access_control["entrances"],
+            lambda entrance: entrance["id"] == entrance_id
+        )
+
+        return {
+            "place_id": place["id"],
+            "access_control_id": access_control["id"],
+            "entrance_id": entrance["id"],
+            "name": entrance["name"],
+            "openable": entrance["allowOpen"]
+        }
+
+    async def open_lock(self, place_id, access_control_id, entrance_id) -> None:
+        LOGGER.info(f"Open lock {place_id}_{access_control_id}_{entrance_id}")
+        await self.api.open_lock(place_id, access_control_id, entrance_id)
