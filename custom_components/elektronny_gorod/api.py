@@ -66,6 +66,23 @@ class ElektronnyGorodAPI:
         )
         return await self.request(api_url, data, method="POST")
 
+    async def update_access_token(self, access_token) -> None:
+        self.access_token = access_token
+
+    async def query_profile(self) -> dict:
+        """Query the profile data for subscriber."""
+        api_url = f"{self.base_url}/rest/v1/subscribers/profiles"
+
+        profile = await self.request(api_url)
+        return profile["data"] if profile else {}
+
+    async def query_places(self) -> list:
+        """Query the list of places for subscriber."""
+        api_url = f"{self.base_url}/rest/v1/subscriberplaces"
+
+        places = await self.request(api_url)
+        return places["data"] if places else []
+
     async def query_cameras(self) -> list:
         """Query the list of cameras for access token."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras"
@@ -84,13 +101,6 @@ class ElektronnyGorodAPI:
         """Query the camera snapshot for the id."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/snapshots?width={width}&height={height}"
         return await self.request(api_url, binary=True)
-
-    async def query_places(self) -> list:
-        """Query the list of places for subscriber."""
-        api_url = f"{self.base_url}/rest/v1/subscriberplaces"
-
-        places = await self.request(api_url)
-        return places["data"] if places else []
 
     async def open_lock(self, place_id, access_control_id, entrance_id) -> list:
         """Query the list of places for subscriber."""

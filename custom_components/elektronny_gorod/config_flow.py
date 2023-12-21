@@ -111,7 +111,10 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             # Verify the SMS code
             if auth:
                 # If code is verified, create config entry
-                name = f"Electronic City ({self.contract})"
+                await self.api.update_access_token(auth["accessToken"])
+                profile = await self.api.query_profile()
+                subscriber = profile["subscriber"]
+                name = f"{subscriber['name']} (Account ID: {subscriber['accountId']})"
                 return self.async_create_entry(
                     title=name,
                     data={
