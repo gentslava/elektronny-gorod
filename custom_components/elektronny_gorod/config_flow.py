@@ -13,7 +13,9 @@ from .const import (
   CONF_PHONE,
   CONF_CONTRACT,
   CONF_SMS,
-  CONF_OPERATOR_ID
+  CONF_OPERATOR_ID,
+  CONF_ACCOUNT_ID,
+  CONF_SUBSCRIBER_ID
 )
 from .api import ElektronnyGorodAPI
 from .helpers import find
@@ -132,16 +134,28 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             # Verify the SMS code
             if self.access_token:
                 # If code is verified, create config entry
-                name = await self.get_name()
-                return self.async_create_entry(
-                    title = name,
-                    data = {
-                        CONF_NAME: name,
-                        CONF_ACCESS_TOKEN: self.access_token,
-                        CONF_REFRESH_TOKEN: self.refresh_token,
-                        CONF_OPERATOR_ID: self.operator_id
-                    }
-                )
+                account = await self.get_account()
+                data = {
+                    CONF_NAME: account[CONF_NAME],
+                    CONF_ACCOUNT_ID: account[CONF_ACCOUNT_ID],
+                    CONF_SUBSCRIBER_ID: account[CONF_SUBSCRIBER_ID],
+                    CONF_ACCESS_TOKEN: self.access_token,
+                    CONF_REFRESH_TOKEN: self.refresh_token,
+                    CONF_OPERATOR_ID: self.operator_id,
+                }
+
+                for entry in self._async_current_entries():
+                    if (
+                        data[CONF_NAME] == entry.data[CONF_NAME]
+                        and data[CONF_ACCOUNT_ID] == entry.data[CONF_ACCOUNT_ID]
+                        and data[CONF_SUBSCRIBER_ID] == entry.data[CONF_SUBSCRIBER_ID]
+                    ):
+                        LOGGER.info(f"Reauth entry {entry.data} with params {data}")
+                        self.hass.config_entries.async_update_entry(entry, data = data)
+                        await self.hass.config_entries.async_reload(entry.entry_id)
+                        return self.async_abort(reason="reauth_successful")
+
+                return self.async_create_entry(title = account[CONF_NAME], data = data)
 
             # Authentication failed
             errors[CONF_SMS] = "invalid_code"
@@ -152,8 +166,12 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             errors = errors
         )
 
-    async def get_name(self) -> str:
+    async def get_account(self) -> dict:
         await self.api.update_access_token(self.access_token)
         profile = await self.api.query_profile()
         subscriber = profile["subscriber"]
-        return f"{subscriber['name']} (Account ID: {subscriber['accountId']})"
+        return {
+            CONF_NAME: f"{subscriber['name']} (Account ID: {subscriber['accountId']})",
+            CONF_ACCOUNT_ID: subscriber["accountId"],
+            CONF_SUBSCRIBER_ID: subscriber["id"]
+        }
