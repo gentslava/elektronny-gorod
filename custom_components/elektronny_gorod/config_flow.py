@@ -145,6 +145,9 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 }
 
                 for entry in self._async_current_entries():
+                    if (data[CONF_ACCESS_TOKEN] == entry.data[CONF_ACCESS_TOKEN]):
+                        LOGGER.info(f"Entry {entry.data} already exists")
+                        return self.async_abort(reason = "already_configured")
                     if (
                         data[CONF_NAME] == entry.data[CONF_NAME]
                         and data[CONF_ACCOUNT_ID] == entry.data[CONF_ACCOUNT_ID]
@@ -153,7 +156,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                         LOGGER.info(f"Reauth entry {entry.data} with params {data}")
                         self.hass.config_entries.async_update_entry(entry, data = data)
                         await self.hass.config_entries.async_reload(entry.entry_id)
-                        return self.async_abort(reason="reauth_successful")
+                        return self.async_abort(reason = "reauth_successful")
 
                 return self.async_create_entry(title = account[CONF_NAME], data = data)
 
