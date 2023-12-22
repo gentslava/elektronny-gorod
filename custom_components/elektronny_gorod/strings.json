@@ -1,32 +1,33 @@
 {
-  "title": "Elektronny Gorod Connect",
-  "config": {
-    "step": {
-      "user": {
-        "data": {
-          "phone": "Phone number or contract"
+    "title": "Elektronny Gorod Connect",
+    "config": {
+        "step": {
+            "user": {
+                "data": {
+                    "phone": "Phone number or contract"
+                }
+            },
+            "contract": {
+              "data": {
+                  "contract": "Contracts"
+              },
+              "description": "Choose your contract"
+            },
+            "sms": {
+              "data": {
+                  "sms": "SMS"
+              },
+              "description": "Enter the code from SMS"
+            }
+        },
+        "error": {
+            "invalid_code": "Invalid code",
+            "limit_exceeded": "The call limit has been exceeded. Please try again later.",
+            "unknown": "[%key:common::config_flow::error::unknown%]"
+        },
+        "abort": {
+            "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+            "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
         }
-      },
-      "contract": {
-        "data": {
-          "contract": "Contracts"
-        },
-        "description": "Choose your contract"
-      },
-      "sms": {
-        "data": {
-          "sms": "SMS"
-        },
-        "description": "Enter the code from SMS"
-      }
-    },
-    "error": {
-      "invalid_code": "Invalid code",
-      "limit_exceeded": "The call limit has been exceeded. Please try again later.",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
-    },
-    "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
     }
-  }
 }

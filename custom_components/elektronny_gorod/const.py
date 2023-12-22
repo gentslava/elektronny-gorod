@@ -11,7 +11,9 @@ CONF_REFRESH_TOKEN: Final = "refresh_token"
 CONF_PHONE: Final = "phone"
 CONF_CONTRACT: Final = "contract"
 CONF_SMS: Final = "sms"
-CONF_OPERATOR_ID: Final = "operatorId"
+CONF_OPERATOR_ID: Final = "operator_id"
+CONF_ACCOUNT_ID: Final = "account_id"
+CONF_SUBSCRIBER_ID: Final = "subscriber_id"
 
 CONF_WIDTH: Final = 300
 CONF_HEIGHT: Final = 300

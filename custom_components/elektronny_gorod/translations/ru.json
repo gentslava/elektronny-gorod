@@ -1,33 +1,34 @@
 {
-  "title": "Электронный город Connect",
-  "config": {
-      "abort": {
-          "already_configured": "Устройство уже настроено"
-      },
-      "error": {
-          "invalid_code": "Неверный код",
-          "limit_exceeded": "Превышен лимит обращений. Пожалуйста, повторите попытку позже.",
-          "unknown": "Неожиданная ошибка"
-      },
-      "step": {
-          "user": {
-              "data": {
-                  "phone": "Номер телефона или догорвора",
-                  "access_token": "Access token (при наличии)"
-              }
-          },
-          "contract": {
-              "data": {
-                  "contract": "Договоры"
-              },
-              "description": "Выберите договор"
-          },
-          "sms": {
-              "data": {
-                  "sms": "СМС"
-              },
-              "description": "Введите код из СМС"
-          }
-      }
-  }
+    "title": "Электронный город Connect",
+    "config": {
+        "abort": {
+            "already_configured": "Устройство уже настроено",
+            "reauth_successful": "Повторная аутентификация прошла успешно"
+        },
+        "error": {
+            "invalid_code": "Неверный код",
+            "limit_exceeded": "Превышен лимит обращений. Пожалуйста, повторите попытку позже.",
+            "unknown": "Неожиданная ошибка"
+        },
+        "step": {
+            "user": {
+                "data": {
+                    "phone": "Номер телефона или догорвора",
+                    "access_token": "Access token (при наличии)"
+                }
+            },
+            "contract": {
+                "data": {
+                    "contract": "Договоры"
+                },
+                "description": "Выберите договор"
+            },
+            "sms": {
+                "data": {
+                    "sms": "СМС"
+                },
+                "description": "Введите код из СМС"
+            }
+        }
+    }
 }
