@@ -1,6 +1,6 @@
+"""Constants used by Elektronny Gorod integration."""
 import logging
 from typing import Final
-"""Constants for the Elektronny Gorod integration."""
 
 DOMAIN = "elektronny_gorod"
 BASE_API_URL: Final = "https://api-mh.ertelecom.ru"
