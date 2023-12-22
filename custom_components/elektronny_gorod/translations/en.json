@@ -12,20 +12,21 @@
       "step": {
           "user": {
               "data": {
-                  "phone": "Phone number or contract"
+                  "phone": "Phone number or contract",
+                  "access_token": "Access token (if available)"
               }
           },
           "contract": {
-            "data": {
-                "contract": "Contracts"
-            },
-            "description": "Choose your contract"
+              "data": {
+                  "contract": "Contracts"
+              },
+              "description": "Choose your contract"
           },
           "sms": {
-            "data": {
-                "sms": "SMS"
-            },
-            "description": "Enter the code from SMS"
+              "data": {
+                  "sms": "SMS"
+              },
+              "description": "Enter the code from SMS"
           }
       }
   }
