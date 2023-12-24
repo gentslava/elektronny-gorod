@@ -1,5 +1,6 @@
 import asyncio
 from typing import Any
+from aiohttp import ClientError
 
 from homeassistant.components.lock import LockEntity
 from homeassistant.config_entries import ConfigEntry
@@ -17,6 +18,7 @@ from .const import DOMAIN, LOGGER
 from .coordinator import ElektronnyGorogDataUpdateCoordinator
 
 LOCK_UNLOCK_DELAY = 5  # Used to give a realistic lock/unlock experience in frontend
+LOCK_JAMMED_DELAY = 2
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -99,18 +101,23 @@ class ElektronnyGorogLock(LockEntity):
         LOGGER.info(f"Unlock {self.unique_id}")
         self._state = STATE_UNLOCKING
         self.async_write_ha_state()
-        await self._coordinator.open_lock(self._place_id, self._access_control_id, self._entrance_id)
-        self._state = STATE_UNLOCKED
+        try:
+            await self._coordinator.open_lock(self._place_id, self._access_control_id, self._entrance_id)
+            self._state = STATE_UNLOCKED
+        except ClientError:
+            self._state = STATE_JAMMED
         self.async_write_ha_state()
 
-    async def fake_timer_lock(self) -> None:
-        await asyncio.sleep(LOCK_UNLOCK_DELAY)
+    async def fake_timer_lock(self, delay) -> None:
+        await asyncio.sleep(delay)
         self._state = STATE_LOCKED
         self.async_write_ha_state()
 
     async def async_update(self) -> None:
         """Update lock state."""
         if self._state == STATE_UNLOCKED:
-            await self.fake_timer_lock()
+            await self.fake_timer_lock(LOCK_UNLOCK_DELAY)
+        if self._state == STATE_JAMMED:
+            await self.fake_timer_lock(LOCK_JAMMED_DELAY)
         # self._lock_info = await self._coordinator.update_lock_state(self._place_id, self._access_control_id, self._entrance_id)
         # self._openable = self._lock_info["openable"]
