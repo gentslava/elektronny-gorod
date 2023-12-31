@@ -4,7 +4,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import CONF_HEIGHT, CONF_WIDTH, DOMAIN, LOGGER
-from .coordinator import ElektronnyGorogDataUpdateCoordinator
+from .coordinator import ElektronnyGorodUpdateCoordinator
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -12,7 +12,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Elektronny Gorog Camera based on a config entry."""
-    coordinator: ElektronnyGorogDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     # Get cameras info
     cameras_info = await coordinator.get_cameras_info()
@@ -28,12 +28,12 @@ async def async_setup_entry(
 class ElektronnyGorogCamera(Camera):
     def __init__(
         self,
-        coordinator: ElektronnyGorogDataUpdateCoordinator,
+        coordinator: ElektronnyGorodUpdateCoordinator,
         camera_info: dict
     ) -> None:
         LOGGER.info("ElektronnyGorogCamera init %s", camera_info)
         super().__init__()
-        self._coordinator: ElektronnyGorogDataUpdateCoordinator = coordinator
+        self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
         self._camera_info: dict = camera_info
         self._id = self._camera_info["ID"]
         self._name = self._camera_info["Name"]

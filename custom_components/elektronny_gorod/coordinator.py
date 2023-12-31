@@ -15,7 +15,7 @@ from .const import (
 from .api import ElektronnyGorodAPI
 from .helpers import find
 
-class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
+class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Elektronny Gorod data from single endpoint."""
     def __init__(
         self,
@@ -28,9 +28,9 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
         self.refresh_token = entry.data[CONF_REFRESH_TOKEN]
         self.operatorId = entry.data[CONF_OPERATOR_ID]
         self.api = ElektronnyGorodAPI(
-            access_token=self.access_token,
-            refresh_token=self.refresh_token,
-            headers={
+            access_token = self.access_token,
+            refresh_token = self.refresh_token,
+            headers = {
                 "Operator": str(self.operatorId),
                 "Content-Type": "application/json"
             }
@@ -41,7 +41,7 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             LOGGER,
-            name=DOMAIN,
+            name = DOMAIN,
         )
 
         async_dispatcher_connect(
@@ -56,7 +56,7 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
     async def _async_update_data(self) -> None:
         """Handle device update. This function is only called once when the integration is added to Home Assistant."""
         try:
-            LOGGER.info("Integration starting...")
+            LOGGER.info("Integration starting")
             pass
         except Exception as ex:
             LOGGER.error("Integration start failed: %s", traceback.format_exc())
@@ -66,21 +66,21 @@ class ElektronnyGorogDataUpdateCoordinator(DataUpdateCoordinator):
         LOGGER.info("Get cameras info")
         return await self.api.query_cameras()
 
-    async def get_camera_stream(self, id) -> str | None:
+    async def get_camera_stream(self, camera_id) -> str | None:
         LOGGER.info("Get camera stream")
-        return await self.api.query_camera_stream(id)
+        return await self.api.query_camera_stream(camera_id)
 
-    async def get_camera_snapshot(self, id, width, height) -> bytes:
-        LOGGER.info(f"Get camera {id} snapshot with size {width}x{height}")
-        return await self.api.query_camera_snapshot(id, width, height)
+    async def get_camera_snapshot(self, camera_id, width, height) -> bytes:
+        LOGGER.info(f"Get camera {camera_id} snapshot with size {width}x{height}")
+        return await self.api.query_camera_snapshot(camera_id, width, height)
 
-    async def update_camera_state(self, id) -> dict:
-        LOGGER.info(f"Update camera {id} state")
+    async def update_camera_state(self, camera_id) -> dict:
+        LOGGER.info(f"Update camera {camera_id} state")
 
         cameras = await self.api.query_cameras()
         return find(
             cameras,
-            lambda camera: camera["ID"] == id
+            lambda camera: camera["ID"] == camera_id
         )
 
     async def get_locks_info(self) -> list:

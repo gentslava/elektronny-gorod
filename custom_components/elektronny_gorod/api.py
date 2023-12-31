@@ -16,16 +16,19 @@ class ElektronnyGorodAPI:
         access_token: str | None = None,
         refresh_token: str | None = None,
         headers: dict = {}
-    ):
+    ) -> None:
         self.base_url: str = BASE_API_URL
-        self.headers: object = {**{
-            "Host": "api-mh.ertelecom.ru",
-            "User-Agent": generate_user_agent(),
-            "Content-Type": "application/json; charset=UTF-8",
-            "Authorization": "",
-            "Accept": "*/*",
-            "Accept-Language": "ru"
-        }, **headers}
+        self.headers: dict = {
+            **{
+                "Host": "api-mh.ertelecom.ru",
+                "User-Agent": generate_user_agent(),
+                "Content-Type": "application/json; charset=UTF-8",
+                "Authorization": "",
+                "Accept": "*/*",
+                "Accept-Language": "ru"
+            },
+            **headers
+        }
         self.phone: str | None = None
         self.access_token: str | None = access_token
         self.refresh_token: str | None = refresh_token
@@ -38,7 +41,7 @@ class ElektronnyGorodAPI:
         contracts = await self.request(api_url)
         return contracts if contracts else []
 
-    async def request_sms_code(self, contract: object):
+    async def request_sms_code(self, contract: dict):
         """Request SMS code for the selected contract."""
         api_url = f"{self.base_url}/auth/v2/confirmation/{self.phone}"
         data = json.dumps(
@@ -51,7 +54,7 @@ class ElektronnyGorodAPI:
         )
         return await self.request(api_url, data, method="POST")
 
-    async def verify_sms_code(self, contract:object, code:str) -> dict:
+    async def verify_sms_code(self, contract: dict, code: str) -> dict:
         """Verify the SMS code."""
         api_url = f"{self.base_url}/auth/v2/auth/{self.phone}/confirmation"
         data = json.dumps(
@@ -100,7 +103,7 @@ class ElektronnyGorodAPI:
     async def query_camera_snapshot(self, id, width, height) -> bytes:
         """Query the camera snapshot for the id."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/snapshots?width={width}&height={height}"
-        return await self.request(api_url, binary=True)
+        return await self.request(api_url, binary = True)
 
     async def open_lock(self, place_id, access_control_id, entrance_id) -> list:
         """Query the list of places for subscriber."""
@@ -110,7 +113,7 @@ class ElektronnyGorodAPI:
                 "name": "accessControlOpen"
             }
         )
-        return await self.request(api_url, data, method="POST")
+        return await self.request(api_url, data, method = "POST")
 
     async def request(
         self,
@@ -125,9 +128,9 @@ class ElektronnyGorodAPI:
         async with ClientSession() as session:
             LOGGER.info("Sending API request to %s with headers=%s and data=%s", url, self.headers, data)
             if method == "GET":
-                response = await session.get(url, headers=self.headers)
+                response = await session.get(url, headers = self.headers)
             elif method == "POST":
-                response = await session.post(url, data=data, headers=self.headers)
+                response = await session.post(url, data = data, headers = self.headers)
 
             if binary: return await response.read()
 

@@ -15,7 +15,7 @@ from homeassistant.const import (
 )
 
 from .const import DOMAIN, LOGGER
-from .coordinator import ElektronnyGorogDataUpdateCoordinator
+from .coordinator import ElektronnyGorodUpdateCoordinator
 
 LOCK_UNLOCK_DELAY = 5  # Used to give a realistic lock/unlock experience in frontend
 LOCK_JAMMED_DELAY = 2
@@ -26,7 +26,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Elektronny Gorog Camera based on a config entry."""
-    coordinator: ElektronnyGorogDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     # Get cameras info
     locks_info = await coordinator.get_locks_info()
@@ -42,12 +42,12 @@ async def async_setup_entry(
 class ElektronnyGorogLock(LockEntity):
     def __init__(
         self,
-        coordinator: ElektronnyGorogDataUpdateCoordinator,
+        coordinator: ElektronnyGorodUpdateCoordinator,
         lock_info: dict
     ) -> None:
         LOGGER.info("ElektronnyGorogLock init %s", lock_info)
         super().__init__()
-        self._coordinator: ElektronnyGorogDataUpdateCoordinator = coordinator
+        self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
         self._lock_info: dict = lock_info
         self._place_id = self._lock_info["place_id"]
         self._access_control_id = self._lock_info["access_control_id"]
