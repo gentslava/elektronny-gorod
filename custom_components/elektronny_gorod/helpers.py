@@ -1,6 +1,8 @@
 import json
 import uuid
+from random import choice
 from collections.abc import Callable
+from .const import iPHONE_iOS_CODES
 
 def is_json(value: str) -> bool:
     try:
@@ -19,10 +21,16 @@ def find(items: list, condition: Callable) -> object:
     return None
 
 def generate_user_agent(
-    iphone: str = "iPhone15,3",
-    ios: str = "iOS 17.1.2",
+    iphone: str | None = None,
+    ios: str | None = None,
     app_ver: str = "6.16.5 (build 1)",
     account_id: str = "_",
     operator: str = "1"
 ) -> str:
-    return f"{iphone} | {ios} | ntk | {app_ver} | {account_id} | {operator} | {str(uuid.uuid4()).upper()}"
+    iphone_code = iphone
+    ios_code = ios
+    if iphone is None or ios is None:
+        rand_iphone = choice(iPHONE_iOS_CODES)
+        iphone_code = choice(rand_iphone["code"])
+        ios_code = choice(rand_iphone["os"])
+    return f"{iphone_code} | {ios_code} | ntk | {app_ver} | {account_id} | {operator} | {str(uuid.uuid4()).upper()}"
