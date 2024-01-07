@@ -3,7 +3,7 @@ import logging
 from typing import Final
 
 DOMAIN = "elektronny_gorod"
-BASE_API_URL: Final = "https://api-mh.ertelecom.ru"
+BASE_API_URL: Final = "api-mh.ertelecom.ru"
 LOGGER = logging.getLogger(__name__)
 
 CONF_ACCESS_TOKEN: Final = "access_token"
