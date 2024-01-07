@@ -2,7 +2,7 @@ import json
 import uuid
 from random import choice
 from collections.abc import Callable
-from .const import iPHONE_iOS_CODES
+from .const import APP_VERSION, iPHONE_iOS_CODES
 
 def is_json(value: str) -> bool:
     try:
@@ -23,7 +23,7 @@ def find(items: list, condition: Callable) -> object:
 def generate_user_agent(
     iphone: str | None = None,
     ios: str | None = None,
-    app_ver: str = "6.16.5 (build 1)",
+    app_ver: str = APP_VERSION,
     account_id: str = "_",
     operator: str = "1"
 ) -> str:
