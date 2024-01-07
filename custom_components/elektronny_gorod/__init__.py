@@ -6,7 +6,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .coordinator import ElektronnyGorogDataUpdateCoordinator
+from .coordinator import ElektronnyGorodUpdateCoordinator
 
 PLATFORMS: list[Platform] = [
     Platform.CAMERA,
@@ -18,7 +18,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elektronny Gorod from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    coordinator = ElektronnyGorogDataUpdateCoordinator(hass, entry=entry)
+    coordinator = ElektronnyGorodUpdateCoordinator(hass, entry = entry)
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
