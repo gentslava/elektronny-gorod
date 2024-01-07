@@ -17,10 +17,10 @@ class ElektronnyGorodAPI:
         refresh_token: str | None = None,
         headers: dict = {}
     ) -> None:
-        self.base_url: str = BASE_API_URL
+        self.base_url: str = f"https://{BASE_API_URL}"
         self.headers: dict = {
             **{
-                "Host": "api-mh.ertelecom.ru",
+                "Host": BASE_API_URL,
                 "User-Agent": generate_user_agent(),
                 "Content-Type": "application/json; charset=UTF-8",
                 "Authorization": "",
