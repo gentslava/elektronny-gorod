@@ -174,7 +174,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         profile = await self.api.query_profile()
         subscriber = profile["subscriber"]
         return {
-            CONF_NAME: f"{subscriber['name']} (Account ID: {subscriber['accountId']})",
+            CONF_NAME: f"{subscriber['name']} ({subscriber['accountId']})",
             CONF_ACCOUNT_ID: subscriber["accountId"],
             CONF_SUBSCRIBER_ID: subscriber["id"]
         }
