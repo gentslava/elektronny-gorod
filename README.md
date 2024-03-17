@@ -4,6 +4,8 @@ This is a custom integration for Home Assistant that allows you to integrate wit
 
 ## Installation
 
+### Manually
+
 Copy the `custom_components/electronic_city` directory to your Home Assistant `config/custom_components` directory.
 
 ```bash
@@ -13,7 +15,14 @@ cp -r elektronny-gorod YOUR_HASS_CONFIG_DIR/custom_components/
 
 Restart Home Assistant.
 
-## Adding the Integration
+
+### Via [HACS](https://hacs.xyz/)
+<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=gentslava&repository=elektronny-gorod&category=integration" target="_blank"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store." /></a>
+
+## Configuration
+<a href="https://my.home-assistant.io/redirect/config_flow_start/?domain=elektronny_gorod" target="_blank"><img src="https://my.home-assistant.io/badges/config_flow_start.svg" alt="Open your Home Assistant instance and start setting up a new integration." /></a>
+
+or manually:
 
 1. Go to the Home Assistant UI.
 2. Navigate to Configuration -> Integrations.
@@ -23,9 +32,10 @@ Restart Home Assistant.
 
 ## Features
 
-- View available contracts and select one.
-- Request and input SMS code for authentication.
-- Control Elektronny Gorod devices.
+- View available contracts and add as much as you need.
+- Request and input SMS code or password for authentication.
+- Get camera preview and streams.
+- Control opening locks at real-time.
 
 ## Issues and Contributions
 
