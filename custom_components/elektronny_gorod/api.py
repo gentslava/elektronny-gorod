@@ -33,7 +33,7 @@ class ElektronnyGorodAPI:
         self.access_token: str | None = access_token
         self.refresh_token: str | None = refresh_token
 
-    async def query_contracts(self, phone: str):
+    async def request_auth(self, phone: str):
         """Query the list of contracts for the given phone number."""
         self.phone = phone
         api_url = f"{self.base_url}/auth/v2/login/{self.phone}"

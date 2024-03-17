@@ -57,7 +57,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_sms()
 
             # Query list of contracts for the given phone number
-            contracts = await self.api.query_contracts(self.phone)
+            contracts = await self.api.request_auth(self.phone)
             LOGGER.info("Contracts is %s", contracts)
 
             if not contracts:
