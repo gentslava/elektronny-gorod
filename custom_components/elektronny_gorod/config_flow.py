@@ -1,3 +1,4 @@
+import re
 import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.config_entries import (
@@ -45,7 +46,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             if CONF_PHONE in user_input:
-                self.phone = user_input[CONF_PHONE]
+                self.phone = re.sub(r'[^A-Za-z0-9]', '', user_input[CONF_PHONE])
                 LOGGER.info("Phone is %s", self.phone)
 
             if CONF_ACCESS_TOKEN in user_input:
