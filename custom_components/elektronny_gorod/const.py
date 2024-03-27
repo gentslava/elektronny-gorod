@@ -18,6 +18,8 @@ CONF_SUBSCRIBER_ID: Final = "subscriber_id"
 CONF_WIDTH: Final = 300
 CONF_HEIGHT: Final = 300
 
+DEFAULT_USERAGENT: Final = "myHome/1 CFNetwork/1410.1 Darwin/22.6.0"
+
 APP_VERSION: Final = "6.16.5 (build 1)"
 iOS_11: Final = ["iOS 11.0", "iOS 11.0.1", "iOS 11.0.2", "iOS 11.0.3", "iOS 11.1", "iOS 11.1.1", "iOS 11.1.2", "iOS 11.2", "iOS 11.2.1", "iOS 11.2.2", "iOS 11.2.5", "iOS 11.2.6", "iOS 11.3", "iOS 11.3.1", "iOS 11.4", "iOS 11.4.1"]
 iOS_12: Final = ["iOS 12.0", "iOS 12.0.1", "iOS 12.1", "iOS 12.1.1", "iOS 12.1.2", "iOS 12.1.3", "iOS 12.1.4", "iOS 12.2", "iOS 12.3", "iOS 12.3.1", "iOS 12.3.2", "iOS 12.4", "iOS 12.4.1"]
