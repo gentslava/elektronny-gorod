@@ -43,6 +43,10 @@ If you encounter any issues or have suggestions for improvements, please [open a
 
 Feel free to contribute to the project by forking the repository and creating pull requests.
 
+## Credits
+
+Apple device types https://gist.github.com/adamawolf/3048717
+
 ## License
 
 This integration is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
