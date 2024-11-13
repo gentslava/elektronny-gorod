@@ -21,7 +21,7 @@ class ElektronnyGorodAPI:
             **{
                 "Host": BASE_API_URL,
                 "Connection": "Keep-Alive",
-                "Accept-Encoding": "gzip"
+                "Accept-Encoding": "gzip",
             },
             **headers
         }
@@ -122,6 +122,8 @@ class ElektronnyGorodAPI:
         """Make a HTTP request."""
         if self.access_token is not None: self.headers["Authorization"] = f"Bearer {self.access_token}"
         self.headers["User-Agent"] = str(self.user_agent)
+        if method == "POST":
+            self.headers["Content-Type"] = "application/json; charset=UTF-8"
 
         async with ClientSession() as session:
             LOGGER.info("Sending API request to %s with headers=%s and data=%s", url, self.headers, data)
