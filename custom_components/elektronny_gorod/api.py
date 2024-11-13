@@ -45,7 +45,7 @@ class ElektronnyGorodAPI:
                 "accountId": contract["accountId"],
                 "address": contract["address"],
                 "operatorId": contract["operatorId"],
-                "subscriberId": contract["subscriberId"],
+                "subscriberId": str(contract["subscriberId"]),
                 "placeId": contract["placeId"],
             }
         )
@@ -61,7 +61,7 @@ class ElektronnyGorodAPI:
                 "confirm2": code,
                 "login": self.phone,
                 "operatorId": contract["operatorId"],
-                "subscriberId": contract["subscriberId"],
+                "subscriberId": str(contract["subscriberId"]),
             }
         )
         return await self.request(api_url, data, method="POST")
