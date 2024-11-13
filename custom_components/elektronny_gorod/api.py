@@ -46,6 +46,7 @@ class ElektronnyGorodAPI:
                 "address": contract["address"],
                 "operatorId": contract["operatorId"],
                 "subscriberId": contract["subscriberId"],
+                "placeId": contract["placeId"],
             }
         )
         return await self.request(api_url, data, method="POST")
