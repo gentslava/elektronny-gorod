@@ -19,7 +19,7 @@ from .const import (
     USER_AGENT
 )
 from .api import ElektronnyGorodAPI
-from .helpers import find, generate_phone
+from .helpers import find
 from .user_agent import UserAgent
 
 class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
