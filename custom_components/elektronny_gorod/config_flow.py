@@ -6,19 +6,21 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import CONF_NAME
 from .const import (
-  DOMAIN,
-  LOGGER,
-  CONF_ACCESS_TOKEN,
-  CONF_REFRESH_TOKEN,
-  CONF_PHONE,
-  CONF_CONTRACT,
-  CONF_SMS,
-  CONF_OPERATOR_ID,
-  CONF_ACCOUNT_ID,
-  CONF_SUBSCRIBER_ID
+    DOMAIN,
+    LOGGER,
+    CONF_ACCESS_TOKEN,
+    CONF_REFRESH_TOKEN,
+    CONF_PHONE,
+    CONF_CONTRACT,
+    CONF_SMS,
+    CONF_OPERATOR_ID,
+    CONF_ACCOUNT_ID,
+    CONF_SUBSCRIBER_ID,
+    USER_AGENT
 )
 from .api import ElektronnyGorodAPI
-from .helpers import find
+from .helpers import find, generate_phone
+from .user_agent import UserAgent
 
 class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     """Elektronny Gorod config flow."""
@@ -27,11 +29,12 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
     def __init__(self) -> None:
         """Initialize."""
-        self.api: ElektronnyGorodAPI = ElektronnyGorodAPI()
+        self.user_agent = UserAgent()
+        self.api: ElektronnyGorodAPI = ElektronnyGorodAPI(user_agent = self.user_agent)
         self.entry: ConfigEntry | None = None
         self.access_token: str | None = None
         self.refresh_token: str | None = None
-        self.operator_id: int = 1
+        self.operator_id: str | int = "null"
         self.phone: str | None = None
         self.contract: object | None = None
         self.contracts: list | None = None
@@ -91,7 +94,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Prepare contract choices for user
         contract_choices = {
-            str(contract["subscriberId"]): f"{contract['address']} (Account ID: {contract['accountId']})"
+            str(contract["subscriberId"]): f"{contract["address"]} (Account ID: {contract["accountId"]})"
             for contract in self.contracts
         }
 
@@ -105,7 +108,9 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
             # Request SMS code for the selected contract
             try:
-                await self.api.request_sms_code(self.contract)
+                account = await self.api.request_sms_code(self.contract)
+                self.user_agent.place_id = account["placeId"]
+                self.user_agent.account_id = account["accountId"]
                 return await self.async_step_sms()
             except:
                 errors[CONF_CONTRACT] = "limit_exceeded"
@@ -130,6 +135,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.access_token = auth["accessToken"]
                 self.refresh_token = auth["refreshToken"]
                 self.operator_id = auth["operatorId"]
+                self.user_agent.operator_id = self.operator_id
 
             # Verify the SMS code
             if self.access_token:
@@ -142,6 +148,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_ACCESS_TOKEN: self.access_token,
                     CONF_REFRESH_TOKEN: self.refresh_token,
                     CONF_OPERATOR_ID: self.operator_id,
+                    USER_AGENT: self.user_agent,
                 }
 
                 for entry in self._async_current_entries():
@@ -173,8 +180,9 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         await self.api.update_access_token(self.access_token)
         profile = await self.api.query_profile()
         subscriber = profile["subscriber"]
+        self.user_agent.account_id = subscriber["accountId"]
         return {
-            CONF_NAME: f"{subscriber['name']} ({subscriber['accountId']})",
+            CONF_NAME: f"{subscriber["name"]} ({subscriber["accountId"]})",
             CONF_ACCOUNT_ID: subscriber["accountId"],
             CONF_SUBSCRIBER_ID: subscriber["id"]
         }

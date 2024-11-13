@@ -1,31 +1,27 @@
 from aiohttp import ClientSession, ClientError
 import json
-from .helpers import (
-    is_json,
-    generate_user_agent
-)
+from .helpers import is_json
 from .const import (
     LOGGER,
     BASE_API_URL,
 )
-
+from .user_agent import UserAgent
 
 class ElektronnyGorodAPI:
     def __init__(
         self,
+        user_agent: UserAgent,
         access_token: str | None = None,
         refresh_token: str | None = None,
-        headers: dict = {}
+        headers: dict = {},
     ) -> None:
         self.base_url: str = f"https://{BASE_API_URL}"
+        self.user_agent: UserAgent = user_agent
         self.headers: dict = {
             **{
                 "Host": BASE_API_URL,
-                "User-Agent": generate_user_agent(),
-                "Content-Type": "application/json; charset=UTF-8",
-                "Authorization": "",
-                "Accept": "*/*",
-                "Accept-Language": "ru"
+                "Connection": "Keep-Alive",
+                "Accept-Encoding": "gzip"
             },
             **headers
         }
@@ -56,7 +52,7 @@ class ElektronnyGorodAPI:
 
     async def verify_sms_code(self, contract: dict, code: str) -> dict:
         """Verify the SMS code."""
-        api_url = f"{self.base_url}/auth/v2/auth/{self.phone}/confirmation"
+        api_url = f"{self.base_url}/auth/v3/auth/{self.phone}/confirmation"
         data = json.dumps(
             {
                 "accountId": contract["accountId"],
@@ -124,6 +120,7 @@ class ElektronnyGorodAPI:
     ):
         """Make a HTTP request."""
         if self.access_token is not None: self.headers["Authorization"] = f"Bearer {self.access_token}"
+        self.headers["User-Agent"] = str(self.user_agent)
 
         async with ClientSession() as session:
             LOGGER.info("Sending API request to %s with headers=%s and data=%s", url, self.headers, data)
