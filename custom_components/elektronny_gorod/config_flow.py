@@ -108,9 +108,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
             # Request SMS code for the selected contract
             try:
-                account = await self.api.request_sms_code(self.contract)
-                self.user_agent.place_id = account["placeId"]
-                self.user_agent.account_id = account["accountId"]
+                await self.api.request_sms_code(self.contract)
                 return await self.async_step_sms()
             except:
                 errors[CONF_CONTRACT] = "limit_exceeded"
@@ -135,7 +133,10 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.access_token = auth["accessToken"]
                 self.refresh_token = auth["refreshToken"]
                 self.operator_id = auth["operatorId"]
-                self.user_agent.operator_id = self.operator_id
+
+                self.user_agent.place_id = self.contract["placeId"]
+                self.user_agent.account_id = self.contract["accountId"]
+                self.user_agent.operator_id = self.contract["operatorId"]
 
             # Verify the SMS code
             if self.access_token:
