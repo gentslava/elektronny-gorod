@@ -6,11 +6,12 @@ from homeassistant.const import CONF_NAME
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 from .const import (
-  DOMAIN,
-  LOGGER,
-  CONF_ACCESS_TOKEN,
-  CONF_REFRESH_TOKEN,
-  CONF_OPERATOR_ID,
+    DOMAIN,
+    LOGGER,
+    CONF_ACCESS_TOKEN,
+    CONF_REFRESH_TOKEN,
+    CONF_OPERATOR_ID,
+    USER_AGENT,
 )
 from .api import ElektronnyGorodAPI
 from .helpers import find
@@ -26,12 +27,14 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         """Initialize global Elektronny Gorod data updater."""
         self.access_token = entry.data[CONF_ACCESS_TOKEN]
         self.refresh_token = entry.data[CONF_REFRESH_TOKEN]
-        self.operatorId = entry.data[CONF_OPERATOR_ID]
+        self.operator_id = entry.data[CONF_OPERATOR_ID]
+        self.user_agent = entry.data[USER_AGENT]
         self.api = ElektronnyGorodAPI(
+            user_agent = self.user_agent,
             access_token = self.access_token,
             refresh_token = self.refresh_token,
             headers = {
-                "Operator": str(self.operatorId),
+                "Operator": str(self.operator_id),
                 "Content-Type": "application/json"
             }
         )
