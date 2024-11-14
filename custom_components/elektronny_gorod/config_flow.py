@@ -106,6 +106,10 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             LOGGER.info("Selected contract is %s. Contract object is %s", user_input[CONF_CONTRACT], self.contract)
 
+            self.user_agent.place_id = self.contract["placeId"]
+            self.user_agent.account_id = self.contract["accountId"]
+            self.user_agent.operator_id = self.contract["operatorId"]
+
             # Request SMS code for the selected contract
             try:
                 await self.api.request_sms_code(self.contract)
