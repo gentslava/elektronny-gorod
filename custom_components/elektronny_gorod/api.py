@@ -90,6 +90,13 @@ class ElektronnyGorodAPI:
         cameras = await self.request(api_url)
         return cameras["data"] if cameras else []
 
+    async def query_public_cameras(self, place_id) -> list:
+        """Query the list of cameras for access token."""
+        api_url = f"{self.base_url}/rest/v2/places/{place_id}/public/cameras"
+
+        cameras = await self.request(api_url)
+        return cameras["data"] if cameras else []
+
     async def query_camera_stream(self, id) -> str | None:
         """Query the stream url of camera for the id."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/video?&LightStream=0"
