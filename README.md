@@ -1,3 +1,5 @@
+[English](/README.md) | [Русский](/README.ru_RU.md)
+
 # Home Assistant Elektronny Gorod Integration
 
 This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) service.
