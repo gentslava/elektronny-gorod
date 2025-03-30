@@ -11,7 +11,7 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_REFRESH_TOKEN,
     CONF_OPERATOR_ID,
-    USER_AGENT,
+    CONF_USER_AGENT,
     CONF_WIDTH,
 )
 from .api import ElektronnyGorodAPI
@@ -29,13 +29,13 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         self.access_token = entry.data[CONF_ACCESS_TOKEN]
         self.refresh_token = entry.data[CONF_REFRESH_TOKEN]
         self.operator_id = entry.data[CONF_OPERATOR_ID]
-        self.user_agent = entry.data[USER_AGENT]
+        self.user_agent = entry.data[CONF_USER_AGENT]
         self.api = ElektronnyGorodAPI(
             user_agent = self.user_agent,
             access_token = self.access_token,
             refresh_token = self.refresh_token,
             headers = {
-                "Operator": str(self.operator_id),
+                "operator": str(self.operator_id),
                 "Content-Type": "application/json"
             }
         )

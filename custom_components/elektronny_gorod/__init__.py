@@ -9,7 +9,8 @@ from homeassistant.core import HomeAssistant
 from .const import (
     DOMAIN,
     LOGGER,
-    USER_AGENT,
+    CONF_OPERATOR_ID,
+    CONF_USER_AGENT,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .user_agent import UserAgent
@@ -43,13 +44,15 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     LOGGER.debug(f"Migrating from version {version}")
 
     if config_entry.version == 1:
-        new_data[USER_AGENT] = UserAgent()
+        user_agent = UserAgent()
+        user_agent.operator_id = new_data[CONF_OPERATOR_ID]
+        new_data[CONF_USER_AGENT] = user_agent
 
         version = 2
         hass.config_entries.async_update_entry(config_entry, data=new_data, options=options, version=version)
         LOGGER.debug(f"Migration to version {version} successful")
 
-    LOGGER.debug("Migration to configuration version %s successful", config_entry.version)
+    LOGGER.debug(f"Migration to configuration version {config_entry.version} successful")
 
     return True
 

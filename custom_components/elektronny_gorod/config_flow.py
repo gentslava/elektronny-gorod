@@ -16,7 +16,7 @@ from .const import (
     CONF_OPERATOR_ID,
     CONF_ACCOUNT_ID,
     CONF_SUBSCRIBER_ID,
-    USER_AGENT
+    CONF_USER_AGENT
 )
 from .api import ElektronnyGorodAPI
 from .helpers import find
@@ -152,7 +152,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_ACCESS_TOKEN: self.access_token,
                     CONF_REFRESH_TOKEN: self.refresh_token,
                     CONF_OPERATOR_ID: self.operator_id,
-                    USER_AGENT: self.user_agent,
+                    CONF_USER_AGENT: self.user_agent,
                 }
 
                 for entry in self._async_current_entries():
