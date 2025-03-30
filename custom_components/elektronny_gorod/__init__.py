@@ -2,11 +2,17 @@
 from __future__ import annotations
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
-from .const import DOMAIN
+from .const import (
+    DOMAIN,
+    LOGGER,
+    USER_AGENT,
+)
 from .coordinator import ElektronnyGorodUpdateCoordinator
+from .user_agent import UserAgent
 
 PLATFORMS: list[Platform] = [
     Platform.CAMERA,
@@ -25,6 +31,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    return True
+
+async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
+    """Migrate old entry."""
+    version = config_entry.version
+    new_data: ConfigType = {**config_entry.data}
+    options: ConfigType = {**config_entry.options}
+
+    LOGGER.debug(f"Migrating from version {version}")
+
+    if config_entry.version == 1:
+        new_data[USER_AGENT] = UserAgent()
+
+        version = 2
+        hass.config_entries.async_update_entry(config_entry, data=new_data, options=options, version=version)
+        LOGGER.debug(f"Migration to version {version} successful")
+
+    LOGGER.debug("Migration to configuration version %s successful", config_entry.version)
 
     return True
 
