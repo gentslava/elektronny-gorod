@@ -29,7 +29,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize."""
         self.user_agent = UserAgent()
-        self.api: ElektronnyGorodAPI = ElektronnyGorodAPI(user_agent = self.user_agent)
+        self.api: ElektronnyGorodAPI = ElektronnyGorodAPI(user_agent = str(self.user_agent))
         self.entry: ConfigEntry | None = None
         self.access_token: str | None = None
         self.refresh_token: str | None = None
@@ -108,6 +108,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             self.user_agent.place_id = self.contract["placeId"]
             self.user_agent.account_id = self.contract["accountId"]
             self.user_agent.operator_id = self.contract["operatorId"]
+            self.api.user_agent = str(self.user_agent)
 
             # Request SMS code for the selected contract
             try:
@@ -140,6 +141,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.user_agent.place_id = self.contract["placeId"]
                 self.user_agent.account_id = self.contract["accountId"]
                 self.user_agent.operator_id = self.contract["operatorId"]
+                self.api.user_agent = str(self.user_agent)
 
             # Verify the SMS code
             if self.access_token:
