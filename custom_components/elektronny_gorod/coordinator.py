@@ -25,16 +25,12 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         entry: ConfigEntry,
     ) -> None:
         """Initialize global Elektronny Gorod data updater."""
-        self.access_token = entry.data[CONF_ACCESS_TOKEN]
-        self.refresh_token = entry.data[CONF_REFRESH_TOKEN]
-        self.operator_id = entry.data[CONF_OPERATOR_ID]
-        self.user_agent = entry.data[CONF_USER_AGENT]
         self.api = ElektronnyGorodAPI(
             user_agent = entry.data[CONF_USER_AGENT],
-            access_token = self.access_token,
-            refresh_token = self.refresh_token,
+            access_token = entry.data[CONF_ACCESS_TOKEN],
+            refresh_token = entry.data[CONF_REFRESH_TOKEN],
             headers = {
-                "operator": str(self.operator_id),
+                "operator": str(entry.data[CONF_OPERATOR_ID]),
                 "Content-Type": "application/json"
             }
         )
