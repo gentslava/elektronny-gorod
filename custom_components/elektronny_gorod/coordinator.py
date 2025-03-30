@@ -74,6 +74,8 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         return await self.api.query_camera_stream(camera_id)
 
     async def get_camera_snapshot(self, camera_id, width, height) -> bytes:
+        if (width == 0): width = 580
+        if (height == 0): height = round(width / 16 * 9)
         LOGGER.info(f"Get camera {camera_id} snapshot with size {width}x{height}")
         return await self.api.query_camera_snapshot(camera_id, width, height)
 
