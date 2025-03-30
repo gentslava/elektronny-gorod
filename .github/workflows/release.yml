@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+jobs:
+  release-zip:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prepare release
+        run: |
+          cd ${{ github.workspace }}/custom_components/elektronny_gorod
+          zip -r elektronny_gorod.zip ./
+
+      - name: Upload zip
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          tag: ${{ github.ref }}
+          file: ${{ github.workspace }}/custom_components/elektronny_gorod/elektronny_gorod.zip
+          asset_name: elektronny_gorod.zip
+          overwrite: true
