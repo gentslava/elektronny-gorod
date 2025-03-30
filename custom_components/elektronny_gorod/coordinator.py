@@ -30,7 +30,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         self.operator_id = entry.data[CONF_OPERATOR_ID]
         self.user_agent = entry.data[CONF_USER_AGENT]
         self.api = ElektronnyGorodAPI(
-            user_agent = self.user_agent,
+            user_agent = entry.data[CONF_USER_AGENT],
             access_token = self.access_token,
             refresh_token = self.refresh_token,
             headers = {

@@ -10,13 +10,13 @@ from .user_agent import UserAgent
 class ElektronnyGorodAPI:
     def __init__(
         self,
-        user_agent: UserAgent,
+        user_agent: str,
         access_token: str | None = None,
         refresh_token: str | None = None,
         headers: dict = {},
     ) -> None:
         self.base_url: str = f"https://{BASE_API_URL}"
-        self.user_agent: UserAgent = user_agent
+        self.user_agent: str = user_agent
         self.headers: dict = {
             **{
                 "Host": BASE_API_URL,
@@ -135,7 +135,7 @@ class ElektronnyGorodAPI:
     ):
         """Make a HTTP request."""
         if self.access_token is not None: self.headers["Authorization"] = f"Bearer {self.access_token}"
-        self.headers["User-Agent"] = str(self.user_agent)
+        self.headers["User-Agent"] = self.user_agent
         if method == "POST":
             self.headers["Content-Type"] = "application/json; charset=UTF-8"
 
