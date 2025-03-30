@@ -3,7 +3,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_HEIGHT, CONF_WIDTH, DOMAIN, LOGGER
+from .const import (
+  DOMAIN,
+  LOGGER,
+  CONF_WIDTH,
+  CONF_HEIGHT,
+)
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
 async def async_setup_entry(
