@@ -76,7 +76,7 @@ class ElektronnyGorodAPI:
         profile = await self.request(api_url)
         return profile["data"] if profile else {}
 
-    async def query_places(self, place_id) -> list:
+    async def query_places(self, place_id="") -> list:
         """Query the list of places for subscriber."""
         api_url = f"{self.base_url}/rest/v3/subscriber-places{"?placeId=" + place_id if place_id else ""}"
 

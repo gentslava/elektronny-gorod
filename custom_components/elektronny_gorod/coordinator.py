@@ -110,11 +110,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
     async def update_lock_state(self, place_id, access_control_id, entrance_id) -> dict:
         LOGGER.info(f"Update lock {place_id}_{access_control_id}_{entrance_id} state")
 
-        subscriber_places = await self.api.query_places()
-        subscriber_place = find(
-            subscriber_places,
-            lambda subscriber_place: subscriber_place["place"]["id"] == place_id
-        )
+        subscriber_place = await self.api.query_places(place_id)
         place = subscriber_place["place"]
 
         access_control = find(
