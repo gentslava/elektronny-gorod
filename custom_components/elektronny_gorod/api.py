@@ -83,6 +83,13 @@ class ElektronnyGorodAPI:
         places = await self.request(api_url)
         return places["data"] if places else []
 
+    async def query_access_controls(self, place_id) -> list:
+        """Query the list of access controls for subscriber."""
+        api_url = f"{self.base_url}/rest/v1/places/{place_id}/accesscontrols"
+
+        places = await self.request(api_url)
+        return places["data"] if places else []
+
     async def query_cameras(self) -> list:
         """Query the list of cameras for access token."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras"
