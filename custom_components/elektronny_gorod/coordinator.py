@@ -98,7 +98,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         locks = []
         for subscriber_place in subscriber_places:
             place = subscriber_place["place"]
-            access_controls = place["accessControls"]
+            access_controls = await self.api.query_access_controls(place["id"])
             for access_control in access_controls:
                 entrances = access_control["entrances"]
                 for entrance in entrances:
