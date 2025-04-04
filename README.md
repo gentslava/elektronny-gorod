@@ -1,54 +1,54 @@
 [English](/README.md) | [Русский](/README.ru_RU.md)
 
-# Home Assistant Elektronny Gorod Integration
+# Интеграция Home Assistant с Электронным Городом
 
-This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) service.
+Это кастомная интеграция для Home Assistant, которая позволяет интегрироваться с сервисом Электронный Город (Новотелеком).
 
-## Installation
+## Установка
 
-### Manually
+### Вручную
 
-Copy the `custom_components/electronic_city` directory to your Home Assistant `config/custom_components` directory.
+Скопируйте директорию `custom_components/electronic_city` в директорию `config/custom_components` вашего Home Assistant.
 
 ```bash
 git clone https://github.com/gentslava/elektronny-gorod.git
 cp -r elektronny-gorod YOUR_HASS_CONFIG_DIR/custom_components/
 ```
 
-Restart Home Assistant.
+Перезапустите Home Assistant.
 
 
-### Via [HACS](https://hacs.xyz/)
-<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=gentslava&repository=elektronny-gorod&category=integration" target="_blank"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store." /></a>
+### Через [HACS](https://hacs.xyz/)
+<a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=gentslava&repository=elektronny-gorod&category=integration" target="_blank"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Откройте ваш экземпляр Home Assistant и откройте репозиторий в магазине Home Assistant Community." /></a>
 
-## Configuration
-<a href="https://my.home-assistant.io/redirect/config_flow_start/?domain=elektronny_gorod" target="_blank"><img src="https://my.home-assistant.io/badges/config_flow_start.svg" alt="Open your Home Assistant instance and start setting up a new integration." /></a>
+## Конфигурация
+<a href="https://my.home-assistant.io/redirect/config_flow_start/?domain=elektronny_gorod" target="_blank"><img src="https://my.home-assistant.io/badges/config_flow_start.svg" alt="Откройте ваш экземпляр Home Assistant и начните настройку новой интеграции." /></a>
 
-or manually:
+или вручную:
 
-1. Go to the Home Assistant UI.
-2. Navigate to Configuration -> Integrations.
-3. Click the "+" button to add a new integration.
-4. Search for "Elektronny Gorod" and select it.
-5. Follow the on-screen instructions to complete the integration setup.
+1. Перейдите в интерфейс Home Assistant.
+2. Перейдите в Конфигурация -> Интеграции.
+3. Нажмите кнопку "+" для добавления новой интеграции.
+4. Найдите "Elektronny Gorod" и выберите его.
+5. Следуйте инструкциям на экране для завершения настройки интеграции.
 
-## Features
+## Возможности
 
-- View available contracts and add as much as you need.
-- Request and input SMS code or password for authentication.
-- Get camera preview and streams.
-- Control opening locks at real-time.
+- Просмотр доступных контрактов и добавление нужных в любом количестве.
+- Запрос и ввод SMS-кода или пароля для аутентификации.
+- Получение превью и потоков с камер.
+- Управление открытием замков в реальном времени.
 
-## Issues and Contributions
+## Проблемы и вклад
 
-If you encounter any issues or have suggestions for improvements, please [open an issue](https://github.com/gentslava/elektronny-gorod/issues) on GitHub.
+Если вы столкнулись с проблемами или у вас есть предложения по улучшению, пожалуйста, [откройте issue](https://github.com/gentslava/elektronny-gorod/issues) на GitHub.
 
-Feel free to contribute to the project by forking the repository and creating pull requests.
+Не стесняйтесь вносить вклад в проект, форкнув репозиторий и создавая pull-запросы.
 
-## Credits
+## Благодарности
 
-Apple device types https://gist.github.com/adamawolf/3048717
+Типы устройств Apple https://gist.github.com/adamawolf/3048717
 
-## License
+## Лицензия
 
-This integration is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+Эта интеграция лицензирована под лицензией MIT. См. файл [LICENSE](LICENSE) для подробностей.
