@@ -2,17 +2,10 @@ import asyncio
 from typing import Any
 from aiohttp import ClientError
 
-from homeassistant.components.lock import LockEntity
+from homeassistant.components.lock import LockEntity, LockState
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.const import (
-    STATE_JAMMED,
-    STATE_LOCKED,
-    STATE_LOCKING,
-    STATE_UNLOCKED,
-    STATE_UNLOCKING,
-)
 
 from .const import DOMAIN, LOGGER
 from .coordinator import ElektronnyGorodUpdateCoordinator
@@ -54,7 +47,7 @@ class ElektronnyGorogLock(LockEntity):
         self._entrance_id = self._lock_info["entrance_id"]
         self._name = self._lock_info["name"]
         self._openable = self._lock_info["openable"]
-        self._state = STATE_LOCKED
+        self._state = LockState.LOCKED
 
     @property
     def unique_id(self) -> str:
@@ -74,50 +67,50 @@ class ElektronnyGorogLock(LockEntity):
     @property
     def is_locking(self) -> bool:
         """Return true if lock is locking."""
-        return self._state == STATE_LOCKING
+        return self._state == LockState.LOCKING
 
     @property
     def is_unlocking(self) -> bool:
         """Return true if lock is unlocking."""
-        return self._state == STATE_UNLOCKING
+        return self._state == LockState.UNLOCKING
 
     @property
     def is_jammed(self) -> bool:
         """Return true if lock is jammed."""
-        return self._state == STATE_JAMMED
+        return self._state == LockState.JAMMED
 
     @property
     def is_locked(self) -> bool:
         """Return true if lock is locked."""
-        return self._state == STATE_LOCKED
+        return self._state == LockState.LOCKED
 
     async def async_lock(self, **kwargs: Any) -> None:
         """Lock the device."""
         LOGGER.info("Not supported")
-        self._state = STATE_LOCKED
+        self._state = LockState.LOCKED
 
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock all or specified locks."""
         LOGGER.info(f"Unlock {self.unique_id}")
-        self._state = STATE_UNLOCKING
+        self._state = LockState.UNLOCKING
         self.async_write_ha_state()
         try:
             await self._coordinator.open_lock(self._place_id, self._access_control_id, self._entrance_id)
-            self._state = STATE_UNLOCKED
+            self._state = LockState.UNLOCKED
         except ClientError:
-            self._state = STATE_JAMMED
+            self._state = LockState.JAMMED
         self.async_write_ha_state()
 
     async def fake_timer_lock(self, delay) -> None:
         await asyncio.sleep(delay)
-        self._state = STATE_LOCKED
+        self._state = LockState.LOCKED
         self.async_write_ha_state()
 
     async def async_update(self) -> None:
         """Update lock state."""
-        if self._state == STATE_UNLOCKED:
+        if self._state == LockState.UNLOCKED:
             await self.fake_timer_lock(LOCK_UNLOCK_DELAY)
-        if self._state == STATE_JAMMED:
+        if self._state == LockState.JAMMED:
             await self.fake_timer_lock(LOCK_JAMMED_DELAY)
         # self._lock_info = await self._coordinator.update_lock_state(self._place_id, self._access_control_id, self._entrance_id)
         # self._openable = self._lock_info["openable"]
