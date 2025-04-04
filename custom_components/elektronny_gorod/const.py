@@ -24,7 +24,7 @@ APP_VERSION: Final = {
   "code": "82300000"
 }
 
-ANDROID_OS_VER: Final = "14"
+ANDROID_OS_VER: Final = "15"
 ANDROID_DEVICES_CSV: Final = "https://storage.googleapis.com/play_public/supported_devices.csv"
 ANDROID_DEVICES: Final = [
   {
