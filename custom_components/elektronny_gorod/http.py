@@ -4,6 +4,7 @@ from .const import (
     BASE_API_URL,
     LOGGER,
 )
+from .user_agent import UserAgent
 
 async def _log_request(url, headers, data) -> None:
     """Log the request."""
@@ -19,13 +20,13 @@ async def _log_response(response: ClientResponse) -> None:
 class HTTP:
     def __init__(
         self,
-        user_agent: str,
+        user_agent: UserAgent,
         access_token: str | None,
         refresh_token: str | None,
         headers: dict,
     ) -> None:
         self.base_url: str = f"https://{BASE_API_URL}"
-        self.user_agent: str = user_agent
+        self.user_agent: UserAgent = user_agent
         self.headers: dict = {
             **{
                 "Host": BASE_API_URL,
@@ -37,10 +38,10 @@ class HTTP:
         self.access_token: str | None = access_token
         self.refresh_token: str | None = refresh_token
 
-    async def __request(self, endpoint: str, method: str, data: object | None, binary: bool):
+    async def __request(self, endpoint: str, method: str, data: object | None, binary: bool) -> ClientResponse | bytes:
         """Make a HTTP request."""
         if self.access_token is not None: self.headers["Authorization"] = f"Bearer {self.access_token}"
-        self.headers["User-Agent"] = self.user_agent
+        self.headers["User-Agent"] = str(self.user_agent)
         if method == "POST":
             self.headers["Content-Type"] = "application/json; charset=UTF-8"
 
@@ -56,19 +57,15 @@ class HTTP:
 
             await _log_response(response)
             if response.ok:
-                try: return await response.json()
-                except: return await response.text()
+                return response
             else:
                 LOGGER.error(f"Could not get data from API")
                 raise ClientError(response)
 
-    async def get(self, endpoint: str, binary: bool = False):
+    async def get(self, endpoint: str, binary: bool = False) -> ClientResponse | bytes:
         """Handle GET requests."""
         return await self.__request(endpoint, method = "GET", data = None, binary = binary)
 
-    async def post(self, endpoint: str, data: object, binary: bool = False):
+    async def post(self, endpoint: str, data: object, binary: bool = False) -> ClientResponse | bytes:
         """Handle POST requests."""
         return await self.__request(endpoint, method = "POST", data = data, binary = binary)
-
-    def update_access_token(self, access_token) -> None:
-        self.access_token = access_token

@@ -1,4 +1,5 @@
 import traceback
+import json
 from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -14,6 +15,7 @@ from .const import (
     CONF_USER_AGENT,
     CONF_WIDTH,
 )
+from .user_agent import UserAgent
 from .api import ElektronnyGorodAPI
 from .helpers import find
 
@@ -26,16 +28,14 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         entry: ConfigEntry,
     ) -> None:
         """Initialize global Elektronny Gorod data updater."""
-        self.access_token = entry.data[CONF_ACCESS_TOKEN]
-        self.refresh_token = entry.data[CONF_REFRESH_TOKEN]
-        self.operator_id = entry.data[CONF_OPERATOR_ID]
-        self.user_agent = entry.data[CONF_USER_AGENT]
+        user_agent = UserAgent()
+        user_agent.from_json(json.loads(entry.data[CONF_USER_AGENT]))
         self.api = ElektronnyGorodAPI(
-            user_agent = entry.data[CONF_USER_AGENT],
-            access_token = self.access_token,
-            refresh_token = self.refresh_token,
+            user_agent,
+            access_token = entry.data[CONF_ACCESS_TOKEN],
+            refresh_token = entry.data[CONF_REFRESH_TOKEN],
             headers = {
-                "operator": str(self.operator_id),
+                "operator": str(entry.data[CONF_OPERATOR_ID]),
                 "Content-Type": "application/json"
             }
         )
@@ -98,6 +98,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         locks = []
         for subscriber_place in subscriber_places:
             place = subscriber_place["place"]
+            self.api.http.user_agent.place_id = place["id"]
             access_controls = await self.api.query_access_controls(place["id"])
             for access_control in access_controls:
                 entrances = access_control["entrances"]
