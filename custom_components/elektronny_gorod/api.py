@@ -140,7 +140,7 @@ class ElektronnyGorodAPI:
             self.headers["Content-Type"] = "application/json; charset=UTF-8"
 
         async with ClientSession() as session:
-            LOGGER.info("Sending API request to %s with headers=%s and data=%s", url, self.headers, data)
+            LOGGER.info(f"Sending API request to {url} with headers={self.headers} and data={data}")
             if method == "GET":
                 response = await session.get(url, headers = self.headers)
             elif method == "POST":
@@ -150,8 +150,8 @@ class ElektronnyGorodAPI:
 
             text = await response.text()
             if response.status in (200, 300):
-                LOGGER.info("Response is %s - %s", response.status, text)
+                LOGGER.info(f"Response is {response.status} - {text}")
                 return await response.json() if is_json(text) else text
             else:
-                LOGGER.error("Could not get data from API: %s - %s", response, text)
+                LOGGER.error(f"Could not get data from API: {response} - {text}")
                 raise ClientError(response.status, text)

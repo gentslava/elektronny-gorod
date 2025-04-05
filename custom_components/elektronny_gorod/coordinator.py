@@ -35,7 +35,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             }
         )
 
-        LOGGER.info("Integration loading: %s", entry.data[CONF_NAME])
+        LOGGER.info(f"Integration loading: {entry.data[CONF_NAME]}")
 
         super().__init__(
             hass,
@@ -58,7 +58,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             LOGGER.info("Integration starting")
             pass
         except Exception as ex:
-            LOGGER.error("Integration start failed: %s", traceback.format_exc())
+            LOGGER.error(f"Integration start failed: {traceback.format_exc()}")
             raise UpdateFailed(ex) from ex
 
     async def get_cameras_info(self) -> list:

@@ -36,7 +36,7 @@ class ElektronnyGorogCamera(Camera):
         coordinator: ElektronnyGorodUpdateCoordinator,
         camera_info: dict
     ) -> None:
-        LOGGER.info("ElektronnyGorogCamera init %s", camera_info)
+        LOGGER.info(f"ElektronnyGorogCamera init {camera_info}")
         super().__init__()
         self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
         self._camera_info: dict = camera_info

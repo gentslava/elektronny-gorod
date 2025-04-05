@@ -38,7 +38,7 @@ class ElektronnyGorogLock(LockEntity):
         coordinator: ElektronnyGorodUpdateCoordinator,
         lock_info: dict
     ) -> None:
-        LOGGER.info("ElektronnyGorogLock init %s", lock_info)
+        LOGGER.info(f"ElektronnyGorogLock init {lock_info}")
         super().__init__()
         self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
         self._lock_info: dict = lock_info

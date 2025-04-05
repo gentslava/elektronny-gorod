@@ -48,18 +48,18 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             if CONF_PHONE in user_input:
                 self.phone = user_input[CONF_PHONE]
-                LOGGER.info("Phone is %s", self.phone)
+                LOGGER.info(f"Phone is {self.phone}")
 
             if CONF_ACCESS_TOKEN in user_input:
                 self.access_token = user_input[CONF_ACCESS_TOKEN]
-                LOGGER.info("Access token is %s", self.access_token)
+                LOGGER.info(f"Access token is {self.access_token}")
 
             if self.access_token is not None:
                 return await self.async_step_sms()
 
             # Query list of contracts for the given phone number
             contracts = await self.api.query_contracts(self.phone)
-            LOGGER.info("Contracts is %s", contracts)
+            LOGGER.info(f"Contracts is {contracts}")
 
             if not contracts:
                 errors[CONF_PHONE] = "no_contracts"
@@ -103,7 +103,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.contracts,
                 lambda contract: str(contract["subscriberId"]) == user_input[CONF_CONTRACT]
             )
-            LOGGER.info("Selected contract is %s. Contract object is %s", user_input[CONF_CONTRACT], self.contract)
+            LOGGER.info(f"Selected contract is {user_input[CONF_CONTRACT]}. Contract object is {self.contract}")
 
             self.user_agent.place_id = self.contract["placeId"]
             self.user_agent.account_id = self.contract["accountId"]
