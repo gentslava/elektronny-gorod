@@ -182,7 +182,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def get_account(self) -> dict:
-        await self.api.update_access_token(self.access_token)
+        self.api.http.update_access_token(self.access_token)
         profile = await self.api.query_profile()
         subscriber = profile["subscriber"]
         self.user_agent.account_id = subscriber["accountId"]
