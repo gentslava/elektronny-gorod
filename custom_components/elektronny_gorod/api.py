@@ -1,11 +1,6 @@
-from aiohttp import ClientSession, ClientError
+"""The Elektronny Gorod API."""
 import json
-from .helpers import is_json
-from .const import (
-    LOGGER,
-    BASE_API_URL,
-)
-from .user_agent import UserAgent
+from .http import HTTP
 
 class ElektronnyGorodAPI:
     def __init__(
@@ -15,26 +10,20 @@ class ElektronnyGorodAPI:
         refresh_token: str | None = None,
         headers: dict = {},
     ) -> None:
-        self.base_url: str = f"https://{BASE_API_URL}"
-        self.user_agent: str = user_agent
-        self.headers: dict = {
-            **{
-                "Host": BASE_API_URL,
-                "Connection": "Keep-Alive",
-                "Accept-Encoding": "gzip",
-            },
-            **headers
-        }
+        self.http: HTTP = HTTP(
+            user_agent,
+            access_token,
+            refresh_token,
+            headers,
+        )
         self.phone: str | None = None
-        self.access_token: str | None = access_token
-        self.refresh_token: str | None = refresh_token
 
     async def query_contracts(self, phone: str):
         """Query the list of contracts for the given phone number."""
         self.phone = phone
         api_url = f"{self.base_url}/auth/v2/login/{self.phone}"
 
-        contracts = await self.request(api_url)
+        contracts = await self.http.get(api_url)
         return contracts if contracts else []
 
     async def request_sms_code(self, contract: dict):
@@ -49,7 +38,7 @@ class ElektronnyGorodAPI:
                 "placeId": contract["placeId"],
             }
         )
-        return await self.request(api_url, data, method="POST")
+        return await self.http.post(api_url, data)
 
     async def verify_sms_code(self, contract: dict, code: str) -> dict:
         """Verify the SMS code."""
@@ -64,7 +53,7 @@ class ElektronnyGorodAPI:
                 "subscriberId": str(contract["subscriberId"]),
             }
         )
-        return await self.request(api_url, data, method="POST")
+        return await self.http.post(api_url, data)
 
     async def update_access_token(self, access_token) -> None:
         self.access_token = access_token
@@ -73,48 +62,48 @@ class ElektronnyGorodAPI:
         """Query the profile data for subscriber."""
         api_url = f"{self.base_url}/rest/v1/subscribers/profiles"
 
-        profile = await self.request(api_url)
+        profile = await self.http.get(api_url)
         return profile["data"] if profile else {}
 
     async def query_places(self, place_id="") -> list:
         """Query the list of places for subscriber."""
         api_url = f"{self.base_url}/rest/v3/subscriber-places{"?placeId=" + place_id if place_id else ""}"
 
-        places = await self.request(api_url)
+        places = await self.http.get(api_url)
         return places["data"] if places else []
 
     async def query_access_controls(self, place_id) -> list:
         """Query the list of access controls for subscriber."""
         api_url = f"{self.base_url}/rest/v1/places/{place_id}/accesscontrols"
 
-        places = await self.request(api_url)
+        places = await self.http.get(api_url)
         return places["data"] if places else []
 
     async def query_cameras(self) -> list:
         """Query the list of cameras for access token."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras"
 
-        cameras = await self.request(api_url)
+        cameras = await self.http.get(api_url)
         return cameras["data"] if cameras else []
 
     async def query_public_cameras(self, place_id) -> list:
         """Query the list of cameras for access token."""
         api_url = f"{self.base_url}/rest/v2/places/{place_id}/public/cameras"
 
-        cameras = await self.request(api_url)
+        cameras = await self.http.get(api_url)
         return cameras["data"] if cameras else []
 
     async def query_camera_stream(self, id) -> str | None:
         """Query the stream url of camera for the id."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/video?&LightStream=0"
 
-        camera_stream = await self.request(api_url)
+        camera_stream = await self.http.get(api_url)
         return camera_stream["data"]["URL"] if camera_stream else None
 
     async def query_camera_snapshot(self, id, width, height) -> bytes:
         """Query the camera snapshot for the id."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras/{id}/snapshots?width={width}&height={height}"
-        return await self.request(api_url, binary = True)
+        return await self.http.get(api_url, binary = True)
 
     async def open_lock(self, place_id, access_control_id, entrance_id) -> list:
         """Query the list of places for subscriber."""
@@ -124,34 +113,4 @@ class ElektronnyGorodAPI:
                 "name": "accessControlOpen"
             }
         )
-        return await self.request(api_url, data, method = "POST")
-
-    async def request(
-        self,
-        url: str,
-        data: object | None = None,
-        method: str = "GET",
-        binary: bool = False
-    ):
-        """Make a HTTP request."""
-        if self.access_token is not None: self.headers["Authorization"] = f"Bearer {self.access_token}"
-        self.headers["User-Agent"] = self.user_agent
-        if method == "POST":
-            self.headers["Content-Type"] = "application/json; charset=UTF-8"
-
-        async with ClientSession() as session:
-            LOGGER.info(f"Sending API request to {url} with headers={self.headers} and data={data}")
-            if method == "GET":
-                response = await session.get(url, headers = self.headers)
-            elif method == "POST":
-                response = await session.post(url, data = data, headers = self.headers)
-
-            if binary: return await response.read()
-
-            text = await response.text()
-            if response.status in (200, 300):
-                LOGGER.info(f"Response is {response.status} - {text}")
-                return await response.json() if is_json(text) else text
-            else:
-                LOGGER.error(f"Could not get data from API: {response} - {text}")
-                raise ClientError(response.status, text)
+        return await self.http.post(api_url, data)
