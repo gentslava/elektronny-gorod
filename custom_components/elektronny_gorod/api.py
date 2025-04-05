@@ -55,9 +55,6 @@ class ElektronnyGorodAPI:
         )
         return await self.http.post(api_url, data)
 
-    async def update_access_token(self, access_token) -> None:
-        self.access_token = access_token
-
     async def query_profile(self) -> dict:
         """Query the profile data for subscriber."""
         api_url = f"/rest/v1/subscribers/profiles"

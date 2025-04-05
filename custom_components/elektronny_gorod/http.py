@@ -12,9 +12,9 @@ async def _log_request(url, headers, data) -> None:
 async def _log_response(response: ClientResponse) -> None:
     """Log the request."""
     if body := await response.text():
-        LOGGER.debug(f"Response is {response.url} ({response.method} data: {body})")
+        LOGGER.debug(f"Response is {response.url} ({response.method}) [{response.status} {response.reason}] data: {body}")
     else:
-        LOGGER.debug(f"Response is {response.url} ({response.method})")
+        LOGGER.debug(f"Response is {response.url} ({response.method}) [{response.status} {response.reason}]")
 
 class HTTP:
     def __init__(
@@ -55,7 +55,7 @@ class HTTP:
             if binary: return await response.read()
 
             await _log_response(response)
-            if response.status in (200, 300):
+            if response.ok:
                 try: return await response.json()
                 except: return await response.text()
             else:
@@ -69,3 +69,6 @@ class HTTP:
     async def post(self, endpoint: str, data: object, binary: bool = False):
         """Handle POST requests."""
         return await self.__request(endpoint, method = "POST", data = data, binary = binary)
+
+    def update_access_token(self, access_token) -> None:
+        self.access_token = access_token
