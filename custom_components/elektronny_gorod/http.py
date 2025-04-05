@@ -5,9 +5,9 @@ from .const import (
     LOGGER,
 )
 
-async def _log_request(endpoint, headers, data) -> None:
+async def _log_request(url, headers, data) -> None:
     """Log the request."""
-    LOGGER.info(f"Sending API request to {endpoint} with headers={headers} and data={data}")
+    LOGGER.info(f"Sending API request to {url} with headers={headers} and data={data}")
 
 async def _log_response(response: ClientResponse) -> None:
     """Log the request."""
@@ -45,22 +45,22 @@ class HTTP:
             self.headers["Content-Type"] = "application/json; charset=UTF-8"
 
         async with ClientSession() as session:
-            await _log_request(endpoint, self.headers, data)
+            url = f"{self.base_url}{endpoint}"
+            await _log_request(url, self.headers, data)
             if method == "GET":
-                response = await session.get(endpoint, headers = self.headers)
+                response = await session.get(url, headers = self.headers)
             elif method == "POST":
-                response = await session.post(endpoint, data = data, headers = self.headers)
+                response = await session.post(url, data = data, headers = self.headers)
 
             if binary: return await response.read()
 
             await _log_response(response)
-            text = await response.text()
             if response.status in (200, 300):
                 try: return await response.json()
                 except: return await response.text()
             else:
                 LOGGER.error(f"Could not get data from API")
-                raise ClientError(response.status, text)
+                raise ClientError(response)
 
     async def get(self, endpoint: str, binary: bool = False):
         """Handle GET requests."""
