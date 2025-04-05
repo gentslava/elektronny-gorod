@@ -1,5 +1,6 @@
 """The Elektronny Gorod integration."""
 from __future__ import annotations
+import json
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.typing import ConfigType
@@ -46,7 +47,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     if config_entry.version == 1:
         user_agent = UserAgent()
         user_agent.operator_id = new_data[CONF_OPERATOR_ID]
-        new_data[CONF_USER_AGENT] = str(user_agent)
+        new_data[CONF_USER_AGENT] = json.dumps(user_agent.json())
 
         version = 2
         hass.config_entries.async_update_entry(config_entry, data=new_data, options=options, version=version)
