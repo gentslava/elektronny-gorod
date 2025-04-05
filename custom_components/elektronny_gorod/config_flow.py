@@ -1,10 +1,10 @@
-import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
 )
 from homeassistant.const import CONF_NAME
+import voluptuous as vol
 from .const import (
     DOMAIN,
     LOGGER,
@@ -61,7 +61,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             contracts = await self.api.query_contracts(self.phone)
             LOGGER.info("Contracts is %s", contracts)
 
-            if not contracts:
+            if not contracts or not len(contracts):
                 errors[CONF_PHONE] = "no_contracts"
             else:
                 self.contracts = contracts
