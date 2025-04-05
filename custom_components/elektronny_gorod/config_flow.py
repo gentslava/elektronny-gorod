@@ -130,49 +130,48 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step to input SMS code."""
         errors = {}
 
-        if user_input is not None or self.access_token is not None:
-            if self.access_token is None:
-                code = user_input[CONF_SMS]
-                auth = await self.api.verify_sms_code(self.contract, code)
-                self.access_token = auth["accessToken"]
-                self.refresh_token = auth["refreshToken"]
-                self.operator_id = auth["operatorId"]
+        # Verify the SMS code
+        if user_input and self.access_token is None:
+            code = user_input[CONF_SMS]
+            auth = await self.api.verify_sms_code(self.contract, code)
+            self.access_token = auth["accessToken"]
+            self.refresh_token = auth["refreshToken"]
+            self.operator_id = auth["operatorId"]
 
-                self.user_agent.place_id = self.contract["placeId"]
-                self.user_agent.account_id = self.contract["accountId"]
-                self.user_agent.operator_id = self.contract["operatorId"]
-                self.api.user_agent = str(self.user_agent)
+            self.user_agent.place_id = self.contract["placeId"]
+            self.user_agent.account_id = self.contract["accountId"]
+            self.user_agent.operator_id = self.contract["operatorId"]
+            self.api.user_agent = str(self.user_agent)
 
-            # Verify the SMS code
-            if self.access_token:
-                # If code is verified, create config entry
-                account = await self.get_account()
-                data = {
-                    CONF_NAME: account[CONF_NAME],
-                    CONF_ACCOUNT_ID: account[CONF_ACCOUNT_ID],
-                    CONF_SUBSCRIBER_ID: account[CONF_SUBSCRIBER_ID],
-                    CONF_ACCESS_TOKEN: self.access_token,
-                    CONF_REFRESH_TOKEN: self.refresh_token,
-                    CONF_OPERATOR_ID: self.operator_id,
-                    CONF_USER_AGENT: str(self.user_agent),
-                }
+        # If code is verified, create config entry
+        if self.access_token:
+            account = await self.get_account()
+            data = {
+                CONF_NAME: account[CONF_NAME],
+                CONF_ACCOUNT_ID: account[CONF_ACCOUNT_ID],
+                CONF_SUBSCRIBER_ID: account[CONF_SUBSCRIBER_ID],
+                CONF_ACCESS_TOKEN: self.access_token,
+                CONF_REFRESH_TOKEN: self.refresh_token,
+                CONF_OPERATOR_ID: self.operator_id,
+                CONF_USER_AGENT: str(self.user_agent),
+            }
 
-                for entry in self._async_current_entries():
-                    if (data[CONF_ACCESS_TOKEN] == entry.data[CONF_ACCESS_TOKEN]):
-                        LOGGER.info(f"Entry {entry.data} already exists")
-                        return self.async_abort(reason = "already_configured")
-                    if (
-                        data[CONF_NAME] == entry.data[CONF_NAME]
-                        and data[CONF_ACCOUNT_ID] == entry.data[CONF_ACCOUNT_ID]
-                        and data[CONF_SUBSCRIBER_ID] == entry.data[CONF_SUBSCRIBER_ID]
-                    ):
-                        LOGGER.info(f"Reauth entry {entry.data} with params {data}")
-                        self.hass.config_entries.async_update_entry(entry, data = data)
-                        await self.hass.config_entries.async_reload(entry.entry_id)
-                        return self.async_abort(reason = "reauth_successful")
+            for entry in self._async_current_entries():
+                if (data[CONF_ACCESS_TOKEN] == entry.data[CONF_ACCESS_TOKEN]):
+                    LOGGER.info(f"Entry {entry.data} already exists")
+                    return self.async_abort(reason = "already_configured")
+                if (
+                    data[CONF_NAME] == entry.data[CONF_NAME]
+                    and data[CONF_ACCOUNT_ID] == entry.data[CONF_ACCOUNT_ID]
+                    and data[CONF_SUBSCRIBER_ID] == entry.data[CONF_SUBSCRIBER_ID]
+                ):
+                    LOGGER.info(f"Reauth entry {entry.data} with params {data}")
+                    self.hass.config_entries.async_update_entry(entry, data = data)
+                    await self.hass.config_entries.async_reload(entry.entry_id)
+                    return self.async_abort(reason = "reauth_successful")
 
-                return self.async_create_entry(title = account[CONF_NAME], data = data)
-
+            return self.async_create_entry(title = account[CONF_NAME], data = data)
+        else:
             # Authentication failed
             errors[CONF_SMS] = "invalid_code"
 
