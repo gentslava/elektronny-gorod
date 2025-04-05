@@ -12,9 +12,9 @@ async def _log_request(url, headers, data) -> None:
 async def _log_response(response: ClientResponse) -> None:
     """Log the request."""
     if body := await response.text():
-        LOGGER.debug(f"Response is {response.url} ({response.method} data: {body})")
+        LOGGER.debug(f"Response is {response.url} ({response.method}) [{response.status} {response.reason}] data: {body}")
     else:
-        LOGGER.debug(f"Response is {response.url} ({response.method})")
+        LOGGER.debug(f"Response is {response.url} ({response.method}) [{response.status} {response.reason}]")
 
 class HTTP:
     def __init__(
@@ -55,7 +55,7 @@ class HTTP:
             if binary: return await response.read()
 
             await _log_response(response)
-            if response.status in (200, 300):
+            if response.ok:
                 try: return await response.json()
                 except: return await response.text()
             else:
