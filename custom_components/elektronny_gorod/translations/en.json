@@ -13,6 +13,7 @@
       "limit_exceeded": "The call limit has been exceeded. Please try again later.",
       "invalid_code": "Invalid code",
       "unknown_status": "Unknown status recieved. Please create issue.",
+      "unauthorized": "Authentication error",
       "unknown": "Unexpected error"
     },
     "step": {

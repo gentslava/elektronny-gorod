@@ -28,6 +28,7 @@
       "limit_exceeded": "[%key:common::config_flow::error::limit_exceeded%]",
       "invalid_code": "[%key:common::config_flow::error::invalid_code%]",
       "unknown_status": "[%key:common::config_flow::error::unknown_status%]",
+      "unauthorized": "[%key:common::config_flow::error::unauthorized%]",
       "unknown": "[%key:common::config_flow::error::unknown%]"
     },
     "abort": {
