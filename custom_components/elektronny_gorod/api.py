@@ -107,9 +107,15 @@ class ElektronnyGorodAPI:
         """Query the profile data for subscriber."""
         api_url = f"/rest/v1/subscribers/profiles"
 
-        response = await self.http.get(api_url)
-        profile = await response.json()
-        return profile["data"] if profile else {}
+        try:
+            response = await self.http.get(api_url)
+            profile = await response.json()
+            return profile["data"] if profile else {}
+        except Exception as e:
+            response = e.args[0]
+            if (response.status == 401):
+                raise ValueError("unauthorized")
+            raise ValueError("unknown_status")
 
     async def query_places(self, place_id="") -> list:
         """Query the list of places for subscriber."""
