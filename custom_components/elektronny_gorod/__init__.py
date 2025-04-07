@@ -1,4 +1,5 @@
 """The Elektronny Gorod integration."""
+
 from __future__ import annotations
 import json
 
@@ -26,7 +27,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elektronny Gorod from a config entry."""
     hass.data.setdefault(DOMAIN, {})
 
-    coordinator = ElektronnyGorodUpdateCoordinator(hass, entry = entry)
+    coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
@@ -35,6 +36,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     return True
+
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old entry."""
@@ -50,10 +52,12 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         new_data[CONF_USER_AGENT] = json.dumps(user_agent.json())
 
         version = 2
-        hass.config_entries.async_update_entry(config_entry, data=new_data, options=options, version=version)
+        hass.config_entries.async_update_entry(
+            config_entry, data=new_data, options=options, version=version
+        )
         LOGGER.debug(f"Migration to version {version} successful")
 
-    LOGGER.debug(f"Migration to configuration version {config_entry.version} successful")
+    LOGGER.debug(f"Migration to config version {config_entry.version} successful")
 
     return True
 
