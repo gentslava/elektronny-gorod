@@ -13,13 +13,16 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_OPERATOR_ID,
     CONF_USER_AGENT,
+    CONF_WIDTH,
 )
 from .user_agent import UserAgent
 from .api import ElektronnyGorodAPI
 from .helpers import find
 
+
 class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Elektronny Gorod data from single endpoint."""
+
     def __init__(
         self,
         hass: HomeAssistant,
@@ -31,12 +34,12 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         user_agent.from_json(json.loads(entry.data[CONF_USER_AGENT]))
         self.api = ElektronnyGorodAPI(
             user_agent,
-            access_token = entry.data[CONF_ACCESS_TOKEN],
-            refresh_token = entry.data[CONF_REFRESH_TOKEN],
-            headers = {
+            access_token=entry.data[CONF_ACCESS_TOKEN],
+            refresh_token=entry.data[CONF_REFRESH_TOKEN],
+            headers={
                 "operator": str(entry.data[CONF_OPERATOR_ID]),
-                "Content-Type": "application/json"
-            }
+                "Content-Type": "application/json",
+            },
         )
 
         LOGGER.info(f"Integration loading: {entry.data[CONF_NAME]}")
@@ -44,7 +47,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         super().__init__(
             hass,
             LOGGER,
-            name = DOMAIN,
+            name=DOMAIN,
         )
 
         async_dispatcher_connect(
@@ -74,8 +77,10 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         return await self.api.query_camera_stream(camera_id)
 
     async def get_camera_snapshot(self, camera_id, width, height) -> bytes:
-        if (width == 0): width = 580
-        if (height == 0): height = round(width / 16 * 9)
+        if not width:
+            width = CONF_WIDTH
+        if not height:
+            height = round(width / 16 * 9)
         LOGGER.info(f"Get camera {camera_id} snapshot with size {width}x{height}")
         return await self.api.query_camera_snapshot(camera_id, width, height)
 
@@ -83,10 +88,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         LOGGER.info(f"Update camera {camera_id} state")
 
         cameras = await self.api.query_cameras()
-        return find(
-            cameras,
-            lambda camera: camera["ID"] == camera_id
-        )
+        return find(cameras, lambda camera: camera["ID"] == camera_id)
 
     async def get_locks_info(self) -> list:
         LOGGER.info("Get locks info")
@@ -105,7 +107,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
                         "access_control_id": access_control["id"],
                         "entrance_id": entrance["id"],
                         "name": entrance["name"],
-                        "openable": entrance["allowOpen"]
+                        "openable": entrance["allowOpen"],
                     }
                     locks.append(lock)
         return locks
@@ -118,12 +120,11 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
 
         access_control = find(
             place["accessControls"],
-            lambda access_control: access_control["id"] == access_control_id
+            lambda access_control: access_control["id"] == access_control_id,
         )
 
         entrance = find(
-            access_control["entrances"],
-            lambda entrance: entrance["id"] == entrance_id
+            access_control["entrances"], lambda entrance: entrance["id"] == entrance_id
         )
 
         return {
@@ -131,7 +132,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             "access_control_id": access_control["id"],
             "entrance_id": entrance["id"],
             "name": entrance["name"],
-            "openable": entrance["allowOpen"]
+            "openable": entrance["allowOpen"],
         }
 
     async def open_lock(self, place_id, access_control_id, entrance_id) -> None:

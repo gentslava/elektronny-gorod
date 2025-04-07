@@ -13,6 +13,7 @@ from .coordinator import ElektronnyGorodUpdateCoordinator
 LOCK_UNLOCK_DELAY = 5  # Used to give a realistic lock/unlock experience in frontend
 LOCK_JAMMED_DELAY = 2
 
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -26,17 +27,13 @@ async def async_setup_entry(
 
     # Create lock entities
     async_add_entities(
-        ElektronnyGorodLock(
-            coordinator,
-            lock_info
-        ) for lock_info in locks_info
+        ElektronnyGorodLock(coordinator, lock_info) for lock_info in locks_info
     )
+
 
 class ElektronnyGorodLock(LockEntity):
     def __init__(
-        self,
-        coordinator: ElektronnyGorodUpdateCoordinator,
-        lock_info: dict
+        self, coordinator: ElektronnyGorodUpdateCoordinator, lock_info: dict
     ) -> None:
         LOGGER.debug(f"ElektronnyGorodLock init {lock_info}")
         super().__init__()
@@ -95,7 +92,9 @@ class ElektronnyGorodLock(LockEntity):
         self._state = LockState.UNLOCKING
         self.async_write_ha_state()
         try:
-            await self._coordinator.open_lock(self._place_id, self._access_control_id, self._entrance_id)
+            await self._coordinator.open_lock(
+                self._place_id, self._access_control_id, self._entrance_id
+            )
             self._state = LockState.UNLOCKED
         except ClientError:
             self._state = LockState.JAMMED

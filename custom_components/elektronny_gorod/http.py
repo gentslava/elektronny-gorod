@@ -1,4 +1,5 @@
 """HTTP interface."""
+
 from aiohttp import ClientSession, ClientError, ClientResponse
 from .const import (
     BASE_API_URL,
@@ -6,16 +7,23 @@ from .const import (
 )
 from .user_agent import UserAgent
 
+
 async def _log_request(url, headers, data) -> None:
     """Log the request."""
     LOGGER.info(f"Sending API request to {url} with headers={headers} and data={data}")
 
+
 async def _log_response(response: ClientResponse) -> None:
     """Log the request."""
+    _url = response.url
+    _method = response.method
+    _status = response.status
+    _reason = response.reason
     if body := await response.text():
-        LOGGER.debug(f"Response is {response.url} ({response.method}) [{response.status} {response.reason}] data: {body}")
+        LOGGER.debug(f"Response {_url} ({_method}) [{_status} {_reason}] data: {body}")
     else:
-        LOGGER.debug(f"Response is {response.url} ({response.method}) [{response.status} {response.reason}]")
+        LOGGER.debug(f"Response {_url} ({_method}) [{_status} {_reason}]")
+
 
 class HTTP:
     def __init__(
@@ -33,14 +41,17 @@ class HTTP:
                 "Connection": "Keep-Alive",
                 "Accept-Encoding": "gzip",
             },
-            **headers
+            **headers,
         }
         self.access_token: str | None = access_token
         self.refresh_token: str | None = refresh_token
 
-    async def __request(self, endpoint: str, method: str, data: object | None, binary: bool) -> ClientResponse | bytes:
+    async def __request(
+        self, endpoint: str, method: str, data: object | None, binary: bool
+    ) -> ClientResponse | bytes:
         """Make a HTTP request."""
-        if self.access_token is not None: self.headers["Authorization"] = f"Bearer {self.access_token}"
+        if self.access_token is not None:
+            self.headers["Authorization"] = f"Bearer {self.access_token}"
         self.headers["User-Agent"] = str(self.user_agent)
         if method == "POST":
             self.headers["Content-Type"] = "application/json; charset=UTF-8"
@@ -49,11 +60,12 @@ class HTTP:
             url = f"{self.base_url}{endpoint}"
             await _log_request(url, self.headers, data)
             if method == "GET":
-                response = await session.get(url, headers = self.headers)
+                response = await session.get(url, headers=self.headers)
             elif method == "POST":
-                response = await session.post(url, data = data, headers = self.headers)
+                response = await session.post(url, data=data, headers=self.headers)
 
-            if binary: return await response.read()
+            if binary:
+                return await response.read()
 
             await _log_response(response)
             if response.ok:
@@ -64,8 +76,10 @@ class HTTP:
 
     async def get(self, endpoint: str, binary: bool = False) -> ClientResponse | bytes:
         """Handle GET requests."""
-        return await self.__request(endpoint, method = "GET", data = None, binary = binary)
+        return await self.__request(endpoint, method="GET", data=None, binary=binary)
 
-    async def post(self, endpoint: str, data: object, binary: bool = False) -> ClientResponse | bytes:
+    async def post(
+        self, endpoint: str, data: object, binary: bool = False
+    ) -> ClientResponse | bytes:
         """Handle POST requests."""
-        return await self.__request(endpoint, method = "POST", data = data, binary = binary)
+        return await self.__request(endpoint, method="POST", data=data, binary=binary)
