@@ -57,7 +57,10 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             if CONF_ACCESS_TOKEN in user_input:
                 self.access_token = user_input[CONF_ACCESS_TOKEN]
                 LOGGER.debug(f"Access token is {self.access_token}")
-                return await self.get_account()
+                try:
+                    return await self.get_account()
+                except ValueError as e:
+                    errors[CONF_PHONE] = str(e)
 
             if CONF_PHONE in user_input:
                 self.phone = user_input[CONF_PHONE]
