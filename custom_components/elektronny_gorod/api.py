@@ -88,8 +88,14 @@ class ElektronnyGorodAPI:
                 "subscriberId": str(contract["subscriberId"]),
             }
         )
-        response = await self.http.post(api_url, data)
-        return await response.json()
+        try:
+            response = await self.http.post(api_url, data)
+            return await response.json()
+        except Exception as e:
+            response = e.args[0]
+            if (response.status == 406):
+                raise ValueError("invalid_format")
+            raise ValueError("unknown_status")
 
     async def query_profile(self) -> dict:
         """Query the profile data for subscriber."""

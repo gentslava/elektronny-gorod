@@ -177,18 +177,22 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         # Verify the SMS code
         if user_input:
             code = user_input[CONF_SMS]
-            auth = await self.api.verify_sms_code(self.contract, code)
-            self.access_token = auth["accessToken"]
-            self.refresh_token = auth["refreshToken"]
-            self.operator_id = auth["operatorId"]
-            self.user_agent.operator_id = self.operator_id
+            try:
+                auth = await self.api.verify_sms_code(self.contract, code)
+                self.access_token = auth["accessToken"]
+                self.refresh_token = auth["refreshToken"]
+                self.operator_id = auth["operatorId"]
+                self.user_agent.operator_id = self.operator_id
 
-            # If code is verified, create config entry
-            if self.access_token:
-                return await self.get_account()
-            else:
+                # If code is verified, create config entry
+                if self.access_token:
+                    return await self.get_account()
+
                 # Authentication failed
-                errors[CONF_SMS] = "invalid_code"
+                else:
+                    errors[CONF_SMS] = "invalid_code"
+            except ValueError as e:
+                errors[CONF_SMS] = str(e)
 
         return self.async_show_form(
             step_id = "sms",
