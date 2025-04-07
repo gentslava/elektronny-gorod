@@ -1,5 +1,9 @@
 [English](/README.md) | [Русский](/README.ru_RU.md)
 
+<a href="https://2090000.ru/domofony/"><img src="https://2090909.ru/img/logo.png" alt="logo" height="80"/></a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://play.google.com/store/apps/details?id=ru.inetra.intercom"><img src="https://play-lh.googleusercontent.com/eCp35NcuGq1V0igXhGrPE6tprf7wGg00dY6TuVvRrqRSiEMTS6yQePuWxEIx3G0EMJ0l=w240-h480-rw" alt="app logo" height="80"/></a>
+
 # Home Assistant Elektronny Gorod Integration
 
 This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) service.
