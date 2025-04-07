@@ -24,21 +24,25 @@ class ElektronnyGorodAPI:
         self.phone = phone
         api_url = f"/auth/v2/login/{self.phone}"
 
-        response = await self.http.get(api_url)
-        if response.status == 300:
-            contracts = await response.json()
-            return {
-                "password": False,
-                "contracts": contracts,
-            }
-        if response.status == 200:
-            return {
-                "password": True,
-                "contracts": [],
-            }
-        if response.status == 204:
-            raise ValueError("unregistered")
-
+        try:
+            response = await self.http.get(api_url)
+            if response.status == 300:
+                contracts = await response.json()
+                return {
+                    "password": False,
+                    "contracts": contracts,
+                }
+            if response.status == 200:
+                return {
+                    "password": True,
+                    "contracts": [],
+                }
+            if response.status == 204:
+                raise ValueError("unregistered")
+        except Exception as e:
+            response = e.args[0]
+            if (response.status == 400):
+                raise ValueError("invalid_login")
         raise ValueError("unknown_status")
 
     async def verify_password(self, timestamp: str, hash1: str, hash2: str) -> dict:
