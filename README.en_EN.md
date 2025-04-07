@@ -8,6 +8,8 @@
 
 This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) service.
 
+Add your intercoms, cameras and locks to Home Assistant.
+
 ## Installation
 
 ### Manually
@@ -39,9 +41,10 @@ or manually:
 ## Features
 
 - View available contracts and add as much as you need.
-- Request and input SMS code or password for authentication.
-- Get camera preview and streams.
-- Control opening locks at real-time.
+- Request and enter an SMS code or password for authentication.
+- Add available intercoms, cameras and locks.
+- Get previews and streams from intercoms and cameras.
+- Manage the opening of locks in real time.
 
 ## Issues and Contributions
 
