@@ -53,34 +53,32 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step to gather the user's input."""
         errors = {}
 
-        if user_input is not None:
+        if user_input:
+            if CONF_ACCESS_TOKEN in user_input:
+                self.access_token = user_input[CONF_ACCESS_TOKEN]
+                LOGGER.debug(f"Access token is {self.access_token}")
+                return await self.get_account()
+
             if CONF_PHONE in user_input:
                 self.phone = user_input[CONF_PHONE]
                 LOGGER.debug(f"Phone is {self.phone}")
 
-            if CONF_ACCESS_TOKEN in user_input:
-                self.access_token = user_input[CONF_ACCESS_TOKEN]
-                LOGGER.debug(f"Access token is {self.access_token}")
+                # Query list of contracts for the given phone number
+                try:
+                    res = await self.api.query_contracts(self.phone)
+                    # Password required
+                    if res["password"]:
+                        return await self.async_step_password()
 
-            if self.access_token is not None:
-                return await self.async_step_sms()
-
-            # Query list of contracts for the given phone number
-            try:
-                res = await self.api.query_contracts(self.phone)
-                # Password required
-                if res["password"]:
-                    return await self.async_step_password()
-
-                # Choose contract
-                contracts = res["contracts"]
-                if not contracts:
-                    errors[CONF_PHONE] = "no_contracts"
-                else:
-                    self.contracts = contracts
-                    return await self.async_step_contract()
-            except ValueError as e:
-                errors[CONF_PHONE] = str(e)
+                    # Choose contract
+                    contracts = res["contracts"]
+                    if not contracts:
+                        errors[CONF_PHONE] = "no_contracts"
+                    else:
+                        self.contracts = contracts
+                        return await self.async_step_contract()
+                except ValueError as e:
+                    errors[CONF_PHONE] = str(e)
 
         if self.show_advanced_options:
             data_schema = vol.Schema({
