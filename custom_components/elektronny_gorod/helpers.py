@@ -15,10 +15,6 @@ def find(items: list, condition: Callable) -> object:
     return None
 
 
-def get_timestamp() -> str:
-    return f"{datetime.now().isoformat()[:-3]}Z"
-
-
 def hash_password(password: str) -> str:
     password_bytes = password.encode("utf-8")
     sha1_hash = hashlib.sha1(password_bytes).digest()
@@ -26,8 +22,9 @@ def hash_password(password: str) -> str:
     return base64_encoded
 
 
-def hash_password_timestamp(password: str, timestamp: str) -> str:
-    password_bytes = password.encode("utf-8")
-    combo = password_bytes + timestamp.encode("utf-8")
-    md5_encoded = hashlib.md5(combo).hexdigest()
+def hash_password_timestamp(login: str, password: str, time: str) -> str:
+    prefix = "DigitalHomeNTKpassword"
+    secret = "789sdgHJs678wertv34712376"
+    raw_string = f"{prefix}{login}{password}{time}{secret}"
+    md5_encoded = hashlib.md5(raw_string.encode()).hexdigest()
     return md5_encoded

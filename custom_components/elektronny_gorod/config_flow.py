@@ -1,11 +1,12 @@
 import json
+from datetime import datetime
+import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
 )
 from homeassistant.const import CONF_NAME
-import voluptuous as vol
 from .const import (
     DOMAIN,
     LOGGER,
@@ -23,11 +24,11 @@ from .const import (
 from .api import ElektronnyGorodAPI
 from .helpers import (
     find,
-    get_timestamp,
     hash_password,
     hash_password_timestamp,
 )
 from .user_agent import UserAgent
+from .time import Time
 
 class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     """Elektronny Gorod config flow."""
@@ -107,11 +108,11 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         # Password auth
         if user_input:
             password = user_input[CONF_PASSWORD]
-            timestamp = get_timestamp()
+            time = Time()
             hash1 = hash_password(password)
-            hash2 = hash_password_timestamp(password, timestamp)
+            hash2 = hash_password_timestamp(self.phone, password, time.get_simpletime())
             try:
-                auth = await self.api.verify_password(timestamp, hash1, hash2)
+                auth = await self.api.verify_password(time.get_timestamp(), hash1, hash2)
                 self.access_token = auth["accessToken"]
                 self.refresh_token = auth["refreshToken"]
                 self.operator_id = auth["operatorId"]
