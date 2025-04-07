@@ -6,6 +6,7 @@
       "reauth_successful": "Re-authentication was successful"
     },
     "error": {
+      "invalid_login": "Please check entered data",
       "no_contracts": "No contracts",
       "unregistered": "Unregistered",
       "invalid_password": "Invalid password",
