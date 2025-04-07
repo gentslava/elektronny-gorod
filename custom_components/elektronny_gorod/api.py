@@ -73,7 +73,13 @@ class ElektronnyGorodAPI:
                 "placeId": contract["placeId"],
             }
         )
-        await self.http.post(api_url, data)
+        try:
+            return await self.http.post(api_url, data)
+        except Exception as e:
+            response = e.args[0]
+            if (response.status == 429):
+                raise ValueError("limit_exceeded")
+            raise ValueError("unknown_status")
 
     async def verify_sms_code(self, contract: dict, code: str) -> dict:
         """Verify the SMS code."""

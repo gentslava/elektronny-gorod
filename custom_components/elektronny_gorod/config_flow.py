@@ -158,8 +158,8 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 await self.api.request_sms_code(self.contract)
                 return await self.async_step_sms()
-            except:
-                errors[CONF_CONTRACT] = "limit_exceeded"
+            except ValueError as e:
+                errors[CONF_CONTRACT] = str(e)
 
         return self.async_show_form(
             step_id = "contract",
