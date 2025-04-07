@@ -1,8 +1,12 @@
 [English](/README.md) | [Русский](/README.ru_RU.md)
 
+<a href="https://2090000.ru/domofony/"><img src="https://2090909.ru/img/logo.png" alt="logo" height="80"/></a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://play.google.com/store/apps/details?id=ru.inetra.intercom"><img src="https://play-lh.googleusercontent.com/eCp35NcuGq1V0igXhGrPE6tprf7wGg00dY6TuVvRrqRSiEMTS6yQePuWxEIx3G0EMJ0l=w240-h480-rw" alt="app logo" height="80"/></a>
+
 # Интеграция Home Assistant с Электронным Городом
 
-Это кастомная интеграция для Home Assistant, которая позволяет интегрироваться с сервисом Электронный Город (Новотелеком).
+Это кастомная интеграция для Home Assistant, которая позволяет интегрироваться с сервисом Электронный Город (Новотелеком), реализующая API приложения Мой Дом - Электронный город.
 
 ## Установка
 
