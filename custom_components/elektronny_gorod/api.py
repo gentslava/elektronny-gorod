@@ -24,21 +24,25 @@ class ElektronnyGorodAPI:
         self.phone = phone
         api_url = f"/auth/v2/login/{self.phone}"
 
-        response = await self.http.get(api_url)
-        if response.status == 300:
-            contracts = await response.json()
-            return {
-                "password": False,
-                "contracts": contracts,
-            }
-        if response.status == 200:
-            return {
-                "password": True,
-                "contracts": [],
-            }
-        if response.status == 204:
-            raise ValueError("unregistered")
-
+        try:
+            response = await self.http.get(api_url)
+            if response.status == 300:
+                contracts = await response.json()
+                return {
+                    "password": False,
+                    "contracts": contracts,
+                }
+            if response.status == 200:
+                return {
+                    "password": True,
+                    "contracts": [],
+                }
+            if response.status == 204:
+                raise ValueError("unregistered")
+        except Exception as e:
+            response = e.args[0]
+            if (response.status == 400):
+                raise ValueError("invalid_login")
         raise ValueError("unknown_status")
 
     async def verify_password(self, timestamp: str, hash1: str, hash2: str) -> dict:
@@ -73,7 +77,13 @@ class ElektronnyGorodAPI:
                 "placeId": contract["placeId"],
             }
         )
-        await self.http.post(api_url, data)
+        try:
+            return await self.http.post(api_url, data)
+        except Exception as e:
+            response = e.args[0]
+            if (response.status == 429):
+                raise ValueError("limit_exceeded")
+            raise ValueError("unknown_status")
 
     async def verify_sms_code(self, contract: dict, code: str) -> dict:
         """Verify the SMS code."""
@@ -88,16 +98,28 @@ class ElektronnyGorodAPI:
                 "subscriberId": str(contract["subscriberId"]),
             }
         )
-        response = await self.http.post(api_url, data)
-        return await response.json()
+        try:
+            response = await self.http.post(api_url, data)
+            return await response.json()
+        except Exception as e:
+            response = e.args[0]
+            if (response.status == 406):
+                raise ValueError("invalid_format")
+            raise ValueError("unknown_status")
 
     async def query_profile(self) -> dict:
         """Query the profile data for subscriber."""
         api_url = f"/rest/v1/subscribers/profiles"
 
-        response = await self.http.get(api_url)
-        profile = await response.json()
-        return profile["data"] if profile else {}
+        try:
+            response = await self.http.get(api_url)
+            profile = await response.json()
+            return profile["data"] if profile else {}
+        except Exception as e:
+            response = e.args[0]
+            if (response.status == 401):
+                raise ValueError("unauthorized")
+            raise ValueError("unknown_status")
 
     async def query_places(self, place_id="") -> list:
         """Query the list of places for subscriber."""

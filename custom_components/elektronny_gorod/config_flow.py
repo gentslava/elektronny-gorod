@@ -57,7 +57,10 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             if CONF_ACCESS_TOKEN in user_input:
                 self.access_token = user_input[CONF_ACCESS_TOKEN]
                 LOGGER.debug(f"Access token is {self.access_token}")
-                return await self.get_account()
+                try:
+                    return await self.get_account()
+                except ValueError as e:
+                    errors[CONF_PHONE] = str(e)
 
             if CONF_PHONE in user_input:
                 self.phone = user_input[CONF_PHONE]
@@ -157,8 +160,8 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 await self.api.request_sms_code(self.contract)
                 return await self.async_step_sms()
-            except:
-                errors[CONF_CONTRACT] = "limit_exceeded"
+            except ValueError as e:
+                errors[CONF_CONTRACT] = str(e)
 
         return self.async_show_form(
             step_id = "contract",
@@ -176,18 +179,22 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         # Verify the SMS code
         if user_input:
             code = user_input[CONF_SMS]
-            auth = await self.api.verify_sms_code(self.contract, code)
-            self.access_token = auth["accessToken"]
-            self.refresh_token = auth["refreshToken"]
-            self.operator_id = auth["operatorId"]
-            self.user_agent.operator_id = self.operator_id
+            try:
+                auth = await self.api.verify_sms_code(self.contract, code)
+                self.access_token = auth["accessToken"]
+                self.refresh_token = auth["refreshToken"]
+                self.operator_id = auth["operatorId"]
+                self.user_agent.operator_id = self.operator_id
 
-            # If code is verified, create config entry
-            if self.access_token:
-                return await self.get_account()
-            else:
+                # If code is verified, create config entry
+                if self.access_token:
+                    return await self.get_account()
+
                 # Authentication failed
-                errors[CONF_SMS] = "invalid_code"
+                else:
+                    errors[CONF_SMS] = "invalid_code"
+            except ValueError as e:
+                errors[CONF_SMS] = str(e)
 
         return self.async_show_form(
             step_id = "sms",

@@ -3,8 +3,12 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import CONF_HEIGHT, CONF_WIDTH, DOMAIN, LOGGER
+from .const import (
+    DOMAIN,
+    LOGGER,
+)
 from .coordinator import ElektronnyGorodUpdateCoordinator
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -19,17 +23,13 @@ async def async_setup_entry(
 
     # Create camera entities
     async_add_entities(
-        ElektronnyGorodCamera(
-            coordinator,
-            camera_info
-        ) for camera_info in cameras_info
+        ElektronnyGorodCamera(coordinator, camera_info) for camera_info in cameras_info
     )
+
 
 class ElektronnyGorodCamera(Camera):
     def __init__(
-        self,
-        coordinator: ElektronnyGorodUpdateCoordinator,
-        camera_info: dict
+        self, coordinator: ElektronnyGorodUpdateCoordinator, camera_info: dict
     ) -> None:
         LOGGER.debug(f"ElektronnyGorodCamera init {camera_info}")
         super().__init__()
@@ -70,9 +70,7 @@ class ElektronnyGorodCamera(Camera):
         return self._is_recording
 
     async def async_camera_image(
-        self,
-        width: int | None = CONF_WIDTH,
-        height: int | None = CONF_HEIGHT
+        self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
         image = await self._coordinator.get_camera_snapshot(self._id, width, height)
