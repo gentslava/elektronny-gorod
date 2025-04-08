@@ -1,4 +1,5 @@
 """Constants used by Elektronny Gorod integration."""
+
 import logging
 from typing import Final
 
@@ -21,51 +22,51 @@ CONF_WIDTH: Final = 300
 CONF_HEIGHT: Final = 300
 
 APP_VERSION: Final = {
-  "name": "8.23.0",
-  "code": "82300000"
+    "name": "8.23.0",
+    "code": "82300000"
 }
 
 ANDROID_OS_VER: Final = "15"
-ANDROID_DEVICES_CSV: Final = "https://storage.googleapis.com/play_public/supported_devices.csv"
+# ANDROID_DEVICES_CSV: Final = "https://storage.googleapis.com/play_public/supported_devices.csv"
 ANDROID_DEVICES: Final = [
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 5a",
-  },
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 6",
-  },
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 6 Pro",
-  },
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 6a",
-  },
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 7",
-  },
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 7 Pro",
-  },
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 7a",
-  },
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 8",
-  },
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 8 Pro",
-  },
-  {
-    "manufacturer": "Google",
-    "model": "Pixel 8a",
-  },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 5a",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 6",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 6 Pro",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 6a",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 7",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 7 Pro",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 7a",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 8",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 8 Pro",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 8a",
+    },
 ]

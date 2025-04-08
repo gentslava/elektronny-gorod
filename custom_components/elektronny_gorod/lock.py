@@ -92,7 +92,9 @@ class ElektronnyGorodLock(LockEntity):
         self._state = LockState.UNLOCKING
         self.async_write_ha_state()
         try:
-            await self._coordinator.open_lock(self._place_id, self._access_control_id, self._entrance_id)
+            await self._coordinator.open_lock(
+                self._place_id, self._access_control_id, self._entrance_id
+            )
             self._state = LockState.UNLOCKED
         except ClientError:
             self._state = LockState.JAMMED
