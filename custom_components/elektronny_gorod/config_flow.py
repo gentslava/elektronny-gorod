@@ -16,7 +16,7 @@ from .const import (
     CONF_OPERATOR_ID,
     CONF_ACCOUNT_ID,
     CONF_SUBSCRIBER_ID,
-    USER_AGENT
+    CONF_USER_AGENT
 )
 from .api import ElektronnyGorodAPI
 from .helpers import find
@@ -24,13 +24,12 @@ from .user_agent import UserAgent
 
 class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     """Elektronny Gorod config flow."""
-
-    VERSION = 1
+    VERSION = 2
 
     def __init__(self) -> None:
         """Initialize."""
         self.user_agent = UserAgent()
-        self.api: ElektronnyGorodAPI = ElektronnyGorodAPI(user_agent = self.user_agent)
+        self.api: ElektronnyGorodAPI = ElektronnyGorodAPI(user_agent = str(self.user_agent))
         self.entry: ConfigEntry | None = None
         self.access_token: str | None = None
         self.refresh_token: str | None = None
@@ -106,6 +105,11 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             )
             LOGGER.info("Selected contract is %s. Contract object is %s", user_input[CONF_CONTRACT], self.contract)
 
+            self.user_agent.place_id = self.contract["placeId"]
+            self.user_agent.account_id = self.contract["accountId"]
+            self.user_agent.operator_id = self.contract["operatorId"]
+            self.api.user_agent = str(self.user_agent)
+
             # Request SMS code for the selected contract
             try:
                 await self.api.request_sms_code(self.contract)
@@ -137,6 +141,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.user_agent.place_id = self.contract["placeId"]
                 self.user_agent.account_id = self.contract["accountId"]
                 self.user_agent.operator_id = self.contract["operatorId"]
+                self.api.user_agent = str(self.user_agent)
 
             # Verify the SMS code
             if self.access_token:
@@ -149,7 +154,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_ACCESS_TOKEN: self.access_token,
                     CONF_REFRESH_TOKEN: self.refresh_token,
                     CONF_OPERATOR_ID: self.operator_id,
-                    USER_AGENT: self.user_agent,
+                    CONF_USER_AGENT: str(self.user_agent),
                 }
 
                 for entry in self._async_current_entries():
