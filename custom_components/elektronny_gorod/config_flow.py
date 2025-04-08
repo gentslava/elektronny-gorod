@@ -1,3 +1,5 @@
+import json
+from datetime import datetime
 import voluptuous as vol
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.config_entries import (
@@ -11,16 +13,22 @@ from .const import (
     CONF_ACCESS_TOKEN,
     CONF_REFRESH_TOKEN,
     CONF_PHONE,
+    CONF_PASSWORD,
     CONF_CONTRACT,
     CONF_SMS,
     CONF_OPERATOR_ID,
     CONF_ACCOUNT_ID,
     CONF_SUBSCRIBER_ID,
-    CONF_USER_AGENT
+    CONF_USER_AGENT,
 )
 from .api import ElektronnyGorodAPI
-from .helpers import find
+from .helpers import (
+    find,
+    hash_password,
+    hash_password_timestamp,
+)
 from .user_agent import UserAgent
+from .time import Time
 
 class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     """Elektronny Gorod config flow."""
@@ -29,7 +37,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize."""
         self.user_agent = UserAgent()
-        self.api: ElektronnyGorodAPI = ElektronnyGorodAPI(user_agent = str(self.user_agent))
+        self.api: ElektronnyGorodAPI = ElektronnyGorodAPI(self.user_agent)
         self.entry: ConfigEntry | None = None
         self.access_token: str | None = None
         self.refresh_token: str | None = None
@@ -45,28 +53,32 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step to gather the user's input."""
         errors = {}
 
-        if user_input is not None:
-            if CONF_PHONE in user_input:
-                self.phone = user_input[CONF_PHONE]
-                LOGGER.info("Phone is %s", self.phone)
-
+        if user_input:
             if CONF_ACCESS_TOKEN in user_input:
                 self.access_token = user_input[CONF_ACCESS_TOKEN]
-                LOGGER.info("Access token is %s", self.access_token)
+                LOGGER.debug(f"Access token is {self.access_token}")
+                return await self.get_account()
 
-            if self.access_token is not None:
-                return await self.async_step_sms()
+            if CONF_PHONE in user_input:
+                self.phone = user_input[CONF_PHONE]
+                LOGGER.debug(f"Phone is {self.phone}")
 
-            # Query list of contracts for the given phone number
-            contracts = await self.api.query_contracts(self.phone)
-            LOGGER.info("Contracts is %s", contracts)
+                # Query list of contracts for the given phone number
+                try:
+                    res = await self.api.query_contracts(self.phone)
+                    # Password required
+                    if res["password"]:
+                        return await self.async_step_password()
 
-            if not contracts:
-                errors[CONF_PHONE] = "no_contracts"
-            else:
-                self.contracts = contracts
-                return await self.async_step_contract()
-
+                    # Choose contract
+                    contracts = res["contracts"]
+                    if not contracts:
+                        errors[CONF_PHONE] = "no_contracts"
+                    else:
+                        self.contracts = contracts
+                        return await self.async_step_contract()
+                except ValueError as e:
+                    errors[CONF_PHONE] = str(e)
 
         if self.show_advanced_options:
             data_schema = vol.Schema({
@@ -81,6 +93,42 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id = "user",
             data_schema = data_schema,
+            errors = errors
+        )
+
+    async def async_step_password(
+        self,
+        user_input: dict[str] | None = None
+    ) -> FlowResult:
+        """Step to input password."""
+        errors = {}
+
+        # Password auth
+        if user_input:
+            password = user_input[CONF_PASSWORD]
+            time = Time()
+            hash1 = hash_password(password)
+            hash2 = hash_password_timestamp(self.phone, password, time.get_simpletime())
+            try:
+                auth = await self.api.verify_password(time.get_timestamp(), hash1, hash2)
+                self.access_token = auth["accessToken"]
+                self.refresh_token = auth["refreshToken"]
+                self.operator_id = auth["operatorId"]
+                self.user_agent.operator_id = self.operator_id
+
+                # If password is verified, create config entry
+                if self.access_token:
+                    return await self.get_account()
+
+                # Authentication failed
+                else:
+                    errors[CONF_PASSWORD] = "invalid_password"
+            except ValueError as e:
+                errors[CONF_PASSWORD] = str(e)
+
+        return self.async_show_form(
+            step_id = "password",
+            data_schema = vol.Schema({vol.Required(CONF_PASSWORD): str}),
             errors = errors
         )
 
@@ -103,12 +151,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 self.contracts,
                 lambda contract: str(contract["subscriberId"]) == user_input[CONF_CONTRACT]
             )
-            LOGGER.info("Selected contract is %s. Contract object is %s", user_input[CONF_CONTRACT], self.contract)
-
-            self.user_agent.place_id = self.contract["placeId"]
-            self.user_agent.account_id = self.contract["accountId"]
-            self.user_agent.operator_id = self.contract["operatorId"]
-            self.api.user_agent = str(self.user_agent)
+            LOGGER.debug(f"Selected contract is {user_input[CONF_CONTRACT]}. Contract object is {self.contract}")
 
             # Request SMS code for the selected contract
             try:
@@ -130,51 +173,21 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         """Step to input SMS code."""
         errors = {}
 
-        if user_input is not None or self.access_token is not None:
-            if self.access_token is None:
-                code = user_input[CONF_SMS]
-                auth = await self.api.verify_sms_code(self.contract, code)
-                self.access_token = auth["accessToken"]
-                self.refresh_token = auth["refreshToken"]
-                self.operator_id = auth["operatorId"]
+        # Verify the SMS code
+        if user_input:
+            code = user_input[CONF_SMS]
+            auth = await self.api.verify_sms_code(self.contract, code)
+            self.access_token = auth["accessToken"]
+            self.refresh_token = auth["refreshToken"]
+            self.operator_id = auth["operatorId"]
+            self.user_agent.operator_id = self.operator_id
 
-                self.user_agent.place_id = self.contract["placeId"]
-                self.user_agent.account_id = self.contract["accountId"]
-                self.user_agent.operator_id = self.contract["operatorId"]
-                self.api.user_agent = str(self.user_agent)
-
-            # Verify the SMS code
+            # If code is verified, create config entry
             if self.access_token:
-                # If code is verified, create config entry
-                account = await self.get_account()
-                data = {
-                    CONF_NAME: account[CONF_NAME],
-                    CONF_ACCOUNT_ID: account[CONF_ACCOUNT_ID],
-                    CONF_SUBSCRIBER_ID: account[CONF_SUBSCRIBER_ID],
-                    CONF_ACCESS_TOKEN: self.access_token,
-                    CONF_REFRESH_TOKEN: self.refresh_token,
-                    CONF_OPERATOR_ID: self.operator_id,
-                    CONF_USER_AGENT: str(self.user_agent),
-                }
-
-                for entry in self._async_current_entries():
-                    if (data[CONF_ACCESS_TOKEN] == entry.data[CONF_ACCESS_TOKEN]):
-                        LOGGER.info(f"Entry {entry.data} already exists")
-                        return self.async_abort(reason = "already_configured")
-                    if (
-                        data[CONF_NAME] == entry.data[CONF_NAME]
-                        and data[CONF_ACCOUNT_ID] == entry.data[CONF_ACCOUNT_ID]
-                        and data[CONF_SUBSCRIBER_ID] == entry.data[CONF_SUBSCRIBER_ID]
-                    ):
-                        LOGGER.info(f"Reauth entry {entry.data} with params {data}")
-                        self.hass.config_entries.async_update_entry(entry, data = data)
-                        await self.hass.config_entries.async_reload(entry.entry_id)
-                        return self.async_abort(reason = "reauth_successful")
-
-                return self.async_create_entry(title = account[CONF_NAME], data = data)
-
-            # Authentication failed
-            errors[CONF_SMS] = "invalid_code"
+                return await self.get_account()
+            else:
+                # Authentication failed
+                errors[CONF_SMS] = "invalid_code"
 
         return self.async_show_form(
             step_id = "sms",
@@ -183,12 +196,33 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         )
 
     async def get_account(self) -> dict:
-        await self.api.update_access_token(self.access_token)
+        self.api.http.access_token = self.access_token
         profile = await self.api.query_profile()
         subscriber = profile["subscriber"]
         self.user_agent.account_id = subscriber["accountId"]
-        return {
+
+        data = {
             CONF_NAME: f"{subscriber["name"]} ({subscriber["accountId"]})",
             CONF_ACCOUNT_ID: subscriber["accountId"],
-            CONF_SUBSCRIBER_ID: subscriber["id"]
+            CONF_SUBSCRIBER_ID: subscriber["id"],
+            CONF_ACCESS_TOKEN: self.access_token,
+            CONF_REFRESH_TOKEN: self.refresh_token,
+            CONF_OPERATOR_ID: self.operator_id,
+            CONF_USER_AGENT: json.dumps(self.user_agent.json()),
         }
+
+        for entry in self._async_current_entries():
+            if (data[CONF_ACCESS_TOKEN] == entry.data[CONF_ACCESS_TOKEN]):
+                LOGGER.info(f"Entry {entry.data} already exists")
+                return self.async_abort(reason = "already_configured")
+            if (
+                data[CONF_NAME] == entry.data[CONF_NAME]
+                and data[CONF_ACCOUNT_ID] == entry.data[CONF_ACCOUNT_ID]
+                and data[CONF_SUBSCRIBER_ID] == entry.data[CONF_SUBSCRIBER_ID]
+            ):
+                LOGGER.info(f"Reauth entry {entry.data} with params {data}")
+                self.hass.config_entries.async_update_entry(entry, data = data)
+                await self.hass.config_entries.async_reload(entry.entry_id)
+                return self.async_abort(reason = "reauth_successful")
+
+        return self.async_create_entry(title = data[CONF_NAME], data = data)

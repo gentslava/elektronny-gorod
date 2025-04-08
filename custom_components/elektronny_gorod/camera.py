@@ -11,7 +11,7 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Elektronny Gorog Camera based on a config entry."""
+    """Set up Elektronny Gorod Camera based on a config entry."""
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     # Get cameras info
@@ -19,19 +19,19 @@ async def async_setup_entry(
 
     # Create camera entities
     async_add_entities(
-        ElektronnyGorogCamera(
+        ElektronnyGorodCamera(
             coordinator,
             camera_info
         ) for camera_info in cameras_info
     )
 
-class ElektronnyGorogCamera(Camera):
+class ElektronnyGorodCamera(Camera):
     def __init__(
         self,
         coordinator: ElektronnyGorodUpdateCoordinator,
         camera_info: dict
     ) -> None:
-        LOGGER.info("ElektronnyGorogCamera init %s", camera_info)
+        LOGGER.debug(f"ElektronnyGorodCamera init {camera_info}")
         super().__init__()
         self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
         self._camera_info: dict = camera_info

@@ -18,27 +18,27 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Elektronny Gorog Camera based on a config entry."""
+    """Set up Elektronny Gorod Lock based on a config entry."""
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    # Get cameras info
+    # Get locks info
     locks_info = await coordinator.get_locks_info()
 
-    # Create camera entities
+    # Create lock entities
     async_add_entities(
-        ElektronnyGorogLock(
+        ElektronnyGorodLock(
             coordinator,
             lock_info
         ) for lock_info in locks_info
     )
 
-class ElektronnyGorogLock(LockEntity):
+class ElektronnyGorodLock(LockEntity):
     def __init__(
         self,
         coordinator: ElektronnyGorodUpdateCoordinator,
         lock_info: dict
     ) -> None:
-        LOGGER.info("ElektronnyGorogLock init %s", lock_info)
+        LOGGER.debug(f"ElektronnyGorodLock init {lock_info}")
         super().__init__()
         self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
         self._lock_info: dict = lock_info
