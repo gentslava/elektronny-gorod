@@ -12,6 +12,7 @@ from .const import (
     CONF_REFRESH_TOKEN,
     CONF_OPERATOR_ID,
     USER_AGENT,
+    CONF_WIDTH,
 )
 from .api import ElektronnyGorodAPI
 from .helpers import find
@@ -74,6 +75,10 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         return await self.api.query_camera_stream(camera_id)
 
     async def get_camera_snapshot(self, camera_id, width, height) -> bytes:
+        if not width:
+            width = CONF_WIDTH
+        if not height:
+            height = round(width / 16 * 9)
         LOGGER.info(f"Get camera {camera_id} snapshot with size {width}x{height}")
         return await self.api.query_camera_snapshot(camera_id, width, height)
 
