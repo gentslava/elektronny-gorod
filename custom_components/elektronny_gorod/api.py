@@ -76,9 +76,16 @@ class ElektronnyGorodAPI:
         profile = await self.request(api_url)
         return profile["data"] if profile else {}
 
-    async def query_places(self) -> list:
+    async def query_places(self, place_id="") -> list:
         """Query the list of places for subscriber."""
-        api_url = f"{self.base_url}/rest/v1/subscriberplaces"
+        api_url = f"{self.base_url}/rest/v3/subscriber-places{"?placeId=" + place_id if place_id else ""}"
+
+        places = await self.request(api_url)
+        return places["data"] if places else []
+
+    async def query_access_controls(self, place_id) -> list:
+        """Query the list of access controls for subscriber."""
+        api_url = f"{self.base_url}/rest/v1/places/{place_id}/accesscontrols"
 
         places = await self.request(api_url)
         return places["data"] if places else []
@@ -86,6 +93,13 @@ class ElektronnyGorodAPI:
     async def query_cameras(self) -> list:
         """Query the list of cameras for access token."""
         api_url = f"{self.base_url}/rest/v1/forpost/cameras"
+
+        cameras = await self.request(api_url)
+        return cameras["data"] if cameras else []
+
+    async def query_public_cameras(self, place_id) -> list:
+        """Query the list of cameras for access token."""
+        api_url = f"{self.base_url}/rest/v2/places/{place_id}/public/cameras"
 
         cameras = await self.request(api_url)
         return cameras["data"] if cameras else []

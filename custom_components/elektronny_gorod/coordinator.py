@@ -98,7 +98,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         locks = []
         for subscriber_place in subscriber_places:
             place = subscriber_place["place"]
-            access_controls = place["accessControls"]
+            access_controls = await self.api.query_access_controls(place["id"])
             for access_control in access_controls:
                 entrances = access_control["entrances"]
                 for entrance in entrances:
@@ -115,11 +115,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
     async def update_lock_state(self, place_id, access_control_id, entrance_id) -> dict:
         LOGGER.info(f"Update lock {place_id}_{access_control_id}_{entrance_id} state")
 
-        subscriber_places = await self.api.query_places()
-        subscriber_place = find(
-            subscriber_places,
-            lambda subscriber_place: subscriber_place["place"]["id"] == place_id
-        )
+        subscriber_place = await self.api.query_places(place_id)
         place = subscriber_place["place"]
 
         access_control = find(

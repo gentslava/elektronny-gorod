@@ -20,11 +20,11 @@ CONF_WIDTH: Final = 300
 CONF_HEIGHT: Final = 300
 
 APP_VERSION: Final = {
-  "name": "8.13.0",
-  "code": "81300000"
+  "name": "8.23.0",
+  "code": "82300000"
 }
 
-ANDROID_OS_VER: Final = "14"
+ANDROID_OS_VER: Final = "15"
 ANDROID_DEVICES_CSV: Final = "https://storage.googleapis.com/play_public/supported_devices.csv"
 ANDROID_DEVICES: Final = [
   {
