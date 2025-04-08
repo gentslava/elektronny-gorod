@@ -1,34 +1,41 @@
 {
-    "title": "Электронный город",
-    "config": {
-        "abort": {
-            "already_configured": "Устройство уже настроено",
-            "reauth_successful": "Повторная аутентификация прошла успешно"
-        },
-        "error": {
-            "invalid_code": "Неверный код",
-            "limit_exceeded": "Превышен лимит обращений. Пожалуйста, повторите попытку позже.",
-            "unknown": "Неожиданная ошибка"
-        },
-        "step": {
-            "user": {
-                "data": {
-                    "phone": "Номер телефона или догорвора",
-                    "access_token": "Access token (при наличии)"
-                }
-            },
-            "contract": {
-                "data": {
-                    "contract": "Договоры"
-                },
-                "description": "Выберите договор"
-            },
-            "sms": {
-                "data": {
-                    "sms": "СМС"
-                },
-                "description": "Введите код из СМС"
-            }
+  "title": "Электронный город",
+  "config": {
+    "abort": {
+      "already_configured": "Устройство уже настроено",
+      "reauth_successful": "Повторная аутентификация прошла успешно"
+    },
+    "error": {
+      "invalid_login": "Проверьте правильность введенных данных",
+      "no_contracts": "Не найден договор",
+      "unregistered": "Данный аккаунт не зарегистрирован",
+      "invalid_password": "Неверный пароль",
+      "invalid_format": "Некорректный формат данных",
+      "limit_exceeded": "Превышен лимит обращений. Пожалуйста, повторите попытку позже.",
+      "invalid_code": "Неверный код",
+      "unknown_status": "Неизвестный ответ получен. Пожалуйста, создайте issue.",
+      "unauthorized": "Ошибка авторизации",
+      "unknown": "Неожиданная ошибка"
+    },
+    "step": {
+      "user": {
+        "data": {
+          "phone": "Номер телефона или догорвора",
+          "access_token": "Access token (при наличии)"
         }
+      },
+      "contract": {
+        "data": {
+          "contract": "Договоры"
+        },
+        "description": "Выберите договор"
+      },
+      "sms": {
+        "data": {
+          "sms": "СМС"
+        },
+        "description": "Введите код из СМС"
+      }
     }
+  }
 }

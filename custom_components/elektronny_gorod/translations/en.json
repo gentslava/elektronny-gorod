@@ -1,34 +1,41 @@
 {
   "title": "Elektronny Gorod",
   "config": {
-      "abort": {
-          "already_configured": "Device is already configured",
-          "reauth_successful": "Re-authentication was successful"
+    "abort": {
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Re-authentication was successful"
+    },
+    "error": {
+      "invalid_login": "Please check entered data",
+      "no_contracts": "No contracts",
+      "unregistered": "Unregistered",
+      "invalid_password": "Invalid password",
+      "invalid_format": "Invalid format",
+      "limit_exceeded": "The call limit has been exceeded. Please try again later.",
+      "invalid_code": "Invalid code",
+      "unknown_status": "Unknown status recieved. Please create issue.",
+      "unauthorized": "Authentication error",
+      "unknown": "Unexpected error"
+    },
+    "step": {
+      "user": {
+        "data": {
+          "phone": "Phone number or contract",
+          "access_token": "Access token (if available)"
+        }
       },
-      "error": {
-          "invalid_code": "Invalid code",
-          "limit_exceeded": "The call limit has been exceeded. Please try again later.",
-          "unknown": "Unexpected error"
+      "contract": {
+        "data": {
+          "contract": "Contracts"
+        },
+        "description": "Choose your contract"
       },
-      "step": {
-          "user": {
-              "data": {
-                  "phone": "Phone number or contract",
-                  "access_token": "Access token (if available)"
-              }
-          },
-          "contract": {
-              "data": {
-                  "contract": "Contracts"
-              },
-              "description": "Choose your contract"
-          },
-          "sms": {
-              "data": {
-                  "sms": "SMS"
-              },
-              "description": "Enter the code from SMS"
-          }
+      "sms": {
+        "data": {
+          "sms": "SMS"
+        },
+        "description": "Enter the code from SMS"
       }
+    }
   }
 }

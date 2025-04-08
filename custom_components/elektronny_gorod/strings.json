@@ -1,33 +1,40 @@
 {
-    "title": "Elektronny Gorod",
-    "config": {
-        "step": {
-            "user": {
-                "data": {
-                    "phone": "Phone number or contract"
-                }
-            },
-            "contract": {
-              "data": {
-                  "contract": "Contracts"
-              },
-              "description": "Choose your contract"
-            },
-            "sms": {
-              "data": {
-                  "sms": "SMS"
-              },
-              "description": "Enter the code from SMS"
-            }
-        },
-        "error": {
-            "invalid_code": "Invalid code",
-            "limit_exceeded": "The call limit has been exceeded. Please try again later.",
-            "unknown": "[%key:common::config_flow::error::unknown%]"
-        },
-        "abort": {
-            "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-            "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+  "title": "Elektronny Gorod",
+  "config": {
+    "step": {
+      "user": {
+        "data": {
+          "phone": "Phone number or contract"
         }
+      },
+      "contract": {
+        "data": {
+          "contract": "Contracts"
+        },
+        "description": "Choose your contract"
+      },
+      "sms": {
+        "data": {
+          "sms": "SMS"
+        },
+        "description": "Enter the code from SMS"
+      }
+    },
+    "error": {
+      "invalid_login": "[%key:common::config_flow::error::invalid_login%]",
+      "no_contracts": "[%key:common::config_flow::error::no_contracts%]",
+      "unregistered": "[%key:common::config_flow::error::unregistered%]",
+      "invalid_password": "[%key:common::config_flow::error::invalid_password%]",
+      "invalid_format": "[%key:common::config_flow::error::invalid_format%]",
+      "limit_exceeded": "[%key:common::config_flow::error::limit_exceeded%]",
+      "invalid_code": "[%key:common::config_flow::error::invalid_code%]",
+      "unknown_status": "[%key:common::config_flow::error::unknown_status%]",
+      "unauthorized": "[%key:common::config_flow::error::unauthorized%]",
+      "unknown": "[%key:common::config_flow::error::unknown%]"
+    },
+    "abort": {
+      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
+      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
     }
+  }
 }
