@@ -22,8 +22,8 @@ CONF_WIDTH: Final = 300
 CONF_HEIGHT: Final = 300
 
 APP_VERSION: Final = {
-    "name": "8.23.0",
-    "code": "82300000"
+    "name": "8.25.0",
+    "code": "82500010"
 }
 
 ANDROID_OS_VER: Final = "15"
