@@ -156,10 +156,12 @@ class ElektronnyGorodAPI:
     async def query_camera_stream(self, id) -> str | None:
         """Query the stream url of camera for the id."""
         api_url = f"/rest/v1/forpost/cameras/{id}/video?&LightStream=0"
-
-        response = await self.http.get(api_url)
-        camera_stream = await response.json()
-        return camera_stream["data"]["URL"] if camera_stream else None
+        try:
+            response = await self.http.get(api_url)
+            camera_stream = await response.json()
+            return camera_stream["data"]["URL"] if camera_stream else None
+        except Exception as e:
+            return None
 
     async def query_camera_snapshot(self, id, width, height) -> bytes:
         """Query the camera snapshot for the id."""
