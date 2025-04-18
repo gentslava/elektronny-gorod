@@ -1,12 +1,12 @@
 [English](/README.md) | [Русский](/README.ru_RU.md)
 
-<a href="https://2090000.ru/domofony/"><img src="https://domconnect.ru/uploads/2434555b0__domconnect.ru.png" alt="logo" height="120"/></a>
+<a href="https://2090000.ru/domofony/"><img src="https://domconnect.ru/uploads/2434555b0__domconnect.ru.png" alt="Elektronny Gorod (Novotelecom) logo" height="120"/></a>
 &nbsp;&nbsp;&nbsp;
-<a href="https://play.google.com/store/apps/details?id=ru.inetra.intercom"><img src="https://play-lh.googleusercontent.com/eCp35NcuGq1V0igXhGrPE6tprf7wGg00dY6TuVvRrqRSiEMTS6yQePuWxEIx3G0EMJ0l=w240-h480-rw" alt="app logo" height="120"/></a>
+<a href="https://play.google.com/store/apps/details?id=ru.inetra.intercom"><img src="https://play-lh.googleusercontent.com/eCp35NcuGq1V0igXhGrPE6tprf7wGg00dY6TuVvRrqRSiEMTS6yQePuWxEIx3G0EMJ0l=w240-h480-rw" alt="My Home app logo" height="120"/></a>
 
 # Home Assistant Elektronny Gorod Integration
 
-This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) service.
+This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) service. This implements the API of the My Home - Elektronny Gorod application.
 
 Add your intercoms, cameras and locks to Home Assistant.
 
