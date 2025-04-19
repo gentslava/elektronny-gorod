@@ -121,6 +121,14 @@ class ElektronnyGorodAPI:
                 raise ValueError("unauthorized")
             raise ValueError("unknown_status")
 
+    async def query_balance(self, place_id) -> dict:
+        """Query the profile data for subscriber."""
+        api_url = f"/api/mh-payment/mobile/v1/finance?placeId={place_id}"
+
+        response = await self.http.get(api_url)
+        finance = await response.json()
+        return finance["data"] if finance else {}
+
     async def query_places(self, place_id="") -> list:
         """Query the list of places for subscriber."""
         api_url = f"/rest/v3/subscriber-places{"?placeId=" + place_id if place_id else ""}"
