@@ -13,6 +13,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update manifest.json with version
+        run: |
+          VERSION=${{ github.event.release.tag_name }}
+          echo "Updating manifest.json with version $VERSION"
+          jq --arg version "$VERSION" '.version = $version' custom_components/elektronny_gorod/manifest.json > tmp.json && mv tmp.json custom_components/elektronny_gorod/manifest.json
+
+      - name: Commit and push changes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git checkout master
+          git add custom_components/elektronny_gorod/manifest.json
+          git commit -m "Update manifest.json to version ${{ github.event.release.tag_name }}"
+          git push origin master
 
       - name: Prepare release
         run: |
