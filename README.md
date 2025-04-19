@@ -47,6 +47,22 @@ cp -r elektronny-gorod YOUR_HASS_CONFIG_DIR/custom_components/
 - Управление открытием замков в реальном времени.
 - Просматривайте баланс аккаунта.
 
+## Пример автоматизации
+Вот пример автоматизации для уведомления о низком балансе:
+
+```yaml
+automation:
+  - alias: "Уведомление о низком балансе"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.elektronny_gorod_balance
+        below: 100
+    action:
+      - service: notify.notify
+        data:
+          message: "Баланс вашего счета в Электронном городе ниже 100 рублей."
+```
+
 ## Проблемы и вклад
 
 Если вы столкнулись с проблемами или у вас есть предложения по улучшению, пожалуйста, [откройте issue](https://github.com/gentslava/elektronny-gorod/issues) на GitHub.

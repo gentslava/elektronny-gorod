@@ -47,6 +47,22 @@ or manually:
 - Manage the opening of locks in real time.
 - View your account balance.
 
+## Automation example
+Here is an example of automation for low balance notification:
+
+```yaml
+automation:
+  - alias: "Low balance notification"
+    trigger:
+      - platform: numeric_state
+        entity_id: sensor.elektronny_gorod_balance
+        below: 100
+    action:
+      - service: notify.notify
+        data:
+          message: "Your account balance in Elektronny Gorod is below 100 rubles."
+```
+
 ## Issues and Contributions
 
 If you encounter any issues or have suggestions for improvements, please [open an issue](https://github.com/gentslava/elektronny-gorod/issues) on GitHub.
