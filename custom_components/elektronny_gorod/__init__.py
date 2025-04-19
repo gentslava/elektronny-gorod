@@ -20,6 +20,7 @@ from .user_agent import UserAgent
 PLATFORMS: list[Platform] = [
     Platform.CAMERA,
     Platform.LOCK,
+    Platform.SENSOR,
 ]
 
 

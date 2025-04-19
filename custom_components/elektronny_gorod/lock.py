@@ -45,11 +45,7 @@ class ElektronnyGorodLock(LockEntity):
         self._name = self._lock_info["name"]
         self._openable = self._lock_info["openable"]
         self._state = LockState.LOCKED
-
-    @property
-    def unique_id(self) -> str:
-        """Return lock unique_id."""
-        return f"{self._place_id}_{self._access_control_id}_{self._entrance_id}_{self._name}"
+        self._attr_unique_id = f"{self._place_id}_{self._access_control_id}_{self._entrance_id}_{self._name}"
 
     @property
     def name(self) -> str:

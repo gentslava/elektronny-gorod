@@ -43,11 +43,7 @@ class ElektronnyGorodCamera(Camera):
         self._attr_supported_features = CameraEntityFeature.STREAM
         self._stream_url: str | None = None
         self._image: bytes | None = None
-
-    @property
-    def unique_id(self) -> str:
-        """Return camera unique_id."""
-        return f"{self._id}_{self._name}"
+        self._attr_unique_id = f"{self._id}_{self._name}"
 
     @property
     def name(self) -> str:
