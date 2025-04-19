@@ -45,6 +45,7 @@ or manually:
 - Add available intercoms, cameras and locks.
 - Get previews and streams from intercoms and cameras.
 - Manage the opening of locks in real time.
+- View your account balance.
 
 ## Issues and Contributions
 
