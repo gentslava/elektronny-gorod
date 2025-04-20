@@ -36,10 +36,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             user_agent,
             access_token=entry.data[CONF_ACCESS_TOKEN],
             refresh_token=entry.data[CONF_REFRESH_TOKEN],
-            headers={
-                "operator": str(entry.data[CONF_OPERATOR_ID]),
-                "Content-Type": "application/json",
-            },
+            operator=str(entry.data[CONF_OPERATOR_ID]),
         )
         self._subscriber_places = []
 

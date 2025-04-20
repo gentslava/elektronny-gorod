@@ -9,13 +9,13 @@ class ElektronnyGorodAPI:
         user_agent: UserAgent,
         access_token: str | None = None,
         refresh_token: str | None = None,
-        headers: dict = {},
+        operator: str | None = None,
     ) -> None:
         self.http: HTTP = HTTP(
             user_agent,
             access_token,
             refresh_token,
-            headers,
+            operator,
         )
         self.phone: str | None = None
 

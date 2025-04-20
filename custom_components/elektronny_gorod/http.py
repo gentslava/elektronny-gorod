@@ -31,18 +31,15 @@ class HTTP:
         user_agent: UserAgent,
         access_token: str | None,
         refresh_token: str | None,
-        headers: dict,
+        operator: str | None,
     ) -> None:
         self.base_url: str = f"https://{BASE_API_URL}"
         self.user_agent: UserAgent = user_agent
-        self.headers: dict = {
-            **{
-                "Host": BASE_API_URL,
-                "Connection": "Keep-Alive",
-                "Accept-Encoding": "gzip",
-            },
-            **headers,
+        self._headers: dict = {
+            "accept-encoding": "gzip",
         }
+        if operator is not None:
+            self._headers["operator"] = operator
         self.access_token: str | None = access_token
         self.refresh_token: str | None = refresh_token
 
@@ -51,18 +48,18 @@ class HTTP:
     ) -> ClientResponse | bytes:
         """Make a HTTP request."""
         if self.access_token is not None:
-            self.headers["Authorization"] = f"Bearer {self.access_token}"
-        self.headers["User-Agent"] = str(self.user_agent)
+            self._headers["authorization"] = f"Bearer {self.access_token}"
+        self._headers["user-agent"] = str(self.user_agent)
         if method == "POST":
-            self.headers["Content-Type"] = "application/json; charset=UTF-8"
+            self._headers["content-type"] = "application/json; charset=UTF-8"
 
         async with ClientSession() as session:
             url = f"{self.base_url}{endpoint}"
-            await _log_request(url, self.headers, data)
+            await _log_request(url, self._headers, data)
             if method == "GET":
-                response = await session.get(url, headers=self.headers)
+                response = await session.get(url, headers=self._headers)
             elif method == "POST":
-                response = await session.post(url, data=data, headers=self.headers)
+                response = await session.post(url, data=data, headers=self._headers)
 
             if binary:
                 return await response.read()
