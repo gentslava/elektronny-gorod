@@ -65,7 +65,6 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         try:
             LOGGER.info("Integration starting")
             self._subscriber_places = await self._api.query_places()
-            pass
         except Exception as ex:
             LOGGER.error(f"Integration start failed: {traceback.format_exc()}")
             raise UpdateFailed(ex) from ex
