@@ -33,7 +33,7 @@ class HTTP:
         refresh_token: str | None,
         operator: str | None,
     ) -> None:
-        self.base_url: str = f"https://{BASE_API_URL}"
+        self._base_url: str = f"https://{BASE_API_URL}"
         self.user_agent: UserAgent = user_agent
         self._headers: dict = {
             "accept-encoding": "gzip",
@@ -41,7 +41,7 @@ class HTTP:
         if operator is not None:
             self._headers["operator"] = operator
         self.access_token: str | None = access_token
-        self.refresh_token: str | None = refresh_token
+        self._refresh_token: str | None = refresh_token
 
     async def __request(
         self, endpoint: str, method: str, data: object | None, binary: bool
@@ -54,7 +54,7 @@ class HTTP:
             self._headers["content-type"] = "application/json; charset=UTF-8"
 
         async with ClientSession() as session:
-            url = f"{self.base_url}{endpoint}"
+            url = f"{self._base_url}{endpoint}"
             await _log_request(url, self._headers, data)
             if method == "GET":
                 response = await session.get(url, headers=self._headers)

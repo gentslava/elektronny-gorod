@@ -17,12 +17,12 @@ class ElektronnyGorodAPI:
             refresh_token,
             operator,
         )
-        self.phone: str | None = None
+        self._phone: str | None = None
 
     async def query_contracts(self, phone: str) -> dict:
         """Query the list of contracts for the given phone number."""
-        self.phone = phone
-        api_url = f"/auth/v2/login/{self.phone}"
+        self._phone = phone
+        api_url = f"/auth/v2/login/{self._phone}"
 
         try:
             response = await self.http.get(api_url)
@@ -47,10 +47,11 @@ class ElektronnyGorodAPI:
 
     async def verify_password(self, timestamp: str, hash1: str, hash2: str) -> dict:
         """Password auth."""
-        api_url = f"/auth/v2/auth/{self.phone}/password"
+        api_url = f"/auth/v2/auth/{self._phone}/password"
+
         data = json.dumps(
             {
-                "login": self.phone,
+                "login": self._phone,
                 "timestamp": timestamp,
                 "hash1": hash1,
                 "hash2": hash2,
@@ -67,7 +68,8 @@ class ElektronnyGorodAPI:
 
     async def request_sms_code(self, contract: dict) -> None:
         """Request SMS code for the selected contract."""
-        api_url = f"/auth/v2/confirmation/{self.phone}"
+        api_url = f"/auth/v2/confirmation/{self._phone}"
+
         data = json.dumps(
             {
                 "accountId": contract["accountId"],
@@ -87,13 +89,14 @@ class ElektronnyGorodAPI:
 
     async def verify_sms_code(self, contract: dict, code: str) -> dict:
         """Verify the SMS code."""
-        api_url = f"/auth/v3/auth/{self.phone}/confirmation"
+        api_url = f"/auth/v3/auth/{self._phone}/confirmation"
+
         data = json.dumps(
             {
                 "accountId": contract["accountId"],
                 "confirm1": code,
                 "confirm2": code,
-                "login": self.phone,
+                "login": self._phone,
                 "operatorId": contract["operatorId"],
                 "subscriberId": str(contract["subscriberId"]),
             }
@@ -164,6 +167,7 @@ class ElektronnyGorodAPI:
     async def query_camera_stream(self, id) -> str | None:
         """Query the stream url of camera for the id."""
         api_url = f"/rest/v1/forpost/cameras/{id}/video?&LightStream=0"
+
         try:
             response = await self.http.get(api_url)
             camera_stream = await response.json()
@@ -174,11 +178,13 @@ class ElektronnyGorodAPI:
     async def query_camera_snapshot(self, id, width, height) -> bytes:
         """Query the camera snapshot for the id."""
         api_url = f"/rest/v1/forpost/cameras/{id}/snapshots?width={width}&height={height}"
+
         return await self.http.get(api_url, binary = True)
 
     async def open_lock(self, place_id, access_control_id, entrance_id) -> None:
         """Request for open lock."""
         api_url = f"/rest/v1/places/{place_id}/accesscontrols/{access_control_id}/entrances/{entrance_id}/actions"
+
         data = json.dumps(
             {
                 "name": "accessControlOpen"
