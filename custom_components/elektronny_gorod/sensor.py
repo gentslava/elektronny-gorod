@@ -43,9 +43,9 @@ class ElektronnyGorodBalanceSensor(SensorEntity):
     @property
     def native_value(self) -> float:
         """Return state of the sensor."""
-        if self._balance is None:
-            return 0
-        return round(self._balance, 2)
+        if self._balance is not None:
+            return round(self._balance, 2)
+        return self._balance
 
     @property
     def native_unit_of_measurement(self) -> str | None:
