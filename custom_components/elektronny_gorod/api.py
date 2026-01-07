@@ -183,7 +183,10 @@ class ElektronnyGorodAPI:
 
     async def open_lock(self, place_id, access_control_id, entrance_id) -> None:
         """Request for open lock."""
-        api_url = f"/rest/v1/places/{place_id}/accesscontrols/{access_control_id}/entrances/{entrance_id}/actions"
+        if entrance_id is None:
+            api_url = f"/rest/v1/places/{place_id}/accesscontrols/{access_control_id}/actions"
+        else:
+            api_url = f"/rest/v1/places/{place_id}/accesscontrols/{access_control_id}/entrances/{entrance_id}/actions"
 
         data = json.dumps(
             {

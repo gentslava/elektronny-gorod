@@ -107,6 +107,16 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
                         "openable": entrance["allowOpen"],
                     }
                     locks.append(lock)
+                    
+                if not entrances:
+                    lock = {
+                        "place_id": place_id,
+                        "access_control_id": access_control["id"],
+                        "entrance_id": None,
+                        "name": access_control["name"],
+                        "openable": access_control["allowOpen"],
+                    }
+                    locks.append(lock)
         return locks
 
     async def update_lock_state(self, place_id, access_control_id, entrance_id) -> dict:
@@ -119,6 +129,15 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             place["accessControls"],
             lambda access_control: access_control["id"] == access_control_id,
         )
+
+        if not access_control["entrances"]:
+            return {
+                "place_id": place["id"],
+                "access_control_id": access_control["id"],
+                "entrance_id": None,
+                "name": access_control["name"],
+                "openable": access_control["allowOpen"],
+            }
 
         entrance = find(
             access_control["entrances"], lambda entrance: entrance["id"] == entrance_id
@@ -133,7 +152,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         }
 
     async def open_lock(self, place_id, access_control_id, entrance_id) -> None:
-        LOGGER.info(f"Open lock {place_id}_{access_control_id}_{entrance_id}")
+        LOGGER.info(f"Open lock place_id={place_id}, access_control_id={access_control_id}, entrance_id={entrance_id}")
         await self._api.open_lock(place_id, access_control_id, entrance_id)
 
     async def get_balances_info(self) -> list:
