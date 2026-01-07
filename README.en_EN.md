@@ -1,5 +1,14 @@
 [English](/README.md) | [Русский](/README.ru_RU.md)
 
+<p>
+  <img src="https://img.shields.io/badge/Home%20Assistant-2023.x-blue?logo=home-assistant" alt="Home Assistant"/>
+  <img src="https://img.shields.io/badge/Custom%20Integration-orange" alt="Custom Integration"/>
+  <img src="https://img.shields.io/badge/Elektronny%20Gorod-API-green" alt="Elektronny Gorod API"/>
+  <img src="https://img.shields.io/badge/Dom.ru-API-red" alt="Dom.ru API"/>
+  <img src="https://img.shields.io/badge/Intercoms,%20Cameras,%20Locks-lightgrey" alt="Devices"/>
+  <img src="https://img.shields.io/badge/English-yes-blue" alt="English language"/>
+</p>
+
 # Home Assistant Elektronny Gorod & Dom.ru Integration
 
 <table>
