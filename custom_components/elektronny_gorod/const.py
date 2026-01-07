@@ -26,13 +26,9 @@ APP_VERSION: Final = {
     "code": "90100000"
 }
 
-ANDROID_OS_VER: Final = "15"
+ANDROID_OS_VER: Final = "16"
 # ANDROID_DEVICES_CSV: Final = "https://storage.googleapis.com/play_public/supported_devices.csv"
 ANDROID_DEVICES: Final = [
-    {
-        "manufacturer": "Google",
-        "model": "Pixel 5a",
-    },
     {
         "manufacturer": "Google",
         "model": "Pixel 6",
@@ -68,5 +64,33 @@ ANDROID_DEVICES: Final = [
     {
         "manufacturer": "Google",
         "model": "Pixel 8a",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 9",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 9 Pro",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 9 Pro XL",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 9a",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 10",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 10 Pro",
+    },
+    {
+        "manufacturer": "Google",
+        "model": "Pixel 10 Pro XL",
     },
 ]
