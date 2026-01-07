@@ -38,6 +38,7 @@ class ElektronnyGorodBalanceSensor(SensorEntity):
         self._balance = balance_info["balance"]
         self._place_id = balance_info["place_id"]
         self._attr_name = f"Баланс аккаунта"
+        self._attr_icon = "mdi:cash-multiple"
         self._attr_unique_id = f"{DOMAIN}_{self._place_id}_balance"
 
     @property
