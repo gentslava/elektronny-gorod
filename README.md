@@ -3,10 +3,14 @@
 <a href="https://2090000.ru/domofony/"><img src="https://domconnect.ru/uploads/2434555b0__domconnect.ru.png" alt="Электронный город (Новотелеком) лого" height="120"/></a>
 &nbsp;&nbsp;&nbsp;
 <a href="https://play.google.com/store/apps/details?id=ru.inetra.intercom"><img src="https://play-lh.googleusercontent.com/eCp35NcuGq1V0igXhGrPE6tprf7wGg00dY6TuVvRrqRSiEMTS6yQePuWxEIx3G0EMJ0l=w240-h480-rw" alt="Приложение Мой дом лого" height="120"/></a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://dom.ru/domofon"><img src="https://internet-domru.ru/assets/images/logo.png" alt="Дом.ру лого" height="120"/></a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://play.google.com/store/apps/details?id=com.ertelecom.smarthome"><img src="https://play-lh.googleusercontent.com/dN4M3FlqpX9a_HacE8jx4QQpnYH8u869U6_SaTaCSY-oZFeI17Zw4ZNlpWxRbe4DxSM=w240-h480-rw" alt="Приложение Умный Дом.ру лого" height="120"/></a>
 
-# Интеграция Home Assistant с Электронным Городом
+# Интеграция Home Assistant с Электронным Городом и Дом.ру
 
-Это кастомная интеграция для Home Assistant, которая позволяет интегрироваться с сервисом Электронный Город (Новотелеком), реализующая API приложения Мой Дом - Электронный город.
+Это кастомная интеграция для Home Assistant, которая позволяет интегрироваться с сервисами Электронный Город (Новотелеком) и Дом.ру, реализуя API приложений Мой Дом – Электронный город и Умный Дом.ру.
 
 Добавьте свои домофоны, камеры и замки в Home Assistant.
 
@@ -40,6 +44,7 @@ cp -r elektronny-gorod YOUR_HASS_CONFIG_DIR/custom_components/
 
 ## Возможности
 
+- Интеграция с сервисами Электронный Город и Дом.ру (работает с приложениями Мой Дом и Умный Дом.ру).
 - Просмотр доступных договоров и добавление нужных в любом количестве.
 - Запрос и ввод SMS-кода или пароля для аутентификации.
 - Добавление доступных домофонов, камер и замков.

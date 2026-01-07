@@ -3,10 +3,14 @@
 <a href="https://2090000.ru/domofony/"><img src="https://domconnect.ru/uploads/2434555b0__domconnect.ru.png" alt="Elektronny Gorod (Novotelecom) logo" height="120"/></a>
 &nbsp;&nbsp;&nbsp;
 <a href="https://play.google.com/store/apps/details?id=ru.inetra.intercom"><img src="https://play-lh.googleusercontent.com/eCp35NcuGq1V0igXhGrPE6tprf7wGg00dY6TuVvRrqRSiEMTS6yQePuWxEIx3G0EMJ0l=w240-h480-rw" alt="My Home app logo" height="120"/></a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://dom.ru/domofon"><img src="https://internet-domru.ru/assets/images/logo.png" alt="Dom.ru logo" height="120"/></a>
+&nbsp;&nbsp;&nbsp;
+<a href="https://play.google.com/store/apps/details?id=com.ertelecom.smarthome"><img src="https://play-lh.googleusercontent.com/dN4M3FlqpX9a_HacE8jx4QQpnYH8u869U6_SaTaCSY-oZFeI17Zw4ZNlpWxRbe4DxSM=w240-h480-rw" alt="Umnyy Dom.ru app logo" height="120"/></a>
 
-# Home Assistant Elektronny Gorod Integration
+# Home Assistant Elektronny Gorod & Dom.ru Integration
 
-This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) service. This implements the API of the My Home - Elektronny Gorod application.
+This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) and Dom.ru services. It implements the APIs of the My Home – Elektronny Gorod and Umnyy Dom.ru applications.
 
 Add your intercoms, cameras and locks to Home Assistant.
 
@@ -40,6 +44,7 @@ or manually:
 
 ## Features
 
+- Integration with Elektronny Gorod and Dom.ru services (works with My Home and Umnyy Dom.ru apps).
 - View available contracts and add as much as you need.
 - Request and enter an SMS code or password for authentication.
 - Add available intercoms, cameras and locks.
