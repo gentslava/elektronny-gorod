@@ -145,8 +145,8 @@ class ElektronnyGorodAPI:
         api_url = f"/rest/v1/places/{place_id}/accesscontrols"
 
         response = await self.http.get(api_url)
-        places = await response.json()
-        return places["data"] if places else []
+        access_controls = await response.json()
+        return access_controls["data"] if access_controls else []
 
     async def query_cameras(self) -> list:
         """Query the list of cameras for access token."""
