@@ -7,6 +7,32 @@
     "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)"
   },
   "config": {
+    "abort": {
+      "missing_phone": "Phone number is missing. Go back and enter your phone number.",
+      "missing_contract": "Contract is missing. Go back and select a contract.",
+      "missing_access_token": "Access token is missing. Please run the setup again.",
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Re-authentication was successful",
+      "missing_entry_data": "Failed to store setup data. Please run the setup again."
+    },
+    "error": {
+      "invalid_login": "Please check that the entered details are correct",
+      "invalid_access_token": "Invalid access token",
+      "invalid_phone": "Invalid phone number",
+      "no_contracts": "No contract found",
+      "unregistered": "This account is not registered",
+      "invalid_password": "Invalid password",
+      "invalid_format": "Invalid data format",
+      "limit_exceeded": "Request limit exceeded. Please try again later.",
+      "invalid_code": "Invalid code",
+      "go2rtc_required_fields": "Please fill in the go2rtc API URL field",
+      "go2rtc_invalid_url": "Invalid URL (could not determine host)",
+      "go2rtc_unreachable": "Could not connect to go2rtc (check the URL and network)",
+      "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)",
+      "unknown_status": "Received an unknown response. Please create an issue.",
+      "unauthorized": "Authorization error",
+      "unknown": "Unexpected error"
+    },
     "step": {
       "user": {
         "data": {
@@ -41,26 +67,6 @@
           "go2rtc_rtsp_host": "RTSP host"
         }
       }
-    },
-    "error": {
-      "invalid_login": "Please check that the entered details are correct",
-      "no_contracts": "No contract found",
-      "unregistered": "This account is not registered",
-      "invalid_password": "Invalid password",
-      "invalid_format": "Invalid data format",
-      "limit_exceeded": "Request limit exceeded. Please try again later.",
-      "invalid_code": "Invalid code",
-      "go2rtc_required_fields": "[%key:component::elektronny_gorod::common::go2rtc_required_fields%]",
-      "go2rtc_invalid_url": "[%key:component::elektronny_gorod::common::go2rtc_invalid_url%]",
-      "go2rtc_unreachable": "[%key:component::elektronny_gorod::common::go2rtc_unreachable%]",
-      "go2rtc_streams_api_failed": "[%key:component::elektronny_gorod::common::go2rtc_streams_api_failed%]",
-      "unknown_status": "Received an unknown response. Please create an issue.",
-      "unauthorized": "Authorization error",
-      "unknown": "Unexpected error"
-    },
-    "abort": {
-      "already_configured": "Device is already configured",
-      "reauth_successful": "Re-authentication was successful"
     }
   },
   "options": {
