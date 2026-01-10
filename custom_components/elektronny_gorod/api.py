@@ -1,10 +1,19 @@
 """The Elektronny Gorod API."""
+
+from __future__ import annotations
+
 import json
+from typing import Any
+
 from aiohttp import ClientResponse
+
 from .http import HTTP
 from .user_agent import UserAgent
 
+
 class ElektronnyGorodAPI:
+    """Elektronny Gorod HTTP API wrapper."""
+
     def __init__(
         self,
         user_agent: UserAgent,
@@ -20,165 +29,221 @@ class ElektronnyGorodAPI:
         )
         self._phone: str | None = None
 
-    async def query_contracts(self, phone: str) -> dict:
+    def _ensure_phone(self) -> str:
+        """Return phone if it is known, otherwise raise a setup error."""
+        if not self._phone:
+            raise ValueError("missing_phone")
+        return self._phone
+
+    async def query_contracts(self, phone: str) -> dict[str, Any]:
         """Query the list of contracts for the given phone number."""
         self._phone = phone
-        api_url = f"/auth/v2/login/{self._phone}"
+        api_url = f"/auth/v2/login/{phone}"
 
         try:
             response = await self.http.get(api_url)
+
+            if not isinstance(response, ClientResponse):
+                raise TypeError(f"Unexpected response type: {type(response)!r}")
+
             if response.status == 300:
                 contracts = await response.json()
-                return {
-                    "password": False,
-                    "contracts": contracts,
-                }
+                return {"password": False, "contracts": contracts}
+
             if response.status == 200:
-                return {
-                    "password": True,
-                    "contracts": [],
-                }
+                return {"password": True, "contracts": []}
+
             if response.status == 204:
                 raise ValueError("unregistered")
+
+            raise ValueError("unknown_status")
+
         except Exception as e:
-            response = e.args[0]
-            if (response.status == 400):
+            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 400:
                 raise ValueError("invalid_login")
-        raise ValueError("unknown_status")
+            if isinstance(e, ValueError):
+                raise
+            raise ValueError("unknown_status")
 
-    async def verify_password(self, timestamp: str, hash1: str, hash2: str) -> dict:
-        """Password auth."""
-        api_url = f"/auth/v2/auth/{self._phone}/password"
+    async def verify_password(self, timestamp: str, hash1: str, hash2: str) -> dict[str, Any]:
+        """Authenticate using password."""
+        phone = self._ensure_phone()
+        api_url = f"/auth/v2/auth/{phone}/password"
 
-        data = json.dumps(
-            {
-                "login": self._phone,
-                "timestamp": timestamp,
-                "hash1": hash1,
-                "hash2": hash2,
-            }
-        )
+        payload = {
+            "login": phone,
+            "timestamp": timestamp,
+            "hash1": hash1,
+            "hash2": hash2,
+        }
+
         try:
-            response = await self.http.post(api_url, data)
+            response = await self.http.post(api_url, json.dumps(payload))
+
+            if not isinstance(response, ClientResponse):
+                raise TypeError(f"Unexpected response type: {type(response)!r}")
+
             return await response.json()
+
         except Exception as e:
-            response = e.args[0]
-            if (response.status == 400):
+            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 400:
                 raise ValueError("invalid_password")
             raise ValueError("unknown_status")
 
-    async def request_sms_code(self, contract: dict) -> None:
+    async def request_sms_code(self, contract: dict[str, Any]) -> None:
         """Request SMS code for the selected contract."""
-        api_url = f"/auth/v2/confirmation/{self._phone}"
+        phone = self._ensure_phone()
+        api_url = f"/auth/v2/confirmation/{phone}"
 
-        data = json.dumps(
-            {
-                "accountId": contract["accountId"],
-                "address": contract["address"],
-                "operatorId": contract["operatorId"],
-                "subscriberId": str(contract["subscriberId"]),
-                "placeId": contract["placeId"],
-            }
-        )
+        payload = {
+            "accountId": contract["accountId"],
+            "address": contract["address"],
+            "operatorId": contract["operatorId"],
+            "subscriberId": str(contract["subscriberId"]),
+            "placeId": contract["placeId"],
+        }
+
         try:
-            return await self.http.post(api_url, data)
+            response = await self.http.post(api_url, json.dumps(payload))
+
+            if not isinstance(response, ClientResponse):
+                raise TypeError(f"Unexpected response type: {type(response)!r}")
+
+            return
+
         except Exception as e:
-            response = e.args[0]
-            if (response.status == 429):
+            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 429:
                 raise ValueError("limit_exceeded")
             raise ValueError("unknown_status")
 
-    async def verify_sms_code(self, contract: dict, code: str) -> dict:
+    async def verify_sms_code(self, contract: dict[str, Any], code: str) -> dict[str, Any]:
         """Verify the SMS code."""
-        api_url = f"/auth/v3/auth/{self._phone}/confirmation"
+        phone = self._ensure_phone()
+        api_url = f"/auth/v3/auth/{phone}/confirmation"
 
-        data = json.dumps(
-            {
-                "accountId": contract["accountId"],
-                "confirm1": code,
-                "confirm2": code,
-                "login": self._phone,
-                "operatorId": contract["operatorId"],
-                "subscriberId": str(contract["subscriberId"]),
-            }
-        )
+        payload = {
+            "accountId": contract["accountId"],
+            "confirm1": code,
+            "confirm2": code,
+            "login": phone,
+            "operatorId": contract["operatorId"],
+            "subscriberId": str(contract["subscriberId"]),
+        }
+
         try:
-            response = await self.http.post(api_url, data)
+            response = await self.http.post(api_url, json.dumps(payload))
+
+            if not isinstance(response, ClientResponse):
+                raise TypeError(f"Unexpected response type: {type(response)!r}")
+
             return await response.json()
+
         except Exception as e:
-            response = e.args[0]
-            if (response.status == 406):
+            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 406:
                 raise ValueError("invalid_format")
             raise ValueError("unknown_status")
 
-    async def query_profile(self) -> dict:
-        """Query the profile data for subscriber."""
-        api_url = f"/rest/v1/subscribers/profiles"
+    async def query_profile(self) -> dict[str, Any]:
+        """Query the subscriber profile."""
+        api_url = "/rest/v1/subscribers/profiles"
 
         try:
             response = await self.http.get(api_url)
+
+            if not isinstance(response, ClientResponse):
+                raise TypeError(f"Unexpected response type: {type(response)!r}")
+
             profile = await response.json()
-            return profile["data"] if profile else {}
+            return profile.get("data") if profile else {}
+
         except Exception as e:
-            response = e.args[0]
-            if (response.status == 401):
+            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 401:
                 raise ValueError("unauthorized")
             raise ValueError("unknown_status")
 
-    async def query_balance(self, place_id) -> dict:
-        """Query the profile data for subscriber."""
+    async def query_balance(self, place_id: str) -> dict[str, Any]:
+        """Query the balance/finance info for a place."""
         api_url = f"/api/mh-payment/mobile/v1/finance?placeId={place_id}"
 
         response = await self.http.get(api_url)
-        finance = await response.json()
-        return finance["data"] if finance else {}
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-    async def query_places(self, place_id="") -> list:
-        """Query the list of places for subscriber."""
-        api_url = f"/rest/v3/subscriber-places{"?placeId=" + place_id if place_id else ""}"
+        finance = await response.json()
+        return finance.get("data") if finance else {}
+
+    async def query_places(self, place_id: str = "") -> list[dict[str, Any]]:
+        """Query the list of places for the subscriber."""
+        suffix = f"?placeId={place_id}" if place_id else ""
+        api_url = f"/rest/v3/subscriber-places{suffix}"
 
         response = await self.http.get(api_url)
-        places = await response.json()
-        return places["data"] if places else []
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-    async def query_access_controls(self, place_id) -> list:
-        """Query the list of access controls for subscriber."""
+        places = await response.json()
+        data = places.get("data") if places else []
+        return data
+
+    async def query_access_controls(self, place_id: str) -> list[dict[str, Any]]:
+        """Query the list of access controls for a place."""
         api_url = f"/rest/v1/places/{place_id}/accesscontrols"
 
         response = await self.http.get(api_url)
-        access_controls = await response.json()
-        return access_controls["data"] if access_controls else []
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-    async def query_cameras(self) -> list:
-        """Query the list of cameras for access token."""
-        api_url = f"/rest/v1/forpost/cameras"
+        access_controls = await response.json()
+        data = access_controls.get("data") if access_controls else []
+        return data
+
+    async def query_cameras(self) -> list[dict[str, Any]]:
+        """Query the list of cameras for the current access token."""
+        api_url = "/rest/v1/forpost/cameras"
 
         response = await self.http.get(api_url)
-        cameras = await response.json()
-        return cameras["data"] if cameras else []
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-    async def query_public_cameras(self, place_id) -> list:
-        """Query the list of cameras for access token."""
+        cameras = await response.json()
+        data = cameras.get("data") if cameras else []
+        return data
+
+    async def query_public_cameras(self, place_id: str) -> list[dict[str, Any]]:
+        """Query the list of public cameras for a place."""
         api_url = f"/rest/v2/places/{place_id}/public/cameras"
 
         response = await self.http.get(api_url)
-        cameras = await response.json()
-        return cameras["data"] if cameras else []
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-    async def query_camera_stream(self, id) -> str | None:
-        """Query the stream url of camera for the id."""
-        api_url = f"/rest/v1/forpost/cameras/{id}/video?&LightStream=0"
+        cameras = await response.json()
+        data = cameras.get("data") if cameras else []
+        return data
+
+    async def query_camera_stream(self, camera_id: str) -> str | None:
+        """Query the stream URL for the given camera."""
+        api_url = f"/rest/v1/forpost/cameras/{camera_id}/video?&LightStream=0"
 
         try:
             response = await self.http.get(api_url)
+            if not isinstance(response, ClientResponse):
+                raise TypeError(f"Unexpected response type: {type(response)!r}")
+
             camera_stream = await response.json()
             return camera_stream["data"]["URL"] if camera_stream else None
-        except Exception as e:
+
+        except Exception:
             return None
 
-    async def query_camera_snapshot(self, id: str, width: int | None, height: int | None) -> bytes:
-        """Query the camera snapshot for the id."""
-        api_url = f"/rest/v1/forpost/cameras/{id}/snapshots?width={width}&height={height}"
+    async def query_camera_snapshot(
+        self,
+        camera_id: str,
+        width: int | None,
+        height: int | None,
+    ) -> bytes:
+        """Query the camera snapshot bytes for the given camera."""
+        api_url = f"/rest/v1/forpost/cameras/{camera_id}/snapshots?width={width}&height={height}"
 
         result = await self.http.get(api_url, binary=True)
 
@@ -190,16 +255,12 @@ class ElektronnyGorodAPI:
 
         raise TypeError(f"Unexpected response type: {type(result)!r}")
 
-    async def open_lock(self, place_id, access_control_id, entrance_id) -> None:
-        """Request for open lock."""
+    async def open_lock(self, place_id: str, access_control_id: str, entrance_id: str | None) -> None:
+        """Send a request to open a lock."""
         if entrance_id is None:
             api_url = f"/rest/v1/places/{place_id}/accesscontrols/{access_control_id}/actions"
         else:
             api_url = f"/rest/v1/places/{place_id}/accesscontrols/{access_control_id}/entrances/{entrance_id}/actions"
 
-        data = json.dumps(
-            {
-                "name": "accessControlOpen"
-            }
-        )
-        await self.http.post(api_url, data)
+        payload = {"name": "accessControlOpen"}
+        await self.http.post(api_url, json.dumps(payload))
