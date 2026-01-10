@@ -13,6 +13,11 @@ from .const import (
     LOGGER,
     CONF_OPERATOR_ID,
     CONF_USER_AGENT,
+    CONF_USE_GO2RTC,
+    CONF_GO2RTC_BASE_URL,
+    CONF_GO2RTC_RTSP_HOST,
+    DEFAULT_GO2RTC_BASE_URL,
+    DEFAULT_GO2RTC_RTSP_HOST,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .user_agent import UserAgent
@@ -45,9 +50,10 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     new_data: ConfigType = {**config_entry.data}
     options: ConfigType = {**config_entry.options}
 
-    LOGGER.debug(f"Migrating from version {version}")
+    LOGGER.debug("Migrating from version %s", version)
 
-    if config_entry.version == 1:
+    # Migration to version 2: add user_agent field
+    if version == 1:
         user_agent = UserAgent()
         user_agent.operator_id = new_data[CONF_OPERATOR_ID]
         new_data[CONF_USER_AGENT] = json.dumps(user_agent.json())
@@ -56,9 +62,21 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
         hass.config_entries.async_update_entry(
             config_entry, data=new_data, options=options, version=version
         )
-        LOGGER.debug(f"Migration to version {version} successful")
+        LOGGER.debug("Migration to version %s successful", version)
 
-    LOGGER.debug(f"Migration to config version {config_entry.version} successful")
+    # Migration to version 3: add go2rtc configuration
+    if version == 2:
+        new_data[CONF_USE_GO2RTC] = False
+        new_data[CONF_GO2RTC_BASE_URL] = DEFAULT_GO2RTC_BASE_URL
+        new_data[CONF_GO2RTC_RTSP_HOST] = DEFAULT_GO2RTC_RTSP_HOST
+
+        version = 3
+        hass.config_entries.async_update_entry(
+            config_entry, data=new_data, options=options, version=version
+        )
+        LOGGER.debug("Migration to version %s successful", version)
+
+    LOGGER.debug("Migration to config version %s successful", config_entry.version)
 
     return True
 

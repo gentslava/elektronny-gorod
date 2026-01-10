@@ -6,21 +6,25 @@
       "reauth_successful": "Re-authentication was successful"
     },
     "error": {
-      "invalid_login": "Please check entered data",
-      "no_contracts": "No contracts",
-      "unregistered": "Unregistered",
+      "invalid_login": "Please check that the entered details are correct",
+      "no_contracts": "No contract found",
+      "unregistered": "This account is not registered",
       "invalid_password": "Invalid password",
-      "invalid_format": "Invalid format",
-      "limit_exceeded": "The call limit has been exceeded. Please try again later.",
+      "invalid_format": "Invalid data format",
+      "limit_exceeded": "Request limit exceeded. Please try again later.",
       "invalid_code": "Invalid code",
-      "unknown_status": "Unknown status recieved. Please create issue.",
-      "unauthorized": "Authentication error",
+      "go2rtc_required_fields": "Please fill in the go2rtc API URL field",
+      "go2rtc_invalid_url": "Invalid URL (could not determine host)",
+      "go2rtc_unreachable": "Could not connect to go2rtc (check the URL and network)",
+      "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)",
+      "unknown_status": "Received an unknown response. Please create an issue.",
+      "unauthorized": "Authorization error",
       "unknown": "Unexpected error"
     },
     "step": {
       "user": {
         "data": {
-          "phone": "Phone number or contract",
+          "phone": "Phone or contract number",
           "access_token": "Access token (if available)"
         }
       },
@@ -28,14 +32,47 @@
         "data": {
           "contract": "Contracts"
         },
-        "description": "Choose your contract"
+        "description": "Select a contract"
       },
       "sms": {
         "data": {
-          "sms": "SMS"
+          "sms": "SMS code"
         },
         "description": "Enter the code from SMS"
+      },
+      "go2rtc_menu": {
+        "menu_options": {
+          "go2rtc": "Set up go2rtc (audio + more stable)",
+          "skip_go2rtc": "Skip"
+        }
+      },
+      "go2rtc": {
+        "title": "go2rtc setup",
+        "description": "If you enable go2rtc, video will play with audio via RTSP.",
+        "data": {
+          "use_go2rtc": "Use go2rtc",
+          "go2rtc_base_url": "go2rtc API URL",
+          "go2rtc_rtsp_host": "RTSP host"
+        }
       }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "go2rtc settings",
+        "description": "If you enable go2rtc, video will play with audio.",
+        "data": {
+          "use_go2rtc": "Use go2rtc",
+          "go2rtc_base_url": "go2rtc API URL"
+        }
+      }
+    },
+    "error": {
+      "go2rtc_required_fields": "Please fill in the go2rtc API URL field",
+      "go2rtc_invalid_url": "Invalid URL (could not determine host)",
+      "go2rtc_unreachable": "Could not connect to go2rtc",
+      "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)"
     }
   }
 }
