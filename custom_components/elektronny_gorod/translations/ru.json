@@ -46,6 +46,12 @@
         },
         "description": "Введите код из СМС"
       },
+      "password": {
+        "data": {
+          "password": "Пароль"
+        },
+        "description": "Введите пароль для входа"
+      },
       "go2rtc_menu": {
         "menu_options": {
           "go2rtc": "Настроить go2rtc (звук + стабильнее)",
