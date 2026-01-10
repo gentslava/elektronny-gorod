@@ -1,5 +1,6 @@
 """The Elektronny Gorod API."""
 import json
+from aiohttp import ClientResponse
 from .http import HTTP
 from .user_agent import UserAgent
 
@@ -175,11 +176,19 @@ class ElektronnyGorodAPI:
         except Exception as e:
             return None
 
-    async def query_camera_snapshot(self, id, width, height) -> bytes:
+    async def query_camera_snapshot(self, id: str, width: int | None, height: int | None) -> bytes:
         """Query the camera snapshot for the id."""
         api_url = f"/rest/v1/forpost/cameras/{id}/snapshots?width={width}&height={height}"
 
-        return await self.http.get(api_url, binary = True)
+        result = await self.http.get(api_url, binary=True)
+
+        if isinstance(result, (bytes, bytearray)):
+            return bytes(result)
+
+        if isinstance(result, ClientResponse):
+            return await result.read()
+
+        raise TypeError(f"Unexpected response type: {type(result)!r}")
 
     async def open_lock(self, place_id, access_control_id, entrance_id) -> None:
         """Request for open lock."""
