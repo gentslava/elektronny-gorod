@@ -2,11 +2,17 @@
   "title": "Elektronny Gorod",
   "config": {
     "abort": {
+      "missing_phone": "Phone number is missing. Go back and enter your phone number.",
+      "missing_contract": "Contract is missing. Go back and select a contract.",
+      "missing_access_token": "Access token is missing. Please run the setup again.",
       "already_configured": "Device is already configured",
-      "reauth_successful": "Re-authentication was successful"
+      "reauth_successful": "Re-authentication was successful",
+      "missing_entry_data": "Failed to store setup data. Please run the setup again."
     },
     "error": {
       "invalid_login": "Please check that the entered details are correct",
+      "invalid_access_token": "Invalid access token",
+      "invalid_phone": "Invalid phone number",
       "no_contracts": "No contract found",
       "unregistered": "This account is not registered",
       "invalid_password": "Invalid password",
