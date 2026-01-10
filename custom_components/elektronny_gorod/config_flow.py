@@ -1,7 +1,8 @@
 import json
 import voluptuous as vol
 
-from typing import Any
+from typing import Any, cast
+
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -41,22 +42,25 @@ from .go2rtc import validate_go2rtc, normalize_base_url
 
 class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     """Elektronny Gorod config flow."""
+
     VERSION = 3
 
     def __init__(self) -> None:
         """Initialize the config flow state."""
         self.user_agent = UserAgent()
         self.api: ElektronnyGorodAPI = ElektronnyGorodAPI(self.user_agent)
+
         self.entry: ConfigEntry | None = None
         self.access_token: str | None = None
         self.refresh_token: str | None = None
         self.operator_id: str = "null"
+
         self.phone: str | None = None
         self.contract: dict[str, Any] | None = None
-        self.contracts: list | None = None
+        self.contracts: list[dict[str, Any]] | None = None
 
         # Prepared entry payload to be created after the final go2rtc decision
-        self._entry_data: dict | None = None
+        self._entry_data: dict[str, Any] | None = None
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Collect phone or access token and start the authentication flow."""
@@ -83,7 +87,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors[CONF_PHONE] = "invalid_phone"
 
             if not errors:
-                self.phone = phone.strip()
+                self.phone = str(phone).strip()
                 LOGGER.debug("Phone is %s", self.phone)
 
                 # Fetch contracts for the phone number
@@ -110,9 +114,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 vol.Optional(CONF_ACCESS_TOKEN): str,
             })
         else:
-            data_schema = vol.Schema({
-                vol.Required(CONF_PHONE): str,
-            })
+            data_schema = vol.Schema({vol.Required(CONF_PHONE): str})
 
         return self.async_show_form(
             step_id="user",
@@ -137,7 +139,6 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
             phone = self.phone
             if not phone:
-                # Should not happen in normal flow, but keep it safe
                 return self.async_abort(reason="missing_phone")
 
             time = Time()
@@ -266,7 +267,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         subscriber = profile["subscriber"]
         self.user_agent.account_id = subscriber["accountId"]
 
-        data = {
+        data: dict[str, Any] = {
             CONF_NAME: f'{subscriber["name"]} ({subscriber["accountId"]})',
             CONF_ACCOUNT_ID: subscriber["accountId"],
             CONF_SUBSCRIBER_ID: subscriber["id"],
@@ -293,7 +294,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 prev_base_url = entry.options.get(CONF_GO2RTC_BASE_URL, entry.data.get(CONF_GO2RTC_BASE_URL))
                 prev_rtsp_host = entry.options.get(CONF_GO2RTC_RTSP_HOST, entry.data.get(CONF_GO2RTC_RTSP_HOST))
 
-                merged_data = {
+                merged_data: dict[str, Any] = {
                     **data,
                     CONF_USE_GO2RTC: bool(prev_use_go2rtc) if prev_use_go2rtc is not None else False,
                     CONF_GO2RTC_BASE_URL: prev_base_url if prev_base_url else DEFAULT_GO2RTC_BASE_URL,
@@ -383,8 +384,6 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
 
         if user_input is not None:
             use_go2rtc = bool(user_input.get(CONF_USE_GO2RTC, False))
-
-            # Normalize strings (even if go2rtc is disabled)
             base_url = normalize_base_url(user_input.get(CONF_GO2RTC_BASE_URL))
 
             # If go2rtc is enabled, validate the URL

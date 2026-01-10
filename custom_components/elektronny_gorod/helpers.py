@@ -7,7 +7,7 @@ def contains(items: list, condition: Callable) -> bool:
     return any(condition(item) for item in items)
 
 
-def find(items: list, condition: Callable) -> object:
+def find(items: list, condition: Callable) -> dict | None:
     for item in items:
         if condition(item):
             return item
