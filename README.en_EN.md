@@ -72,6 +72,26 @@ or manually:
 - Manage the opening of locks in real time.
 - View your account balance.
 
+> **New:** Now you can connect cameras via [go2rtc](https://github.com/AlexxIT/go2rtc) — this method allows you to get audio from cameras and provides faster and more stable video streaming.
+
+## Camera connection via go2rtc
+
+Integration with [go2rtc](https://github.com/AlexxIT/go2rtc) is supported for Elektronny Gorod and Dom.ru cameras. This method allows you to:
+- Get audio stream from cameras.
+- Get faster and more stable video stream (low latency, fewer disconnects).
+
+### How to connect
+
+1. Install and configure [go2rtc](https://github.com/AlexxIT/go2rtc) in Home Assistant (via HACS or manually).
+2. In the Elektronny Gorod/Dom.ru integration settings, select the stream method via go2rtc (or specify the go2rtc link in the camera settings).
+3. After that, cameras will automatically appear in Home Assistant with audio support and improved video.
+
+#### Using with already configured integrations
+
+If you already have cameras set up via the standard integration, just enable go2rtc support in the integration or camera settings — you do not need to re-add devices.
+
+**Note:** For audio and low latency to work, make sure your go2rtc and Home Assistant versions are up to date.
+
 ## Automation example
 Here is an example of automation for low balance notification:
 
@@ -97,6 +117,8 @@ Feel free to contribute to the project by forking the repository and creating pu
 ## Credits
 
 Apple device types https://gist.github.com/adamawolf/3048717
+
+[go2rtc](https://github.com/AlexxIT/go2rtc) — project for streaming video and audio
 
 ## License
 
