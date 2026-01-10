@@ -28,8 +28,8 @@ CONF_ACCOUNT_ID: Final = "account_id"
 CONF_SUBSCRIBER_ID: Final = "subscriber_id"
 CONF_USER_AGENT: Final = "user_agent"
 
-CONF_WIDTH: Final = 300
-CONF_HEIGHT: Final = 300
+DEFAULT_SNAPSHOT_WIDTH: Final = 300
+DEFAULT_SNAPSHOT_HEIGHT: Final = 300
 
 APP_VERSION: Final = {
     "name": "9.1.0",
