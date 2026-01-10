@@ -13,6 +13,16 @@ CONF_PHONE: Final = "phone"
 CONF_PASSWORD: Final = "password"
 CONF_CONTRACT: Final = "contract"
 CONF_SMS: Final = "sms"
+
+# go2rtc configuration
+CONF_USE_GO2RTC = "use_go2rtc"
+CONF_GO2RTC_BASE_URL = "go2rtc_base_url"
+CONF_GO2RTC_RTSP_HOST = "go2rtc_rtsp_host"
+
+DEFAULT_GO2RTC_BASE_URL = "http://127.0.0.1:1984"
+DEFAULT_GO2RTC_RTSP_HOST = "127.0.0.1"
+GO2RTC_RTSP_PORT = 8554
+
 CONF_OPERATOR_ID: Final = "operator_id"
 CONF_ACCOUNT_ID: Final = "account_id"
 CONF_SUBSCRIBER_ID: Final = "subscriber_id"

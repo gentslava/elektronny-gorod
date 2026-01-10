@@ -1,40 +1,84 @@
 {
   "title": "Elektronny Gorod",
+  "common": {
+    "go2rtc_required_fields": "Please fill in the go2rtc API URL field",
+    "go2rtc_invalid_url": "Invalid URL (could not determine host)",
+    "go2rtc_unreachable": "Could not connect to go2rtc (check the URL and network)",
+    "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)"
+  },
   "config": {
     "step": {
       "user": {
         "data": {
-          "phone": "Phone number or contract"
+          "phone": "Phone or contract number",
+          "access_token": "Access token (if available)"
         }
       },
       "contract": {
         "data": {
           "contract": "Contracts"
         },
-        "description": "Choose your contract"
+        "description": "Select a contract"
       },
       "sms": {
         "data": {
-          "sms": "SMS"
+          "sms": "SMS code"
         },
         "description": "Enter the code from SMS"
+      },
+      "go2rtc_menu": {
+        "menu_options": {
+          "go2rtc": "Set up go2rtc (audio + more stable)",
+          "skip_go2rtc": "Skip"
+        }
+      },
+      "go2rtc": {
+        "title": "go2rtc setup",
+        "description": "If you enable go2rtc, video will play with audio via RTSP.",
+        "data": {
+          "use_go2rtc": "Use go2rtc",
+          "go2rtc_base_url": "go2rtc API URL",
+          "go2rtc_rtsp_host": "RTSP host"
+        }
       }
     },
     "error": {
-      "invalid_login": "[%key:common::config_flow::error::invalid_login%]",
-      "no_contracts": "[%key:common::config_flow::error::no_contracts%]",
-      "unregistered": "[%key:common::config_flow::error::unregistered%]",
-      "invalid_password": "[%key:common::config_flow::error::invalid_password%]",
-      "invalid_format": "[%key:common::config_flow::error::invalid_format%]",
-      "limit_exceeded": "[%key:common::config_flow::error::limit_exceeded%]",
-      "invalid_code": "[%key:common::config_flow::error::invalid_code%]",
-      "unknown_status": "[%key:common::config_flow::error::unknown_status%]",
-      "unauthorized": "[%key:common::config_flow::error::unauthorized%]",
-      "unknown": "[%key:common::config_flow::error::unknown%]"
+      "invalid_login": "Please check that the entered details are correct",
+      "no_contracts": "No contract found",
+      "unregistered": "This account is not registered",
+      "invalid_password": "Invalid password",
+      "invalid_format": "Invalid data format",
+      "limit_exceeded": "Request limit exceeded. Please try again later.",
+      "invalid_code": "Invalid code",
+      "go2rtc_required_fields": "[%key:component::elektronny_gorod::common::go2rtc_required_fields%]",
+      "go2rtc_invalid_url": "[%key:component::elektronny_gorod::common::go2rtc_invalid_url%]",
+      "go2rtc_unreachable": "[%key:component::elektronny_gorod::common::go2rtc_unreachable%]",
+      "go2rtc_streams_api_failed": "[%key:component::elektronny_gorod::common::go2rtc_streams_api_failed%]",
+      "unknown_status": "Received an unknown response. Please create an issue.",
+      "unauthorized": "Authorization error",
+      "unknown": "Unexpected error"
     },
     "abort": {
-      "already_configured": "[%key:common::config_flow::abort::already_configured_device%]",
-      "reauth_successful": "[%key:common::config_flow::abort::reauth_successful%]"
+      "already_configured": "Device is already configured",
+      "reauth_successful": "Re-authentication was successful"
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "go2rtc settings",
+        "description": "If you enable go2rtc, video will play with audio.",
+        "data": {
+          "use_go2rtc": "Use go2rtc",
+          "go2rtc_base_url": "go2rtc API URL"
+        }
+      }
+    },
+    "error": {
+      "go2rtc_required_fields": "[%key:component::elektronny_gorod::common::go2rtc_required_fields%]",
+      "go2rtc_invalid_url": "[%key:component::elektronny_gorod::common::go2rtc_invalid_url%]",
+      "go2rtc_unreachable": "[%key:component::elektronny_gorod::common::go2rtc_unreachable%]",
+      "go2rtc_streams_api_failed": "[%key:component::elektronny_gorod::common::go2rtc_streams_api_failed%]"
     }
   }
 }

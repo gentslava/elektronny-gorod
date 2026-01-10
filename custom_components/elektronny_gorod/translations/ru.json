@@ -13,6 +13,10 @@
       "invalid_format": "Некорректный формат данных",
       "limit_exceeded": "Превышен лимит обращений. Пожалуйста, повторите попытку позже.",
       "invalid_code": "Неверный код",
+      "go2rtc_required_fields": "Заполните поле go2rtc API URL",
+      "go2rtc_invalid_url": "Некорректный URL (не удалось определить host)",
+      "go2rtc_unreachable": "Не удалось подключиться к go2rtc (проверьте URL и сеть)",
+      "go2rtc_streams_api_failed": "go2rtc доступен, но не принимает /api/streams (проверьте настройки/права)",
       "unknown_status": "Неизвестный ответ получен. Пожалуйста, создайте issue.",
       "unauthorized": "Ошибка авторизации",
       "unknown": "Неожиданная ошибка"
@@ -20,7 +24,7 @@
     "step": {
       "user": {
         "data": {
-          "phone": "Номер телефона или догорвора",
+          "phone": "Номер телефона или договора",
           "access_token": "Access token (при наличии)"
         }
       },
@@ -35,7 +39,40 @@
           "sms": "СМС"
         },
         "description": "Введите код из СМС"
+      },
+      "go2rtc_menu": {
+        "menu_options": {
+          "go2rtc": "Настроить go2rtc (звук + стабильнее)",
+          "skip_go2rtc": "Пропустить"
+        }
+      },
+      "go2rtc": {
+        "title": "Настройка go2rtc",
+        "description": "Если включить go2rtc, видео будет открываться со звуком через RTSP.",
+        "data": {
+          "use_go2rtc": "Использовать go2rtc",
+          "go2rtc_base_url": "go2rtc API URL",
+          "go2rtc_rtsp_host": "RTSP host"
+        }
       }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки go2rtc",
+        "description": "Если включить go2rtc — видео будет со звуком.",
+        "data": {
+          "use_go2rtc": "Использовать go2rtc",
+          "go2rtc_base_url": "go2rtc API URL"
+        }
+      }
+    },
+    "error": {
+      "go2rtc_required_fields": "Заполните поле go2rtc API URL",
+      "go2rtc_invalid_url": "Некорректный URL (не удалось определить host)",
+      "go2rtc_unreachable": "Не удалось подключиться к go2rtc",
+      "go2rtc_streams_api_failed": "go2rtc доступен, но не принимает /api/streams (проверьте настройки/права)"
     }
   }
 }
