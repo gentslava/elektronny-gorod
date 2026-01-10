@@ -30,6 +30,7 @@ from .const import (
     CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_RTSP_HOST,
     DEFAULT_GO2RTC_BASE_URL,
+    DEFAULT_GO2RTC_RTSP_HOST,
 )
 from .api import ElektronnyGorodAPI
 from .helpers import find, hash_password, hash_password_timestamp
@@ -287,7 +288,23 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 and data[CONF_SUBSCRIBER_ID] == entry.data.get(CONF_SUBSCRIBER_ID)
             ):
                 LOGGER.info("Reauth entry %s with params %s", entry.data, data)
-                self.hass.config_entries.async_update_entry(entry, data=data)
+
+                prev_use_go2rtc = entry.options.get(CONF_USE_GO2RTC, entry.data.get(CONF_USE_GO2RTC))
+                prev_base_url = entry.options.get(CONF_GO2RTC_BASE_URL, entry.data.get(CONF_GO2RTC_BASE_URL))
+                prev_rtsp_host = entry.options.get(CONF_GO2RTC_RTSP_HOST, entry.data.get(CONF_GO2RTC_RTSP_HOST))
+
+                merged_data = {
+                    **data,
+                    CONF_USE_GO2RTC: bool(prev_use_go2rtc) if prev_use_go2rtc is not None else False,
+                    CONF_GO2RTC_BASE_URL: prev_base_url if prev_base_url else DEFAULT_GO2RTC_BASE_URL,
+                    CONF_GO2RTC_RTSP_HOST: prev_rtsp_host if prev_rtsp_host else DEFAULT_GO2RTC_RTSP_HOST,
+                }
+
+                self.hass.config_entries.async_update_entry(
+                    entry,
+                    data=merged_data,
+                    options=entry.options,
+                )
                 await self.hass.config_entries.async_reload(entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
