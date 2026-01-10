@@ -46,6 +46,12 @@
         },
         "description": "Enter the code from SMS"
       },
+      "password": {
+        "data": {
+          "password": "Password"
+        },
+        "description": "Enter the password to log in"
+      },
       "go2rtc_menu": {
         "menu_options": {
           "go2rtc": "Set up go2rtc (audio + more stable)",

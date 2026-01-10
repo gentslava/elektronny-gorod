@@ -25,10 +25,10 @@
       "invalid_format": "Invalid data format",
       "limit_exceeded": "Request limit exceeded. Please try again later.",
       "invalid_code": "Invalid code",
-      "go2rtc_required_fields": "Please fill in the go2rtc API URL field",
-      "go2rtc_invalid_url": "Invalid URL (could not determine host)",
-      "go2rtc_unreachable": "Could not connect to go2rtc (check the URL and network)",
-      "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)",
+      "go2rtc_required_fields": "[%key:component::elektronny_gorod::common::go2rtc_required_fields%]",
+      "go2rtc_invalid_url": "[%key:component::elektronny_gorod::common::go2rtc_invalid_url%]",
+      "go2rtc_unreachable": "[%key:component::elektronny_gorod::common::go2rtc_unreachable%]",
+      "go2rtc_streams_api_failed": "[%key:component::elektronny_gorod::common::go2rtc_streams_api_failed%]",
       "unknown_status": "Received an unknown response. Please create an issue.",
       "unauthorized": "Authorization error",
       "unknown": "Unexpected error"
@@ -51,6 +51,12 @@
           "sms": "SMS code"
         },
         "description": "Enter the code from SMS"
+      },
+      "password": {
+        "data": {
+          "password": "Password"
+        },
+        "description": "Enter the password to log in"
       },
       "go2rtc_menu": {
         "menu_options": {
