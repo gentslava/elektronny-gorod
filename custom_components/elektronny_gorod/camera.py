@@ -191,6 +191,3 @@ class ElektronnyGorodCamera(Camera):
     async def async_update(self) -> None:
         """Update camera state."""
         self._camera_info = await self._coordinator.update_camera_state(self._id)
-        self._is_on = self._camera_info["IsActive"] == 1
-        self._is_streaming = self._camera_info["State"] == 1
-        self._is_recording = self._camera_info["RecordType"] == 1

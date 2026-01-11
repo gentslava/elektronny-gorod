@@ -89,10 +89,10 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             available_public_cameras = await self._api.query_public_cameras(place_id)
             for public_camera in available_public_cameras:
                 cameras.append(public_camera)
-                
+
             available_sections = await self._api.query_sections(place_id)
 
-            available_cameras = await self._api.query_cameras()
+            available_cameras = await self._api.query_cameras(place_id)
             for camera in available_cameras:
                 cameras.append(camera)
 
@@ -120,7 +120,25 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         """Refresh and return camera state for a given camera."""
         LOGGER.info("Updating camera %s state", camera_id)
 
-        cameras = await self._api.query_cameras()
+        cameras: list[dict[str, Any]] = []
+
+        for subscriber_place in self._subscriber_places:
+            place = subscriber_place.get("place") or {}
+            place_id = place.get("id")
+            if not place_id:
+                continue
+
+            self._api.http.user_agent.place_id = place_id
+            available_public_cameras = await self._api.query_public_cameras(place_id)
+            for public_camera in available_public_cameras:
+                cameras.append(public_camera)
+
+            available_sections = await self._api.query_sections(place_id)
+
+            available_cameras = await self._api.query_cameras(place_id)
+            for camera in available_cameras:
+                cameras.append(camera)
+
         camera = find(cameras, lambda c: c.get("ID") == camera_id)
 
         if camera is None:
