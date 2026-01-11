@@ -22,7 +22,7 @@ from .const import (
     DOMAIN,
     LOGGER,
 )
-from .helpers import find
+from .helpers import find, append_unique
 from .user_agent import UserAgent
 
 
@@ -85,16 +85,24 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             if not place_id:
                 continue
 
+            available_old_cameras = await self._api.query_old_cameras()
+            for old_camera in available_old_cameras:
+                append_unique(cameras, {
+                    **old_camera,
+                    "id": old_camera.get("ID"),
+                    "name": old_camera.get("Name"),
+                })
+
             self._api.http.user_agent.place_id = place_id
             available_public_cameras = await self._api.query_public_cameras(place_id)
             for public_camera in available_public_cameras:
-                cameras.append(public_camera)
+                append_unique(cameras, public_camera)
 
             available_sections = await self._api.query_sections(place_id)
 
             available_cameras = await self._api.query_cameras(place_id)
             for camera in available_cameras:
-                cameras.append(camera)
+                append_unique(cameras, camera)
 
         return cameras if cameras else []
 

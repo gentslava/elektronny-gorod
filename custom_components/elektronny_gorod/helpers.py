@@ -14,6 +14,13 @@ def find(items: list, condition: Callable) -> dict | None:
     return None
 
 
+def append_unique(target_list, new_dict):
+    existing_ids = [d['id'] for d in target_list]
+
+    if new_dict['id'] not in existing_ids:
+        target_list.append(new_dict)
+
+
 def hash_password(password: str) -> str:
     password_bytes = password.encode("utf-8")
     sha1_hash = hashlib.sha1(password_bytes).digest()

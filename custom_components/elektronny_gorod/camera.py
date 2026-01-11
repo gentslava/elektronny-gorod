@@ -109,10 +109,10 @@ class ElektronnyGorodCamera(Camera):
     ) -> None:
         super().__init__()
         self.hass = hass
-
         self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
-        self._camera_info: dict = camera_info
 
+        LOGGER.debug("Initializing camera: %s", camera_info)
+        self._camera_info: dict = camera_info
         self._id: str = self._camera_info.get("id") or ""
         self._name: str = self._camera_info.get("name") or self._id
 
