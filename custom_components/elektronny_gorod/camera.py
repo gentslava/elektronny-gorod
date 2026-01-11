@@ -113,8 +113,8 @@ class ElektronnyGorodCamera(Camera):
         self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
         self._camera_info: dict = camera_info
 
-        self._id = self._camera_info["ID"]
-        self._name = self._camera_info["Name"]
+        self._id: str = self._camera_info.get("id") or ""
+        self._name: str = self._camera_info.get("name") or self._id
 
         self._attr_supported_features = CameraEntityFeature.STREAM
         self._last_src: str | None = None
