@@ -197,9 +197,9 @@ class ElektronnyGorodAPI:
         data = access_controls.get("data") if access_controls else []
         return data
 
-    async def query_cameras(self) -> list[dict[str, Any]]:
+    async def query_cameras(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of cameras for the current access token."""
-        api_url = "/rest/v1/forpost/cameras"
+        api_url = f"/rest/v1/places/{place_id}/cameras"
 
         response = await self.http.get(api_url)
         if not isinstance(response, ClientResponse):
@@ -219,6 +219,18 @@ class ElektronnyGorodAPI:
 
         cameras = await response.json()
         data = cameras.get("data") if cameras else []
+        return data
+
+    async def query_sections(self, place_id: str) -> list[dict[str, Any]]:
+        """Query the list of cameras for the current access token."""
+        api_url = f"/rest/v1/places/{place_id}/screen-sections"
+
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+
+        cameras = await response.json()
+        data = cameras.get("sections") if cameras else []
         return data
 
     async def query_camera_stream(self, camera_id: str) -> str | None:

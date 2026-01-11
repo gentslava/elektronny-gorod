@@ -116,10 +116,6 @@ class ElektronnyGorodCamera(Camera):
         self._id = self._camera_info["ID"]
         self._name = self._camera_info["Name"]
 
-        self._is_on = self._camera_info["IsActive"] == 1
-        self._is_streaming = self._camera_info["State"] == 1
-        self._is_recording = self._camera_info["RecordType"] == 1
-
         self._attr_supported_features = CameraEntityFeature.STREAM
         self._last_src: str | None = None
         self._image: bytes | None = None
@@ -134,21 +130,6 @@ class ElektronnyGorodCamera(Camera):
     def name(self) -> str:
         """Return camera name."""
         return self._name
-
-    @property
-    def is_on(self) -> bool:
-        """Return camera state is_on."""
-        return self._is_on
-
-    @property
-    def is_streaming(self) -> bool:
-        """Return camera state is_streaming."""
-        return self._is_streaming
-
-    @property
-    def is_recording(self) -> bool:
-        """Return camera state is_recording."""
-        return self._is_recording
 
     def _rtsp_url(self) -> str:
         if not self._go2rtc_rtsp_host:

@@ -76,7 +76,26 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
     async def get_cameras_info(self) -> list[dict[str, Any]]:
         """Fetch cameras list."""
         LOGGER.info("Getting cameras info")
-        cameras = await self._api.query_cameras()
+
+        cameras: list[dict[str, Any]] = []
+
+        for subscriber_place in self._subscriber_places:
+            place = subscriber_place.get("place") or {}
+            place_id = place.get("id")
+            if not place_id:
+                continue
+
+            self._api.http.user_agent.place_id = place_id
+            available_public_cameras = await self._api.query_public_cameras(place_id)
+            for public_camera in available_public_cameras:
+                cameras.append(public_camera)
+                
+            available_sections = await self._api.query_sections(place_id)
+
+            available_cameras = await self._api.query_cameras()
+            for camera in available_cameras:
+                cameras.append(camera)
+
         return cameras if cameras else []
 
     async def get_camera_stream(self, camera_id: str) -> str | None:
