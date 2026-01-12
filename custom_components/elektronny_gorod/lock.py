@@ -58,6 +58,19 @@ class ElektronnyGorodLock(LockEntity):
         return self._openable
 
     @property
+    def extra_state_attributes(self):
+        """Return the state attributes of the lock."""
+        if self._lock_info:
+            return {
+                "Place ID": str(self._lock_info["place_id"]),
+                "Access control ID": str(self._lock_info["access_control_id"]),
+                "Entrance ID": str(self._lock_info["entrance_id"]),
+                "Name": self._lock_info["name"],
+                "Openable": str(self._lock_info["openable"]),
+            }
+        return None
+
+    @property
     def is_locking(self) -> bool:
         """Return true if lock is locking."""
         return self._state == LockState.LOCKING
