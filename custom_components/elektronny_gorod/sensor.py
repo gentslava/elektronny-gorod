@@ -1,3 +1,5 @@
+from datetime import datetime
+
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -35,6 +37,7 @@ class ElektronnyGorodBalanceSensor(SensorEntity):
         LOGGER.debug(f"ElektronnyGorodBalanceSensor init {balance_info}")
         super().__init__()
         self._coordinator = coordinator
+        self._balance_info: dict = balance_info
         self._balance = balance_info["balance"]
         self._place_id = balance_info["place_id"]
         self._attr_name = f"Баланс аккаунта"
@@ -42,7 +45,7 @@ class ElektronnyGorodBalanceSensor(SensorEntity):
         self._attr_unique_id = f"{DOMAIN}_{self._place_id}_balance"
 
     @property
-    def native_value(self) -> float:
+    def native_value(self) -> float | None:
         """Return state of the sensor."""
         if self._balance is not None:
             return round(self._balance, 2)
@@ -54,6 +57,18 @@ class ElektronnyGorodBalanceSensor(SensorEntity):
         if self._balance is None:
             return None
         return "₽"
+
+    @property
+    def extra_state_attributes(self):
+        """Return the state attributes of the lock."""
+        if self._balance_info:
+            return {
+                "Amount sum": round(self._balance_info["payment_sum"], 2),
+                "Target date": datetime.fromisoformat(self._balance_info["payment_date"]).strftime("%d.%m.%Y, %H:%M:%S"),
+                "Payment link": self._balance_info["payment_link"],
+                "Blocked": self._balance_info["blocked"],
+            }
+        return None
 
     async def async_update(self) -> None:
         """Fetch the latest balance from the API."""

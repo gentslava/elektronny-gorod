@@ -262,8 +262,10 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
                 "place_id": place_id,
                 "balance": finance_data.get("balance"),
                 "block_type": finance_data.get("blockType"),
+                "blocked": finance_data.get("blocked"),
                 "payment_date": finance_data.get("targetDate"),
                 "payment_sum": finance_data.get("amountSum"),
+                "payment_link": finance_data.get("paymentLink"),
             })
 
         return balances
@@ -281,6 +283,8 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             "place_id": place_id,
             "balance": finance_data.get("balance"),
             "block_type": finance_data.get("blockType"),
+            "blocked": finance_data.get("blocked"),
             "payment_date": finance_data.get("targetDate"),
             "payment_sum": finance_data.get("amountSum"),
+            "payment_link": finance_data.get("paymentLink"),
         }
