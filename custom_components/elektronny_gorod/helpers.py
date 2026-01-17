@@ -25,7 +25,7 @@ def dedupe_by_id(items: list[dict]) -> list[dict]:
     seen_ids = set()
     unique_by_id = []
     for item in items:
-        item_id = item.get("id")
+        item_id = str(item.get("id"))
         if item_id and item_id not in seen_ids:
             unique_by_id.append(item)
             seen_ids.add(item_id)
