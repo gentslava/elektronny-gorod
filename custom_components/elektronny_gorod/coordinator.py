@@ -22,7 +22,7 @@ from .const import (
     DOMAIN,
     LOGGER,
 )
-from .helpers import find, append_unique
+from .helpers import find, dedupe_by_id
 from .user_agent import UserAgent
 
 
@@ -85,26 +85,38 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             if not place_id:
                 continue
 
-            available_old_cameras = await self._api.query_old_cameras()
-            for old_camera in available_old_cameras:
-                append_unique(cameras, {
-                    **old_camera,
-                    "id": old_camera.get("ID"),
-                    "name": old_camera.get("Name"),
-                })
-
             self._api.http.user_agent.place_id = place_id
+        
+            access_controls = await self._api.query_access_controls(place_id)
+            for access_control in access_controls:
+                if not access_control.get("externalCameraId"):
+                    continue
+
+                camera = {
+                    "id": access_control.get("externalCameraId"),
+                    "name": access_control.get("name"),
+                }
+                cameras.append(camera)
+
             available_public_cameras = await self._api.query_public_cameras(place_id)
             for public_camera in available_public_cameras:
-                append_unique(cameras, public_camera)
+                camera = {
+                    "id": public_camera.get("externalCameraId") or public_camera.get("id"),
+                    "name": public_camera.get("name"),
+                }
+                cameras.append(camera)
 
             available_sections = await self._api.query_sections(place_id)
 
             available_cameras = await self._api.query_cameras(place_id)
-            for camera in available_cameras:
-                append_unique(cameras, camera)
+            for available_camera in available_cameras:
+                camera = {
+                    "id": available_camera.get("externalCameraId") or available_camera.get("id"),
+                    "name": available_camera.get("name"),
+                }
+                cameras.append(camera)
 
-        return cameras if cameras else []
+        return dedupe_by_id(cameras) if cameras else []
 
     async def get_camera_stream(self, camera_id: str) -> str | None:
         """Fetch a single-use camera stream URL."""
@@ -137,14 +149,34 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
                 continue
 
             self._api.http.user_agent.place_id = place_id
+        
+            access_controls = await self._api.query_access_controls(place_id)
+            for access_control in access_controls:
+                if not access_control.get("externalCameraId"):
+                    continue
+
+                camera = {
+                    "id": access_control.get("externalCameraId"),
+                    "name": access_control.get("name"),
+                }
+                cameras.append(camera)
+
             available_public_cameras = await self._api.query_public_cameras(place_id)
             for public_camera in available_public_cameras:
-                cameras.append(public_camera)
+                camera = {
+                    "id": public_camera.get("externalCameraId") or public_camera.get("id"),
+                    "name": public_camera.get("name"),
+                }
+                cameras.append(camera)
 
             available_sections = await self._api.query_sections(place_id)
 
             available_cameras = await self._api.query_cameras(place_id)
-            for camera in available_cameras:
+            for available_camera in available_cameras:
+                camera = {
+                    "id": available_camera.get("externalCameraId") or available_camera.get("id"),
+                    "name": available_camera.get("name"),
+                }
                 cameras.append(camera)
 
         camera = find(cameras, lambda c: c.get("ID") == camera_id)
