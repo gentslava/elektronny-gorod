@@ -61,12 +61,22 @@ class ElektronnyGorodBalanceSensor(SensorEntity):
     @property
     def extra_state_attributes(self):
         """Return the state attributes of the lock."""
-        if self._balance_info:
+        if self._balance_info is not None and isinstance(self._balance_info, dict):
+            payment_sum = self._balance_info.get("payment_sum")
+            amount_sum = None
+            if payment_sum is not None:
+                amount_sum = round(payment_sum, 2)
+
+            payment_date = self._balance_info.get("payment_date")
+            target_date = None
+            if payment_date is not None:
+                target_date = datetime.fromisoformat(payment_date).strftime("%d.%m.%Y, %H:%M:%S")
+
             return {
-                "Amount sum": round(self._balance_info["payment_sum"], 2),
-                "Target date": datetime.fromisoformat(self._balance_info["payment_date"]).strftime("%d.%m.%Y, %H:%M:%S"),
-                "Payment link": self._balance_info["payment_link"],
-                "Blocked": self._balance_info["blocked"],
+                "Amount sum": amount_sum,
+                "Target date": target_date,
+                "Payment link": self._balance_info.get("payment_link"),
+                "Blocked": self._balance_info.get("blocked"),
             }
         return None
 
