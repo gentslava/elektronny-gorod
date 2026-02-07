@@ -21,7 +21,7 @@
       "invalid_code": "Неверный код",
       "go2rtc_required_fields": "Заполните поле go2rtc API URL",
       "go2rtc_invalid_url": "Некорректный URL (не удалось определить host)",
-      "go2rtc_unreachable": "Не удалось подключиться к go2rtc (проверьте URL и сеть)",
+      "go2rtc_unreachable": "Не удалось подключиться к go2rtc (проверьте URL, сеть или логин/пароль)",
       "go2rtc_streams_api_failed": "go2rtc доступен, но не принимает /api/streams (проверьте настройки/права)",
       "unknown_status": "Неизвестный ответ получен. Пожалуйста, создайте issue.",
       "unauthorized": "Ошибка авторизации",
@@ -64,7 +64,9 @@
         "data": {
           "use_go2rtc": "Использовать go2rtc",
           "go2rtc_base_url": "go2rtc API URL",
-          "go2rtc_rtsp_host": "RTSP host"
+          "go2rtc_rtsp_host": "RTSP host",
+          "go2rtc_username": "Имя пользователя go2rtc",
+          "go2rtc_password": "Пароль go2rtc"
         }
       }
     }
@@ -76,14 +78,16 @@
         "description": "Если включить go2rtc — видео будет со звуком.",
         "data": {
           "use_go2rtc": "Использовать go2rtc",
-          "go2rtc_base_url": "go2rtc API URL"
+          "go2rtc_base_url": "go2rtc API URL",
+          "go2rtc_username": "Имя пользователя go2rtc",
+          "go2rtc_password": "Пароль go2rtc"
         }
       }
     },
     "error": {
       "go2rtc_required_fields": "Заполните поле go2rtc API URL",
       "go2rtc_invalid_url": "Некорректный URL (не удалось определить host)",
-      "go2rtc_unreachable": "Не удалось подключиться к go2rtc",
+      "go2rtc_unreachable": "Не удалось подключиться к go2rtc (проверьте URL, сеть или логин/пароль)",
       "go2rtc_streams_api_failed": "go2rtc доступен, но не принимает /api/streams (проверьте настройки/права)"
     }
   }

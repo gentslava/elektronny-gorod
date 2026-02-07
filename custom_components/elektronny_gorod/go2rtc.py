@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+import base64
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
@@ -31,7 +32,7 @@ def derive_rtsp_host(base_url: str) -> str | None:
         return None
 
 
-async def validate_go2rtc(base_url: str, session: ClientSession) -> Go2RtcValidationResult:
+async def validate_go2rtc(base_url: str, session: ClientSession, username: str | None = None, password: str | None = None) -> Go2RtcValidationResult:
     """
     Validate go2rtc HTTP API and that streams API is writable.
 
@@ -51,9 +52,15 @@ async def validate_go2rtc(base_url: str, session: ClientSession) -> Go2RtcValida
     if not rtsp_host:
         return Go2RtcValidationResult(False, "go2rtc_invalid_url", None)
 
+    headers = {}
+    if username and password:
+        userpass = f"{username}:{password}"
+        b64 = base64.b64encode(userpass.encode()).decode()
+        headers["Authorization"] = f"Basic {b64}"
+
     # 1) ping /api
     try:
-        async with session.get(f"{base_url}/api") as resp:
+        async with session.get(f"{base_url}/api", headers=headers) as resp:
             if resp.status != 200:
                 return Go2RtcValidationResult(False, "go2rtc_unreachable", rtsp_host)
     except ClientError:
@@ -65,7 +72,7 @@ async def validate_go2rtc(base_url: str, session: ClientSession) -> Go2RtcValida
     put_qs = urlencode({"name": test_name, "src": test_src})
 
     try:
-        async with session.put(f"{base_url}/api/streams?{put_qs}") as resp:
+        async with session.put(f"{base_url}/api/streams?{put_qs}", headers=headers) as resp:
             if resp.status not in (200, 201, 204):
                 body = await resp.text()
                 LOGGER.debug("go2rtc streams check failed: %s %s", resp.status, body)
@@ -74,12 +81,12 @@ async def validate_go2rtc(base_url: str, session: ClientSession) -> Go2RtcValida
         return Go2RtcValidationResult(False, "go2rtc_streams_api_failed", rtsp_host)
     finally:
         # 3) cleanup (best-effort)
-        await cleanup_go2rtc_stream(base_url, test_name, session)
+        await cleanup_go2rtc_stream(base_url, test_name, session, headers)
 
     return Go2RtcValidationResult(True, "", rtsp_host)
 
 
-async def cleanup_go2rtc_stream(base_url: str, stream_name: str, session: ClientSession) -> None:
+async def cleanup_go2rtc_stream(base_url: str, stream_name: str, session: ClientSession, headers: dict = None) -> None:
     """Best-effort cleanup stream created by validate_go2rtc."""
     base_url = normalize_base_url(base_url)
     if not base_url or not stream_name:
@@ -88,7 +95,7 @@ async def cleanup_go2rtc_stream(base_url: str, stream_name: str, session: Client
     # go2rtc API uses src=<stream_name> for delete
     del_qs = urlencode({"src": stream_name})
     try:
-        async with session.delete(f"{base_url}/api/streams?{del_qs}") as resp:
+        async with session.delete(f"{base_url}/api/streams?{del_qs}", headers=headers or {}) as resp:
             # 404 ok (already gone), 200/204 ok
             if resp.status in (200, 204, 404):
                 return

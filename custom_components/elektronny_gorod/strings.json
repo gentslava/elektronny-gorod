@@ -3,7 +3,7 @@
   "common": {
     "go2rtc_required_fields": "Please fill in the go2rtc API URL field",
     "go2rtc_invalid_url": "Invalid URL (could not determine host)",
-    "go2rtc_unreachable": "Could not connect to go2rtc (check the URL and network)",
+    "go2rtc_unreachable": "Could not connect to go2rtc (check the URL, network, or credentials)",
     "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)"
   },
   "config": {
@@ -70,7 +70,9 @@
         "data": {
           "use_go2rtc": "Use go2rtc",
           "go2rtc_base_url": "go2rtc API URL",
-          "go2rtc_rtsp_host": "RTSP host"
+          "go2rtc_rtsp_host": "RTSP host",
+          "go2rtc_username": "go2rtc username",
+          "go2rtc_password": "go2rtc password"
         }
       }
     }
@@ -82,7 +84,9 @@
         "description": "If you enable go2rtc, video will play with audio.",
         "data": {
           "use_go2rtc": "Use go2rtc",
-          "go2rtc_base_url": "go2rtc API URL"
+          "go2rtc_base_url": "go2rtc API URL",
+          "go2rtc_username": "go2rtc username",
+          "go2rtc_password": "go2rtc password"
         }
       }
     },
