@@ -365,7 +365,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
         schema = vol.Schema({
             vol.Required(CONF_GO2RTC_BASE_URL, default=DEFAULT_GO2RTC_BASE_URL): str,
-            vol.Optional(CONF_GO2RTC_USERNAME, default="admin"): str,
+            vol.Optional(CONF_GO2RTC_USERNAME, default=""): str,
             vol.Optional(CONF_GO2RTC_PASSWORD, default=""): str,
         })
 
@@ -432,7 +432,7 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
         )
         go2rtc_username_default = self.entry.options.get(
             CONF_GO2RTC_USERNAME,
-            self.entry.data.get(CONF_GO2RTC_USERNAME, "admin"),
+            self.entry.data.get(CONF_GO2RTC_USERNAME, ""),
         )
         go2rtc_password_default = self.entry.options.get(
             CONF_GO2RTC_PASSWORD,
