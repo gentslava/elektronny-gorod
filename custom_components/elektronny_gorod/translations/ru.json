@@ -64,7 +64,9 @@
         "data": {
           "use_go2rtc": "Использовать go2rtc",
           "go2rtc_base_url": "go2rtc API URL",
-          "go2rtc_rtsp_host": "RTSP host"
+          "go2rtc_rtsp_host": "RTSP host",
+          "go2rtc_username": "Имя пользователя go2rtc",
+          "go2rtc_password": "Пароль go2rtc"
         }
       }
     }
@@ -76,7 +78,9 @@
         "description": "Если включить go2rtc — видео будет со звуком.",
         "data": {
           "use_go2rtc": "Использовать go2rtc",
-          "go2rtc_base_url": "go2rtc API URL"
+          "go2rtc_base_url": "go2rtc API URL",
+          "go2rtc_username": "Имя пользователя go2rtc",
+          "go2rtc_password": "Пароль go2rtc"
         }
       }
     },
