@@ -187,6 +187,8 @@ class ElektronnyGorodCamera(Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
+        if hasattr(self, '_attr_available') and not self._attr_available:
+            return None
         image = await self._coordinator.get_camera_snapshot(self._id, width, height)
         if image:
             self._image = image
