@@ -30,6 +30,8 @@ from .const import (
     CONF_USE_GO2RTC,
     CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_RTSP_HOST,
+    CONF_GO2RTC_USERNAME,
+    CONF_GO2RTC_PASSWORD,
     DEFAULT_GO2RTC_BASE_URL,
     DEFAULT_GO2RTC_RTSP_HOST,
 )
@@ -334,14 +336,19 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
 
+        username = None
+        password = None
+
         if user_input is not None:
             base_url = normalize_base_url(user_input.get(CONF_GO2RTC_BASE_URL))
+            username = user_input.get(CONF_GO2RTC_USERNAME)
+            password = user_input.get(CONF_GO2RTC_PASSWORD)
 
             if not base_url:
                 errors["base"] = "go2rtc_required_fields"
             else:
                 session = async_get_clientsession(self.hass)
-                result = await validate_go2rtc(base_url, session)
+                result = await validate_go2rtc(base_url, session, username, password)
                 if not result.ok:
                     errors["base"] = result.error
 
@@ -351,11 +358,15 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_USE_GO2RTC: True,
                     CONF_GO2RTC_BASE_URL: base_url,
                     CONF_GO2RTC_RTSP_HOST: result.rtsp_host,
+                    CONF_GO2RTC_USERNAME: username,
+                    CONF_GO2RTC_PASSWORD: password,
                 }
                 return self.async_create_entry(title=data[CONF_NAME], data=data)
 
         schema = vol.Schema({
             vol.Required(CONF_GO2RTC_BASE_URL, default=DEFAULT_GO2RTC_BASE_URL): str,
+            vol.Optional(CONF_GO2RTC_USERNAME, default="admin"): str,
+            vol.Optional(CONF_GO2RTC_PASSWORD, default=""): str,
         })
 
         return self.async_show_form(

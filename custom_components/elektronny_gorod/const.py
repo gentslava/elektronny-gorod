@@ -18,6 +18,8 @@ CONF_SMS: Final = "sms"
 CONF_USE_GO2RTC = "use_go2rtc"
 CONF_GO2RTC_BASE_URL = "go2rtc_base_url"
 CONF_GO2RTC_RTSP_HOST = "go2rtc_rtsp_host"
+CONF_GO2RTC_USERNAME = "go2rtc_username"
+CONF_GO2RTC_PASSWORD = "go2rtc_password"
 
 DEFAULT_GO2RTC_BASE_URL = "http://127.0.0.1:1984"
 DEFAULT_GO2RTC_RTSP_HOST = "127.0.0.1"

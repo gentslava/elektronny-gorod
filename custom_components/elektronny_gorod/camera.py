@@ -17,6 +17,8 @@ from .const import (
     CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_RTSP_HOST,
     GO2RTC_RTSP_PORT,
+    CONF_GO2RTC_USERNAME,
+    CONF_GO2RTC_PASSWORD,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
@@ -31,11 +33,12 @@ async def _go2rtc_upsert_stream(
     base_url: str,
     stream_name: str,
     src: str,
+    headers: dict = None,
 ) -> None:
     qs = urlencode({"name": stream_name, "src": src})
     put_url = f"{base_url}/api/streams?{qs}"
     try:
-        async with session.put(put_url) as resp:
+        async with session.put(put_url, headers=headers or {}) as resp:
             if resp.status in (200, 201, 204):
                 return
     except ClientError:
@@ -43,7 +46,7 @@ async def _go2rtc_upsert_stream(
         pass
 
     patch_url = f"{base_url}/api/streams?{qs}"
-    async with session.patch(patch_url) as resp:
+    async with session.patch(patch_url, headers=headers or {}) as resp:
         if resp.status >= 400:
             body = await resp.text()
             raise RuntimeError(f"go2rtc PATCH failed: {resp.status} {body}")
@@ -77,7 +80,9 @@ def _get_go2rtc_cfg(entry: ConfigEntry) -> tuple[bool, str | None, str | None]:
     )
     base_url = entry.options.get(CONF_GO2RTC_BASE_URL) or entry.data.get(CONF_GO2RTC_BASE_URL)
     rtsp_host = entry.options.get(CONF_GO2RTC_RTSP_HOST) or entry.data.get(CONF_GO2RTC_RTSP_HOST)
-    return bool(use_go2rtc), base_url, rtsp_host
+    go2rtc_username = entry.options.get(CONF_GO2RTC_USERNAME) or entry.data.get(CONF_GO2RTC_USERNAME)
+    go2rtc_password = entry.options.get(CONF_GO2RTC_PASSWORD) or entry.data.get(CONF_GO2RTC_PASSWORD)
+    return bool(use_go2rtc), base_url, rtsp_host, go2rtc_username, go2rtc_password
 
 
 async def async_setup_entry(
@@ -89,10 +94,12 @@ async def async_setup_entry(
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     cameras_info = await coordinator.get_cameras_info()
 
-    use_go2rtc, base_url, rtsp_host = _get_go2rtc_cfg(entry)
+    use_go2rtc, base_url, rtsp_host, go2rtc_username, go2rtc_password = _get_go2rtc_cfg(entry)
 
     async_add_entities(
-        ElektronnyGorodCamera(hass, coordinator, camera_info, use_go2rtc, base_url, rtsp_host)
+        ElektronnyGorodCamera(
+            hass, coordinator, camera_info, use_go2rtc, base_url, rtsp_host, go2rtc_username, go2rtc_password
+        )
         for camera_info in cameras_info
     )
 
@@ -106,6 +113,8 @@ class ElektronnyGorodCamera(Camera):
         use_go2rtc: bool,
         go2rtc_base_url: str | None,
         go2rtc_rtsp_host: str | None,
+        go2rtc_username: str | None = None,
+        go2rtc_password: str | None = None,
     ) -> None:
         super().__init__()
         self.hass = hass
@@ -125,6 +134,8 @@ class ElektronnyGorodCamera(Camera):
         self._go2rtc_rtsp_host = go2rtc_rtsp_host
         self._use_go2rtc = use_go2rtc
         self._go2rtc_stream_name = f"eg_{self._id}"
+        self._go2rtc_username = go2rtc_username
+        self._go2rtc_password = go2rtc_password
 
     @property
     def name(self) -> str:
@@ -151,11 +162,18 @@ class ElektronnyGorodCamera(Camera):
             return
 
         session: ClientSession = async_get_clientsession(self.hass)
+        headers = {}
+        if self._go2rtc_username and self._go2rtc_password:
+            import base64
+            userpass = f"{self._go2rtc_username}:{self._go2rtc_password}"
+            b64 = base64.b64encode(userpass.encode()).decode()
+            headers["Authorization"] = f"Basic {b64}"
         await _go2rtc_upsert_stream(
             session=session,
             base_url=base_url,
             stream_name=self._go2rtc_stream_name,
             src=src,
+            headers=headers,
         )
         self._last_src = src
 
