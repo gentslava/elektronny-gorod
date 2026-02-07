@@ -1,0 +1,33 @@
+name: PR Pre-Release
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  prerelease:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set PR tag
+        id: pr_tag
+        run: echo "tag=pr-${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+
+      - name: Prepare pre-release zip
+        run: |
+          cd ${{ github.workspace }}/custom_components/elektronny_gorod
+          zip -r elektronny_gorod.zip ./
+
+      - name: Create or update pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.pr_tag.outputs.tag }}
+          name: "PR #${{ github.event.pull_request.number }} pre-release"
+          body: "Pre-release for PR #${{ github.event.pull_request.number }}. Use for Home Assistant testing."
+          prerelease: true
+          files: custom_components/elektronny_gorod/elektronny_gorod.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
