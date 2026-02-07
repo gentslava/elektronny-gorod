@@ -187,6 +187,8 @@ class ElektronnyGorodCamera(Camera):
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
+        if hasattr(self, '_attr_available') and not self._attr_available:
+            return None
         image = await self._coordinator.get_camera_snapshot(self._id, width, height)
         if image:
             self._image = image
@@ -198,8 +200,12 @@ class ElektronnyGorodCamera(Camera):
         LOGGER.info("Stream url is %s", stream_url)
         if not stream_url:
             LOGGER.warning("Camera %s (%s): empty source stream url", self._name, self._id)
+            self._attr_available = False
+            self._attr_is_on = False
             return None
 
+        self._attr_available = True
+        self._attr_is_on = True
         if not self._use_go2rtc:
             return stream_url
 
@@ -208,4 +214,12 @@ class ElektronnyGorodCamera(Camera):
 
     async def async_update(self) -> None:
         """Update camera state."""
-        self._camera_info = await self._coordinator.update_camera_state(self._id)
+        try:
+            self._camera_info = await self._coordinator.update_camera_state(self._id)
+            stream_url = await self._coordinator.get_camera_stream(self._id)
+            self._attr_available = bool(stream_url)
+            self._attr_is_on = bool(stream_url)
+        except Exception as ex:
+            LOGGER.error("Camera %s (%s): update failed: %s", self._name, self._id, ex)
+            self._attr_available = False
+            self._attr_is_on = False
