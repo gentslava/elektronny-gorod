@@ -201,9 +201,11 @@ class ElektronnyGorodCamera(Camera):
         if not stream_url:
             LOGGER.warning("Camera %s (%s): empty source stream url", self._name, self._id)
             self._attr_available = False
+            self._attr_is_on = False
             return None
 
         self._attr_available = True
+        self._attr_is_on = True
         if not self._use_go2rtc:
             return stream_url
 
@@ -216,6 +218,8 @@ class ElektronnyGorodCamera(Camera):
             self._camera_info = await self._coordinator.update_camera_state(self._id)
             stream_url = await self._coordinator.get_camera_stream(self._id)
             self._attr_available = bool(stream_url)
+            self._attr_is_on = bool(stream_url)
         except Exception as ex:
             LOGGER.error("Camera %s (%s): update failed: %s", self._name, self._id, ex)
             self._attr_available = False
+            self._attr_is_on = False
