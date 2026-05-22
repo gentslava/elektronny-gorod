@@ -1,0 +1,54 @@
+---
+description: Python-стиль для elektronny-gorod (PEP 8 + HA conventions + async-first).
+globs: ["**/*.py"]
+alwaysApply: false
+---
+
+# Python rules
+
+## Стиль
+
+- PEP 8.
+- Type hints для публичных методов и сложных параметров.
+- `from __future__ import annotations` в каждом модуле с typing.
+- Импорты: stdlib → third-party → local. Внутри группы — алфавит.
+- `import base64` (и аналогичные) — **на top of file**, не внутри методов (см. A-43).
+
+## Async
+
+- Все I/O — `async def`.
+- 🔴 Никаких `requests` / `urllib` / `time.sleep` в event loop.
+- `asyncio.sleep` — только если нет альтернативы; обычно `async_call_later` / `async_track_time_interval`.
+
+## HTTP
+
+- `async_get_clientsession(hass)` — единственный способ.
+- `ClientTimeout(total=N)` на каждом запросе.
+
+## Логирование
+
+- `%`-форматирование, **не f-string**:
+  ```python
+  LOGGER.info("Loaded %d places", n)   # ✅
+  LOGGER.info(f"Loaded {n} places")    # ❌
+  ```
+- `LOGGER.exception("Failed")` вместо `LOGGER.error(f"Failed: {e}")` (теряем traceback).
+- 🔴 Не логировать токены / headers / passwords / entry.data — см. `no-secret-logs.mdc`.
+
+## Exceptions
+
+- Узкие исключения в `api.py`: `ClientResponseError`, `ClientError`, `asyncio.TimeoutError`.
+- Никаких `except Exception` без явной re-raise.
+- `e.args[0]` — антипаттерн. Использовать атрибуты исключения.
+
+## Naming
+
+- `snake_case` для функций и переменных.
+- `PascalCase` для классов.
+- `UPPER_SNAKE_CASE` для констант в `const.py`.
+- Private: `_leading_underscore`.
+
+## См. также
+
+- `conventions.md`
+- `docs/architecture/overview.md`

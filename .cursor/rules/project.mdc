@@ -1,0 +1,44 @@
+---
+description: Базовый контекст проекта elektronny-gorod для Cursor. Применяется ко всем правкам.
+globs: ["**/*"]
+alwaysApply: true
+---
+
+# Project: elektronny-gorod
+
+Home Assistant custom integration для российских операторов «Электронный город» (Новотелеком) и «Дом.ру».
+
+## Обязательное чтение перед первой правкой
+
+- `AGENTS.md` — общий agent contract
+- `conventions.md` — конвенции кода
+- `workflow.md` — процесс
+- `docs/index.md` — точка входа в AIDD
+
+## Главные правила
+
+1. 🔴 **Не логировать секреты** — access_token, refresh_token, headers с Bearer, password, SMS, entry.data. См. `.cursor/rules/no-secret-logs.mdc`.
+2. 🔴 **Не создавать `aiohttp.ClientSession()` напрямую** — использовать `homeassistant.helpers.aiohttp_client.async_get_clientsession(hass)`.
+3. Любая entity должна наследовать `CoordinatorEntity` (когда [ADR-0002](../../docs/decisions/0002-coordinator-pattern.md) принят и реализован).
+4. `unique_id` — стабильный, без локализованных строк (`name`).
+5. Тесты — реальные, не stub. См. `docs/testing/strategy.md`.
+6. Versions / SHA не фиксировать в текстах документации (кроме changelog).
+
+## Что под scope
+
+- `custom_components/elektronny_gorod/**` — основной код
+- `tests/**` — тесты
+- `.github/workflows/**` — CI
+- `docs/**` — AIDD документация
+
+## Boundaries
+
+- **Без подтверждения:** чтение, AIDD-документы, предложения с evidence.
+- **С подтверждением:** правки `custom_components/**`, `manifest.json`, `hacs.json`, CI.
+- **Никогда:** force-push, `--no-verify`, логирование секретов.
+
+## См. также
+
+- `docs/audit/project-audit.md` — все известные проблемы
+- `docs/roadmap.md` — план
+- `docs/aidd/multi-agent-workflow.md` — роли

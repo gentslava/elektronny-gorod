@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git branch:*)",
+      "Bash(git blame:*)",
+      "Bash(git show:*)",
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(pytest:*)",
+      "Bash(ruff:*)",
+      "Bash(mypy:*)",
+      "Bash(python:*)",
+      "Bash(python3:*)",
+      "Bash(pip install:*)",
+      "Bash(jq:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh release view:*)",
+      "Bash(gh release list:*)",
+      "Bash(gh issue view:*)",
+      "Bash(gh issue list:*)"
+    ],
+    "deny": [
+      "Bash(rm -rf custom_components/:*)",
+      "Bash(git push --force:*)",
+      "Bash(git push -f:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -f:*)",
+      "Bash(git checkout master:*)",
+      "Bash(git branch -D:*)",
+      "Bash(git commit --no-verify:*)",
+      "Bash(rm -rf .git:*)",
+      "Bash(rm -rf docs/:*)",
+      "Bash(rm -rf .claude/:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/post-edit-redaction-check.sh"
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "CLAUDE_PROJECT_NAME": "elektronny-gorod"
+  }
+}
