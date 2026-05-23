@@ -30,20 +30,38 @@ env/
 .claude/settings.local.json
 .cursor/settings.local.json
 
-# Research / reverse engineering artifacts — contain secrets, never commit
+# Research / reverse engineering artifacts — contain secrets, never commit.
+# Любые формы capture-снимков мобильного приложения содержат:
+# tokens / phone / account_id / адреса / финансовые данные.
 research/api/*.har
 research/api/**/*.har
 research/api/*.flow
 research/api/**/*.flow
+research/api/*.chlz
+research/api/**/*.chlz
+research/api/*.chls
+research/api/**/*.chls
+research/api/*.saz
+research/api/**/*.saz
+research/api/*.pcap
+research/api/*.pcapng
+research/api/*.cap
 research/api/.*.pid
 research/api/notes/
 research/api/private/
 research/apk/*.apk
 research/scripts/.env
 research/scripts/.baseline-meta
+# Глобальные расширения — на случай если файлы окажутся вне research/
 *.har.json
 *.har
 *.flow
+*.chlz
+*.chls
+*.saz
+*.pcap
+*.pcapng
+*.cap
 *.apk
 
 # Local dev artifacts

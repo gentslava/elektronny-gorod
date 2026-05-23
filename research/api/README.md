@@ -7,8 +7,32 @@
 ## Что класть сюда
 
 - `.har` файлы из Charles / mitmproxy / Proxyman.
+- `.chlz` / `.chls` исходники из Charles (опционально — для архива; **агент их читать не может**, см. ниже).
 - Заметки анализа в `notes/` (опционально).
 - Свои черновые скрипты для разбора (`*.py`, `*.sh`).
+
+## Форматы capture
+
+| Расширение | Источник | Агент может читать? | Что делать |
+|---|---|---|---|
+| `.har` | mitmproxy/Charles/Proxyman/DevTools | ✅ да — JSON | основной формат для анализа |
+| `.flow` | mitmproxy native | ⚠️ нет напрямую, но `mitmdump -nr file.flow --set hardump=file.har` конвертирует | конвертация перед анализом (есть в `05-capture-stop.sh`) |
+| `.chlz` / `.chls` | Charles native (proprietary binary, gzip-of-XML) | ❌ нет | конвертировать в HAR через Charles GUI (см. ниже) |
+| `.saz` | Fiddler | ❌ нет | конвертировать через Fiddler GUI |
+| `.pcap` / `.pcapng` | Wireshark / tcpdump | ❌ нет (низкий уровень) | для проекта избыточно — TLS не расшифрован |
+
+### Charles `.chlz` → HAR
+
+В Charles:
+
+1. Открыть `.chlz` (File → Open).
+2. **File → Export Session…** (или `Cmd+Shift+E`).
+3. Format: **HTTP Archive (.har)**.
+4. Сохранить в `research/api/YYYY-MM-DD-<scenario>.har`.
+
+После этого агент `reverse-engineer` читает HAR.
+
+> Все `.chlz` файлы в `.gitignore`. Хранятся локально для archive — не нужно конвертировать, если планируете переоткрывать в Charles. Но для анализа агентом — нужен HAR.
 
 ## Naming convention
 

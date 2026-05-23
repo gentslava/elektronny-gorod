@@ -2,6 +2,8 @@
 
 Процесс сбора HTTPS-трафика мобильного приложения «Мой Дом» / «Умный Дом.ру». Реализация [ADR-0006: Mirror application behavior](../../decisions/0006-mirror-app-behavior.md) поверх [ADR-0007: Stateful emulator baseline](../../decisions/0007-stateful-emulator-baseline.md).
 
+> **Альтернатива через Charles** (если вы уже работаете в Charles вручную): соберите `.chlz` → File → Export Session… → HAR → положите `.har` в `research/api/`. Pipeline скриптов ниже — для **mitmproxy** (агент может им управлять). Charles остаётся для ручной работы пользователя.
+
 ## Когда применять
 
 - Перед началом любой новой фичи, которая трогает API.
