@@ -76,7 +76,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors[CONF_ACCESS_TOKEN] = "invalid_access_token"
                 else:
                     self.access_token = token.strip()
-                    LOGGER.debug("Access token is %s", self.access_token)
+                    LOGGER.debug("Credentials captured (length=%d)", len(self.access_token))
                     try:
                         return await self.get_account()
                     except ValueError as e:
@@ -90,7 +90,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
             if not errors:
                 self.phone = str(phone).strip()
-                LOGGER.debug("Phone is %s", self.phone)
+                LOGGER.debug("Phone captured (length=%d)", len(self.phone))
 
                 # Fetch contracts for the phone number
                 try:
@@ -200,7 +200,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors[CONF_CONTRACT] = "invalid_contract"
                 else:
                     self.contract = contract
-                    LOGGER.debug("Selected contract is %s. Contract object is %s", selected_id, contract)
+                    LOGGER.debug("Selected contract subscriberId=%s", selected_id)
 
                     # Request an SMS code for the selected contract
                     try:
@@ -282,7 +282,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         # Existing-entry / reauth logic
         for entry in self._async_current_entries():
             if data[CONF_ACCESS_TOKEN] == entry.data.get(CONF_ACCESS_TOKEN):
-                LOGGER.info("Entry %s already exists", entry.data)
+                LOGGER.info("Entry %s already exists", entry.entry_id)
                 return self.async_abort(reason="already_configured")
 
             if (
@@ -290,7 +290,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 and data[CONF_ACCOUNT_ID] == entry.data.get(CONF_ACCOUNT_ID)
                 and data[CONF_SUBSCRIBER_ID] == entry.data.get(CONF_SUBSCRIBER_ID)
             ):
-                LOGGER.info("Reauth entry %s with params %s", entry.data, data)
+                LOGGER.info("Reauth entry %s", entry.entry_id)
 
                 prev_use_go2rtc = entry.options.get(CONF_USE_GO2RTC, entry.data.get(CONF_USE_GO2RTC))
                 prev_base_url = entry.options.get(CONF_GO2RTC_BASE_URL, entry.data.get(CONF_GO2RTC_BASE_URL))

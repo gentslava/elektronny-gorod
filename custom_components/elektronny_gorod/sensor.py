@@ -34,7 +34,7 @@ class ElektronnyGorodBalanceSensor(SensorEntity):
         self, coordinator: ElektronnyGorodUpdateCoordinator, balance_info: dict
     ) -> None:
         """Initialize the balance sensor."""
-        LOGGER.debug(f"ElektronnyGorodBalanceSensor init {balance_info}")
+        LOGGER.debug("ElektronnyGorodBalanceSensor init for place_id=%s", balance_info.get("place_id"))
         super().__init__()
         self._coordinator = coordinator
         self._balance_info: dict = balance_info
@@ -86,6 +86,6 @@ class ElektronnyGorodBalanceSensor(SensorEntity):
             LOGGER.info("Fetching balance from Elektronny Gorod API")
             balance_info = await self._coordinator.update_balance_state(self._place_id)
             self._balance = balance_info["balance"]
-        except Exception as e:
-            LOGGER.error(f"Failed to fetch balance: {e}")
+        except Exception:
+            LOGGER.exception("Failed to fetch balance for place_id=%s", self._place_id)
             self._balance = None

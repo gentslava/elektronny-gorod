@@ -5,24 +5,51 @@ from .const import (
     BASE_API_URL,
     LOGGER,
 )
+from ._logging import redact, is_auth_path
 from .user_agent import UserAgent
 
 
-async def _log_request(url, headers, data) -> None:
-    """Log the request."""
-    LOGGER.info(f"Sending API request to {url} with headers={headers} and data={data}")
+def _log_request(url: str, method: str, headers: dict, body_size: int) -> None:
+    """Log outgoing request. Headers redacted; body NEVER logged.
+
+    Для auth-paths факт наличия body тоже не упоминаем (минимизируем сигнал).
+    Для остальных — реальный размер body в байтах.
+    """
+    if is_auth_path(url):
+        body_marker = "<auth-path-redacted>"
+    elif body_size > 0:
+        body_marker = f"<{body_size} bytes>"
+    else:
+        body_marker = "<none>"
+    LOGGER.debug(
+        "Request %s %s headers=%s body=%s",
+        method,
+        url,
+        redact(headers),
+        body_marker,
+    )
 
 
 async def _log_response(response: ClientResponse) -> None:
-    """Log the request."""
-    _url = response.url
-    _method = response.method
-    _status = response.status
-    _reason = response.reason
-    if body := await response.text():
-        LOGGER.debug(f"Response {_url} ({_method}) [{_status} {_reason}] data: {body}")
-    else:
-        LOGGER.debug(f"Response {_url} ({_method}) [{_status} {_reason}]")
+    """Log response status + length. Body НЕ логируется для auth-paths;
+    для остальных — только размер, не содержимое.
+    """
+    url = str(response.url)
+    if is_auth_path(url):
+        # Полностью пропускаем — даже размер ответа может намекать на исход (success vs error).
+        LOGGER.debug("Response %s %s [%s]", response.method, url, response.status)
+        return
+    # Не читаем body здесь — иначе streaming-ответы будут consumed.
+    # Размер берём из Content-Length, если есть.
+    content_length = response.headers.get("Content-Length", "?")
+    LOGGER.debug(
+        "Response %s %s [%s %s] content-length=%s",
+        response.method,
+        url,
+        response.status,
+        response.reason,
+        content_length,
+    )
 
 
 class HTTP:
@@ -55,7 +82,14 @@ class HTTP:
 
         async with ClientSession() as session:
             url = f"{self._base_url}{endpoint}"
-            await _log_request(url, self._headers, data)
+            # data может быть str/bytes/None. Размер считаем безопасно.
+            if data is None:
+                body_size = 0
+            elif isinstance(data, (bytes, bytearray)):
+                body_size = len(data)
+            else:
+                body_size = len(str(data).encode("utf-8"))
+            _log_request(url, method, self._headers, body_size)
             if method == "GET":
                 response = await session.get(url, headers=self._headers)
             elif method == "POST":
@@ -68,7 +102,7 @@ class HTTP:
             if response.ok:
                 return response
             else:
-                LOGGER.error(f"Could not get data from API")
+                LOGGER.error("API request failed: %s [%s]", endpoint, response.status)
                 raise ClientError(response)
 
     async def get(self, endpoint: str, binary: bool = False) -> ClientResponse | bytes:

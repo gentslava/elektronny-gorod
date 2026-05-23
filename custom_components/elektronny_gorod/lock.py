@@ -35,7 +35,7 @@ class ElektronnyGorodLock(LockEntity):
     def __init__(
         self, coordinator: ElektronnyGorodUpdateCoordinator, lock_info: dict
     ) -> None:
-        LOGGER.debug(f"ElektronnyGorodLock init {lock_info}")
+        LOGGER.debug("ElektronnyGorodLock init for entrance_id=%s", lock_info.get("entrance_id"))
         super().__init__()
         self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
         self._lock_info: dict = lock_info
@@ -97,7 +97,7 @@ class ElektronnyGorodLock(LockEntity):
 
     async def async_unlock(self, **kwargs: Any) -> None:
         """Unlock all or specified locks."""
-        LOGGER.info(f"Unlock {self.unique_id}")
+        LOGGER.info("Unlock %s", self.unique_id)
         self._state = LockState.UNLOCKING
         self.async_write_ha_state()
         try:
