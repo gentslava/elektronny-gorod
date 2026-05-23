@@ -63,7 +63,9 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | Запустить локально | `aidd/runbooks/local-development.md` |
 | Дебажить странное поведение | `aidd/runbooks/debugging.md` |
 | Помочь пользователю | `aidd/runbooks/troubleshooting.md` |
-| Спроектировать новую feature | `aidd/templates/idea.template.md` → `prd.template.md` → `plan.template.md` |
+| Собрать HAR-трафик приложения | `aidd/runbooks/har-collection.md` |
+| Понять принцип reverse engineering | `decisions/0006-mirror-app-behavior.md` |
+| Спроектировать новую feature | `aidd/runbooks/har-collection.md` → HAR → `aidd/templates/idea.template.md` → `prd.template.md` → `plan.template.md` |
 | Использовать готовый prompt | `aidd/prompt-library.md` |
 | Выбрать skill для задачи | `aidd/skills.md` |
 | Понять роли агентов | `aidd/multi-agent-workflow.md` |
@@ -110,10 +112,11 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | `aidd/skills.md` | Active |
 | `aidd/prompt-library.md` | Active |
 | `aidd/mcp-tools.md` | Active |
-| `decisions/0001..0005` | accepted (0001) / proposed (0002..0005) |
+| `decisions/0001..0006` | accepted (0001, 0006) / proposed (0002..0005) |
 | `aidd/templates/*` | шаблоны |
-| `aidd/runbooks/*` | руководства |
+| `aidd/runbooks/*` | руководства (вкл. `har-collection.md`) |
 | `features/example/*` | образец |
+| `research/api/README.md` | конвенция для HAR-снимков (сама папка — local-only) |
 
 ## Next reading
 

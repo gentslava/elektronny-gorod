@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+build/
+dist/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# IDE / editor
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Claude Code / Cursor local overrides
+.claude/settings.local.json
+.cursor/settings.local.json
+
+# Research / reverse engineering artifacts — contain secrets, never commit
+research/api/*.har
+research/api/**/*.har
+research/api/notes/
+research/api/private/
+*.har.json
+*.har
+
+# Local dev artifacts
+.env
+.env.local
+local/
+tmp/
+
+# HA / integration zip от release workflow (если случайно собран локально)
+custom_components/elektronny_gorod/elektronny_gorod.zip

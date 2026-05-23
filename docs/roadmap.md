@@ -99,7 +99,7 @@ Quality gates:
 
 #### HA features
 
-- [ ] **A-22** Auto-refresh access_token при 401 (с использованием `refresh_token`).
+- [ ] **A-22** Поведение при 401: сначала собрать HAR-сессию со сценарием истечения access_token, затем реализовать **точно как в приложении** (см. [ADR-0006](decisions/0006-mirror-app-behavior.md)). До получения HAR — оставить текущее graceful поведение (UpdateFailed → пользователь делает reauth через UI).
 - [ ] **A-25** Native reauth flow (`async_step_reauth_confirm`).
 - [ ] **A-26** Reconfigure flow (`async_step_reconfigure`).
 - [ ] **A-37** `parallel_updates = 1` (или другое значение) на entity-классах.

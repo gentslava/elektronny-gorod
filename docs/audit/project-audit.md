@@ -202,11 +202,13 @@ Quality gates:
 - **Evidence:** `http.py`, `api.py`
 - **Recommended fix:** `ClientTimeout(total=30)` + helper для retry с backoff.
 
-### A-22. Нет auto-refresh на 401
+### A-22. Поведение при 401 (auto-refresh — unknown)
 
 - **Area:** UX / Reliability
-- **Evidence:** [`api.py:160-162`](../../custom_components/elektronny_gorod/api.py#L160-L162)
-- **Recommended fix:** реализовать `_refresh_access_token()` и retry при 401.
+- **Evidence:** [`api.py:160-162`](../../custom_components/elektronny_gorod/api.py#L160-L162) — при 401 поднимается `ValueError("unauthorized")` без попытки refresh.
+- **Note:** оригинальное приложение **в наблюдавшихся HAR-сессиях** не использует `/auth/.../refresh` endpoint. Это **не значит** что endpoint не существует — возможно, мы не поймали сценарий истечения access_token. См. [ADR-0006](../decisions/0006-mirror-app-behavior.md).
+- **Текущая рекомендация:** **не реализовывать** auto-refresh «по интуиции». Сначала — собрать HAR со сценарием истечения access_token (запуск приложения после долгого простоя / форсированный logout-on-server). Только после этого — реализовывать в точном соответствии с приложением.
+- **Fallback пока HAR нет:** при 401 — graceful UpdateFailed, пользователь проходит reauth через UI. Это сейчас и работает.
 
 ### A-23. Отсутствует `diagnostics.py`
 

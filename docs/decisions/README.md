@@ -20,6 +20,7 @@
 | [0003](0003-iot-class-strategy.md) | Стратегия `iot_class` и polling | proposed | 2026-05-22 |
 | [0004](0004-token-redaction.md) | Token redaction в логах | proposed | 2026-05-22 |
 | [0005](0005-lock-vs-button.md) | Lock vs Button для домофона | proposed | 2026-05-22 |
+| [0006](0006-mirror-app-behavior.md) | Mirror application behavior | accepted | 2026-05-23 |
 
 ## Когда писать ADR
 
