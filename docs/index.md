@@ -63,8 +63,9 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | Запустить локально | `aidd/runbooks/local-development.md` |
 | Дебажить странное поведение | `aidd/runbooks/debugging.md` |
 | Помочь пользователю | `aidd/runbooks/troubleshooting.md` |
-| Собрать HAR-трафик приложения | `aidd/runbooks/har-collection.md` |
-| Понять принцип reverse engineering | `decisions/0006-mirror-app-behavior.md` |
+| Собрать HAR-трафик приложения | `aidd/runbooks/har-collection.md` + `/capture-har <scenario>` |
+| Понять принцип reverse engineering | `decisions/0006-mirror-app-behavior.md`, `decisions/0007-stateful-emulator-baseline.md` |
+| Разобрать API из HAR | `architecture/api-reference.md` (через subagent `reverse-engineer`) |
 | Спроектировать новую feature | `aidd/runbooks/har-collection.md` → HAR → `aidd/templates/idea.template.md` → `prd.template.md` → `plan.template.md` |
 | Использовать готовый prompt | `aidd/prompt-library.md` |
 | Выбрать skill для задачи | `aidd/skills.md` |
@@ -112,11 +113,14 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | `aidd/skills.md` | Active |
 | `aidd/prompt-library.md` | Active |
 | `aidd/mcp-tools.md` | Active |
-| `decisions/0001..0006` | accepted (0001, 0006) / proposed (0002..0005) |
+| `decisions/0001..0007` | accepted (0001, 0006, 0007) / proposed (0002..0005) |
 | `aidd/templates/*` | шаблоны |
 | `aidd/runbooks/*` | руководства (вкл. `har-collection.md`) |
 | `features/example/*` | образец |
+| `architecture/api-reference.md` | reverse-engineered API knowledge (stub до первого HAR) |
 | `research/api/README.md` | конвенция для HAR-снимков (сама папка — local-only) |
+| `research/apk/README.md` | конвенция для APK (сама папка — local-only) |
+| `research/scripts/README.md` | pipeline для сбора HAR |
 
 ## Next reading
 

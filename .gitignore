@@ -33,10 +33,18 @@ env/
 # Research / reverse engineering artifacts — contain secrets, never commit
 research/api/*.har
 research/api/**/*.har
+research/api/*.flow
+research/api/**/*.flow
+research/api/.*.pid
 research/api/notes/
 research/api/private/
+research/apk/*.apk
+research/scripts/.env
+research/scripts/.baseline-meta
 *.har.json
 *.har
+*.flow
+*.apk
 
 # Local dev artifacts
 .env

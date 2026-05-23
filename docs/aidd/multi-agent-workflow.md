@@ -111,6 +111,18 @@ Quality gates:
 | Outputs | validation report (как комментарий к PR) |
 | Gate | проверяет все gates |
 
+### 9. Reverse Engineer Agent
+
+| Поле | Значение |
+|---|---|
+| Когда | сбор / анализ HAR, обновление `api-reference.md`, diff между версиями приложения |
+| Обязательное чтение | [ADR-0006](../decisions/0006-mirror-app-behavior.md), [ADR-0007](../decisions/0007-stateful-emulator-baseline.md), `../architecture/api-reference.md`, `runbooks/har-collection.md`, `../../research/scripts/README.md` |
+| Outputs | `../../research/api/*.har` (local-only), обновление `../architecture/api-reference.md` |
+| Gate | (нет своего, hand-off в lead-architect / ha-expert при необходимости правок кода) |
+| Subagent file | `.claude/agents/reverse-engineer.md` |
+| Slash command | `/capture-har <scenario>` |
+| Tools restriction | НЕ может писать в `custom_components/`, `tests/`, `manifest.json`, `.github/`, `docs/audit/`, accepted ADR |
+
 ## Hand-off pattern
 
 ```text
