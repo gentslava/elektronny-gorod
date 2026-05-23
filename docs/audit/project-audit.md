@@ -341,6 +341,73 @@ Quality gates:
 - **Evidence:** [`.github/workflows/prerelease.yaml`](../../.github/workflows/prerelease.yaml)
 - **Note:** workflow выкатывает pre-release zip для каждого PR. Добавлен в карту проекта.
 
+## Findings из первого HAR-анализа (2026-05-23)
+
+> Источник — HAR-снимки в `research/api/*.har` (gitignored, конкретные имена не фиксируем). Подробности по endpoints — в [`architecture/api-reference.md`](../architecture/api-reference.md). Принцип ADR-0006: «mirror app behavior» соблюдён — все findings основаны на реальных запросах приложения.
+
+### A-47. WebSocket / STOMP real-time канал не реализован
+
+- **Area:** Feature gap (potential push)
+- **Severity:** P1 (research-фаза), потенциально P0-feature после spec
+- **Evidence:** `wss://myhome.proptech.ru:443/events` + `Sec-WebSocket-Protocol: v12.stomp, v11.stomp, v10.stomp` зафиксированы в HAR. Также `GET /rest/v1/stomp/available-features` как probe.
+- **Impact:** возможно, через WebSocket приходят события домофона/камеры в real-time — это ключ к HA-автоматизациям «звонок в дверь → действие».
+- **Каверзы:** в HAR содержимое STOMP-фреймов **не зафиксировано**. WebSocket может нести **не все** события — часть может идти через SIP (см. A-49) или FCM. До получения HAR с активным сценарием (реальный звонок в домофон с записью WS-фреймов) — **не строить spec**.
+- **Recommended first step:** записать HAR со сценарием звонка через альтернативный capture (mitmproxy с WebSocket-decode опциями, либо `mitmdump --mode reverse:` для расшифровки). Когда фреймы будут на руках — отдельный feature folder с PRD.
+- **НЕ делать:** не «угадывать» STOMP topics и схему сообщений (нарушение ADR-0006).
+
+### A-48. Snapshot домофона (`accesscontrols/{ac}/snapshots`) не реализован
+
+- **Severity:** P2
+- **Evidence:** `GET /rest/v1/places/{p}/accesscontrols/{ac}/snapshots` зафиксирован в HAR. Возвращает JPEG bytes.
+- **Impact:** наша интеграция показывает snapshot **камер**, но не **домофона** — а домофон тоже имеет камеру у двери.
+- **Recommended fix:** добавить в `api.py` метод `query_access_control_snapshot(place_id, ac_id, w, h)`, аналогичный `query_camera_snapshot`. Создать camera entity для каждой `accesscontrols` или дополнительный snapshot endpoint в существующих camera entities.
+
+### A-49. SIP credentials endpoint не используется
+
+- **Severity:** P1 (потенциал для звонков)
+- **Evidence:** `POST /rest/v1/places/{p}/accesscontrols/{ac}/sipdevices` возвращает `{id, realm, login, password}` — SIP credentials для регистрации в SIP-сервере оператора.
+- **Impact:** приложение использует SIP для приёма входящих звонков от домофонов. Это вероятный механизм real-time доставки «кто-то нажал кнопку у подъезда».
+- **Caverны:** SIP — это RTP/UDP вне HTTP. Charles HAR этого не покажет. Нужно либо отдельный capture (Wireshark + ключ TLS), либо реверс APK для SIP-клиента приложения.
+- **Recommended first step:** spec-фаза с research через документацию SIP-клиентов Android (PjSIP, Linphone) и попытка зарегистрировать SIP-клиент в HA с credentials из `sipdevices` (например, через PJSIP-плагин HA). Затем — реальный звонок и наблюдение.
+- **Связано с A-47** — взаимоисключающие или дополняющие каналы?
+
+### A-50. Camera events endpoints не реализованы
+
+- **Severity:** P2
+- **Evidence:** 
+  - `GET /api/mh-camera-personal/mobile/v1/cameras/{id}/events` — `{externalEvents: [{ID, Time, Duration, isAvailable}], recordingDisabledEvents: []}`
+  - `GET /rest/v2/forpost/cameras/{id}/events` — альтернативный v2 endpoint
+- **Impact:** история motion-событий / записей с камер. Можно поднять как HA `event` entity или сенсор «последняя запись».
+- **Recommended fix:** новый platform `sensor.last_event` или `event` entity для каждой камеры. Polling с разумным интервалом.
+
+### A-51. Bootstrap config endpoint (`device-installations`) не используется
+
+- **Severity:** P2 (зависит от стабильности hardcoded URLs)
+- **Evidence:** `POST /api/mh-customer-device/mobile/public/v1/customers/device-installations` возвращает `{AUTH_PROVIDER, MOBILE_URL.domain.{backend, genesys, stomp, expiredAt}, policy}`.
+- **Impact:** приложение **динамически** получает URLs (включая STOMP). У нас hardcoded `BASE_API_URL = "myhome.proptech.ru"` — если оператор переедет, мы сломаемся.
+- **Recommended fix:** вызывать device-installations при первом setup + при истечении `expiredAt`, кэшировать в `entry.data`. Использовать `MOBILE_URL.domain.backend` вместо hardcoded.
+
+### A-52. Header `traceparent` не отправляется
+
+- **Severity:** P3
+- **Evidence:** в HAR каждый запрос приложения содержит W3C trace context: `traceparent: 00-<32hex>-<16hex>-01`. У нас этого нет.
+- **Impact:** теоретически мог бы помочь оператору при поддержке — но в нашем случае это просто **отклонение от паттерна приложения**.
+- **Recommended fix:** генерировать `traceparent` per-request в `http.py` (uuid4 → 32 hex для trace, 16 hex для span). Не критично, но облегчает «зеркалирование».
+
+### A-53. `GET /public/v1/operators` не используется
+
+- **Severity:** P3
+- **Evidence:** приложение запрашивает список операторов при старте.
+- **Impact:** наша интеграция хардкодит один оператор. Если пользователь имеет аккаунты у разных операторов — не поддерживаем.
+- **Recommended fix:** не приоритет; в текущей модели один config entry = один оператор.
+
+### A-54. FCM-канал и `subscriberNotifications` — за пределами проекта
+
+- **Severity:** P3 (документирование, не реализация)
+- **Evidence:** `POST /rest/v1/subscriberNotifications` отправляет `pushToken` (FCM) и метаданные устройства.
+- **Impact:** требует APK reverse engineering для FCM project_id, sender_id, server_key. Юридически серая зона. **Не делать** в рамках HA-интеграции, если есть альтернативы через WS/SIP.
+- **Status:** оставляем как known endpoint в `api-reference.md`. Реализация не планируется.
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
@@ -352,8 +419,9 @@ Quality gates:
 | A-01..A-05, A-43, A-45 | Итерация 1 (hotfix-релиз) |
 | A-06, A-07 | Итерация 1 |
 | A-08..A-14, A-16..A-21, A-23, A-24, A-44 | Итерация 2 |
-| A-15, A-22, A-25, A-26, A-37, A-38 | Итерация 3 |
-| A-27..A-36, A-39..A-41 | по мере touch |
+| A-15, A-22, A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
+| A-47, A-49, A-50 | Итерация 4 (real-time + push) — после доп. HAR-research |
+| A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 
 ## Next reading

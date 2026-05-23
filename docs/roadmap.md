@@ -127,7 +127,47 @@ Quality gates:
 - [ ] Создать `docs/aidd/mcp-tools.md` — карта инструментов и permissions.
 - [ ] Создать `docs/aidd/prompts.md` — prompt library.
 
+#### Гэпы с приложением (на основе первого HAR-разбора)
+
+- [ ] **A-48** Snapshot домофона: `GET /rest/v1/places/{p}/accesscontrols/{ac}/snapshots` — добавить отдельный snapshot для домофонов (не только для камер).
+- [ ] **A-51** Bootstrap config: `POST .../device-installations` — динамические URLs вместо hardcoded `BASE_API_URL`.
+- [ ] **A-52** Header `traceparent` — генерировать per-request для соответствия паттерну приложения.
+
 **Quality gates passed:** `READY_FOR_RELEASE` + Silver IQS.
+
+## Итерация 4 — Real-time + push (≈ research-фаза, неопределённо)
+
+**Цель:** реализовать приём событий домофона в real-time (звонок → автоматизация HA).
+
+**Принцип:** строго следуем [ADR-0006](decisions/0006-mirror-app-behavior.md) — никаких догадок без подтверждения через HAR.
+
+### Research-фаза (обязательна до spec)
+
+- [ ] **HAR-1** Собрать HAR со сценарием активного WebSocket-соединения + реальный звонок в домофон. Зафиксировать содержимое STOMP-фреймов.
+- [ ] **HAR-2** Capture SIP-трафика (через mitmproxy в TCP-mode или Wireshark) во время реального звонка. Зафиксировать INVITE / RTP flow.
+- [ ] **HAR-3** Capture поведения приложения «в фоне» (нажал home, ждал ~5 минут, входящее событие). Какие каналы реально доставляют?
+- [ ] Анализ — три канала (STOMP / SIP / FCM): что чем доставляется, какие фолбэки, какая latency.
+
+### Возможные direction (зависят от research)
+
+- [ ] **A-47** STOMP-клиент в `coordinator` (если WS несёт релевантные события):
+  - WebSocket subscriber поверх существующего `aiohttp` (либо `aiohttp.ClientWebSocketResponse`).
+  - SUBSCRIBE на нужные destinations (зависит от research).
+  - На приходящий MESSAGE — `async_dispatcher_send` → HA-entity / `event`.
+- [ ] **A-49** SIP-клиент (если SIP несёт INVITE для звонков):
+  - Прототип через PJSIP / Linphone CLI.
+  - Регистрация SIP UAC с credentials из `sipdevices`.
+  - На INVITE — `event` в HA + потенциально доступ к RTP audio (long-term).
+- [ ] **A-50** Camera events polling — независимая фича, не требует real-time:
+  - `GET /api/mh-camera-personal/.../cameras/{id}/events` периодически.
+  - `event` entity на каждую запись.
+
+### Ожидаемые исходы
+
+- Лучше всего: один STOMP-клиент закрывает 80% сценариев. Лёгкий wins для HA-автоматизаций.
+- Хуже всего: события размазаны по 3 каналам, нужны все три → сложность поддержки растёт. В этом случае — выбрать самый стабильный канал и документировать ограничения.
+
+**Quality gates passed:** READY_FOR_RELEASE + Silver IQS + работающая push-фича.
 
 ## Принципы
 
