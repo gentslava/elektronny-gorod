@@ -93,11 +93,9 @@ Quality gates:
 
 ### A-08. Coordinator не имеет `update_interval`
 
+- **Status:** ✅ **RESOLVED** в ветке `feat/coordinator-pattern` (slice 3a). `update_interval=timedelta(minutes=5)`, `_async_update_data` возвращает dict `{places, balances, cameras, locks}`. См. [ADR-0002](../decisions/0002-coordinator-pattern.md).
 - **Area:** HA-compat / Architecture
-- **Evidence:** [`coordinator.py:32-55`](../../custom_components/elektronny_gorod/coordinator.py#L32-L55)
-- **Impact:** места загружаются 1 раз; баланс не обновляется автоматически; entity ходят в `update_*_state` напрямую.
-- **Recommended fix:** задать `update_interval=timedelta(minutes=5)` и в `_async_update_data` обновлять баланс/устройства; вернуть `data` как dict.
-- **First step:** ADR-0002 «coordinator pattern».
+- **Original Impact:** места загружались 1 раз; баланс не обновлялся автоматически.
 
 ### A-09. Entity не используют `CoordinatorEntity`
 
@@ -151,22 +149,19 @@ Quality gates:
 
 ### A-16. `async_unsubscribe` не вызывается из `async_unload_entry`
 
+- **Status:** ✅ **RESOLVED** в ветке `feat/coordinator-pattern` (slice 3a). Используется HA-canonical pattern: `entry.async_on_unload(coordinator.async_unsubscribe)` регистрируется в `async_setup_entry`. HA-core вызывает cleanup автоматически, независимо от исхода platform unload (в отличие от ручного вызова под `if unload_ok:`, который теряет cleanup при partial unload).
 - **Area:** Reliability / Memory
-- **Evidence:** [`__init__.py:89-94`](../../custom_components/elektronny_gorod/__init__.py#L89-L94) vs [`coordinator.py:71-74`](../../custom_components/elektronny_gorod/coordinator.py#L71-L74)
-- **Impact:** dispatcher-слушатель остаётся подписан после unload.
-- **Recommended fix:** добавить `coordinator.async_unsubscribe()` в `async_unload_entry`.
+- **Original Impact:** dispatcher-слушатель оставался подписан после unload.
 
 ### A-17. Дубликат логики в coordinator
 
+- **Status:** ✅ **RESOLVED** в ветке `feat/coordinator-pattern` (slice 3a). Извлечён `_collect_cameras_for_place(place_id)` helper. Прежние `get_cameras_info` и `update_camera_state` больше не дублируют сбор камер — они являются shim-ами над `self.data`.
 - **Area:** Maintainability
-- **Evidence:** [`coordinator.py:76-119`](../../custom_components/elektronny_gorod/coordinator.py#L76-L119) ↔ [`coordinator.py:139-187`](../../custom_components/elektronny_gorod/coordinator.py#L139-L187)
-- **Recommended fix:** извлечь `_collect_cameras_for_place(place_id)`.
 
 ### A-18. `available_sections` извлекается и игнорируется
 
+- **Status:** ✅ **RESOLVED** в ветке `feat/coordinator-pattern` (slice 3a). Вызов `query_sections` удалён из coordinator (он действительно был неиспользуемым — endpoint `/rest/v1/places/{p}/screen-sections` возвращает UI-конфиг приложения, не нужный HA-интеграции).
 - **Area:** Dead code / Performance
-- **Evidence:** [`coordinator.py:109`](../../custom_components/elektronny_gorod/coordinator.py#L109), [`:172`](../../custom_components/elektronny_gorod/coordinator.py#L172)
-- **Recommended fix:** удалить вызов или использовать результат.
 
 ### A-19. Широкий `except Exception` в API + `e.args[0]`
 
@@ -309,10 +304,9 @@ Quality gates:
 
 ### A-44. `async_update` камеры делает доп. запрос к API
 
+- **Status:** ⚠️ **PARTIALLY RESOLVED** в slice 3a. После coordinator-pattern `update_camera_state(id)` теперь cheap lookup в `self.data` (без HTTP). Остался один HTTP-запрос `get_camera_stream(id)` в `async_update`. Полностью закроется в slice 3b при переходе на `CoordinatorEntity` (тогда `async_update` исчезнет, stream URL получается лениво в `stream_source()`).
 - **Severity:** P1
-- **Evidence:** [`camera.py:215-225`](../../custom_components/elektronny_gorod/camera.py#L215-L225) — `update_camera_state` + `get_camera_stream` в одном `async_update`.
-- **Impact:** двойная нагрузка на оператора при каждом update; зависит от polling-частоты HA для entity.
-- **Recommended fix:** перевод на `CoordinatorEntity` (A-09) сделает proper update. Альтернативно — кэширование stream_url с TTL.
+- **Original Impact:** двойная нагрузка на оператора при каждом update.
 
 ### A-45. go2rtc credentials в `entry.data` plaintext
 
