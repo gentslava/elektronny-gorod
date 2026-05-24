@@ -1,11 +1,15 @@
 """HTTP interface."""
 
-from aiohttp import ClientSession, ClientError, ClientResponse
+from aiohttp import ClientError, ClientResponse
+
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from ._logging import redact, is_auth_path
 from .const import (
     BASE_API_URL,
     LOGGER,
 )
-from ._logging import redact, is_auth_path
 from .user_agent import UserAgent
 
 
@@ -55,11 +59,13 @@ async def _log_response(response: ClientResponse) -> None:
 class HTTP:
     def __init__(
         self,
+        hass: HomeAssistant,
         user_agent: UserAgent,
         access_token: str | None,
         refresh_token: str | None,
         operator: str | None,
     ) -> None:
+        self._hass = hass
         self._base_url: str = f"https://{BASE_API_URL}"
         self.user_agent: UserAgent = user_agent
         self._headers: dict = {
@@ -73,37 +79,41 @@ class HTTP:
     async def __request(
         self, endpoint: str, method: str, data: object | None, binary: bool
     ) -> ClientResponse | bytes:
-        """Make a HTTP request."""
+        """Make a HTTP request through shared HA aiohttp session.
+
+        См. ADR-0008. Не создаём свою ClientSession — это нарушение HA convention
+        (audit A-05, security S-05).
+        """
         if self.access_token is not None:
             self._headers["authorization"] = f"Bearer {self.access_token}"
         self._headers["user-agent"] = str(self.user_agent)
         if method == "POST":
             self._headers["content-type"] = "application/json; charset=UTF-8"
 
-        async with ClientSession() as session:
-            url = f"{self._base_url}{endpoint}"
-            # data может быть str/bytes/None. Размер считаем безопасно.
-            if data is None:
-                body_size = 0
-            elif isinstance(data, (bytes, bytearray)):
-                body_size = len(data)
-            else:
-                body_size = len(str(data).encode("utf-8"))
-            _log_request(url, method, self._headers, body_size)
-            if method == "GET":
-                response = await session.get(url, headers=self._headers)
-            elif method == "POST":
-                response = await session.post(url, data=data, headers=self._headers)
+        session = async_get_clientsession(self._hass)
+        url = f"{self._base_url}{endpoint}"
+        # data может быть str/bytes/None. Размер считаем безопасно.
+        if data is None:
+            body_size = 0
+        elif isinstance(data, (bytes, bytearray)):
+            body_size = len(data)
+        else:
+            body_size = len(str(data).encode("utf-8"))
+        _log_request(url, method, self._headers, body_size)
+        if method == "GET":
+            response = await session.get(url, headers=self._headers)
+        elif method == "POST":
+            response = await session.post(url, data=data, headers=self._headers)
 
-            if binary:
-                return await response.read()
+        if binary:
+            return await response.read()
 
-            await _log_response(response)
-            if response.ok:
-                return response
-            else:
-                LOGGER.error("API request failed: %s [%s]", endpoint, response.status)
-                raise ClientError(response)
+        await _log_response(response)
+        if response.ok:
+            return response
+        else:
+            LOGGER.error("API request failed: %s [%s]", endpoint, response.status)
+            raise ClientError(response)
 
     async def get(self, endpoint: str, binary: bool = False) -> ClientResponse | bytes:
         """Handle GET requests."""

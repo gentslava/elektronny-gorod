@@ -50,7 +50,10 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         """Initialize the config flow state."""
         self.user_agent = UserAgent()
-        self.api: ElektronnyGorodAPI = ElektronnyGorodAPI(self.user_agent)
+        # self.hass устанавливается framework-ом ConfigFlow до первого async_step_*
+        # (через сеттер `hass`), но в момент __init__ ещё не инициализирован.
+        # Поэтому API создаём лениво — при первом обращении (см. @property api ниже).
+        self._api: ElektronnyGorodAPI | None = None
 
         self.entry: ConfigEntry | None = None
         self.access_token: str | None = None
@@ -63,6 +66,17 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
         # Prepared entry payload to be created after the final go2rtc decision
         self._entry_data: dict[str, Any] | None = None
+
+    @property
+    def api(self) -> ElektronnyGorodAPI:
+        """Lazy-init API клиента после того, как HA установил self.hass.
+
+        Создаётся при первом обращении в любом step (например, async_step_user).
+        См. ADR-0008.
+        """
+        if self._api is None:
+            self._api = ElektronnyGorodAPI(self.hass, self.user_agent)
+        return self._api
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Collect phone or access token and start the authentication flow."""

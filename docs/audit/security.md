@@ -89,10 +89,9 @@ Quality gates:
 
 ### S-05. Per-request `ClientSession` без `async_get_clientsession`
 
-- **Файл:** [`http.py:56`](../../custom_components/elektronny_gorod/http.py#L56)
-- **Severity:** P0 (Reliability / Performance, не утечка, но кросс-разрез)
-- **Impact:** каждый запрос — новый TLS handshake, отсутствует общий pool HA, рост сокетов в TIME_WAIT, медленные ответы.
-- **Fix:** прокинуть `hass` в `HTTP.__init__` и использовать `async_get_clientsession(hass)`.
+- **Status:** ✅ **RESOLVED** в ветке `feat/shared-client-session` (ADR-0008). `HTTP.__init__(hass, ...)` + `async_get_clientsession(hass)` в `__request`. См. [audit A-05](project-audit.md).
+- **Severity:** P0 (Reliability / Performance)
+- **Original Impact:** каждый запрос — новый TLS handshake, отсутствовал общий pool HA, рост сокетов в TIME_WAIT, медленные ответы.
 
 ## P1 — важные
 
