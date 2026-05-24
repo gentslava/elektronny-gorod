@@ -102,6 +102,11 @@
       "balance": {
         "name": "Account balance"
       }
+    },
+    "lock": {
+      "lock": {
+        "name": "Lock"
+      }
     }
   }
 }

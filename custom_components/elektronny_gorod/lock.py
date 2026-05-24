@@ -47,12 +47,16 @@ class ElektronnyGorodLock(
 
     Slice 3c (Bronze polish):
     - Stable `unique_id` без `name` (см. `entity_migration.lock_unique_id`, A-12).
-    - `_attr_has_entity_name = True` + `_attr_name = None`: lock — самостоятельный
-      device, имя берётся из `device_info.name` (приходит из API).
+    - `_attr_has_entity_name = True` + `_attr_translation_key = "lock"`:
+      entity-имя из translations («Замок» / «Lock»). Device.name = entrance.name
+      (например «Калитка 1»). В UI получается «Калитка 1 Замок».
+    - `device_info.identifiers = (DOMAIN, f"entrance_{place}_{ac}_{eid|main}")` —
+      общий с intercom-camera того же entrance (см. api-reference §Access
+      controls — каждая entrance имеет свою `externalCameraId`).
     """
 
     _attr_has_entity_name = True
-    _attr_name = None
+    _attr_translation_key = "lock"
 
     def __init__(
         self,
@@ -71,8 +75,16 @@ class ElektronnyGorodLock(
         self._attr_unique_id = lock_unique_id(
             self._place_id, self._access_control_id, self._entrance_id
         )
+        # Device per entrance: общий с intercom-camera того же entrance.
+        # entrance.externalCameraId — первичный источник связи camera↔lock
+        # (см. api-reference §Access controls). На уровне access_control в API
+        # бывают рассогласования; entrance — точнее.
+        device_uid = (
+            f"entrance_{self._place_id}_{self._access_control_id}_"
+            f"{self._entrance_id or 'main'}"
+        )
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, self._attr_unique_id)},
+            identifiers={(DOMAIN, device_uid)},
             name=self._name,
             manufacturer="Электронный город",
             model="Intercom",

@@ -196,17 +196,51 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _collect_cameras_for_place(self, place_id: str) -> list[dict[str, Any]]:
         """Камеры одного place — три источника (access_controls + public + cameras).
 
-        Раньше дубликат логики был в `get_cameras_info` и `update_camera_state`
-        (audit A-17). Теперь один helper.
+        ⚠️ **Структура API** (см. api-reference §Access controls):
+        `externalCameraId` существует на ДВУХ уровнях:
+        - `access_control.externalCameraId` — общая камера домофона;
+        - `access_control.entrances[*].externalCameraId` — камера конкретного
+          entrance (подъезд/калитка). Это **разные** камеры — у каждой entrance
+          обычно своя.
+
+        Поэтому для intercom-камер группировка идёт **по entrance**, не по ac.
+        Coordinator передаёт `place_id` + `access_control_id` + `entrance_id`
+        в camera dict — entity-слой делает device identifier
+        `entrance_{place}_{ac}_{entrance_id|main}`, общий с lock того же entrance.
+
+        Public/place-cameras остаются standalone (без этих полей).
         """
         cameras: list[dict[str, Any]] = []
 
-        # 1. Access controls (домофоны с externalCameraId).
+        # 1. Access controls (домофоны).
         access_controls = await self._api.query_access_controls(place_id)
         for ac in access_controls:
-            if not ac.get("externalCameraId"):
-                continue
-            cameras.append({"id": ac.get("externalCameraId"), "name": ac.get("name")})
+            ac_id = ac.get("id")
+            entrances = ac.get("entrances") or []
+            if entrances:
+                # Каждая entrance со своим externalCameraId → отдельная intercom-камера.
+                for entrance in entrances:
+                    eid = entrance.get("externalCameraId")
+                    if not eid:
+                        continue
+                    cameras.append({
+                        "id": eid,
+                        "name": entrance.get("name"),
+                        "place_id": place_id,
+                        "access_control_id": ac_id,
+                        "entrance_id": entrance.get("id"),
+                    })
+            else:
+                # AC без entrances — сам по себе door. Используем ac.externalCameraId.
+                cid = ac.get("externalCameraId")
+                if cid:
+                    cameras.append({
+                        "id": cid,
+                        "name": ac.get("name"),
+                        "place_id": place_id,
+                        "access_control_id": ac_id,
+                        "entrance_id": None,
+                    })
 
         # 2. Public cameras (дворовые).
         public_cameras = await self._api.query_public_cameras(place_id)
@@ -227,10 +261,17 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return cameras
 
     async def _collect_locks_for_place(self, place_id: str) -> list[dict[str, Any]]:
-        """Locks одного place (один per entrance, либо per AC если без entrances)."""
+        """Locks одного place (один per entrance, либо per AC если без entrances).
+
+        `name` — entrance.name (для UI entity, чтобы различать "Подъезд 1" /
+        "Калитка 2"). `ac_name` — имя access_control (физического домофона),
+        используется как `device_info.name` — общее для всех entrances + camera
+        этого домофона.
+        """
         locks: list[dict[str, Any]] = []
         access_controls = await self._api.query_access_controls(place_id)
         for ac in access_controls:
+            ac_name = ac.get("name")
             entrances = ac.get("entrances") or []
             if entrances:
                 for entrance in entrances:
@@ -239,6 +280,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "access_control_id": ac.get("id"),
                         "entrance_id": entrance.get("id"),
                         "name": entrance.get("name"),
+                        "ac_name": ac_name,
                         "openable": entrance.get("allowOpen"),
                     })
             else:
@@ -246,7 +288,8 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     "place_id": place_id,
                     "access_control_id": ac.get("id"),
                     "entrance_id": None,
-                    "name": ac.get("name"),
+                    "name": ac_name,
+                    "ac_name": ac_name,
                     "openable": ac.get("allowOpen"),
                 })
         return locks

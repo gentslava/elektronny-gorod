@@ -190,8 +190,11 @@ Response shape:
       "place": {
         "id": "number",                  // 🎯 place_id
         "address": {
-          "region", "city", "street", "house", "building", "apartment",
+          "index", "region", "district", "city", "locality", "street",
+          "house", "building", "apartment",
           "visibleAddress", "groupName": "string"
+          // ⚠️ это dict, не строка. Для UI используй visibleAddress.
+          // index/district/locality часто = null в наблюдаемых HAR.
         },
         "location": { "longitude", "latitude": "number" },
         "operatorId": "number",
@@ -231,10 +234,10 @@ Response shape:
       "operatorId": "number",
       "name": "string",
       "forpostGroupId": "string",
-      "forpostAccountId": "null|string",
-      "type": "string",
+      "forpostAccountId": "null|string",    // в наблюдаемых HAR — null
+      "type": "string",                     // observed: "SIP"
       "allowOpen": "boolean",
-      "openMethod": "string",
+      "openMethod": "string",               // observed: "ACCESS_CONTROL"
       "allowVideo": "boolean",              // ← мы не используем
       "allowCallMobile": "boolean",         // 🎯 ← связано с SIP
       "allowSlideshow": "boolean",
@@ -242,7 +245,7 @@ Response shape:
       "videoDownloadAvailable": "boolean",
       "timeZone": "number",
       "quota": "number",
-      "externalCameraId": "string",
+      "externalCameraId": "string",         // см. ⚠️ ниже
       "externalDeviceId": "null|string",
       "entrances": [
         {
@@ -252,13 +255,22 @@ Response shape:
           "allowOpen, openMethod, allowVideo, allowCallMobile,
            allowSlideshow, previewAvailable, videoDownloadAvailable": "...",
           "timeZone, quota": "number",
-          "externalCameraId": "string"
+          "externalCameraId": "string",     // 🎯 ПЕРВИЧНЫЙ — см. ⚠️ ниже
+          "externalDeviceId": "null|string" // в наблюдаемых HAR — null
         }
       ]
     }
   ]
 }
 ```
+
+⚠️ **`externalCameraId` существует на двух уровнях** (ac.* и entrances[*].*).
+Во всех наблюдаемых HAR (11 уникальных AC, по 1 entrance на AC) значения
+**совпадают**. Multi-entrance кейс не пойман — но schema допускает их различие,
+и пользовательский bug (camera показывает другую entrance) подтверждает, что
+**приоритет должен быть entrance-level**: маппить camera→entrance, не camera→ac.
+AC-level `externalCameraId` следует трактовать как shortcut для случая
+ac-без-entrances, либо вообще игнорировать.
 
 **У нас:** [`api.py:query_access_controls`](../../custom_components/elektronny_gorod/api.py#L188) — используем только id/name/allowOpen/entrances. Не используем `previewAvailable`, `allowVideo`, `allowCallMobile` — это потенциал для дополнительной функциональности (см. audit).
 

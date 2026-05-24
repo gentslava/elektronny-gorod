@@ -52,6 +52,7 @@
 
 - `async_migrate_entity_unique_ids` пропускает коллизии вместо падения с `ValueError`. Если у camera/lock накопилось несколько legacy записей в `entity_registry` (разные `name` за время) — все они мапятся в один stable UID. Мигрируется первая, остальные остаются orphan с warning в лог (пользователь удаляет вручную). Раньше ValueError ломал весь `async_setup_entry` → entity не создавались.
 - `manifest.json`: `integration_type` исправлен `hub` → `service`. Каждый entry представляет cloud-аккаунт оператора (как Spotify / Yandex.Station), а не локальный физический bridge — в UI карточки попадают в раздел «Сервисы», а не «Хабы».
+- **Группировка intercom по entrance** (HAR-verified). Каждая `entrance` access_control имеет свою `externalCameraId` (api-reference §Access controls). Camera + lock одной entrance → один device с identifier `entrance_{place}_{ac}_{eid|main}`. Раньше группировал по access_control — но `ac.externalCameraId` иногда расходится с `entrance.externalCameraId` в реальных установках, и пользователь видел чужую камеру в device. Coordinator теперь итерирует `entrances[]`, source camera_id = `entrance.externalCameraId`. AC-level используется только когда у access_control нет entrances. Lock entity: `_attr_translation_key="lock"` (раздел `entity.lock.lock.name` в strings + переводы «Замок» / «Lock»), device.name = entrance.name. Standalone камеры (городские / place_cameras) остаются отдельными devices.
 
 ### Documentation
 

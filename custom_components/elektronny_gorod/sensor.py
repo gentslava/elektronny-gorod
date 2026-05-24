@@ -74,16 +74,29 @@ class ElektronnyGorodBalanceSensor(
         )
 
     def _place_display_name(self) -> str:
-        """Достать читаемое имя места из coordinator.data.places."""
+        """Достать читаемое имя места из coordinator.data.places.
+
+        `place.address` от API оператора — это **dict** (regional structure),
+        не строка. DeviceInfo.name требует str; иначе HA молча отбрасывает
+        entity при регистрации в state machine. Поэтому достаём
+        `visibleAddress` (готовая строка) или собираем fallback.
+        """
         places = (self.coordinator.data or {}).get("places") or []
         for subscriber_place in places:
             place = subscriber_place.get("place") or {}
-            if place.get("id") == self._place_id:
-                return (
-                    place.get("address")
-                    or place.get("name")
-                    or f"Place {self._place_id}"
-                )
+            if place.get("id") != self._place_id:
+                continue
+            addr = place.get("address")
+            if isinstance(addr, dict):
+                visible = addr.get("visibleAddress")
+                if isinstance(visible, str) and visible:
+                    return visible
+            if isinstance(addr, str) and addr:
+                return addr
+            name = place.get("name")
+            if isinstance(name, str) and name:
+                return name
+            break
         return f"Place {self._place_id}"
 
     @property

@@ -139,17 +139,35 @@ class ElektronnyGorodCamera(
         self._id: str = camera_info.get("id") or ""
         self._name: str = camera_info.get("name") or self._id
 
-        LOGGER.debug("Camera init id=%s", self._id)
+        # Intercom-камеры (от entrances в access_controls) имеют place_id +
+        # access_control_id + entrance_id и разделяют device с lock того же
+        # entrance. Public/place-cameras без этих полей → standalone devices.
+        ac_id = camera_info.get("access_control_id")
+        place_id = camera_info.get("place_id")
+        entrance_id = camera_info.get("entrance_id")
+        is_intercom = bool(ac_id and place_id)
+
+        LOGGER.debug("Camera init id=%s intercom=%s", self._id, is_intercom)
 
         self._last_src: str | None = None
         self._image: bytes | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"camera_{self._id}")},
-            name=self._name,
-            manufacturer="Электронный город",
-            model="IP Camera",
-        )
+        if is_intercom:
+            device_uid = f"entrance_{place_id}_{ac_id}_{entrance_id or 'main'}"
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, device_uid)},
+                name=self._name,
+                manufacturer="Электронный город",
+                model="Intercom",
+                via_device=(DOMAIN, f"place_{place_id}"),
+            )
+        else:
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"camera_{self._id}")},
+                name=self._name,
+                manufacturer="Электронный город",
+                model="IP Camera",
+            )
 
         self._go2rtc_base_url = go2rtc_base_url
         self._go2rtc_rtsp_host = go2rtc_rtsp_host
