@@ -215,11 +215,38 @@ Response shape:
 
 ### `GET /api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens`
 
-UI-настройки экрана (порядок виджетов, что показывать).
+🎯 **Пользовательские настройки видимости** для экрана камер/домофонов в
+приложении оператора. Используется в [`api.py:query_screens_settings`](../../custom_components/elektronny_gorod/api.py).
 
-Response shape: `{ "screens": [strings] }`.
+Response shape:
+```json
+{
+  "screens": [
+    {
+      "type": "ACCESS_CONTROLS",
+      "entities": [                          // видимые
+        {"id": 5137, "type": "ACCESS_CONTROL_ENTRANCE", "order": 0},
+        ...
+      ],
+      "hidden": [                            // скрытые пользователем
+        {"id": 5138, "type": "ACCESS_CONTROL_ENTRANCE"}
+      ]
+    },
+    {
+      "type": "PUBLIC_CAMERAS",
+      "entities": [{"id": 5593590, "type": "PUBLIC_CAMERA", "order": 0}, ...],
+      "hidden":   [{"id": 5593568, "type": "PUBLIC_CAMERA"}, ...]
+    }
+  ]
+}
+```
 
-**У нас не реализован** — нерелевантно для HA (это UI-нагрузка приложения).
+Если пользователь не настраивал — возвращается `{}` (пустой объект).
+
+**Использование в интеграции:** `hidden` IDs прокидываются в camera/lock
+dicts через флаг `hidden`. Entity для них получает
+`_attr_entity_registry_enabled_default = False` — новые установки уважают
+пользовательский выбор. Existing entities сохраняют выбор юзера в HA.
 
 ## Access controls (домофоны)
 

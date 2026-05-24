@@ -151,7 +151,13 @@ class ElektronnyGorodCamera(
         source = camera_info.get("source") or "public"  # fallback
         is_intercom = source == "intercom" and bool(ac_id and place_id)
 
-        LOGGER.debug("Camera init id=%s source=%s", self._id, source)
+        # `hidden` приходит из user app settings (/settings/screens). Для НОВЫХ
+        # entity registry-записей задаёт enabled_default=False; existing entities
+        # сохраняют свой пользовательский выбор.
+        self._attr_entity_registry_enabled_default = not camera_info.get("hidden", False)
+
+        LOGGER.debug("Camera init id=%s source=%s hidden=%s",
+                     self._id, source, camera_info.get("hidden"))
 
         self._last_src: str | None = None
         self._image: bytes | None = None
@@ -167,7 +173,10 @@ class ElektronnyGorodCamera(
                 via_device=(DOMAIN, f"place_{place_id}"),
             )
         else:
-            # Public (городские) vs Place (внутренние) — разный model + area.
+            # source="place" — личные подписочные камеры из /rest/v1/.../cameras
+            # (юзер их купил отдельно). source="public" — всё из
+            # /rest/v2/.../public/cameras (общедомовые + городские, API не
+            # разделяет; juzер может скрыть конкретные через app — см. `hidden`).
             if source == "place":
                 model = "Indoor Camera"
                 area = AREA_INDOOR_CAM

@@ -68,6 +68,9 @@ class ElektronnyGorodLock(
         self._access_control_id = lock_info["access_control_id"]
         self._entrance_id = lock_info["entrance_id"]
         self._name: str = lock_info["name"]
+        # User app preference: если entrance скрыт в /settings/screens —
+        # entity по умолчанию disabled (только для НОВЫХ registry-записей).
+        self._attr_entity_registry_enabled_default = not lock_info.get("hidden", False)
         # Synthetic state — управляется async_unlock + async_call_later.
         self._state: LockState = LockState.LOCKED
         # Cancel-handle для запланированного reset (если есть).
