@@ -1,8 +1,11 @@
 # ADR-0002: Переход на CoordinatorEntity + update_interval
 
-- **Status:** proposed
-- **Date:** 2026-05-22
+- **Status:** accepted
+- **Date:** 2026-05-22 (accepted 2026-05-24)
 - **Owner:** Architecture Agent
+
+> Реализация поэтапная: **slice 3a** (Этап 3) — coordinator сам (`update_interval`,
+> `_async_update_data` → dict). **Slice 3b** — entities наследуют CoordinatorEntity.
 
 ## Context
 

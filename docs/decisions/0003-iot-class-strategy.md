@@ -1,8 +1,11 @@
 # ADR-0003: Стратегия `iot_class` и polling
 
-- **Status:** proposed
-- **Date:** 2026-05-22
+- **Status:** accepted
+- **Date:** 2026-05-22 (accepted 2026-05-24)
 - **Owner:** HA Expert Agent
+
+> Реализован в slice 3a (Этап 3): `update_interval=timedelta(minutes=5)`.
+> Значение тюнится в slice 3e на основе rate-limit-наблюдений.
 
 ## Context
 

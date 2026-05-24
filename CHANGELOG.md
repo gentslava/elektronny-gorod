@@ -30,6 +30,7 @@
 - `import base64` поднят на top of file в `camera.py` (был внутри метода) ([A-43](docs/audit/project-audit.md)).
 - Заменён `f"..."`-форматирование на `%`-форматирование в `LOGGER` вызовах (`lock.py`, `sensor.py`, `coordinator.py`).
 - **HTTP: shared `ClientSession`** через HA-стандартный `async_get_clientsession(hass)`. `HTTP.__init__` и `ElektronnyGorodAPI.__init__` принимают `hass`. Closes [A-05](docs/audit/project-audit.md) / [S-05](docs/audit/security.md). См. [ADR-0008](docs/decisions/0008-shared-client-session.md). Эффект: экономия TLS-handshake на каждом запросе, общий pool с HA-core, нет утечки сокетов в TIME_WAIT.
+- **Coordinator pattern: реальный polling** ([ADR-0002](docs/decisions/0002-coordinator-pattern.md), [ADR-0003](docs/decisions/0003-iot-class-strategy.md)). `DataUpdateCoordinator` теперь имеет `update_interval=timedelta(minutes=5)` и `_async_update_data` за один тик собирает `{places, balances, cameras, locks}` параллельно через `asyncio.gather`. Entity-методы (`get_*_info`, `update_*_state`) превращены в shims над `self.data` (вместо отдельных HTTP-запросов). Closes [A-08](docs/audit/project-audit.md), [A-16](docs/audit/project-audit.md) (`async_unsubscribe` из unload), [A-17](docs/audit/project-audit.md) (дубликат сбора камер), [A-18](docs/audit/project-audit.md) (мёртвый `available_sections`). Partially closes [A-44](docs/audit/project-audit.md) (camera double-request). Entities полностью на `CoordinatorEntity` перейдут в slice 3b.
 
 ### Removed
 

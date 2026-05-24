@@ -37,6 +37,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # HA-core гарантированно вызовет эти cleanup-функции на unload entry,
+    # независимо от успешности platform unload. См. audit A-16.
+    entry.async_on_unload(coordinator.async_unsubscribe)
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -87,7 +90,13 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
+    """Unload a config entry.
+
+    Cleanup-функции coordinator-а (dispatcher listener, options listener)
+    зарегистрированы через `entry.async_on_unload` в `async_setup_entry` —
+    HA-core вызовет их автоматически независимо от исхода platform unload
+    (см. audit A-16).
+    """
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
 

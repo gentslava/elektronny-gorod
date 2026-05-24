@@ -1,6 +1,30 @@
+"""DataUpdateCoordinator для Elektronny Gorod.
+
+См. ADR-0002 (CoordinatorEntity + update_interval) и ADR-0003 (iot_class).
+
+Slice 3a (текущий PR):
+- `update_interval=timedelta(minutes=5)`.
+- `_async_update_data` собирает все runtime-данные за один тик и возвращает
+  dict `{places, balances, cameras, locks}`. HA-core кэширует это в
+  `coordinator.data`.
+- Старые методы (`get_*_info`, `update_*_state`) сохранены как shims над
+  `self.data` — entities продолжают работать через них без изменений.
+- Snapshot / stream / open_lock — on-demand actions (не data).
+
+Slice 3b (будущий PR):
+- Entities наследуют `CoordinatorEntity`, читают `self.coordinator.data` напрямую.
+- Старые shim-методы удалить.
+
+⚠️ Concurrency: `self._api.http.user_agent.place_id` — shared state, которое
+читается в момент построения HTTP-headers (см. `mirror-app-behavior` memory:
+UA — load-bearing fingerprint). Поэтому ВЕСЬ refresh идёт **последовательно**
+по places. Race-free; параллелизация — отдельная задача, требующая
+рефакторинга `HTTP` (передавать `place_id` per-request, не через state).
+"""
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from datetime import timedelta
 import json
 from typing import Any
 
@@ -20,12 +44,14 @@ from .const import (
     DOMAIN,
     LOGGER,
 )
-from .helpers import find, dedupe_by_id
+from .helpers import dedupe_by_id, find
 from .user_agent import UserAgent
 
+UPDATE_INTERVAL = timedelta(minutes=5)
 
-class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
-    """Coordinator to fetch Elektronny Gorod data."""
+
+class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
+    """Coordinator: периодически опрашивает API, кэширует в self.data."""
 
     def __init__(self, hass: HomeAssistant, *, entry: ConfigEntry) -> None:
         """Initialize coordinator."""
@@ -40,86 +66,268 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             operator=str(entry.data[CONF_OPERATOR_ID]),
         )
 
-        self._subscriber_places: list[dict[str, Any]] = []
-
         LOGGER.info("Integration loading entry %s", entry.entry_id)
 
-        # Unsubscribe callback for dispatcher listener (called on unload)
+        # Dispatcher listener (для будущих фич; сейчас no-op).
         self._unsub_notifications: Callable[[], None] = async_dispatcher_connect(
             hass,
             persistent_notification.SIGNAL_PERSISTENT_NOTIFICATIONS_UPDATED,
             self._notification_dismiss_listener,
         )
 
-        super().__init__(hass, LOGGER, name=DOMAIN)
+        super().__init__(
+            hass,
+            LOGGER,
+            name=DOMAIN,
+            update_interval=UPDATE_INTERVAL,
+        )
 
     @callback
     def _notification_dismiss_listener(self, _type: Any, _data: Any) -> None:
-        """Handle HA persistent notification updates (optional hook)."""
+        """Hook для HA persistent notifications (placeholder)."""
         return
 
-    async def _async_update_data(self) -> None:
-        """Fetch initial data once when the integration is set up."""
+    # ------------------------------------------------------------------ #
+    # Periodic refresh (`_async_update_data`)                            #
+    # ------------------------------------------------------------------ #
+
+    async def _async_update_data(self) -> dict[str, Any]:
+        """Обновить весь снапшот данных за один тик.
+
+        Возвращает dict:
+            {
+                "places":   list[dict],          # subscriber places
+                "balances": list[dict],          # per-place balance info
+                "cameras":  list[dict],          # уникальные камеры (по id)
+                "locks":    list[dict],          # по entrance (или AC, если нет entrances)
+            }
+
+        Стратегия ошибок:
+        - Если `query_places` упал — поднимаем `UpdateFailed` (без places никого
+          не построить).
+        - Per-place sub-задачи (balance/cameras/locks) ловятся индивидуально;
+          partial data допустима. Логируется warning-ом, не tracebackом, чтобы
+          не спамить лог при стабильном per-place failure.
+
+        ⚠️ Race-safety: serial по places (см. module docstring).
+        """
         try:
-            LOGGER.info("Integration starting")
-            self._subscriber_places = await self._api.query_places()
-        except Exception as ex:
-            LOGGER.exception("Integration start failed")
-            raise UpdateFailed(ex) from ex
+            places = await self._api.query_places()
+        except Exception as ex:  # noqa: BLE001
+            LOGGER.exception("Failed to load subscriber places")
+            raise UpdateFailed(f"places: {ex}") from ex
 
-    def async_unsubscribe(self) -> None:
-        """Unsubscribe internal listeners (called from async_unload_entry)."""
-        if hasattr(self, "_unsub_notifications") and callable(self._unsub_notifications):
-            self._unsub_notifications()
+        if not places:
+            LOGGER.warning("No subscriber places returned by API")
+            return {"places": [], "balances": [], "cameras": [], "locks": []}
 
-    async def get_cameras_info(self) -> list[dict[str, Any]]:
-        """Fetch cameras list."""
-        LOGGER.info("Getting cameras info")
-
+        balances: list[dict[str, Any]] = []
         cameras: list[dict[str, Any]] = []
+        locks: list[dict[str, Any]] = []
 
-        for subscriber_place in self._subscriber_places:
+        for _, place_id in self._iter_place_ids(places):
+            # Установка `place_id` в shared UA — критично сделать ДО любого
+            # запроса для этого place. Поскольку refresh serial — race нет.
+            self._api.http.user_agent.place_id = place_id
+
+            try:
+                balance = await self._fetch_balance(place_id)
+            except Exception as ex:  # noqa: BLE001
+                LOGGER.warning("Balance fetch failed for place_id=%s: %s", place_id, ex)
+            else:
+                if balance:
+                    balances.append(balance)
+
+            try:
+                cameras.extend(await self._collect_cameras_for_place(place_id))
+            except Exception as ex:  # noqa: BLE001
+                LOGGER.warning("Cameras fetch failed for place_id=%s: %s", place_id, ex)
+
+            try:
+                locks.extend(await self._collect_locks_for_place(place_id))
+            except Exception as ex:  # noqa: BLE001
+                LOGGER.warning("Locks fetch failed for place_id=%s: %s", place_id, ex)
+
+        cameras = dedupe_by_id(cameras) if cameras else []
+
+        LOGGER.debug(
+            "Coordinator refresh: %d places, %d balances, %d cameras, %d locks",
+            len(places), len(balances), len(cameras), len(locks),
+        )
+
+        return {
+            "places": places,
+            "balances": balances,
+            "cameras": cameras,
+            "locks": locks,
+        }
+
+    @staticmethod
+    def _iter_place_ids(
+        places: list[dict[str, Any]],
+    ) -> Iterator[tuple[dict[str, Any], str]]:
+        """Yield `(subscriber_place, place_id)` для каждого валидного place."""
+        for subscriber_place in places:
             place = subscriber_place.get("place") or {}
             place_id = place.get("id")
             if not place_id:
                 continue
+            yield subscriber_place, place_id
 
-            self._api.http.user_agent.place_id = place_id
-        
-            access_controls = await self._api.query_access_controls(place_id)
-            for access_control in access_controls:
-                if not access_control.get("externalCameraId"):
-                    continue
+    # ------------------------------------------------------------------ #
+    # Per-place collectors (вызываются сериально из `_async_update_data`)#
+    # ------------------------------------------------------------------ #
 
-                camera = {
-                    "id": access_control.get("externalCameraId"),
-                    "name": access_control.get("name"),
-                }
-                cameras.append(camera)
+    async def _fetch_balance(self, place_id: str) -> dict[str, Any] | None:
+        """Балансовая запись для одного place."""
+        finance = await self._api.query_balance(place_id)
+        if not finance:
+            return None
+        return {
+            "place_id": place_id,
+            "balance": finance.get("balance"),
+            "block_type": finance.get("blockType"),
+            "blocked": finance.get("blocked"),
+            "payment_date": finance.get("targetDate"),
+            "payment_sum": finance.get("amountSum"),
+            "payment_link": finance.get("paymentLink"),
+        }
 
-            available_public_cameras = await self._api.query_public_cameras(place_id)
-            for public_camera in available_public_cameras:
-                camera = {
-                    "id": public_camera.get("externalCameraId") or public_camera.get("id"),
-                    "name": public_camera.get("name"),
-                }
-                cameras.append(camera)
+    async def _collect_cameras_for_place(self, place_id: str) -> list[dict[str, Any]]:
+        """Камеры одного place — три источника (access_controls + public + cameras).
 
-            available_sections = await self._api.query_sections(place_id)
+        Раньше дубликат логики был в `get_cameras_info` и `update_camera_state`
+        (audit A-17). Теперь один helper.
+        """
+        cameras: list[dict[str, Any]] = []
 
-            available_cameras = await self._api.query_cameras(place_id)
-            for available_camera in available_cameras:
-                camera = {
-                    "id": available_camera.get("externalCameraId") or available_camera.get("id"),
-                    "name": available_camera.get("name"),
-                }
-                cameras.append(camera)
+        # 1. Access controls (домофоны с externalCameraId).
+        access_controls = await self._api.query_access_controls(place_id)
+        for ac in access_controls:
+            if not ac.get("externalCameraId"):
+                continue
+            cameras.append({"id": ac.get("externalCameraId"), "name": ac.get("name")})
 
-        return dedupe_by_id(cameras) if cameras else []
+        # 2. Public cameras (дворовые).
+        public_cameras = await self._api.query_public_cameras(place_id)
+        for cam in public_cameras:
+            cameras.append({
+                "id": cam.get("externalCameraId") or cam.get("id"),
+                "name": cam.get("name"),
+            })
+
+        # 3. Place-cameras.
+        place_cameras = await self._api.query_cameras(place_id)
+        for cam in place_cameras:
+            cameras.append({
+                "id": cam.get("externalCameraId") or cam.get("id"),
+                "name": cam.get("name"),
+            })
+
+        return cameras
+
+    async def _collect_locks_for_place(self, place_id: str) -> list[dict[str, Any]]:
+        """Locks одного place (один per entrance, либо per AC если без entrances)."""
+        locks: list[dict[str, Any]] = []
+        access_controls = await self._api.query_access_controls(place_id)
+        for ac in access_controls:
+            entrances = ac.get("entrances") or []
+            if entrances:
+                for entrance in entrances:
+                    locks.append({
+                        "place_id": place_id,
+                        "access_control_id": ac.get("id"),
+                        "entrance_id": entrance.get("id"),
+                        "name": entrance.get("name"),
+                        "openable": entrance.get("allowOpen"),
+                    })
+            else:
+                locks.append({
+                    "place_id": place_id,
+                    "access_control_id": ac.get("id"),
+                    "entrance_id": None,
+                    "name": ac.get("name"),
+                    "openable": ac.get("allowOpen"),
+                })
+        return locks
+
+    # ------------------------------------------------------------------ #
+    # Lifecycle                                                          #
+    # ------------------------------------------------------------------ #
+
+    def async_unsubscribe(self) -> None:
+        """Отписаться от dispatcher listener. Вызывается из async_unload_entry."""
+        self._unsub_notifications()
+
+    # ------------------------------------------------------------------ #
+    # Backwards-compat shims                                             #
+    # ------------------------------------------------------------------ #
+    # TODO(slice-3b): удалить, когда entities перейдут на CoordinatorEntity
+    # и будут читать `self.coordinator.data` напрямую.
+
+    async def get_cameras_info(self) -> list[dict[str, Any]]:
+        """Список камер из последнего refresh (shim над self.data)."""
+        return list((self.data or {}).get("cameras") or [])
+
+    async def get_locks_info(self) -> list[dict[str, Any]]:
+        """Список locks из последнего refresh."""
+        return list((self.data or {}).get("locks") or [])
+
+    async def get_balances_info(self) -> list[dict[str, Any]]:
+        """Список балансов из последнего refresh."""
+        return list((self.data or {}).get("balances") or [])
+
+    async def update_camera_state(self, camera_id: str) -> dict[str, Any]:
+        """Найти camera в кэше. Не делает HTTP — данные обновляются coordinator-тиком."""
+        if self.data is None:
+            raise UpdateFailed("Coordinator not initialized")
+        camera = find(self.data.get("cameras") or [], lambda c: c.get("id") == camera_id)
+        if camera is None:
+            raise UpdateFailed(f"Camera {camera_id} not found in last refresh")
+        return camera
+
+    async def update_lock_state(
+        self,
+        place_id: str,
+        access_control_id: str,
+        entrance_id: str | None,
+    ) -> dict[str, Any]:
+        """Найти lock в кэше."""
+        if self.data is None:
+            raise UpdateFailed("Coordinator not initialized")
+        lock = find(
+            self.data.get("locks") or [],
+            lambda lk: (
+                lk.get("place_id") == place_id
+                and lk.get("access_control_id") == access_control_id
+                and lk.get("entrance_id") == entrance_id
+            ),
+        )
+        if lock is None:
+            raise UpdateFailed(
+                f"Lock {place_id}/{access_control_id}/{entrance_id} not found"
+            )
+        return lock
+
+    async def update_balance_state(self, place_id: str) -> dict[str, Any]:
+        """Найти balance в кэше."""
+        if self.data is None:
+            raise UpdateFailed("Coordinator not initialized")
+        balance = find(
+            self.data.get("balances") or [],
+            lambda b: b.get("place_id") == place_id,
+        )
+        if balance is None:
+            raise UpdateFailed(f"Balance for place_id={place_id} not found")
+        return balance
+
+    # ------------------------------------------------------------------ #
+    # On-demand actions (не кэшируются в self.data)                      #
+    # ------------------------------------------------------------------ #
 
     async def get_camera_stream(self, camera_id: str) -> str | None:
-        """Fetch a single-use camera stream URL."""
-        LOGGER.info("Getting camera stream")
+        """Fetch a single-use camera stream URL. On-demand action."""
+        LOGGER.debug("Fetching camera %s stream URL", camera_id)
         return await self._api.query_camera_stream(camera_id)
 
     async def get_camera_snapshot(
@@ -128,194 +336,21 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         width: int | None,
         height: int | None,
     ) -> bytes:
-        """Fetch camera snapshot bytes."""
+        """Fetch camera snapshot bytes. On-demand action."""
         w = width or DEFAULT_SNAPSHOT_WIDTH
         h = height or round(w / 16 * 9)
-
-        LOGGER.info("Getting camera %s snapshot with size %sx%s", camera_id, w, h)
+        LOGGER.debug("Fetching camera %s snapshot %sx%s", camera_id, w, h)
         return await self._api.query_camera_snapshot(camera_id, w, h)
 
-    async def update_camera_state(self, camera_id: str) -> dict[str, Any]:
-        """Refresh and return camera state for a given camera."""
-        LOGGER.info("Updating camera %s state", camera_id)
-
-        cameras: list[dict[str, Any]] = []
-
-        for subscriber_place in self._subscriber_places:
-            place = subscriber_place.get("place") or {}
-            place_id = place.get("id")
-            if not place_id:
-                continue
-
-            self._api.http.user_agent.place_id = place_id
-        
-            access_controls = await self._api.query_access_controls(place_id)
-            for access_control in access_controls:
-                if not access_control.get("externalCameraId"):
-                    continue
-
-                camera = {
-                    "id": access_control.get("externalCameraId"),
-                    "name": access_control.get("name"),
-                }
-                cameras.append(camera)
-
-            available_public_cameras = await self._api.query_public_cameras(place_id)
-            for public_camera in available_public_cameras:
-                camera = {
-                    "id": public_camera.get("externalCameraId") or public_camera.get("id"),
-                    "name": public_camera.get("name"),
-                }
-                cameras.append(camera)
-
-            available_sections = await self._api.query_sections(place_id)
-
-            available_cameras = await self._api.query_cameras(place_id)
-            for available_camera in available_cameras:
-                camera = {
-                    "id": available_camera.get("externalCameraId") or available_camera.get("id"),
-                    "name": available_camera.get("name"),
-                }
-                cameras.append(camera)
-
-        camera = find(cameras, lambda c: c.get("id") == camera_id)
-
-        if camera is None:
-            raise UpdateFailed(f"Camera {camera_id} not found")
-
-        return camera
-
-    async def get_locks_info(self) -> list[dict[str, Any]]:
-        """Build locks list from subscriber places/access controls."""
-        LOGGER.info("Getting locks info")
-
-        locks: list[dict[str, Any]] = []
-
-        for subscriber_place in self._subscriber_places:
-            place = subscriber_place.get("place") or {}
-            place_id = place.get("id")
-            if not place_id:
-                continue
-
-            self._api.http.user_agent.place_id = place_id
-            access_controls = await self._api.query_access_controls(place_id)
-
-            for access_control in access_controls:
-                entrances = access_control.get("entrances") or []
-
-                for entrance in entrances:
-                    locks.append({
-                        "place_id": place_id,
-                        "access_control_id": access_control.get("id"),
-                        "entrance_id": entrance.get("id"),
-                        "name": entrance.get("name"),
-                        "openable": entrance.get("allowOpen"),
-                    })
-
-                if not entrances:
-                    locks.append({
-                        "place_id": place_id,
-                        "access_control_id": access_control.get("id"),
-                        "entrance_id": None,
-                        "name": access_control.get("name"),
-                        "openable": access_control.get("allowOpen"),
-                    })
-        return locks
-
-    async def update_lock_state(
+    async def open_lock(
         self,
         place_id: str,
         access_control_id: str,
         entrance_id: str | None,
-    ) -> dict[str, Any]:
-        """Refresh and return lock state."""
-        LOGGER.info("Updating lock %s_%s_%s state", place_id, access_control_id, entrance_id)
-
-        access_controls = await self._api.query_access_controls(place_id)
-        access_control = find(
-            access_controls,
-            lambda ac: ac.get("id") == access_control_id,
-        )
-        if access_control is None:
-            raise UpdateFailed(f"Access control {access_control_id} not found")
-
-        if entrance_id is None:
-            return {
-                "place_id": place_id,
-                "access_control_id": access_control.get("id"),
-                "entrance_id": None,
-                "name": access_control.get("name"),
-                "openable": access_control.get("allowOpen"),
-            }
-
-        entrances = access_control.get("entrances") or []
-
-        entrance = find(entrances, lambda e: e.get("id") == entrance_id)
-        if entrance is None:
-            raise UpdateFailed(f"Entrance {entrance_id} not found")
-
-        return {
-            "place_id": place_id,
-            "access_control_id": access_control.get("id"),
-            "entrance_id": entrance.get("id"),
-            "name": entrance.get("name"),
-            "openable": entrance.get("allowOpen"),
-        }
-
-    async def open_lock(self, place_id: str, access_control_id: str, entrance_id: str | None) -> None:
-        """Send open lock command."""
+    ) -> None:
+        """Send open lock command. On-demand action."""
         LOGGER.info(
-            "Opening lock place_id=%s, access_control_id=%s, entrance_id=%s",
-            place_id,
-            access_control_id,
-            entrance_id,
+            "Opening lock place_id=%s ac=%s entrance=%s",
+            place_id, access_control_id, entrance_id,
         )
         await self._api.open_lock(place_id, access_control_id, entrance_id)
-
-    async def get_balances_info(self) -> list[dict[str, Any]]:
-        """Fetch balances for user places."""
-        LOGGER.info("Getting balances info")
-
-        balances: list[dict[str, Any]] = []
-
-        for subscriber_place in self._subscriber_places:
-            place = subscriber_place.get("place") or {}
-            place_id = place.get("id")
-            if not place_id:
-                continue
-
-            self._api.http.user_agent.place_id = place_id
-            finance_data = await self._api.query_balance(place_id)
-            if not finance_data:
-                continue
-
-            balances.append({
-                "place_id": place_id,
-                "balance": finance_data.get("balance"),
-                "block_type": finance_data.get("blockType"),
-                "blocked": finance_data.get("blocked"),
-                "payment_date": finance_data.get("targetDate"),
-                "payment_sum": finance_data.get("amountSum"),
-                "payment_link": finance_data.get("paymentLink"),
-            })
-
-        return balances
-
-    async def update_balance_state(self, place_id: str) -> dict[str, Any]:
-        """Refresh and return a single balance state."""
-        LOGGER.info("Updating balance %s state", place_id)
-
-        self._api.http.user_agent.place_id = place_id
-        finance_data = await self._api.query_balance(place_id)
-        if not finance_data:
-            raise UpdateFailed(f"Finance data not found for place {place_id}")
-
-        return {
-            "place_id": place_id,
-            "balance": finance_data.get("balance"),
-            "block_type": finance_data.get("blockType"),
-            "blocked": finance_data.get("blocked"),
-            "payment_date": finance_data.get("targetDate"),
-            "payment_sum": finance_data.get("amountSum"),
-            "payment_link": finance_data.get("paymentLink"),
-        }
