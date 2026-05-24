@@ -16,12 +16,14 @@ from aiohttp import ClientError
 from homeassistant.components.lock import LockEntity, LockState
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, LOGGER
 from .coordinator import ElektronnyGorodUpdateCoordinator
+from .entity_migration import lock_unique_id
 
 LOCK_UNLOCK_DELAY = 5  # секунды cosmetic-UX «открыто»
 LOCK_JAMMED_DELAY = 2
@@ -41,7 +43,16 @@ async def async_setup_entry(
 class ElektronnyGorodLock(
     CoordinatorEntity[ElektronnyGorodUpdateCoordinator], LockEntity
 ):
-    """Lock entity (CoordinatorEntity)."""
+    """Lock entity (CoordinatorEntity).
+
+    Slice 3c (Bronze polish):
+    - Stable `unique_id` без `name` (см. `entity_migration.lock_unique_id`, A-12).
+    - `_attr_has_entity_name = True` + `_attr_name = None`: lock — самостоятельный
+      device, имя берётся из `device_info.name` (приходит из API).
+    """
+
+    _attr_has_entity_name = True
+    _attr_name = None
 
     def __init__(
         self,
@@ -57,18 +68,18 @@ class ElektronnyGorodLock(
         self._state: LockState = LockState.LOCKED
         # Cancel-handle для запланированного reset (если есть).
         self._cancel_reset = None
-        # TODO(slice-3c): убрать `_name` из unique_id (A-12 — stable id).
-        self._attr_unique_id = (
-            f"{self._place_id}_{self._access_control_id}_"
-            f"{self._entrance_id}_{self._name}"
+        self._attr_unique_id = lock_unique_id(
+            self._place_id, self._access_control_id, self._entrance_id
+        )
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, self._attr_unique_id)},
+            name=self._name,
+            manufacturer="Электронный город",
+            model="Intercom",
+            via_device=(DOMAIN, f"place_{self._place_id}"),
         )
 
         LOGGER.debug("Lock init for entrance_id=%s", self._entrance_id)
-
-    @property
-    def name(self) -> str:
-        """Return lock name."""
-        return self._name
 
     @property
     def _coordinator_lock_info(self) -> dict[str, Any] | None:
@@ -98,11 +109,14 @@ class ElektronnyGorodLock(
 
     @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Return the state attributes of the lock."""
+        """Return the state attributes of the lock.
+
+        Ключи — Title Case для обратной совместимости с пользовательскими
+        автоматизациями (A-30 → snake_case отложен в Итерацию 3).
+        """
         info = self._coordinator_lock_info
         if info is None:
             return None
-        # TODO(slice-3c): keys → snake_case (A-30).
         return {
             "Place ID": str(info.get("place_id")),
             "Access control ID": str(info.get("access_control_id")),

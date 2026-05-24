@@ -18,6 +18,7 @@ from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -106,9 +107,19 @@ async def async_setup_entry(
 class ElektronnyGorodCamera(
     CoordinatorEntity[ElektronnyGorodUpdateCoordinator], Camera
 ):
-    """Camera entity (CoordinatorEntity)."""
+    """Camera entity (CoordinatorEntity).
+
+    Slice 3c (Bronze polish):
+    - Стабильный `unique_id = f"{DOMAIN}_camera_{camera_id}"` (без `name`,
+      см. ADR-0002, A-12). Миграция старого формата `{id}_{name}` — в
+      `async_setup_entry` через `er.async_migrate_entries`.
+    - `_attr_has_entity_name = True` + `_attr_name = None`: camera как
+      самостоятельный device, имя берётся из `device_info.name`.
+    """
 
     _attr_supported_features = CameraEntityFeature.STREAM
+    _attr_has_entity_name = True
+    _attr_name = None
 
     def __init__(
         self,
@@ -132,8 +143,13 @@ class ElektronnyGorodCamera(
 
         self._last_src: str | None = None
         self._image: bytes | None = None
-        # TODO(slice-3c): убрать `_name` из unique_id (A-12 — stable id).
-        self._attr_unique_id = f"{self._id}_{self._name}"
+        self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"camera_{self._id}")},
+            name=self._name,
+            manufacturer="Электронный город",
+            model="IP Camera",
+        )
 
         self._go2rtc_base_url = go2rtc_base_url
         self._go2rtc_rtsp_host = go2rtc_rtsp_host
@@ -141,11 +157,6 @@ class ElektronnyGorodCamera(
         self._go2rtc_stream_name = f"eg_{self._id}"
         self._go2rtc_username = go2rtc_username
         self._go2rtc_password = go2rtc_password
-
-    @property
-    def name(self) -> str:
-        """Return camera name."""
-        return self._name
 
     @property
     def _coordinator_camera_info(self) -> dict[str, Any] | None:

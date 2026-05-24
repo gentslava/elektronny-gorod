@@ -20,6 +20,7 @@ from .const import (
     DEFAULT_GO2RTC_RTSP_HOST,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
+from .entity_migration import async_migrate_entity_unique_ids
 from .user_agent import UserAgent
 
 PLATFORMS: list[Platform] = [
@@ -36,6 +37,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    # Slice 3c (A-12): legacy unique_id содержали динамический `name`.
+    # Мигрируем ДО forward_entry_setups, чтобы entity повторно регистрировались
+    # с новыми UID без появления дублей.
+    await async_migrate_entity_unique_ids(hass, entry, coordinator.data or {})
 
     # HA-core гарантированно вызовет эти cleanup-функции на unload entry,
     # независимо от успешности platform unload. См. audit A-16.

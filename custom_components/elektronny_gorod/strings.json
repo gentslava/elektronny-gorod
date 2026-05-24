@@ -96,5 +96,12 @@
       "go2rtc_unreachable": "[%key:component::elektronny_gorod::common::go2rtc_unreachable%]",
       "go2rtc_streams_api_failed": "[%key:component::elektronny_gorod::common::go2rtc_streams_api_failed%]"
     }
+  },
+  "entity": {
+    "sensor": {
+      "balance": {
+        "name": "Account balance"
+      }
+    }
   }
 }
