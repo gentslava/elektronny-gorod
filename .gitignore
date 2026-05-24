@@ -50,6 +50,8 @@ research/api/.*.pid
 research/api/notes/
 research/api/private/
 research/apk/*.apk
+research/apk/*.xapk
+research/apk/*.apks
 research/scripts/.env
 research/scripts/.baseline-meta
 # Глобальные расширения — на случай если файлы окажутся вне research/
@@ -63,12 +65,16 @@ research/scripts/.baseline-meta
 *.pcapng
 *.cap
 *.apk
+*.xapk
+*.apks
 
 # Local dev artifacts
 .env
 .env.local
 local/
 tmp/
+# apk-mitm artifacts (создаётся в корне проекта при патче APK)
+logs/
 
 # HA / integration zip от release workflow (если случайно собран локально)
 custom_components/elektronny_gorod/elektronny_gorod.zip
