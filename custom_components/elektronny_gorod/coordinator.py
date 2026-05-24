@@ -44,7 +44,7 @@ from .const import (
     DOMAIN,
     LOGGER,
 )
-from .helpers import dedupe_by_id, find
+from .helpers import dedupe_by_id
 from .user_agent import UserAgent
 
 UPDATE_INTERVAL = timedelta(minutes=5)
@@ -258,68 +258,6 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     def async_unsubscribe(self) -> None:
         """Отписаться от dispatcher listener. Вызывается из async_unload_entry."""
         self._unsub_notifications()
-
-    # ------------------------------------------------------------------ #
-    # Backwards-compat shims                                             #
-    # ------------------------------------------------------------------ #
-    # TODO(slice-3b): удалить, когда entities перейдут на CoordinatorEntity
-    # и будут читать `self.coordinator.data` напрямую.
-
-    async def get_cameras_info(self) -> list[dict[str, Any]]:
-        """Список камер из последнего refresh (shim над self.data)."""
-        return list((self.data or {}).get("cameras") or [])
-
-    async def get_locks_info(self) -> list[dict[str, Any]]:
-        """Список locks из последнего refresh."""
-        return list((self.data or {}).get("locks") or [])
-
-    async def get_balances_info(self) -> list[dict[str, Any]]:
-        """Список балансов из последнего refresh."""
-        return list((self.data or {}).get("balances") or [])
-
-    async def update_camera_state(self, camera_id: str) -> dict[str, Any]:
-        """Найти camera в кэше. Не делает HTTP — данные обновляются coordinator-тиком."""
-        if self.data is None:
-            raise UpdateFailed("Coordinator not initialized")
-        camera = find(self.data.get("cameras") or [], lambda c: c.get("id") == camera_id)
-        if camera is None:
-            raise UpdateFailed(f"Camera {camera_id} not found in last refresh")
-        return camera
-
-    async def update_lock_state(
-        self,
-        place_id: str,
-        access_control_id: str,
-        entrance_id: str | None,
-    ) -> dict[str, Any]:
-        """Найти lock в кэше."""
-        if self.data is None:
-            raise UpdateFailed("Coordinator not initialized")
-        lock = find(
-            self.data.get("locks") or [],
-            lambda lk: (
-                lk.get("place_id") == place_id
-                and lk.get("access_control_id") == access_control_id
-                and lk.get("entrance_id") == entrance_id
-            ),
-        )
-        if lock is None:
-            raise UpdateFailed(
-                f"Lock {place_id}/{access_control_id}/{entrance_id} not found"
-            )
-        return lock
-
-    async def update_balance_state(self, place_id: str) -> dict[str, Any]:
-        """Найти balance в кэше."""
-        if self.data is None:
-            raise UpdateFailed("Coordinator not initialized")
-        balance = find(
-            self.data.get("balances") or [],
-            lambda b: b.get("place_id") == place_id,
-        )
-        if balance is None:
-            raise UpdateFailed(f"Balance for place_id={place_id} not found")
-        return balance
 
     # ------------------------------------------------------------------ #
     # On-demand actions (не кэшируются в self.data)                      #

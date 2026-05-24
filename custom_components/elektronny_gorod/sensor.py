@@ -1,9 +1,18 @@
+"""Balance sensor — CoordinatorEntity-based.
+
+См. ADR-0002. Slice 3b: entity использует coordinator.data напрямую через
+CoordinatorEntity._handle_coordinator_update. Старый async_update удалён.
+"""
+from __future__ import annotations
+
 from datetime import datetime
+from typing import Any
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, LOGGER
 from .coordinator import ElektronnyGorodUpdateCoordinator
@@ -17,75 +26,94 @@ async def async_setup_entry(
     """Set up Elektronny Gorod Balance Sensor based on a config entry."""
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    # Get balances info
-    balances_info = await coordinator.get_balances_info()
-
-    # Create balance sensor entities
+    balances = (coordinator.data or {}).get("balances") or []
     async_add_entities(
-        ElektronnyGorodBalanceSensor(coordinator, balance_info)
-        for balance_info in balances_info
+        ElektronnyGorodBalanceSensor(coordinator, balance_info["place_id"])
+        for balance_info in balances
     )
 
 
-class ElektronnyGorodBalanceSensor(SensorEntity):
-    """Representation of a balance sensor."""
+class ElektronnyGorodBalanceSensor(
+    CoordinatorEntity[ElektronnyGorodUpdateCoordinator], SensorEntity
+):
+    """Balance sensor (CoordinatorEntity)."""
+
+    _attr_icon = "mdi:cash-multiple"
+    _attr_name = "Баланс аккаунта"
 
     def __init__(
-        self, coordinator: ElektronnyGorodUpdateCoordinator, balance_info: dict
+        self,
+        coordinator: ElektronnyGorodUpdateCoordinator,
+        place_id: str,
     ) -> None:
         """Initialize the balance sensor."""
-        LOGGER.debug("ElektronnyGorodBalanceSensor init for place_id=%s", balance_info.get("place_id"))
-        super().__init__()
-        self._coordinator = coordinator
-        self._balance_info: dict = balance_info
-        self._balance = balance_info["balance"]
-        self._place_id = balance_info["place_id"]
-        self._attr_name = f"Баланс аккаунта"
-        self._attr_icon = "mdi:cash-multiple"
-        self._attr_unique_id = f"{DOMAIN}_{self._place_id}_balance"
+        super().__init__(coordinator)
+        LOGGER.debug("BalanceSensor init for place_id=%s", place_id)
+        self._place_id = place_id
+        self._attr_unique_id = f"{DOMAIN}_{place_id}_balance"
+
+    @property
+    def _balance_info(self) -> dict[str, Any] | None:
+        """Найти balance для нашего place_id в текущем coordinator.data."""
+        balances = (self.coordinator.data or {}).get("balances") or []
+        for entry in balances:
+            if entry.get("place_id") == self._place_id:
+                return entry
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Доступен, если coordinator.data содержит balance для нашего place."""
+        return super().available and self._balance_info is not None
 
     @property
     def native_value(self) -> float | None:
         """Return state of the sensor."""
-        if self._balance is not None:
-            return round(self._balance, 2)
-        return self._balance
+        info = self._balance_info
+        if info is None:
+            return None
+        balance = info.get("balance")
+        if balance is None:
+            return None
+        return round(balance, 2)
 
     @property
     def native_unit_of_measurement(self) -> str | None:
-        """Return unit of measurement the value is expressed in."""
-        if self._balance is None:
+        """Return unit of measurement."""
+        # TODO(slice-3c): заменить на CURRENCY_RUBLE (A-14).
+        if self.native_value is None:
             return None
         return "₽"
 
     @property
-    def extra_state_attributes(self):
-        """Return the state attributes of the lock."""
-        if self._balance_info is not None and isinstance(self._balance_info, dict):
-            payment_sum = self._balance_info.get("payment_sum")
-            amount_sum = None
-            if payment_sum is not None:
-                amount_sum = round(payment_sum, 2)
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Дополнительные атрибуты (payment info)."""
+        info = self._balance_info
+        if info is None:
+            return None
 
-            payment_date = self._balance_info.get("payment_date")
-            target_date = None
-            if payment_date is not None:
-                target_date = datetime.fromisoformat(payment_date).strftime("%d.%m.%Y, %H:%M:%S")
+        payment_sum = info.get("payment_sum")
+        amount_sum = round(payment_sum, 2) if payment_sum is not None else None
 
-            return {
-                "Amount sum": amount_sum,
-                "Target date": target_date,
-                "Payment link": self._balance_info.get("payment_link"),
-                "Blocked": self._balance_info.get("blocked"),
-            }
-        return None
+        payment_date = info.get("payment_date")
+        target_date = None
+        if payment_date is not None:
+            try:
+                target_date = datetime.fromisoformat(payment_date).strftime(
+                    "%d.%m.%Y, %H:%M:%S"
+                )
+            except (TypeError, ValueError):
+                target_date = payment_date
 
-    async def async_update(self) -> None:
-        """Fetch the latest balance from the API."""
-        try:
-            LOGGER.info("Fetching balance from Elektronny Gorod API")
-            balance_info = await self._coordinator.update_balance_state(self._place_id)
-            self._balance = balance_info["balance"]
-        except Exception:
-            LOGGER.exception("Failed to fetch balance for place_id=%s", self._place_id)
-            self._balance = None
+        # TODO(slice-3c): keys → snake_case (A-30).
+        return {
+            "Amount sum": amount_sum,
+            "Target date": target_date,
+            "Payment link": info.get("payment_link"),
+            "Blocked": info.get("blocked"),
+        }
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Coordinator обновился — нашу state читаем из coordinator.data в propertых."""
+        self.async_write_ha_state()
