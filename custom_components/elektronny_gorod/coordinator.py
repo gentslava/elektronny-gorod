@@ -33,6 +33,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
         user_agent.from_json(json.loads(entry.data[CONF_USER_AGENT]))
 
         self._api = ElektronnyGorodAPI(
+            hass,
             user_agent,
             access_token=entry.data[CONF_ACCESS_TOKEN],
             refresh_token=entry.data[CONF_REFRESH_TOKEN],

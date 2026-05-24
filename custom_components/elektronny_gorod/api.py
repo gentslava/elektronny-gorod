@@ -7,6 +7,8 @@ from typing import Any
 
 from aiohttp import ClientResponse
 
+from homeassistant.core import HomeAssistant
+
 from .http import HTTP
 from .user_agent import UserAgent
 
@@ -16,12 +18,14 @@ class ElektronnyGorodAPI:
 
     def __init__(
         self,
+        hass: HomeAssistant,
         user_agent: UserAgent,
         access_token: str | None = None,
         refresh_token: str | None = None,
         operator: str | None = None,
     ) -> None:
         self.http: HTTP = HTTP(
+            hass,
             user_agent,
             access_token,
             refresh_token,

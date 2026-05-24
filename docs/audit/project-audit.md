@@ -73,11 +73,9 @@ Quality gates:
 
 ### A-05. `ClientSession` per-request
 
+- **Status:** ✅ **RESOLVED** в ветке `feat/shared-client-session` (ADR-0008). `HTTP.__init__(hass, ...)` + `async_get_clientsession(hass)` в `__request`. `ElektronnyGorodAPI.__init__` принимает `hass`. `config_flow` lazy-init API через `@property`.
 - **Area:** Performance / HA-compat
-- **Evidence:** [`http.py:56`](../../custom_components/elektronny_gorod/http.py#L56)
-- **Impact:** новый TLS-handshake на каждый запрос; не использует общий pool HA; утечка сокетов.
-- **Recommended fix:** прокинуть `hass` в `HTTP.__init__`, использовать `homeassistant.helpers.aiohttp_client.async_get_clientsession(hass)`.
-- **First step:** изменить сигнатуру `HTTP.__init__` и cascading через `ElektronnyGorodAPI` и `ElektronnyGorodUpdateCoordinator`.
+- **Original Impact:** новый TLS-handshake на каждый запрос; не использовал общий pool HA; утечка сокетов.
 - **Owner agent:** Architecture.
 
 ### A-06. Bug в `update_camera_state`: поиск по `"ID"` вместо `"id"`
@@ -395,6 +393,14 @@ Quality gates:
 - **Impact:** требует APK reverse engineering для FCM project_id, sender_id, server_key. Юридически серая зона. **Не делать** в рамках HA-интеграции, если есть альтернативы через WS/SIP.
 - **Status:** оставляем как known endpoint в `api-reference.md`. Реализация не планируется.
 
+### A-55. Unread response body в `request_sms_code`
+
+- **Severity:** P2 (выявлен code-reviewer-ом во время review ветки `feat/shared-client-session`).
+- **Evidence:** [`api.py:request_sms_code`](../../custom_components/elektronny_gorod/api.py) (около строк 93-117) — после `await self.http.post(...)` метод просто `return` без чтения body. С прежним per-request `ClientSession` connection закрывался автоматически при exit `async with`. С shared session (после ADR-0008) — connection возвращается в pool только после consume body или GC.
+- **Impact:** под нагрузкой может удерживать connection в "in-use" состоянии дольше необходимого. Не блокер, но slightly менее эффективно.
+- **Recommended fix:** добавить `await response.read()` перед `return` либо использовать pattern `async with response:` для гарантированного освобождения connection. Сгруппировать с A-19/A-20 в одном PR.
+- **Target:** Итерация 3 Bronze (slice 3e, вместе с tighter exception handling).
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
@@ -405,7 +411,7 @@ Quality gates:
 |---|---|
 | A-01..A-05, A-43, A-45 | Итерация 1 (hotfix-релиз) |
 | A-06, A-07 | Итерация 1 |
-| A-08..A-14, A-16..A-21, A-23, A-24, A-44 | Итерация 2 |
+| A-08..A-14, A-16..A-21, A-23, A-24, A-44, A-55 | Итерация 2 |
 | A-15, A-22, A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | A-47, A-49, A-50 | Итерация 4 (real-time + push) — после доп. HAR-research |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
