@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -93,6 +94,21 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Update options for entry that was configured via user interface."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    device_entry: DeviceEntry,
+) -> bool:
+    """Разрешить пользователю удалить device через UI / WS-API.
+
+    Возвращаем True безусловно — orphan devices (после переименований в
+    приложении оператора или смены device-identifier между релизами)
+    должны удаляться. На следующем тике coordinator пересоздаст актуальные
+    devices, а удалённые останутся удалёнными.
+    """
+    return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
