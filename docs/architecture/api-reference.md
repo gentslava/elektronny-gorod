@@ -31,6 +31,33 @@ Quality gates:
 
 🔴 **Конкретные значения (account_id, place_id, tokens, адреса, телефоны) хранятся ТОЛЬКО в .har файлах (gitignored). В этом документе — placeholders.**
 
+## Backends — separate ecosystems
+
+У оператора «Электронный город» (Новотелеком, Новосибирск) **два независимых
+мобильных приложения и два независимых бэкенда**:
+
+| Приложение | Package | Backend | Auth |
+|---|---|---|---|
+| **«Мой Дом»** (наша цель) | `ru.proptech.myhome` (?) | `myhome.proptech.ru` | Signed-request (sha1+md5 hashes) |
+| «Электронный город» (старое) | `com.electronnijgorod.novosibirsk` | `my.2090000.ru` (`api.novotelecom.ru` для OAuth) | Keycloak OAuth2 (`client_id=mlk:android`) |
+
+**Наша HA integration реализует только «Мой Дом»** (`myhome.proptech.ru`).
+Старое приложение использует совсем другой DTO (`{id, type, category,
+objectId, title, isMain, address, model, mac, ip}` через
+`/api/ntk-video-equipment/rest/v1/devices`) и Keycloak — реализация
+параллельного backend-клиента — отдельная задача.
+
+**Важное общее знание из reverse engineering обоих приложений:**
+- Ни один из бэкендов **не различает на API-уровне** «домовая камера»
+  vs «городская». Оба возвращают плоский список.
+- Оба используют **user-side preferences** для UX-фильтрации:
+  - «Мой Дом» — `/settings/screens` (`entities` vs `hidden`)
+  - «Электронный город» — `PUT /rest/v1/devices/{id}` с `isMain: bool`
+- Оба show «only domovaya cameras» решают через юзерский выбор в
+  приложении, не через server categorization. Это значит интеграция
+  не должна изобретать heuristic-категории — только уважать user
+  preferences (что мы делаем через `_attr_entity_registry_enabled_default`).
+
 ## Общие свойства
 
 - **Base URL:** `https://myhome.proptech.ru`.
