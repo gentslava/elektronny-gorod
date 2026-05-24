@@ -1,16 +1,29 @@
-import asyncio
+"""Lock entity — CoordinatorEntity-based.
+
+См. ADR-0002. Slice 3b: lock использует coordinator.data для availability.
+Synthetic state-cycle (UNLOCKED → 5s → LOCKED) сохраняется как cosmetic UX,
+но реализован через `async_call_later` (вместо `asyncio.sleep` в `async_update`),
+что совместимо с `CoordinatorEntity` (у которой `should_poll=False`).
+
+Полное решение `lock → button` отложено в ADR-0005 (отдельный PR).
+"""
+from __future__ import annotations
+
 from typing import Any
+
 from aiohttp import ClientError
 
 from homeassistant.components.lock import LockEntity, LockState
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, LOGGER
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
-LOCK_UNLOCK_DELAY = 5  # Used to give a realistic lock/unlock experience in frontend
+LOCK_UNLOCK_DELAY = 5  # секунды cosmetic-UX «открыто»
 LOCK_JAMMED_DELAY = 2
 
 
@@ -21,31 +34,36 @@ async def async_setup_entry(
 ) -> None:
     """Set up Elektronny Gorod Lock based on a config entry."""
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-
-    # Get locks info
-    locks_info = await coordinator.get_locks_info()
-
-    # Create lock entities
-    async_add_entities(
-        ElektronnyGorodLock(coordinator, lock_info) for lock_info in locks_info
-    )
+    locks = (coordinator.data or {}).get("locks") or []
+    async_add_entities(ElektronnyGorodLock(coordinator, lock_info) for lock_info in locks)
 
 
-class ElektronnyGorodLock(LockEntity):
+class ElektronnyGorodLock(
+    CoordinatorEntity[ElektronnyGorodUpdateCoordinator], LockEntity
+):
+    """Lock entity (CoordinatorEntity)."""
+
     def __init__(
-        self, coordinator: ElektronnyGorodUpdateCoordinator, lock_info: dict
+        self,
+        coordinator: ElektronnyGorodUpdateCoordinator,
+        lock_info: dict[str, Any],
     ) -> None:
-        LOGGER.debug("ElektronnyGorodLock init for entrance_id=%s", lock_info.get("entrance_id"))
-        super().__init__()
-        self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
-        self._lock_info: dict = lock_info
-        self._place_id = self._lock_info["place_id"]
-        self._access_control_id = self._lock_info["access_control_id"]
-        self._entrance_id = self._lock_info["entrance_id"]
-        self._name = self._lock_info["name"]
-        self._openable = self._lock_info["openable"]
-        self._state = LockState.LOCKED
-        self._attr_unique_id = f"{self._place_id}_{self._access_control_id}_{self._entrance_id}_{self._name}"
+        super().__init__(coordinator)
+        self._place_id = lock_info["place_id"]
+        self._access_control_id = lock_info["access_control_id"]
+        self._entrance_id = lock_info["entrance_id"]
+        self._name: str = lock_info["name"]
+        # Synthetic state — управляется async_unlock + async_call_later.
+        self._state: LockState = LockState.LOCKED
+        # Cancel-handle для запланированного reset (если есть).
+        self._cancel_reset = None
+        # TODO(slice-3c): убрать `_name` из unique_id (A-12 — stable id).
+        self._attr_unique_id = (
+            f"{self._place_id}_{self._access_control_id}_"
+            f"{self._entrance_id}_{self._name}"
+        )
+
+        LOGGER.debug("Lock init for entrance_id=%s", self._entrance_id)
 
     @property
     def name(self) -> str:
@@ -53,72 +71,115 @@ class ElektronnyGorodLock(LockEntity):
         return self._name
 
     @property
-    def available(self) -> bool:
-        """Return lock is available."""
-        return self._openable
-
-    @property
-    def extra_state_attributes(self):
-        """Return the state attributes of the lock."""
-        if self._lock_info:
-            return {
-                "Place ID": str(self._lock_info["place_id"]),
-                "Access control ID": str(self._lock_info["access_control_id"]),
-                "Entrance ID": str(self._lock_info["entrance_id"]),
-                "Name": self._lock_info["name"],
-                "Openable": str(self._lock_info["openable"]),
-            }
+    def _coordinator_lock_info(self) -> dict[str, Any] | None:
+        """Найти текущий lock в coordinator.data."""
+        locks = (self.coordinator.data or {}).get("locks") or []
+        for lk in locks:
+            if (
+                lk.get("place_id") == self._place_id
+                and lk.get("access_control_id") == self._access_control_id
+                and lk.get("entrance_id") == self._entrance_id
+            ):
+                return lk
         return None
 
     @property
+    def available(self) -> bool:
+        """Доступен, если coordinator успешно обновился и lock с
+        openable=True есть в coordinator.data.
+
+        Прежняя реализация возвращала `self._openable` напрямую, что могло
+        дать `None` (не bool). Здесь нормализуем через `bool(...)`.
+        """
+        if not super().available:
+            return False
+        info = self._coordinator_lock_info
+        return info is not None and bool(info.get("openable"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any] | None:
+        """Return the state attributes of the lock."""
+        info = self._coordinator_lock_info
+        if info is None:
+            return None
+        # TODO(slice-3c): keys → snake_case (A-30).
+        return {
+            "Place ID": str(info.get("place_id")),
+            "Access control ID": str(info.get("access_control_id")),
+            "Entrance ID": str(info.get("entrance_id")),
+            "Name": info.get("name"),
+            "Openable": str(info.get("openable")),
+        }
+
+    @property
     def is_locking(self) -> bool:
-        """Return true if lock is locking."""
         return self._state == LockState.LOCKING
 
     @property
     def is_unlocking(self) -> bool:
-        """Return true if lock is unlocking."""
         return self._state == LockState.UNLOCKING
 
     @property
     def is_jammed(self) -> bool:
-        """Return true if lock is jammed."""
         return self._state == LockState.JAMMED
 
     @property
     def is_locked(self) -> bool:
-        """Return true if lock is locked."""
         return self._state == LockState.LOCKED
 
     async def async_lock(self, **kwargs: Any) -> None:
-        """Lock the device."""
-        LOGGER.info("Not supported")
+        """Lock не поддерживается API оператора — это домофон. См. ADR-0005."""
+        LOGGER.info("async_lock is not supported (intercom)")
         self._state = LockState.LOCKED
+        self.async_write_ha_state()
 
     async def async_unlock(self, **kwargs: Any) -> None:
-        """Unlock all or specified locks."""
+        """Trigger door-open. Synthetic state-cycle через async_call_later."""
         LOGGER.info("Unlock %s", self.unique_id)
         self._state = LockState.UNLOCKING
         self.async_write_ha_state()
         try:
-            await self._coordinator.open_lock(
+            await self.coordinator.open_lock(
                 self._place_id, self._access_control_id, self._entrance_id
             )
-            self._state = LockState.UNLOCKED
         except ClientError:
             self._state = LockState.JAMMED
+            self._schedule_reset(LOCK_JAMMED_DELAY)
+        else:
+            self._state = LockState.UNLOCKED
+            self._schedule_reset(LOCK_UNLOCK_DELAY)
         self.async_write_ha_state()
 
-    async def fake_timer_lock(self, delay) -> None:
-        await asyncio.sleep(delay)
-        self._state = LockState.LOCKED
-        self.async_write_ha_state()
+    def _schedule_reset(self, delay: int) -> None:
+        """Запланировать возврат state → LOCKED через `delay` секунд.
 
-    async def async_update(self) -> None:
-        """Update lock state."""
-        if self._state == LockState.UNLOCKED:
-            await self.fake_timer_lock(LOCK_UNLOCK_DELAY)
-        if self._state == LockState.JAMMED:
-            await self.fake_timer_lock(LOCK_JAMMED_DELAY)
-        # self._lock_info = await self._coordinator.update_lock_state(self._place_id, self._access_control_id, self._entrance_id)
-        # self._openable = self._lock_info["openable"]
+        Если уже есть pending reset — отменяем (защита от наложения вызовов).
+        """
+        if self._cancel_reset is not None:
+            self._cancel_reset()
+            self._cancel_reset = None
+
+        @callback
+        def _restore_locked(_now) -> None:
+            self._cancel_reset = None
+            # Idempotent: восстанавливаем LOCKED только если state ещё в
+            # «временной» зоне. Если за время задержки пользователь снова
+            # нажал unlock и state теперь UNLOCKING — не перетираем.
+            if self._state in (LockState.UNLOCKED, LockState.JAMMED):
+                self._state = LockState.LOCKED
+                self.async_write_ha_state()
+
+        self._cancel_reset = async_call_later(self.hass, delay, _restore_locked)
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Cleanup pending reset при удалении entity."""
+        if self._cancel_reset is not None:
+            self._cancel_reset()
+            self._cancel_reset = None
+        await super().async_will_remove_from_hass()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Coordinator обновился — properties (available/extra_state_attributes)
+        читают из coordinator.data в propertах; пишем state."""
+        self.async_write_ha_state()

@@ -99,10 +99,9 @@ Quality gates:
 
 ### A-09. Entity не используют `CoordinatorEntity`
 
+- **Status:** ✅ **RESOLVED** в ветке `feat/coordinator-entity` (slice 3b). Sensor / Camera / Lock наследуют `CoordinatorEntity[ElektronnyGorodUpdateCoordinator]`. Все `async_update` удалены — обновления приходят через `_handle_coordinator_update`. Backwards-compat shims из coordinator (`get_*_info`, `update_*_state`) тоже удалены (entities читают `coordinator.data` напрямую). Lock state-cycle переписан с `asyncio.sleep` на `async_call_later` — без блокировки event loop.
 - **Area:** HA-compat
-- **Evidence:** [`sensor.py:30`](../../custom_components/elektronny_gorod/sensor.py#L30), [`lock.py:34`](../../custom_components/elektronny_gorod/lock.py#L34), [`camera.py:100`](../../custom_components/elektronny_gorod/camera.py#L100)
-- **Impact:** нарушение паттерна; нет автоматического обновления при тике coordinator.
-- **Recommended fix:** наследовать `CoordinatorEntity[ElektronnyGorodUpdateCoordinator]` + переопределить `_handle_coordinator_update`.
+- **Original Impact:** нарушение паттерна; нет автоматического обновления при тике coordinator.
 
 ### A-10. `iot_class: cloud_polling` без реального polling
 
@@ -304,7 +303,7 @@ Quality gates:
 
 ### A-44. `async_update` камеры делает доп. запрос к API
 
-- **Status:** ⚠️ **PARTIALLY RESOLVED** в slice 3a. После coordinator-pattern `update_camera_state(id)` теперь cheap lookup в `self.data` (без HTTP). Остался один HTTP-запрос `get_camera_stream(id)` в `async_update`. Полностью закроется в slice 3b при переходе на `CoordinatorEntity` (тогда `async_update` исчезнет, stream URL получается лениво в `stream_source()`).
+- **Status:** ✅ **RESOLVED** в ветке `feat/coordinator-entity` (slice 3b). `async_update` удалён из `camera.py` вместе с переходом на `CoordinatorEntity`. Stream URL получается лениво в `stream_source()` (по запросу от HA), camera availability определяется по наличию в `coordinator.data["cameras"]`.
 - **Severity:** P1
 - **Original Impact:** двойная нагрузка на оператора при каждом update.
 

@@ -1,25 +1,35 @@
+"""Camera entity — CoordinatorEntity-based.
+
+См. ADR-0002. Slice 3b: camera использует coordinator.data для availability.
+Stream / snapshot — on-demand actions (не кэшируются в coordinator.data).
+
+Closes A-44: `async_update` удалён, дублирующий `get_camera_stream`-запрос
+тоже. Stream URL получается лениво в `stream_source()`.
+"""
 from __future__ import annotations
 
 import base64
+from typing import Any
 from urllib.parse import urlencode
 
 from aiohttp import ClientSession, ClientError
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    DOMAIN,
-    LOGGER,
-    CONF_USE_GO2RTC,
     CONF_GO2RTC_BASE_URL,
-    CONF_GO2RTC_RTSP_HOST,
-    GO2RTC_RTSP_PORT,
-    CONF_GO2RTC_USERNAME,
     CONF_GO2RTC_PASSWORD,
+    CONF_GO2RTC_RTSP_HOST,
+    CONF_GO2RTC_USERNAME,
+    CONF_USE_GO2RTC,
+    DOMAIN,
+    GO2RTC_RTSP_PORT,
+    LOGGER,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
@@ -34,7 +44,7 @@ async def _go2rtc_upsert_stream(
     base_url: str,
     stream_name: str,
     src: str,
-    headers: dict = None,
+    headers: dict | None = None,
 ) -> None:
     qs = urlencode({"name": stream_name, "src": src})
     put_url = f"{base_url}/api/streams?{qs}"
@@ -53,27 +63,9 @@ async def _go2rtc_upsert_stream(
             raise RuntimeError(f"go2rtc PATCH failed: {resp.status} {body}")
 
 
-async def _go2rtc_frame_jpeg(
-    session: ClientSession,
-    base_url: str,
-    stream_name: str,
-    width: int | None,
-    height: int | None,
-) -> bytes | None:
-    params: dict[str, str] = {"src": stream_name}
-    if width:
-        params["width"] = str(width)
-    if height:
-        params["height"] = str(height)
-
-    url = f"{base_url}/api/frame.jpeg?{urlencode(params)}"
-    async with session.get(url) as resp:
-        if resp.status != 200:
-            return None
-        return await resp.read()
-
-
-def _get_go2rtc_cfg(entry: ConfigEntry) -> tuple[bool, str | None, str | None]:
+def _get_go2rtc_cfg(
+    entry: ConfigEntry,
+) -> tuple[bool, str | None, str | None, str | None, str | None]:
     use_go2rtc = (
         entry.options.get(CONF_USE_GO2RTC)
         if CONF_USE_GO2RTC in entry.options
@@ -93,42 +85,54 @@ async def async_setup_entry(
 ) -> None:
     """Set up Elektronny Gorod Camera based on a config entry."""
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
-    cameras_info = await coordinator.get_cameras_info()
+    cameras = (coordinator.data or {}).get("cameras") or []
 
     use_go2rtc, base_url, rtsp_host, go2rtc_username, go2rtc_password = _get_go2rtc_cfg(entry)
 
     async_add_entities(
         ElektronnyGorodCamera(
-            hass, coordinator, camera_info, use_go2rtc, base_url, rtsp_host, go2rtc_username, go2rtc_password
+            coordinator,
+            camera_info,
+            use_go2rtc=use_go2rtc,
+            go2rtc_base_url=base_url,
+            go2rtc_rtsp_host=rtsp_host,
+            go2rtc_username=go2rtc_username,
+            go2rtc_password=go2rtc_password,
         )
-        for camera_info in cameras_info
+        for camera_info in cameras
     )
 
 
-class ElektronnyGorodCamera(Camera):
+class ElektronnyGorodCamera(
+    CoordinatorEntity[ElektronnyGorodUpdateCoordinator], Camera
+):
+    """Camera entity (CoordinatorEntity)."""
+
+    _attr_supported_features = CameraEntityFeature.STREAM
+
     def __init__(
         self,
-        hass: HomeAssistant,
         coordinator: ElektronnyGorodUpdateCoordinator,
-        camera_info: dict,
+        camera_info: dict[str, Any],
+        *,
         use_go2rtc: bool,
         go2rtc_base_url: str | None,
         go2rtc_rtsp_host: str | None,
         go2rtc_username: str | None = None,
         go2rtc_password: str | None = None,
     ) -> None:
-        super().__init__()
-        self.hass = hass
-        self._coordinator: ElektronnyGorodUpdateCoordinator = coordinator
+        # Camera.__init__ инициализирует Entity-state; затем регистрируемся в coordinator.
+        CoordinatorEntity.__init__(self, coordinator)
+        Camera.__init__(self)
 
-        LOGGER.debug("Initializing camera: %s", camera_info)
-        self._camera_info: dict = camera_info
-        self._id: str = self._camera_info.get("id") or ""
-        self._name: str = self._camera_info.get("name") or self._id
+        self._id: str = camera_info.get("id") or ""
+        self._name: str = camera_info.get("name") or self._id
 
-        self._attr_supported_features = CameraEntityFeature.STREAM
+        LOGGER.debug("Camera init id=%s", self._id)
+
         self._last_src: str | None = None
         self._image: bytes | None = None
+        # TODO(slice-3c): убрать `_name` из unique_id (A-12 — stable id).
         self._attr_unique_id = f"{self._id}_{self._name}"
 
         self._go2rtc_base_url = go2rtc_base_url
@@ -143,10 +147,31 @@ class ElektronnyGorodCamera(Camera):
         """Return camera name."""
         return self._name
 
+    @property
+    def _coordinator_camera_info(self) -> dict[str, Any] | None:
+        """Найти текущую запись camera в coordinator.data."""
+        cameras = (self.coordinator.data or {}).get("cameras") or []
+        for cam in cameras:
+            if cam.get("id") == self._id:
+                return cam
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Доступна, если camera найдена в последнем refresh coordinator."""
+        return super().available and self._coordinator_camera_info is not None
+
+    # ------------------------------------------------------------------ #
+    # go2rtc                                                             #
+    # ------------------------------------------------------------------ #
+
     def _rtsp_url(self) -> str:
         if not self._go2rtc_rtsp_host:
             raise RuntimeError("go2rtc rtsp host is not configured")
-        return f"rtsp://{self._go2rtc_rtsp_host}:{GO2RTC_RTSP_PORT}/{self._go2rtc_stream_name}"
+        return (
+            f"rtsp://{self._go2rtc_rtsp_host}:{GO2RTC_RTSP_PORT}/"
+            f"{self._go2rtc_stream_name}"
+        )
 
     async def _ensure_go2rtc_stream(self, source_url: str) -> None:
         if not self._use_go2rtc:
@@ -154,7 +179,7 @@ class ElektronnyGorodCamera(Camera):
 
         base_url = self._go2rtc_base_url
         if not base_url:
-            LOGGER.debug("go2rtc enabled but base_url is missing; falling back to direct FLV")
+            LOGGER.debug("go2rtc enabled but base_url missing; falling back to direct FLV")
             self._use_go2rtc = False
             return
 
@@ -163,7 +188,7 @@ class ElektronnyGorodCamera(Camera):
             return
 
         session: ClientSession = async_get_clientsession(self.hass)
-        headers = {}
+        headers: dict[str, str] = {}
         if self._go2rtc_username and self._go2rtc_password:
             userpass = f"{self._go2rtc_username}:{self._go2rtc_password}"
             b64 = base64.b64encode(userpass.encode()).decode()
@@ -183,43 +208,37 @@ class ElektronnyGorodCamera(Camera):
             self._rtsp_url(),
         )
 
+    # ------------------------------------------------------------------ #
+    # On-demand actions                                                  #
+    # ------------------------------------------------------------------ #
+
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
-        if hasattr(self, '_attr_available') and not self._attr_available:
+        if not self.available:
             return None
-        image = await self._coordinator.get_camera_snapshot(self._id, width, height)
+        image = await self.coordinator.get_camera_snapshot(self._id, width, height)
         if image:
             self._image = image
         return self._image
 
     async def stream_source(self) -> str | None:
         """Return the source of the stream."""
-        stream_url = await self._coordinator.get_camera_stream(self._id)
-        LOGGER.info("Stream url is %s", stream_url)
+        stream_url = await self.coordinator.get_camera_stream(self._id)
         if not stream_url:
             LOGGER.warning("Camera %s (%s): empty source stream url", self._name, self._id)
-            self._attr_available = False
-            self._attr_is_on = False
             return None
-
-        self._attr_available = True
-        self._attr_is_on = True
         if not self._use_go2rtc:
             return stream_url
-
         await self._ensure_go2rtc_stream(stream_url)
         return self._rtsp_url()
 
-    async def async_update(self) -> None:
-        """Update camera state."""
-        try:
-            self._camera_info = await self._coordinator.update_camera_state(self._id)
-            stream_url = await self._coordinator.get_camera_stream(self._id)
-            self._attr_available = bool(stream_url)
-            self._attr_is_on = bool(stream_url)
-        except Exception as ex:
-            LOGGER.error("Camera %s (%s): update failed: %s", self._name, self._id, ex)
-            self._attr_available = False
-            self._attr_is_on = False
+    # ------------------------------------------------------------------ #
+    # Coordinator hook                                                   #
+    # ------------------------------------------------------------------ #
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        """Coordinator refresh — actuality берётся из property `available`."""
+        self.async_write_ha_state()
