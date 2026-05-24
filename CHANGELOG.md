@@ -37,7 +37,7 @@
   - **`_attr_has_entity_name = True`** + `_attr_translation_key = "balance"` для sensor ([A-13](docs/audit/project-audit.md)). Camera/Lock — `_attr_name = None`, имя приходит из `device_info.name`. Добавлен раздел `entity.sensor.balance.name` в `strings.json` + `translations/{ru,en}.json`.
   - **`device_info`** для всех entity: sensor группируется per place, camera/lock — самостоятельные device (lock с `via_device` на place).
   - **Sensor balance — long-term statistics** ([A-14](docs/audit/project-audit.md)): `device_class=MONETARY`, `state_class=TOTAL`, `native_unit_of_measurement="RUB"` (ISO 4217 — требование `MONETARY` device_class; константа `CURRENCY_RUBLE` удалена из HA core).
-  - **manifest.json** ([A-34](docs/audit/project-audit.md)): `quality_scale: "bronze"`, `integration_type: "hub"`.
+  - **manifest.json** ([A-34](docs/audit/project-audit.md)): `quality_scale: "bronze"`, `integration_type: "service"`.
 
 ### Removed
 
@@ -51,6 +51,7 @@
 ### Fixed
 
 - `async_migrate_entity_unique_ids` пропускает коллизии вместо падения с `ValueError`. Если у camera/lock накопилось несколько legacy записей в `entity_registry` (разные `name` за время) — все они мапятся в один stable UID. Мигрируется первая, остальные остаются orphan с warning в лог (пользователь удаляет вручную). Раньше ValueError ломал весь `async_setup_entry` → entity не создавались.
+- `manifest.json`: `integration_type` исправлен `hub` → `service`. Каждый entry представляет cloud-аккаунт оператора (как Spotify / Yandex.Station), а не локальный физический bridge — в UI карточки попадают в раздел «Сервисы», а не «Хабы».
 
 ### Documentation
 

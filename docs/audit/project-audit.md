@@ -248,7 +248,7 @@ Quality gates:
 
 ### A-34. Manifest без `quality_scale`, `integration_type`
 
-- **Status:** ✅ **RESOLVED** в ветке `feat/coordinator-entity` (slice 3c). `manifest.json`: `"quality_scale": "bronze"`, `"integration_type": "hub"`.
+- **Status:** ✅ **RESOLVED** в ветке `feat/bronze-entity-polish` (slice 3c). `manifest.json`: `"quality_scale": "bronze"`, `"integration_type": "service"` (cloud API оператора, не локальный hub — см. CHANGELOG hot-fix #5).
 
 ### A-35. CHANGELOG.md отсутствует
 
