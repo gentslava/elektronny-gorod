@@ -23,6 +23,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    AREA_INTERCOM,
+    AREA_INDOOR_CAM,
+    AREA_PUBLIC_CAM,
     CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_PASSWORD,
     CONF_GO2RTC_RTSP_HOST,
@@ -145,9 +148,10 @@ class ElektronnyGorodCamera(
         ac_id = camera_info.get("access_control_id")
         place_id = camera_info.get("place_id")
         entrance_id = camera_info.get("entrance_id")
-        is_intercom = bool(ac_id and place_id)
+        source = camera_info.get("source") or "public"  # fallback
+        is_intercom = source == "intercom" and bool(ac_id and place_id)
 
-        LOGGER.debug("Camera init id=%s intercom=%s", self._id, is_intercom)
+        LOGGER.debug("Camera init id=%s source=%s", self._id, source)
 
         self._last_src: str | None = None
         self._image: bytes | None = None
@@ -159,14 +163,23 @@ class ElektronnyGorodCamera(
                 name=self._name,
                 manufacturer="Электронный город",
                 model="Intercom",
+                suggested_area=AREA_INTERCOM,
                 via_device=(DOMAIN, f"place_{place_id}"),
             )
         else:
+            # Public (городские) vs Place (внутренние) — разный model + area.
+            if source == "place":
+                model = "Indoor Camera"
+                area = AREA_INDOOR_CAM
+            else:
+                model = "Public Camera"
+                area = AREA_PUBLIC_CAM
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"camera_{self._id}")},
                 name=self._name,
                 manufacturer="Электронный город",
-                model="IP Camera",
+                model=model,
+                suggested_area=area,
             )
 
         self._go2rtc_base_url = go2rtc_base_url

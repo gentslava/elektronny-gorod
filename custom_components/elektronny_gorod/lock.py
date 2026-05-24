@@ -21,7 +21,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LOGGER
+from .const import AREA_INTERCOM, DOMAIN, LOGGER
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import lock_unique_id
 
@@ -88,6 +88,7 @@ class ElektronnyGorodLock(
             name=self._name,
             manufacturer="Электронный город",
             model="Intercom",
+            suggested_area=AREA_INTERCOM,
             via_device=(DOMAIN, f"place_{self._place_id}"),
         )
 

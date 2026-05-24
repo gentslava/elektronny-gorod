@@ -229,6 +229,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "place_id": place_id,
                         "access_control_id": ac_id,
                         "entrance_id": entrance.get("id"),
+                        "source": "intercom",
                     })
             else:
                 # AC без entrances — сам по себе door. Используем ac.externalCameraId.
@@ -240,22 +241,27 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                         "place_id": place_id,
                         "access_control_id": ac_id,
                         "entrance_id": None,
+                        "source": "intercom",
                     })
 
-        # 2. Public cameras (дворовые).
-        public_cameras = await self._api.query_public_cameras(place_id)
-        for cam in public_cameras:
-            cameras.append({
-                "id": cam.get("externalCameraId") or cam.get("id"),
-                "name": cam.get("name"),
-            })
-
-        # 3. Place-cameras.
+        # 2. Place-cameras (внутренние — в квартире, подъезде).
+        # Идут ВТОРЫМИ чтобы dedupe_by_id отдал приоритет intercom > place > public:
+        # если camera_id появилась как intercom — public/place её перебить не должны.
         place_cameras = await self._api.query_cameras(place_id)
         for cam in place_cameras:
             cameras.append({
                 "id": cam.get("externalCameraId") or cam.get("id"),
                 "name": cam.get("name"),
+                "source": "place",
+            })
+
+        # 3. Public cameras (дворовые / городские).
+        public_cameras = await self._api.query_public_cameras(place_id)
+        for cam in public_cameras:
+            cameras.append({
+                "id": cam.get("externalCameraId") or cam.get("id"),
+                "name": cam.get("name"),
+                "source": "public",
             })
 
         return cameras

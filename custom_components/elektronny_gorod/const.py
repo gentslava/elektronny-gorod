@@ -33,6 +33,14 @@ CONF_USER_AGENT: Final = "user_agent"
 DEFAULT_SNAPSHOT_WIDTH: Final = 300
 DEFAULT_SNAPSHOT_HEIGHT: Final = 300
 
+# Suggested area names — даём пользователю осмысленную дефолтную группировку.
+# suggested_area работает только при создании device; existing devices можно
+# переназначить в UI или через API. Имена локализованы для русскоязычного
+# оператора «Электронный город».
+AREA_INTERCOM: Final = "Домофоны"
+AREA_INDOOR_CAM: Final = "Камеры дома"
+AREA_PUBLIC_CAM: Final = "Городские камеры"
+
 APP_VERSION: Final = {
     "name": "9.1.0",
     "code": "90100000"
