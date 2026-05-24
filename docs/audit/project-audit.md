@@ -40,40 +40,36 @@ Quality gates:
 
 ### A-01. Утечка access_token в логи
 
+- **Status:** ✅ **RESOLVED** в hotfix-ветке `hotfix/p0-security`.
 - **Area:** Security
-- **Evidence:** [`config_flow.py:77`](../../custom_components/elektronny_gorod/config_flow.py#L77)
-- **Impact:** debug-логи содержат bearer-токен → полный доступ к чужому аккаунту.
-- **Recommended fix:** удалить строку.
-- **First step:** одностраничный PR.
+- **Evidence:** `config_flow.py:77` — заменено на `LOGGER.debug("Access token captured (length=%d)", len(self.access_token))`.
+- **Original Impact:** debug-логи содержали bearer-токен → полный доступ к чужому аккаунту.
 - **Owner agent:** Security & Privacy.
 - **Quality gate:** SECURITY_OK.
-- **Details:** см. [`SECURITY_AUDIT.md#S-01`](../audit/security.md).
+- **Details:** см. [`security.md#S-01`](security.md).
 
 ### A-02. Утечка headers с Bearer и request body в логи
 
+- **Status:** ✅ **RESOLVED**. `http.py:_log_request` теперь:
+  - использует `redact(headers)` из `_logging.py` (любые sensitive ключи → `***`);
+  - для auth-paths (`/auth/*`) — body не упоминается даже как факт наличия;
+  - для остальных — только размер body, не содержимое.
 - **Area:** Security
-- **Evidence:** [`http.py:11-13`](../../custom_components/elektronny_gorod/http.py#L11-L13)
-- **Impact:** info-логи содержат Authorization headers и тело auth-запросов (с паролем/SMS).
-- **Recommended fix:** redact-helper для headers; не логировать `data` для auth-endpoints.
-- **First step:** создать `_redact_headers()` в `http.py`, заменить `_log_request`.
+- **Original Impact:** info-логи содержали Authorization headers и тело auth-запросов (с паролем/SMS).
 - **Owner agent:** Security & Privacy.
 - **Quality gate:** SECURITY_OK.
 
 ### A-03. Утечка response body на DEBUG
 
+- **Status:** ✅ **RESOLVED**. `http.py:_log_response` теперь не читает body вообще (для streaming-safety); для auth-paths логируется только status; для остальных — status + content-length.
 - **Area:** Security
-- **Evidence:** [`http.py:16-25`](../../custom_components/elektronny_gorod/http.py#L16-L25)
-- **Impact:** debug-логи содержат полный ответ на login/refresh — там accessToken/refreshToken.
-- **Recommended fix:** для auth-paths логировать только status + длину body; либо вообще не логировать body на этих эндпоинтах.
-- **First step:** добавить whitelist auth-paths в `_log_response`.
+- **Original Impact:** debug-логи содержали полный ответ на login/refresh — там accessToken/refreshToken.
 
 ### A-04. Утечка `entry.data` в логи
 
+- **Status:** ✅ **RESOLVED**. `config_flow.py:283, 291` теперь логируют `entry.entry_id` вместо целого `entry.data`.
 - **Area:** Security
-- **Evidence:** [`config_flow.py:283`](../../custom_components/elektronny_gorod/config_flow.py#L283), [`:291`](../../custom_components/elektronny_gorod/config_flow.py#L291)
-- **Impact:** `entry.data` содержит токены.
-- **Recommended fix:** заменить на `entry.entry_id`.
-- **First step:** 2 правки в config_flow.
+- **Original Impact:** `entry.data` содержал токены.
 
 ### A-05. `ClientSession` per-request
 
@@ -86,23 +82,14 @@ Quality gates:
 
 ### A-06. Bug в `update_camera_state`: поиск по `"ID"` вместо `"id"`
 
+- **Status:** ✅ **RESOLVED**. `coordinator.py:182` — заменено `c.get("ID")` → `c.get("id")`.
 - **Area:** Correctness
-- **Evidence:** [`coordinator.py:182`](../../custom_components/elektronny_gorod/coordinator.py#L182):
-  ```python
-  camera = find(cameras, lambda c: c.get("ID") == camera_id)
-  ```
-  Все остальные места используют ключ `"id"`.
-- **Impact:** `update_camera_state` **всегда** падает с `UpdateFailed("Camera ... not found")`. Скрыто, потому что `async_update` вызывается редко и ошибка проглатывается на уровне entity.
-- **Recommended fix:** `c.get("id")`.
-- **First step:** 1-строчная правка.
+- **Original Impact:** `update_camera_state` всегда падал с `UpdateFailed("Camera ... not found")`.
 
 ### A-07. Тесты — нерабочий stub из шаблона HA
 
+- **Status:** ✅ **PARTIALLY RESOLVED**. Stub `tests/test_config_flow.py` удалён. Добавлен реальный `tests/test_logging_redact.py` для нового helper'а. Полноценный test plan для config_flow + coordinator + api → Этап 3 Bronze (slice 3e).
 - **Area:** Testing / Correctness
-- **Evidence:** [`tests/test_config_flow.py:5-7`](../../tests/test_config_flow.py#L5-L7) — импортирует несуществующие `CannotConnect`, `InvalidAuth`, `PlaceholderHub`; использует `CONF_HOST`/`CONF_USERNAME`/`CONF_PASSWORD`, которых нет в проекте.
-- **Impact:** coverage 0%; рефакторинг рискован; IQS Bronze blocker.
-- **Recommended fix:** удалить файл, написать тесты по плану из [`testing/strategy.md`](../testing/strategy.md).
-- **First step:** удалить `tests/test_config_flow.py`, оставить `conftest.py`; создать минимальный `test_init.py` со skip-ами; запланировать переписывание.
 
 ## P1 — важные
 
@@ -318,9 +305,9 @@ Quality gates:
 
 ### A-43. `import base64` внутри метода
 
+- **Status:** ✅ **RESOLVED**. `import base64` поднят на top of file `camera.py`.
 - **Severity:** P3
-- **Evidence:** [`camera.py:167`](../../custom_components/elektronny_gorod/camera.py#L167)
-- **Recommended fix:** поднять импорт в top of file. Также рассмотреть `aiohttp.BasicAuth` вместо ручного base64-кодирования.
+- **Note:** `aiohttp.BasicAuth` вместо ручного кодирования — TBD, оставим в Итерации 3.
 
 ### A-44. `async_update` камеры делает доп. запрос к API
 

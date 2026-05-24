@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import json
-import traceback
 from typing import Any
 
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -43,7 +41,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
 
         self._subscriber_places: list[dict[str, Any]] = []
 
-        LOGGER.info(f"Integration loading: {entry.data[CONF_NAME]}")
+        LOGGER.info("Integration loading entry %s", entry.entry_id)
 
         # Unsubscribe callback for dispatcher listener (called on unload)
         self._unsub_notifications: Callable[[], None] = async_dispatcher_connect(
@@ -65,7 +63,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
             LOGGER.info("Integration starting")
             self._subscriber_places = await self._api.query_places()
         except Exception as ex:
-            LOGGER.error("Integration start failed: %s", traceback.format_exc())
+            LOGGER.exception("Integration start failed")
             raise UpdateFailed(ex) from ex
 
     def async_unsubscribe(self) -> None:
@@ -179,7 +177,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator):
                 }
                 cameras.append(camera)
 
-        camera = find(cameras, lambda c: c.get("ID") == camera_id)
+        camera = find(cameras, lambda c: c.get("id") == camera_id)
 
         if camera is None:
             raise UpdateFailed(f"Camera {camera_id} not found")

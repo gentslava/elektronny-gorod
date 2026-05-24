@@ -123,6 +123,18 @@ Quality gates:
 | Slash command | `/capture-har <scenario>` |
 | Tools restriction | НЕ может писать в `custom_components/`, `tests/`, `manifest.json`, `.github/`, `docs/audit/`, accepted ADR |
 
+### 10. Code Reviewer Agent
+
+| Поле | Значение |
+|---|---|
+| Когда | перед merge любого PR в master или перед commit нетривиального изменения |
+| Обязательное чтение | `../../conventions.md`, `../audit/project-audit.md`, `../audit/security.md`, `../decisions/*.md`, `../../.claude/rules/*` |
+| Outputs | review report по [`templates/review-report.template.md`](templates/review-report.template.md) |
+| Gate | `REVIEW_OK` |
+| Subagent file | `.claude/agents/code-reviewer.md` |
+| Tools restriction | **read-only** — не пишет код сам |
+| Skills | `agent-skills:code-review-and-quality` (обязательно), `agent-skills:security-and-hardening` |
+
 ## Hand-off pattern
 
 ```text

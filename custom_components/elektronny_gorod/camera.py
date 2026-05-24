@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from urllib.parse import urlencode
 
 from aiohttp import ClientSession, ClientError
@@ -164,7 +165,6 @@ class ElektronnyGorodCamera(Camera):
         session: ClientSession = async_get_clientsession(self.hass)
         headers = {}
         if self._go2rtc_username and self._go2rtc_password:
-            import base64
             userpass = f"{self._go2rtc_username}:{self._go2rtc_password}"
             b64 = base64.b64encode(userpass.encode()).decode()
             headers["Authorization"] = f"Basic {b64}"

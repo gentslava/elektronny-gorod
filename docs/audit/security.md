@@ -215,11 +215,15 @@ Quality gates:
 
 ## Definition of done для SECURITY_OK gate
 
-- [ ] S-01..S-05 исправлены и зафиксированы коммитом.
-- [ ] Добавлен `diagnostics.py` с redaction (S-08).
-- [ ] `grep -rE "LOGGER\..*token|LOGGER\..*headers|LOGGER\..*entry\.data" custom_components/` возвращает 0 совпадений.
-- [ ] Hotfix-релиз с changelog «security: redact tokens in logs».
-- [ ] Уведомление пользователей в README + GitHub Release notes.
+- [x] **S-01..S-04, S-06 исправлены** (ветка `hotfix/p0-security`).
+- [x] Добавлен helper `_logging.py` с `SENSITIVE_KEYS` + `redact()` (ADR-0004).
+- [x] `grep -rE 'LOGGER\..*(token|password|sms|headers|entry\.data)' custom_components/elektronny_gorod/` возвращает 0 совпадений (после merge ветки).
+- [ ] Добавлен `diagnostics.py` с redaction (S-08) — Итерация 2.
+- [ ] Hotfix-релиз с changelog «security: redact tokens in logs» — после merge PR.
+- [ ] Уведомление пользователей в release notes (включено в CHANGELOG.md).
+- [ ] S-05 (shared ClientSession) — Этап 2, отдельный PR.
+- [ ] S-07 (auto-refresh на 401) — Итерация 3 после HAR-сценария истечения.
+- [ ] S-08, S-16 (diagnostics + go2rtc_password redact) — Итерация 2.
 
 ## Next reading
 
