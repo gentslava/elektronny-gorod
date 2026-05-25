@@ -98,9 +98,16 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     ) -> bool:
         """Update DND settings for a place.
 
-        Wraps `api.post_dnd_settings` с UA race-safety (place_id в shared
-        user_agent должен быть выставлен до запроса). Caller (switch entity)
-        формирует полный payload (3 items с обновлёнными `status`).
+        Caller (switch entity) формирует полный payload (3 items с обновлёнными
+        `status`).
+
+        ⚠️ Inter-task race с `_async_update_data` теоретически возможен (оба
+        мутируют shared `user_agent.place_id`), но **не affecting корректность**:
+        backend идентифицирует место по `place_id` в URL `.../places/{id}/...`,
+        UA-поле — лишь metadata о клиенте. Worst case — UA содержит чужой
+        place_id в момент DND POST; backend всё равно обрабатывает запрос
+        корректно по URL. Полноценный `asyncio.Lock` — overengineering для
+        этой semantics.
 
         Returns True если backend принял.
         """

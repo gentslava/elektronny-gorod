@@ -117,12 +117,8 @@ async def test_dependent_unavailable_when_root_off(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    root = hass.states.get(f"switch.addr_do_not_disturb")
-    intercom = hass.states.get(f"switch.addr_mute_intercom_calls")
-    mgmt = hass.states.get(f"switch.addr_mute_management_company_calls")
-
-    # Имена entity_id формируются HA из device.name + translation, точное
-    # имя может отличаться — найдём по unique_id через registry.
+    # entity_id формируются HA динамически из device.name + translation —
+    # найдём через registry по unique_id.
     registry = er.async_get(hass)
     root_eid = registry.async_get_entity_id(
         "switch", DOMAIN, f"{DOMAIN}_dnd_{PLACE_ID}_dnd_root"
