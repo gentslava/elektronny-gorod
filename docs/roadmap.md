@@ -63,7 +63,7 @@ Quality gates:
 - [ ] **A-08** Задать `update_interval=timedelta(minutes=5)` в `ElektronnyGorodUpdateCoordinator`; в `_async_update_data` обновлять баланс + список мест; вернуть `data: dict`.
 - [ ] **A-09** Перевести Sensor / Lock / Camera на `CoordinatorEntity[ElektronnyGorodUpdateCoordinator]` + `_handle_coordinator_update`.
 - [ ] **A-10** Решить `iot_class`: либо включён реальный polling — оставить `cloud_polling`; либо сменить класс. Зафиксировать в ADR-0003.
-- [ ] **A-11** Поднять `hacs.json:homeassistant` до `2024.1.0` (или иной реально нужной версии).
+- [x] **A-11** ✅ Поднят `hacs.json:homeassistant` до `2024.10.4` — первая stable HA с `LockState` enum, который импортирует `lock.py`. Та же версия пинится как min в CI matrix (см. python-tests.yaml).
 - [x] **A-12** ✅ slice 3c — stable `unique_id` Camera/Lock + миграция legacy через `entity_registry.async_migrate_entries`.
 - [x] **A-13** ✅ slice 3c — `_attr_has_entity_name = True` + `_attr_translation_key="balance"` (sensor); Camera/Lock — имя в `device_info.name`. Раздел `entity` добавлен в `strings.json` + переводы.
 - [x] **A-14** ✅ slice 3c — Sensor баланса: `device_class=MONETARY`, `state_class=TOTAL`, `unit=CURRENCY_RUBLE`.

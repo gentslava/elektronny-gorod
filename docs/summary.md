@@ -83,7 +83,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - Coordinator без `update_interval` — данные не обновляются после старта.
 - Entity не используют `CoordinatorEntity`.
 - `iot_class: cloud_polling` не соответствует реальности (нет polling).
-- `hacs.json` минимальная HA = 2022.8.0, в реальности нужно ≥ 2024.x.
+- ✅ `hacs.json` минимальная HA = 2024.10.4 (LockState enum появился в 2024.10).
 - Sensor баланса: unit `"₽"` вместо `"RUB"`, нет `device_class`/`state_class`.
 - `unique_id` для Camera/Lock содержит локализованное `name`.
 - Нет `diagnostics.py` с redaction.

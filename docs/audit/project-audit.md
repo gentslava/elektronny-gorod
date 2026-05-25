@@ -111,9 +111,10 @@ Quality gates:
 
 ### A-11. `hacs.json` minimum HA = `2022.8.0`
 
+- **Status:** ✅ **RESOLVED** — `hacs.json:homeassistant` поднят до `2024.10.4` (первая stable с `LockState` enum в `homeassistant.components.lock`, который импортирует `lock.py`). Та же версия в CI matrix как min job — см. `.github/workflows/python-tests.yaml`.
 - **Area:** Manifest / HA-compat
-- **Evidence:** [`hacs.json:3`](../../hacs.json#L3); код использует `ConfigFlowResult`, `LockState.LOCKED` (HA ≥ 2024.x).
-- **Recommended fix:** поднять до фактической `2024.1.0`.
+- **Evidence:** [`hacs.json:3`](../../hacs.json#L3); код использует `ConfigFlowResult`, `LockState` (HA ≥ 2024.10).
+- **Original fix:** поднять до фактической `2024.1.0` (заменено на `2024.10.4` после run 26413140290 — `LockState` отсутствовал в HA 2024.7/2024.8/2024.9, появился только в 2024.10).
 
 ### A-12. `unique_id` Camera/Lock содержит локализованное `name`
 

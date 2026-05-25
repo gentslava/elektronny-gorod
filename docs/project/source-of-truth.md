@@ -66,10 +66,10 @@ Quality gates:
 
 | Источник | Значение |
 |---|---|
-| `hacs.json:3` | `2022.8.0` |
+| `hacs.json:3` | `2024.10.4` |
 | `info.md` | (производный от hacs.json) |
-| `README.md` badge | `2023.x` |
-| Код (`ConfigFlowResult`, `LockState.LOCKED`) | требует ≥ 2024.x |
+| `README.md` badge | `2024.10+` ✅ |
+| Код (`ConfigFlowResult`, `LockState`) | ≥ 2024.10 ✅ совпадает с hacs.json |
 
 **Резолюция:** код — источник реальной минимальной версии. Требуется обновить `hacs.json` и README до фактической `2024.1.0` (минимально).
 

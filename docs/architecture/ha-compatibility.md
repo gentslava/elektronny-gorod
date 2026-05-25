@@ -56,7 +56,7 @@ Quality gates:
 | Поле | Текущее | Замечание |
 |---|---|---|
 | `name` | `Электронный город` | ✅ |
-| `homeassistant` | `2022.8.0` | 🔴 неверно — реальная min ≥ 2024.1 |
+| `homeassistant` | `2024.10.4` | ✅ — `LockState` enum появился в 2024.10 |
 | `zip_release` | `true` | ✅ |
 | `filename` | `elektronny_gorod.zip` | ✅ |
 | `country` | `RU` | ✅ |
