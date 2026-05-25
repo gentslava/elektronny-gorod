@@ -122,17 +122,17 @@ elektronny-gorod/
 
 | Файл | Назначение | Особенности |
 |---|---|---|
-| [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) | `DataUpdateCoordinator` | 🔴 **Без `update_interval`** — однократная загрузка `_subscriber_places` |
-| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance | использует свой `HTTP` |
-| [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | 🔴 **per-request `ClientSession()`** |
+| [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) | `DataUpdateCoordinator` | `update_interval=5min`, `_async_update_data` → `{places, balances, cameras, locks}` (ADR-0002) |
+| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance | использует shared `HTTP` (ADR-0008) |
+| [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
 
 ### Платформы (entity)
 
 | Файл | Платформа | Особенности |
 |---|---|---|
-| [`camera.py`](../../custom_components/elektronny_gorod/camera.py) | `camera` | STREAM, опциональный proxy через go2rtc |
-| [`lock.py`](../../custom_components/elektronny_gorod/lock.py) | `lock` | fake-timer через `asyncio.sleep` |
-| [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | balance, unit "₽" (вместо RUB) |
+| [`camera.py`](../../custom_components/elektronny_gorod/camera.py) | `camera` | `CoordinatorEntity`, stable `unique_id=elektronny_gorod_camera_{id}`, STREAM + опциональный proxy через go2rtc, intercom-камера группируется с lock через entrance_uid |
+| [`lock.py`](../../custom_components/elektronny_gorod/lock.py) | `lock` | `CoordinatorEntity`, stable `unique_id=elektronny_gorod_lock_{place}_{ac}_{eid\|main}`, synthetic state через `async_call_later` (без блокировки event loop) |
+| [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | balance, `device_class=MONETARY` + `state_class=TOTAL` + `unit=RUB` (long-term statistics); `_attr_translation_key="balance"`, имя из `device_info.name` |
 
 ### Внешние интеграции
 
@@ -161,8 +161,13 @@ elektronny-gorod/
 
 | Файл | Статус |
 |---|---|
-| [`tests/conftest.py`](../../tests/conftest.py) | работоспособная фикстура |
-| [`tests/test_config_flow.py`](../../tests/test_config_flow.py) | 🔴 **нерабочий stub** из HA template (импортирует несуществующие `CannotConnect`, `InvalidAuth`, `PlaceholderHub`) |
+| [`tests/conftest.py`](../../tests/conftest.py) | fixtures + `enable_custom_integrations` auto-applied |
+| [`tests/test_entity_migration.py`](../../tests/test_entity_migration.py) | unit-тесты `_camera_new_uid`/`_lock_new_uid` + golden vector для `lock_unique_id` |
+| [`tests/test_logging_redact.py`](../../tests/test_logging_redact.py) | unit-тесты `_logging.redact()` + `redact_path()` |
+| [`tests/test_http.py`](../../tests/test_http.py) | Bearer skip на pre-auth, no-leak между запросами, PII redact в error log |
+| [`tests/test_visibility.py`](../../tests/test_visibility.py) | hidden_by sync (first_add, USER override, un-hide, re-add) |
+| [`tests/test_visibility_real.py`](../../tests/test_visibility_real.py) | production-replica (реальные HAR-данные) + migration v2 |
+| [`pytest.ini`](../../pytest.ini) | `asyncio_mode = auto`, `testpaths = tests` |
 
 ### CI / CD
 
@@ -170,9 +175,10 @@ elektronny-gorod/
 |---|---|---|
 | [`hassfest.yaml`](../../.github/workflows/hassfest.yaml) | push / PR | manifest validation |
 | [`hacs.yaml`](../../.github/workflows/hacs.yaml) | push / PR / dispatch | HACS validation |
+| [`prerelease.yaml`](../../.github/workflows/prerelease.yaml) | PR opened / sync | pre-release ZIP с тегом `pr-N` для тестирования |
 | [`release.yaml`](../../.github/workflows/release.yaml) | release published | zip + GH release + автокоммит версии |
 
-🔴 **Отсутствует workflow для pytest.**
+🟡 **Отсутствует workflow для pytest** — все 67 тестов проходят локально (`PYTHONPATH=. pytest tests/`), но CI ещё не настроен. Tracking: roadmap → Tests-1.
 
 ## Внешние API и зависимости
 

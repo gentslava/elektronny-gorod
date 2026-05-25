@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-05-25
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -48,20 +48,37 @@ Quality gates:
 
 **Quality gates passed:** `SECURITY_OK` (P0 cleared), `AUDIT_DONE`, `DOCS_UPDATED`.
 
-## Итерация 2 — Bronze quality scale (≈ 3-5 дней)
+## Итерация 2 — Bronze quality scale ✅ COMPLETED
 
 **Цель:** довести интеграцию до Bronze. См. [`architecture/quality-scale.md#bronze`](architecture/quality-scale.md).
 
-**Acceptance:**
-- `pytest tests/ -v` зелёный в CI;
-- `manifest.json` содержит `quality_scale: "bronze"` и `integration_type: "hub"`;
-- entity имеют `_attr_has_entity_name = True` и стабильный `unique_id`;
-- coordinator имеет `update_interval` и обновляет данные.
+**Статус:** Bronze IQS shipped. Все обязательные критерии Bronze закрыты;
+осталась одна follow-up задача — CI workflow для pytest (Tests-1).
 
-### Tasks
+**Acceptance — met:**
+- `manifest.json` содержит `quality_scale: "bronze"` и `integration_type: "hub"` ✓ (A-34);
+- entity имеют `_attr_has_entity_name = True` и стабильный `unique_id` ✓ (A-12, A-13);
+- coordinator имеет `update_interval` и обновляет данные ✓ (A-08, A-09);
+- `pytest tests/` зелёный локально (67 tests pass) ✓ — CI workflow `.github/workflows/python-tests.yaml`
+  всё ещё **не создан**, это Tests-1 follow-up (см. A-24).
 
-- [ ] **A-08** Задать `update_interval=timedelta(minutes=5)` в `ElektronnyGorodUpdateCoordinator`; в `_async_update_data` обновлять баланс + список мест; вернуть `data: dict`.
-- [ ] **A-09** Перевести Sensor / Lock / Camera на `CoordinatorEntity[ElektronnyGorodUpdateCoordinator]` + `_handle_coordinator_update`.
+### Tasks (closed)
+
+- [x] **A-08** ✅ — `update_interval=timedelta(minutes=5)` + `_async_update_data` возвращает dict.
+- [x] **A-09** ✅ — Sensor / Lock / Camera переведены на `CoordinatorEntity` + `_handle_coordinator_update`. Старые `async_update` удалены.
+- [x] **A-12** ✅ — stable `unique_id` Camera/Lock + миграция legacy через `entity_registry.async_migrate_entries`.
+- [x] **A-13** ✅ — `_attr_has_entity_name = True` + `_attr_translation_key="balance"` (sensor); Camera/Lock — имя в `device_info.name`. Раздел `entity` добавлен в `strings.json` + переводы.
+- [x] **A-14** ✅ — Sensor баланса: `device_class=MONETARY`, `state_class=TOTAL`, `unit="RUB"` (ISO 4217; константа `CURRENCY_RUBLE` удалена из `homeassistant.const` в свежих HA).
+- [x] **A-16** ✅ — `coordinator.async_unsubscribe()` зарегистрирован через `entry.async_on_unload` в `async_setup_entry`.
+- [x] **A-17** ✅ — `_collect_cameras_for_place` + `_collect_locks_for_place` helpers извлечены. (Оставшийся duplicate fan-out на per-place уровне — см. A-61.)
+- [x] **A-18** ✅ — `query_sections` удалён из coordinator.
+- [x] **A-34** ✅ — `quality_scale: "bronze"`, `integration_type: "hub"` в `manifest.json`.
+- [x] **A-44** ✅ — `async_update` камеры удалён вместе с переходом на `CoordinatorEntity` (stream URL лениво в `stream_source()`).
+- [x] **Tests baseline** ✅ — `tests/test_logging_redact.py`, `tests/test_http.py`, `tests/test_entity_migration.py`, `tests/test_visibility.py`, `tests/test_visibility_real.py` + `conftest.py` фикс + `pytest.ini`. Локально 67 tests pass.
+- [x] **PR #35 extras** ✅ — Visibility sync через `hidden_by` ↔ `/settings/screens` + one-time migration `visibility_migration_v2` (см. A-60). Bearer-omission на pre-auth endpoints (см. A-22 partial).
+
+### Tasks (deferred → Итерация 3)
+
 - [ ] **A-10** Решить `iot_class`: либо включён реальный polling — оставить `cloud_polling`; либо сменить класс. Зафиксировать в ADR-0003.
 - [x] **A-11** ✅ Поднят `hacs.json:homeassistant` до `2024.10.4` — первая stable HA с `LockState` enum, который импортирует `lock.py`. Та же версия пинится как min в CI matrix (см. python-tests.yaml).
 - [x] **A-12** ✅ slice 3c — stable `unique_id` Camera/Lock + миграция legacy через `entity_registry.async_migrate_entries`.
@@ -81,14 +98,14 @@ Quality gates:
 - [ ] **A-35** Создать `CHANGELOG.md`.
 - [ ] **A-36** Создать `CONTRIBUTING.md` со ссылкой на `aidd/contributing.md`.
 - [ ] **A-27..A-29** Поправить README (битая ссылка, `electronic_city → elektronny_gorod`, badge HA-версии).
-- [ ] **ADR-0002** «coordinator pattern: переход на CoordinatorEntity + update_interval».
-- [ ] **ADR-0004** «token redaction strategy».
+- [ ] **ADR-0002** «coordinator pattern: переход на CoordinatorEntity + update_interval» — proposed, требуется promote → accepted.
+- [ ] **ADR-0004** «token redaction strategy» — proposed, требуется promote → accepted.
 
-**Quality gates passed:** `TESTS_PASS`, `SECURITY_OK`, `REVIEW_OK`, `DOCS_UPDATED`. Integration Quality Scale: Bronze.
+**Quality gates achieved:** `SECURITY_OK`, `REVIEW_OK`, `DOCS_UPDATED`. Integration Quality Scale: **Bronze**. `TESTS_PASS` — локально зелёный, CI follow-up в Итерации 3.
 
 ## Итерация 3 — Silver + Full AIDD (≈ 5-7 дней)
 
-**Цель:** Silver Quality Scale + расширенная агентская инфраструктура.
+**Цель:** Silver Quality Scale + расширенная агентская инфраструктура + закрытие feature gaps, открытых HAR-research циклом.
 
 **Acceptance:**
 - Silver criteria по [`architecture/quality-scale.md#silver`](architecture/quality-scale.md);
@@ -99,13 +116,22 @@ Quality gates:
 
 #### HA features
 
-- [ ] **A-22** Поведение при 401: сначала собрать HAR-сессию со сценарием истечения access_token, затем реализовать **точно как в приложении** (см. [ADR-0006](decisions/0006-mirror-app-behavior.md)). До получения HAR — оставить текущее graceful поведение (UpdateFailed → пользователь делает reauth через UI).
+- [ ] **A-15** Решить судьбу `fake_timer_lock` в `lock.py` — либо удалить, либо переписать `lock` → `button`. Требует ADR-0005.
+- [ ] **A-22** (остаток) Поведение при 401: pre-auth Bearer-omission уже сделан (PR #35); осталось — собрать HAR со сценарием истечения access_token, затем реализовать `/auth/.../refresh` **точно как в приложении** (см. [ADR-0006](decisions/0006-mirror-app-behavior.md)). До получения HAR — текущее graceful поведение (UpdateFailed → reauth через UI).
 - [ ] **A-25** Native reauth flow (`async_step_reauth_confirm`).
 - [ ] **A-26** Reconfigure flow (`async_step_reconfigure`).
 - [ ] **A-37** `parallel_updates = 1` (или другое значение) на entity-классах.
 - [ ] **A-38** Обработка unavailable / log-when-unavailable.
-- [ ] **A-15** Решить судьбу `fake_timer_lock` в `lock.py` — либо удалить, либо переписать `lock` → `button`. Требует ADR-0005.
 - [ ] Repairs flow для edge-cases (заблокированный аккаунт, истёкший договор).
+
+#### Silver feature gaps (HAR-research findings)
+
+- [ ] **A-56** DND switches (3 entity per place: master + 2 dependent через `/settings/do_not_disturb`). Новая платформа `switch`.
+- [ ] **A-57** Sensor balance — extra entities из `/finance` response (binary_sensor.balance_blocked, sensor.days_to_block, sensor.next_payment_amount/date, button.pay).
+- [ ] **A-58** `/rest/v1/events/search` polling — основа для real-time event detection без STOMP/FCM. Требует **ADR-0009** (см. ниже). Закрывает основной use-case Итерации 4 более простым способом.
+- [ ] **A-59** Video retention helper — `is_within_retention(camera_type, ts)`, проверка перед video URL request. Закрывает ложные 500 для лифт/публичных камер.
+- [ ] **A-61** Двойной HTTP в per-place collectors — вынести `screens` + `access_controls` на уровень `_async_update_data`, передавать как параметры. Perf, не функциональная проблема.
+- [ ] **A-62** FAVORITES section в `_extract_hidden_ids` — расширить парсинг с учётом mixed-typed items. Fallback OK, не блокер.
 
 #### Code quality
 
@@ -135,39 +161,43 @@ Quality gates:
 
 **Quality gates passed:** `READY_FOR_RELEASE` + Silver IQS.
 
-## Итерация 4 — Real-time + push (≈ research-фаза, неопределённо)
+## Итерация 4 — Polling-based event detection (≈ 3-5 дней)
 
-**Цель:** реализовать приём событий домофона в real-time (звонок → автоматизация HA).
+**Цель:** реализовать near-real-time приём событий домофона (звонок → автоматизация HA) через polling endpoint **без** STOMP/FCM/SIP.
 
-**Принцип:** строго следуем [ADR-0006](decisions/0006-mirror-app-behavior.md) — никаких догадок без подтверждения через HAR.
+**Принцип:** строго следуем [ADR-0006](decisions/0006-mirror-app-behavior.md) — никаких догадок без подтверждения через HAR. Polling-стратегия выбрана **именно потому**, что подтверждена через HAR (`/events/search` использует само приложение); STOMP/FCM/SIP — нет.
 
-### Research-фаза (обязательна до spec)
+### Почему отказались от STOMP / FCM / SIP
 
-- [ ] **HAR-1** Собрать HAR со сценарием активного WebSocket-соединения + реальный звонок в домофон. Зафиксировать содержимое STOMP-фреймов.
-- [ ] **HAR-2** Capture SIP-трафика (через mitmproxy в TCP-mode или Wireshark) во время реального звонка. Зафиксировать INVITE / RTP flow.
-- [ ] **HAR-3** Capture поведения приложения «в фоне» (нажал home, ждал ~5 минут, входящее событие). Какие каналы реально доставляют?
-- [ ] Анализ — три канала (STOMP / SIP / FCM): что чем доставляется, какие фолбэки, какая latency.
+HAR-research цикл показал:
 
-### Возможные direction (зависят от research)
+- **STOMP**: `GET /rest/v1/stomp/available-features` для абонентов ЭГ возвращает `null` — backend feature-flag отключён. Видимо, это **платная фича Дом.ру** («Умный дом»), не включена в подписку обычных абонентов «Мой Дом». Реализация STOMP-клиента для пустого канала — пустая трата времени.
+- **FCM**: push приходят через Google Play Services, минуя HTTPS-каналы. Bridge'инг в HA требует APK реверса (FCM `project_id`, `sender_key`) → **юридически серая зона**, в scope проекта не входит.
+- **SIP**: трафик идёт вне HTTP (RTP/UDP). Полный SIP UAC в HA — серьёзный архитектурный proxy + зависимость (`pjsip`, `linphone`). Слишком жирно для базовой «звонок → автоматизация» цели.
+- **`/events/search` polling** ✅ — REST endpoint, использует то же приложение для backfill, retention 6 месяцев, page-pagination. Latency 15-30s acceptable для большинства HA-автоматизаций. Требует только cron-tick поверх существующего coordinator-паттерна.
 
-- [ ] **A-47** STOMP-клиент в `coordinator` (если WS несёт релевантные события):
-  - WebSocket subscriber поверх существующего `aiohttp` (либо `aiohttp.ClientWebSocketResponse`).
-  - SUBSCRIBE на нужные destinations (зависит от research).
-  - На приходящий MESSAGE — `async_dispatcher_send` → HA-entity / `event`.
-- [ ] **A-49** SIP-клиент (если SIP несёт INVITE для звонков):
-  - Прототип через PJSIP / Linphone CLI.
-  - Регистрация SIP UAC с credentials из `sipdevices`.
-  - На INVITE — `event` в HA + потенциально доступ к RTP audio (long-term).
-- [ ] **A-50** Camera events polling — независимая фича, не требует real-time:
-  - `GET /api/mh-camera-personal/.../cameras/{id}/events` периодически.
-  - `event` entity на каждую запись.
+### План (А-58 как основной driver)
+
+- [ ] **ADR-0009** — Polling vs STOMP/FCM для event detection. Зафиксировать **почему** отказались от других каналов. Required before code.
+- [ ] **A-58** Coordinator polls `/rest/v1/events/search?page=0` каждые 15-30 секунд (отдельный interval, **не** общий 5-минутный refresh):
+  - Dedup новых событий по `id`.
+  - `async_dispatcher_send` → HA `event` entity на каждый `accessControl` / camera.
+  - Backfill при первом setup (опционально) — до N страниц истории в HA logbook.
+  - Page-size = 20 (фикс backend), respect `last:true`.
+- [ ] **A-50** Camera events — реализовать через **тот же** `/events/search` filter по `source.type = camera` (вместо отдельного `/cameras/{id}/events` endpoint). Один polling-loop, один event-stream.
+- [ ] **ADR-0010** (опционально) — зафиксировать visibility sync strategy (`hidden_by`-based, two-way, USER override respect). Прецедент уже реализован в коде (PR #35 + A-60); ADR закрепит решение, чтобы будущие модификации не deviated.
+
+### Понижены / отложены
+
+- ~~**A-47** STOMP-клиент~~ — понижен до **P3 / skip**. Если когда-то backend включит STOMP feature flag для ЭГ абонентов — пересмотреть. Сейчас канал пуст.
+- ~~**A-49** SIP-клиент~~ — остаётся **P3 future**. Только если потребуется full intercom-call feature (RTP audio в HA) — отдельная итерация с явным spec.
 
 ### Ожидаемые исходы
 
-- Лучше всего: один STOMP-клиент закрывает 80% сценариев. Лёгкий wins для HA-автоматизаций.
-- Хуже всего: события размазаны по 3 каналам, нужны все три → сложность поддержки растёт. В этом случае — выбрать самый стабильный канал и документировать ограничения.
+- **Realistic best case**: 15-30s latency на звонок в домофон, retention 6 месяцев истории для backfill. Покрывает «90% use-cases» автоматизации «звонок → подсветить экран / уведомить».
+- **Limitation**: не real-time (latency, не sub-second). Если пользователю нужна моментальная реакция — это **out of scope без STOMP/SIP**, документировать в README.
 
-**Quality gates passed:** READY_FOR_RELEASE + Silver IQS + работающая push-фича.
+**Quality gates passed:** `READY_FOR_RELEASE` + Silver IQS + polling-based event entity работает.
 
 ## Принципы
 
@@ -206,6 +236,11 @@ Tests
 | 0003 | Стратегия `iot_class` и polling | начало Итерации 2 |
 | 0004 | Token redaction strategy | начало Итерации 1 (post-factum для уже сделанных правок) |
 | 0005 | Lock vs Button для домофона | Итерация 3 |
+| 0006 | Mirror application behavior | accepted |
+| 0007 | Stateful emulator baseline | accepted |
+| 0008 | Shared aiohttp ClientSession | Итерация 2 |
+| 0009 | Polling vs STOMP/FCM для event detection | **required** перед A-58 (Итерация 4) |
+| 0010 | Visibility sync strategy (hidden_by, two-way) | опц., Итерация 3-4 (post-factum для PR #35) |
 
 ## Risks
 
