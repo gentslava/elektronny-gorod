@@ -15,10 +15,10 @@
   - `switch.{place}_mute_management_company_calls` — отключить уведомления УК (dependent).
   - Полностью server-side: при включении backend перестаёт слать push о звонках. Toggle через HA UI — POST `/api/mh-customer/.../settings/do_not_disturb`. См. api-reference §do_not_disturb.
 
-- **Balance-related entities** ([A-57](docs/audit/project-audit.md)). Для каждого place добавлены 3 entity на основе расширенного `/finance` response:
+- **Balance-related entities** ([A-57](docs/audit/project-audit.md)). Для каждого place добавлены 2 entity на основе расширенного `/finance` response:
   - `binary_sensor.{place}_account_blocked` — `device_class=problem`, `True` когда аккаунт заблокирован оператором. Готово для automation «уведомить если blocked».
   - `sensor.{place}_days_to_block` — `device_class=duration`, `unit=d`. Дней до автоматической блокировки. Графики warning возможны.
-  - `button.{place}_pay` — press → persistent notification с `payment_link` из API. HA не имеет native browser-launch (server-side), notification — стандартный pattern.
+  - `payment_link` остаётся как attribute `"Payment link"` у `sensor.balance` (для использования через Lovelace `tap_action: url` или automation с `mobile_app.notify` OPEN_URL).
   - **0 новых HTTP calls** — поля приходят в существующем `query_balance` (был unused). Coordinator теперь extract `days_to_block`, `days_to_warning`, `company`.
 
 ## [3.1.0] - 2026-05-25

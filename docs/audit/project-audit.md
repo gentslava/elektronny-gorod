@@ -414,16 +414,25 @@ Quality gates:
 
 ### A-57. Sensor balance — нет дополнительных attrs из `/finance` response
 
-- **Status:** ✅ **RESOLVED** в branch `feat/a57-balance-attrs` (PR TBD).
-  3 entity per place добавлены к существующему balance device:
+- **Status:** ✅ **RESOLVED** в branch `feat/a57-balance-attrs` (PR #39).
+  2 entity per place добавлены к существующему balance device:
   - `binary_sensor.{place}_account_blocked` (BinarySensorDeviceClass.PROBLEM).
   - `sensor.{place}_days_to_block` (DURATION + UnitOfTime.DAYS).
-  - `button.{place}_pay` (press → persistent_notification с payment_link).
   Coordinator `_fetch_balance` теперь extracts `days_to_block`, `days_to_warning`,
   `company`. 0 новых HTTP calls — поля из существующего `/finance` response.
-  6 unit-тестов (TDD strict — RED first, потом GREEN). Translations ru/en.
-  `amountSum` / `targetDate` остались в balance sensor extra_state_attributes
-  (не выделены в отдельные entity) — достаточно для automation. См. CHANGELOG.
+  `amountSum` / `targetDate` / `payment_link` остались в `sensor.balance`
+  extra_state_attributes — достаточно для automation (mobile_app.notify
+  OPEN_URL, Lovelace tap_action: url, scripts).
+
+  **Дизайн-урок**: первоначально был добавлен `button.{place}_pay` с
+  press → persistent_notification, но удалён. HA `ButtonEntity` это
+  server-side trigger, не подходит для browser-launch. Открытие URL —
+  client-side concern (Lovelace tap_action / mobile push). `payment_link`
+  как attribute даёт пользователю гибкость без navigating «button →
+  notification → click».
+
+  5 unit-тестов (TDD strict — RED first, потом GREEN). Translations ru/en.
+  См. CHANGELOG.
 
 ### A-58. Real-time event delivery (polling vs FCM push — research pending)
 

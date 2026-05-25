@@ -1,19 +1,17 @@
 """Tests for A-57: balance-related entities из /finance response.
 
-Архитектура (full scope, выбрано пользователем):
+Архитектура:
 
 | Entity | Платформа | Источник из coordinator.data["balances"] |
 |---|---|---|
 | sensor.{addr}_account_balance | sensor (existing) | balance |
 | binary_sensor.{addr}_blocked | binary_sensor (new) | blocked |
 | sensor.{addr}_days_to_block | sensor (new) | days_to_block |
-| button.{addr}_pay | button (new) | payment_link |
 
-button.press → persistent_notification с payment_link (standard HA pattern
-для open-URL action: HA не имеет нативного browser-launch API server-side).
-
-TDD strict: эти тесты должны fail сейчас (entity не существуют), потом
-implementation до green.
+Note: `payment_link` остаётся как attribute у `sensor.balance` (поле
+"Payment link" в extra_state_attributes). Button entity для оплаты убран —
+HA не имеет server-side browser-launch, redirect делается через client-side
+(Lovelace card `tap_action: url` или mobile_app push с OPEN_URL action).
 """
 from __future__ import annotations
 
@@ -188,13 +186,17 @@ async def test_days_to_block_has_duration_device_class(
     assert state.attributes.get("unit_of_measurement") == "d"
 
 
-# ─── button.pay ─────────────────────────────────────────────────────────────
+# ─── payment_link остаётся как attribute у sensor.balance ─────────────────
 
 
-async def test_pay_button_exposes_payment_link_attr(
+async def test_payment_link_available_as_balance_sensor_attribute(
     hass: HomeAssistant, mock_api
 ):
-    """button.pay должен иметь payment_link в extra_state_attributes."""
+    """payment_link доступен в `sensor.balance.attributes["Payment link"]`.
+
+    Пользователь использует через Lovelace `tap_action: url` (с template на
+    attribute) или automation с mobile_app.notify (action OPEN_URL).
+    """
     _, set_finance = mock_api
     set_finance(payment_link="https://pay.example/xyz")
 
@@ -204,48 +206,8 @@ async def test_pay_button_exposes_payment_link_attr(
     await hass.async_block_till_done()
 
     registry = er.async_get(hass)
-    uid = f"{DOMAIN}_{PLACE_ID}_pay"
-    eid = registry.async_get_entity_id("button", DOMAIN, uid)
+    uid = f"{DOMAIN}_{PLACE_ID}_balance"
+    eid = registry.async_get_entity_id("sensor", DOMAIN, uid)
     assert eid is not None
     state = hass.states.get(eid)
-    assert state.attributes.get("payment_link") == "https://pay.example/xyz"
-
-
-async def test_pay_button_press_fires_persistent_notification(
-    hass: HomeAssistant, mock_api
-):
-    """button.pay press → persistent_notification с payment_link.
-
-    HA не имеет нативного browser-launch (server-side); persistent_notification
-    с link — стандартный pattern для «открыть URL из service call»."""
-    _, set_finance = mock_api
-    set_finance(payment_link="https://pay.example/zzz")
-
-    entry = _make_config_entry()
-    entry.add_to_hass(hass)
-    assert await hass.config_entries.async_setup(entry.entry_id)
-    await hass.async_block_till_done()
-
-    registry = er.async_get(hass)
-    uid = f"{DOMAIN}_{PLACE_ID}_pay"
-    eid = registry.async_get_entity_id("button", DOMAIN, uid)
-    assert eid is not None
-
-    # Mock async_create — проверяем что наш код вызвал её с правильным message.
-    # В HA 2024+ persistent_notification не пишет в state machine (только WS),
-    # поэтому assert через mock — более надёжный unit-test pattern.
-    with patch(
-        "custom_components.elektronny_gorod.button.async_create_notification"
-    ) as mock_notify:
-        await hass.services.async_call(
-            "button", "press", {"entity_id": eid}, blocking=True
-        )
-        await hass.async_block_till_done()
-
-    mock_notify.assert_called_once()
-    call_args = mock_notify.call_args
-    # signature: async_create(hass, message, title=..., notification_id=...)
-    message = call_args.args[1] if len(call_args.args) > 1 else call_args.kwargs.get("message", "")
-    assert "https://pay.example/zzz" in message, (
-        f"Expected payment_link в notification message, got: {message!r}"
-    )
+    assert state.attributes.get("Payment link") == "https://pay.example/xyz"
