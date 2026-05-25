@@ -10,23 +10,35 @@
 
 | Приложение | Package | Backend | Используется в integration |
 |---|---|---|---|
-| **Мой Дом** (Электронный город / Дом.ру) | `ru.inetra.intercom` | `myhome.proptech.ru` | ✅ да |
+| **Мой Дом** (Электронный город / Дом.ру / др.) | `ru.inetra.intercom` | `myhome.proptech.ru` | ✅ да |
 | **Электронный город** (legacy / standalone) | `com.electronnijgorod.novosibirsk` | `my.2090000.ru` + Keycloak | ❌ нет (другой бэкенд) |
+| **Дом.ру Агент** | `com.ertelecom.agent` | (не разбирали) | ❌ нет |
 | **Умный Дом.ру** | `com.ertelecom.smarthome` | (не разбирали) | ❌ нет |
 
 Подробнее про разделение бэкендов — см. [`docs/architecture/api-reference.md`](../../docs/architecture/api-reference.md) раздел «Backends — separate ecosystems».
+
+⚠️ **Важно про naming:** имя файла APK / xapk / apks никак не связано с реальным package — оператор может выпускать «Мой Дом.ру» как Дом.ру Агент (`com.ertelecom.agent`), а «Мой Дом» как `ru.inetra.intercom`. **Всегда проверяй package через aapt / jadx до patching.**
+
+## Форматы файлов
+
+APK скачивается в одном из трёх форматов:
+- **`.apk`** — обычный single-package. `apk-mitm <file>.apk` → `<file>-patched.apk`. Install через `adb install`.
+- **`.xapk`** (APKPure формат) — zip с base + split-config APKs. `apk-mitm` принимает напрямую, выдаёт `-patched.xapk`. Распаковать (`unzip`) → `adb install-multiple *.apk`.
+- **`.apks`** (Google Play Android App Bundle) — bundletool output. `apk-mitm` принимает напрямую, выдаёт `-patched.apks`. Распаковать → `adb install-multiple base.apk split_config*.apk` (игнорируй `*.idsig`).
 
 ## Структура файлов
 
 ```
 research/apk/
 ├── README.md                                  ← коммитится
-├── myhome-3.64.0-original.apk                 ← оригинал
-├── myhome-3.64.0-original-patched.apk        ← после apk-mitm (можно ставить через adb)
-├── eg-3.6.6-original.apk                      ← оригинал
-├── eg-3.6.6-original-patched.apk             ← после apk-mitm
-├── umnydom-9.3.0-original.apk                 ← оригинал
-└── umnydom-9.3.0-original-patched.apk        ← после apk-mitm
+├── myhome-9.7.0-original.apks                 ← Мой Дом (.apks, Google Play bundle)
+├── myhome-9.7.0-original-patched.apks         ← после apk-mitm
+├── eg-3.6.6-original.apk                      ← Электронный город (legacy)
+├── eg-3.6.6-original-patched.apk
+├── domru-agent-3.64.0-original.apk            ← Дом.ру Агент (com.ertelecom.agent)
+├── domru-agent-3.64.0-original-patched.apk
+├── umnydom-9.3.0-original.apk                 ← Умный Дом.ру
+└── umnydom-9.3.0-original-patched.apk
 ```
 
 ## Откуда брать APK
