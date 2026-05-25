@@ -101,6 +101,17 @@
       "lock": {
         "name": "Замок"
       }
+    },
+    "switch": {
+      "dnd_root": {
+        "name": "Не беспокоить"
+      },
+      "dnd_intercom_calls": {
+        "name": "Без звонков с домофона"
+      },
+      "dnd_management_company_calls": {
+        "name": "Без уведомлений от УК"
+      }
     }
   }
 }

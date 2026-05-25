@@ -101,6 +101,17 @@
       "lock": {
         "name": "Lock"
       }
+    },
+    "switch": {
+      "dnd_root": {
+        "name": "Do not disturb"
+      },
+      "dnd_intercom_calls": {
+        "name": "Mute intercom calls"
+      },
+      "dnd_management_company_calls": {
+        "name": "Mute management company calls"
+      }
     }
   }
 }
