@@ -167,13 +167,37 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 if balance:
                     balances.append(balance)
 
+            # Pre-fetch shared per-place data (A-61): screens + access_controls
+            # нужны и для cameras (для hidden), и для locks. Раньше каждый
+            # collector делал свой fetch — двойной HTTP. Теперь один раз per
+            # place, передаём в collectors как параметры.
             try:
-                cameras.extend(await self._collect_cameras_for_place(place_id))
+                screens = await self._api.query_screens_settings(place_id)
+            except Exception as ex:  # noqa: BLE001
+                LOGGER.warning("Screens fetch failed for place_id=%s: %s", place_id, ex)
+                screens = {}
+            try:
+                access_controls = await self._api.query_access_controls(place_id)
+            except Exception as ex:  # noqa: BLE001
+                LOGGER.warning(
+                    "Access controls fetch failed for place_id=%s: %s", place_id, ex
+                )
+                access_controls = []
+
+            hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
+            hidden_entrance_ids = self._extract_hidden_ids(screens, "ACCESS_CONTROLS")
+
+            try:
+                cameras.extend(await self._collect_cameras_for_place(
+                    place_id, access_controls, hidden_cam_ids, hidden_entrance_ids
+                ))
             except Exception as ex:  # noqa: BLE001
                 LOGGER.warning("Cameras fetch failed for place_id=%s: %s", place_id, ex)
 
             try:
-                locks.extend(await self._collect_locks_for_place(place_id))
+                locks.extend(self._collect_locks_for_place(
+                    place_id, access_controls, hidden_entrance_ids
+                ))
             except Exception as ex:  # noqa: BLE001
                 LOGGER.warning("Locks fetch failed for place_id=%s: %s", place_id, ex)
 
@@ -234,8 +258,23 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "company": finance.get("company"),
         }
 
-    async def _collect_cameras_for_place(self, place_id: str) -> list[dict[str, Any]]:
+    async def _collect_cameras_for_place(
+        self,
+        place_id: str,
+        access_controls: list[dict[str, Any]],
+        hidden_cam_ids: set[str],
+        hidden_entrance_ids: set[str],
+    ) -> list[dict[str, Any]]:
         """Камеры одного place — три источника (access_controls + public + cameras).
+
+        Args:
+            place_id: ID места.
+            access_controls: pre-fetched access controls (общий результат с
+                _collect_locks_for_place; раньше каждый делал свой запрос —
+                A-61).
+            hidden_cam_ids: pre-extracted из `/settings/screens` PUBLIC_CAMERAS
+                раздел (общий с locks для ACCESS_CONTROLS hidden — A-61).
+            hidden_entrance_ids: pre-extracted из ACCESS_CONTROLS раздел.
 
         ⚠️ **Структура API** (см. api-reference §Access controls):
         `externalCameraId` существует на ДВУХ уровнях:
@@ -261,20 +300,10 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         cameras: list[dict[str, Any]] = []
 
-        # screens settings — для уважения user app preferences (visibility).
-        try:
-            screens = await self._api.query_screens_settings(place_id)
-        except Exception as ex:  # noqa: BLE001
-            LOGGER.warning("Screens settings failed for place_id=%s: %s", place_id, ex)
-            screens = {}
-        hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
-        hidden_entrance_ids = self._extract_hidden_ids(screens, "ACCESS_CONTROLS")
-
         # 1. Access controls (домофоны).
         # hidden для intercom-камеры берётся из ACCESS_CONTROLS.hidden — если
         # user скрыл entrance в приложении, и lock и camera этого entrance
         # получат `enabled_default=False`.
-        access_controls = await self._api.query_access_controls(place_id)
         for ac in access_controls:
             ac_id = ac.get("id")
             entrances = ac.get("entrances") or []
@@ -352,8 +381,21 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     result.add(str(iid))
         return result
 
-    async def _collect_locks_for_place(self, place_id: str) -> list[dict[str, Any]]:
+    def _collect_locks_for_place(
+        self,
+        place_id: str,
+        access_controls: list[dict[str, Any]],
+        hidden_entrance_ids: set[str],
+    ) -> list[dict[str, Any]]:
         """Locks одного place (один per entrance, либо per AC если без entrances).
+
+        Args:
+            place_id: ID места.
+            access_controls: pre-fetched (общий результат с
+                _collect_cameras_for_place; раньше каждый делал свой запрос —
+                A-61).
+            hidden_entrance_ids: pre-extracted из `/settings/screens`
+                ACCESS_CONTROLS раздел.
 
         `name` — entrance.name (для UI entity, чтобы различать "Подъезд 1" /
         "Калитка 2"). `ac_name` — имя access_control (физического домофона),
@@ -362,15 +404,6 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         (user в приложении скрыл entrance) → entity получит enabled_default=False.
         """
         locks: list[dict[str, Any]] = []
-        # screens для hidden — повторный вызов после _collect_cameras_for_place;
-        # это +1 HTTP per place per refresh. TODO: вынести screens на верхний
-        # уровень `_async_update_data` чтобы запросить один раз.
-        try:
-            screens = await self._api.query_screens_settings(place_id)
-        except Exception:  # noqa: BLE001
-            screens = {}
-        hidden_entrance_ids = self._extract_hidden_ids(screens, "ACCESS_CONTROLS")
-        access_controls = await self._api.query_access_controls(place_id)
         for ac in access_controls:
             ac_name = ac.get("name")
             entrances = ac.get("entrances") or []

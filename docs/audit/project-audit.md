@@ -488,21 +488,16 @@ Quality gates:
 
 ### A-61. Двойной HTTP в per-place collectors
 
-- **Severity:** P3 (perf, не функциональная проблема).
-- **Area:** Performance.
-- **Evidence:** [`coordinator.py:_collect_locks_for_place`](../../custom_components/elektronny_gorod/coordinator.py)
-  повторно вызывает `query_screens_settings` и `query_access_controls`,
-  которые уже были fetched в `_collect_cameras_for_place` для того же
-  place. В самом коде есть TODO-комментарий: «это +1 HTTP per place per
-  refresh. TODO: вынести screens на верхний уровень».
-- **Impact:** +2 HTTP per place per refresh (screens + access_controls).
-  При 5-минутном update_interval и N places — 2N лишних requests
-  каждые 5 минут. Это **не** функциональная проблема (данные одинаковые,
-  results корректные), а излишняя нагрузка на оператора + лишний latency.
-- **Recommended fix:** в `_async_update_data` для каждого place fetch
-  screens + access_controls один раз → передавать в `_collect_cameras_for_place`
-  и `_collect_locks_for_place` как параметры (вместо повторного fetch
-  внутри). От code-reviewer hand-off.
+- **Status:** ✅ **RESOLVED** в branch `feat/a61-fix-double-http` (PR TBD).
+  Pre-fetch `screens` + `access_controls` в `_async_update_data` per place,
+  передача в оба collectors как параметры. `_collect_cameras_for_place`
+  signature расширена до 4 параметров. `_collect_locks_for_place` теперь
+  pure-sync (нет awaitов). **Экономия: -2 HTTP per place per 5min refresh**
+  (-576 calls/day для 1 place, scales linearly). 3 new unit-теста (TDD
+  strict — RED first → GREEN после refactor). Behavioral NOTE: при ошибке
+  `query_access_controls` теперь и cameras, и locks пусты для того place
+  (раньше locks могли survive независимо — теперь per-place операция
+  атомарна). См. CHANGELOG.
 
 ### A-62. FAVORITES section в `/settings/screens` не парсится
 
@@ -536,7 +531,7 @@ Quality gates:
 | A-08..A-14, A-16..A-21, A-23, A-24, A-44, A-55 | Итерация 2 (Bronze IQS — shipped в 3.1.0) |
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
-| ✅ A-56 + ✅ A-57 (shipped 3.2.0 TBD), A-58, A-59, A-61, A-62 | Итерация 3 (Silver feature gaps) |
+| ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
