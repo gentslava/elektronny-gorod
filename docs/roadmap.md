@@ -64,10 +64,10 @@ Quality gates:
 - [ ] **A-09** Перевести Sensor / Lock / Camera на `CoordinatorEntity[ElektronnyGorodUpdateCoordinator]` + `_handle_coordinator_update`.
 - [ ] **A-10** Решить `iot_class`: либо включён реальный polling — оставить `cloud_polling`; либо сменить класс. Зафиксировать в ADR-0003.
 - [ ] **A-11** Поднять `hacs.json:homeassistant` до `2024.1.0` (или иной реально нужной версии).
-- [ ] **A-12** Убрать `name` из `unique_id` Camera и Lock; стабильный формат на основе домена + place + sub-id.
-- [ ] **A-13** `_attr_has_entity_name = True` + `_attr_translation_key`. Добавить раздел `entity` в `strings.json` + переводы.
-- [ ] **A-14** Sensor баланса: `device_class=MONETARY`, `state_class=MEASUREMENT`, `unit=CURRENCY_RUBLE`.
-- [ ] **A-16** Вызывать `coordinator.async_unsubscribe()` из `async_unload_entry`.
+- [x] **A-12** ✅ slice 3c — stable `unique_id` Camera/Lock + миграция legacy через `entity_registry.async_migrate_entries`.
+- [x] **A-13** ✅ slice 3c — `_attr_has_entity_name = True` + `_attr_translation_key="balance"` (sensor); Camera/Lock — имя в `device_info.name`. Раздел `entity` добавлен в `strings.json` + переводы.
+- [x] **A-14** ✅ slice 3c — Sensor баланса: `device_class=MONETARY`, `state_class=TOTAL`, `unit=CURRENCY_RUBLE`.
+- [x] **A-16** ✅ slice 3a — `coordinator.async_unsubscribe()` зарегистрирован через `entry.async_on_unload` в `async_setup_entry`.
 - [ ] **A-17** Извлечь дубликат логики в `_collect_cameras_for_place(place_id)`.
 - [ ] **A-18** Удалить или использовать `available_sections`.
 - [ ] **A-19** Сузить `except Exception` в `api.py` до `ClientResponseError`/`ClientError`/`asyncio.TimeoutError`; не использовать `e.args[0]`.
@@ -77,7 +77,7 @@ Quality gates:
 - [ ] **A-44** Убрать дублирующий `get_camera_stream` в `async_update` камеры (закрывается через A-09 CoordinatorEntity).
 - [ ] **Tests-1..N** Написать реальные тесты по плану [`testing/strategy.md`](testing/strategy.md): config_flow happy + abort, options_flow, миграции, coordinator, api.
 - [ ] **CI-1** Создать `.github/workflows/python-tests.yaml`.
-- [ ] **A-34** Добавить `quality_scale: "bronze"`, `integration_type: "hub"` в manifest.
+- [x] **A-34** ✅ slice 3c — `quality_scale: "bronze"`, `integration_type: "hub"` в `manifest.json`.
 - [ ] **A-35** Создать `CHANGELOG.md`.
 - [ ] **A-36** Создать `CONTRIBUTING.md` со ссылкой на `aidd/contributing.md`.
 - [ ] **A-27..A-29** Поправить README (битая ссылка, `electronic_city → elektronny_gorod`, badge HA-версии).

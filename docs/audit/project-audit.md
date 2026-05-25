@@ -117,22 +117,21 @@ Quality gates:
 
 ### A-12. `unique_id` Camera/Lock содержит локализованное `name`
 
+- **Status:** ✅ **RESOLVED** в ветке `feat/coordinator-entity` (slice 3c). Новый формат — camera `{DOMAIN}_camera_{id}`, lock `{DOMAIN}_lock_{place_id}_{ac_id}_{entrance_id|main}` (канонический — `entity_migration.lock_unique_id`). Existing entries мигрируются автоматически через `entity_registry.async_migrate_entries` в `async_setup_entry`. См. [ADR-0002](../decisions/0002-coordinator-pattern.md) §Entity naming.
 - **Area:** HA-compat / Correctness
-- **Evidence:** [`camera.py:122`](../../custom_components/elektronny_gorod/camera.py#L122), [`lock.py:48`](../../custom_components/elektronny_gorod/lock.py#L48)
-- **Impact:** при изменении `name` оператором — другой entity в HA registry; ломается история состояний.
-- **Recommended fix:** убрать `name` из `unique_id`. Использовать только стабильные идентификаторы.
+- **Original Impact:** при изменении `name` оператором — другой entity в HA registry; ломалась история состояний.
 
 ### A-13. Жёсткое русское имя `_attr_name = "Баланс аккаунта"`
 
+- **Status:** ✅ **RESOLVED** в ветке `feat/coordinator-entity` (slice 3c). Sensor — `_attr_has_entity_name=True` + `_attr_translation_key="balance"` (раздел `entity.sensor.balance.name` в `strings.json` + `translations/{ru,en}.json`). Camera/Lock — `_attr_name=None`, имя из `device_info.name` (приходит из API оператора).
 - **Area:** HA-compat / i18n
-- **Evidence:** [`sensor.py:43`](../../custom_components/elektronny_gorod/sensor.py#L43)
-- **Recommended fix:** `_attr_has_entity_name = True`, `_attr_translation_key = "balance"`; добавить раздел `entity` в `strings.json`.
 
 ### A-14. Sensor баланса: нет device_class/state_class/правильного unit
 
+- **Status:** ✅ **RESOLVED** в ветке `feat/bronze-entity-polish` (slice 3c). `_attr_device_class = SensorDeviceClass.MONETARY`, `_attr_state_class = SensorStateClass.TOTAL`, `_attr_native_unit_of_measurement = "RUB"` (ISO 4217; константа `CURRENCY_RUBLE` удалена из `homeassistant.const` в свежих HA). Long-term statistics в HA работают корректно.
 - **Area:** HA-compat
-- **Evidence:** [`sensor.py:55-59`](../../custom_components/elektronny_gorod/sensor.py#L55-L59): unit = `"₽"`.
-- **Recommended fix:**
+- **Original Evidence:** [`sensor.py:55-59`](../../custom_components/elektronny_gorod/sensor.py#L55-L59): unit = `"₽"`.
+- **Original Fix (для reference):**
   ```python
   _attr_device_class = SensorDeviceClass.MONETARY
   _attr_native_unit_of_measurement = CURRENCY_RUBLE  # из homeassistant.const
@@ -249,7 +248,7 @@ Quality gates:
 
 ### A-34. Manifest без `quality_scale`, `integration_type`
 
-- См. A-01..A-26 — добавить после fixes.
+- **Status:** ✅ **RESOLVED** в ветке `feat/bronze-entity-polish` (slice 3c). `manifest.json`: `"quality_scale": "bronze"`, `"integration_type": "hub"` (по HA dev docs: «one config_entry → many devices» — аналог Tuya/SmartThings/Husqvarna cloud integrations).
 
 ### A-35. CHANGELOG.md отсутствует
 

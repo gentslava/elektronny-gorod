@@ -1,16 +1,25 @@
 """Balance sensor — CoordinatorEntity-based.
 
-См. ADR-0002. Slice 3b: entity использует coordinator.data напрямую через
-CoordinatorEntity._handle_coordinator_update. Старый async_update удалён.
+Slice 3c (Bronze polish):
+- `_attr_has_entity_name = True` + `_attr_translation_key = "balance"` — имя
+  entity берётся из translations (см. `strings.json`).
+- `device_class = MONETARY`, `state_class = TOTAL`, unit = `CURRENCY_RUBLE` —
+  даёт корректные long-term statistics в HA.
+- `device_info` группирует sensor с place (один device = один адрес).
 """
 from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -38,8 +47,14 @@ class ElektronnyGorodBalanceSensor(
 ):
     """Balance sensor (CoordinatorEntity)."""
 
+    _attr_has_entity_name = True
+    _attr_translation_key = "balance"
     _attr_icon = "mdi:cash-multiple"
-    _attr_name = "Баланс аккаунта"
+    _attr_device_class = SensorDeviceClass.MONETARY
+    _attr_state_class = SensorStateClass.TOTAL
+    # SensorDeviceClass.MONETARY требует ISO 4217 currency code; константа
+    # `CURRENCY_RUBLE` (= "₽") удалена из homeassistant.const в новых релизах.
+    _attr_native_unit_of_measurement = "RUB"
 
     def __init__(
         self,
@@ -51,6 +66,38 @@ class ElektronnyGorodBalanceSensor(
         LOGGER.debug("BalanceSensor init for place_id=%s", place_id)
         self._place_id = place_id
         self._attr_unique_id = f"{DOMAIN}_{place_id}_balance"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"place_{place_id}")},
+            name=self._place_display_name(),
+            manufacturer="Электронный город",
+            model="Place",
+        )
+
+    def _place_display_name(self) -> str:
+        """Достать читаемое имя места из coordinator.data.places.
+
+        `place.address` от API оператора — это **dict** (regional structure),
+        не строка. DeviceInfo.name требует str; иначе HA молча отбрасывает
+        entity при регистрации в state machine. Поэтому достаём
+        `visibleAddress` (готовая строка) или собираем fallback.
+        """
+        places = (self.coordinator.data or {}).get("places") or []
+        for subscriber_place in places:
+            place = subscriber_place.get("place") or {}
+            if place.get("id") != self._place_id:
+                continue
+            addr = place.get("address")
+            if isinstance(addr, dict):
+                visible = addr.get("visibleAddress")
+                if isinstance(visible, str) and visible:
+                    return visible
+            if isinstance(addr, str) and addr:
+                return addr
+            name = place.get("name")
+            if isinstance(name, str) and name:
+                return name
+            break
+        return f"Place {self._place_id}"
 
     @property
     def _balance_info(self) -> dict[str, Any] | None:
@@ -78,16 +125,13 @@ class ElektronnyGorodBalanceSensor(
         return round(balance, 2)
 
     @property
-    def native_unit_of_measurement(self) -> str | None:
-        """Return unit of measurement."""
-        # TODO(slice-3c): заменить на CURRENCY_RUBLE (A-14).
-        if self.native_value is None:
-            return None
-        return "₽"
-
-    @property
     def extra_state_attributes(self) -> dict[str, Any] | None:
-        """Дополнительные атрибуты (payment info)."""
+        """Дополнительные атрибуты (payment info).
+
+        Ключи — Title Case для обратной совместимости с пользовательскими
+        автоматизациями. Перевод на snake_case — отдельный slice (A-30,
+        Итерация 3 / Silver), требует release notes как breaking change.
+        """
         info = self._balance_info
         if info is None:
             return None
@@ -105,7 +149,6 @@ class ElektronnyGorodBalanceSensor(
             except (TypeError, ValueError):
                 target_date = payment_date
 
-        # TODO(slice-3c): keys → snake_case (A-30).
         return {
             "Amount sum": amount_sum,
             "Target date": target_date,
@@ -115,5 +158,5 @@ class ElektronnyGorodBalanceSensor(
 
     @callback
     def _handle_coordinator_update(self) -> None:
-        """Coordinator обновился — нашу state читаем из coordinator.data в propertых."""
+        """Coordinator обновился — нашу state читаем из coordinator.data в propertах."""
         self.async_write_ha_state()

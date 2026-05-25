@@ -261,6 +261,39 @@ class ElektronnyGorodAPI:
         except Exception:
             return []
 
+    async def query_screens_settings(self, place_id: str) -> dict[str, Any]:
+        """Пользовательские настройки видимости из приложения оператора.
+
+        Возвращает dict вида:
+            {"screens": [
+                {"type": "ACCESS_CONTROLS",
+                 "entities": [{"id", "type", "order"}, ...],  # видимые
+                 "hidden":   [...]},                          # скрытые юзером
+                {"type": "PUBLIC_CAMERAS",
+                 "entities": [...],
+                 "hidden":   [...]},
+            ]}
+
+        `hidden` — НЕ категория («городские» или «лифт»), а user preference
+        (юзер нажал «скрыть» в приложении). Интеграция уважает это: entity
+        для hidden получает `_attr_entity_registry_enabled_default = False`
+        (только для НОВЫХ registry-записей; existing сохраняют выбор юзера
+        в HA).
+
+        Если ответ `{}` — пользователь ничего не настраивал, всё видимо.
+        """
+        api_url = (
+            f"/api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens"
+        )
+        try:
+            response = await self.http.get(api_url)
+            if not isinstance(response, ClientResponse):
+                raise TypeError(f"Unexpected response type: {type(response)!r}")
+            data = await response.json()
+            return data or {}
+        except Exception:
+            return {}
+
     async def query_camera_stream(self, camera_id: str) -> str | None:
         """Query the stream URL for the given camera."""
         api_url = f"/rest/v1/forpost/cameras/{camera_id}/video?&LightStream=0"

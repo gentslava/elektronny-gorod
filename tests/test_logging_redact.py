@@ -9,6 +9,7 @@ from custom_components.elektronny_gorod._logging import (
     AUTH_PATH_MARKERS,
     is_auth_path,
     redact,
+    redact_path,
 )
 
 
@@ -142,3 +143,31 @@ def test_is_auth_path_negative():
 def test_auth_path_markers_contains_auth():
     """Sanity check: маркеры покрывают auth/-paths."""
     assert any("/auth/" in m for m in AUTH_PATH_MARKERS)
+
+
+@pytest.mark.parametrize("path,expected", [
+    # numeric identifier (phone / contract / account)
+    ("/auth/v2/login/1131686", "/auth/v2/login/***"),
+    ("/auth/v2/login/79991234567", "/auth/v2/login/***"),
+    ("/auth/v2/login/+79991234567", "/auth/v2/login/***"),
+    ("/auth/v2/auth/79991234567/password", "/auth/v2/auth/***/password"),
+    ("/auth/v3/auth/+79991234567/confirmation", "/auth/v3/auth/***/confirmation"),
+    ("/auth/v2/confirmation/79991234567", "/auth/v2/confirmation/***"),
+    # full URL
+    ("https://myhome.proptech.ru/auth/v2/login/1131686",
+     "https://myhome.proptech.ru/auth/v2/login/***"),
+])
+def test_redact_path_masks_auth_identifiers(path, expected):
+    assert redact_path(path) == expected
+
+
+@pytest.mark.parametrize("path", [
+    "/rest/v3/subscriber-places",
+    "/rest/v1/places/12345/accesscontrols",
+    "/api/mh-payment/mobile/v1/finance",
+    "/rest/v1/forpost/cameras/5593590/video",
+])
+def test_redact_path_passes_non_auth_unchanged(path):
+    """Не-auth URLs не маскируются: place_id, camera_id и т.д. — internal
+    references, не PII клиента."""
+    assert redact_path(path) == path

@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 import json
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
@@ -20,6 +23,7 @@ from .const import (
     DEFAULT_GO2RTC_RTSP_HOST,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
+from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .user_agent import UserAgent
 
 PLATFORMS: list[Platform] = [
@@ -37,6 +41,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
+    # Slice 3c (A-12): legacy unique_id содержали динамический `name`.
+    # Мигрируем ДО forward_entry_setups, чтобы entity повторно регистрировались
+    # с новыми UID без появления дублей.
+    await async_migrate_entity_unique_ids(hass, entry, coordinator.data or {})
+
     # HA-core гарантированно вызовет эти cleanup-функции на unload entry,
     # независимо от успешности platform unload. См. audit A-16.
     entry.async_on_unload(coordinator.async_unsubscribe)
@@ -44,7 +53,167 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # One-time migration: legacy state (disabled_by на entities/devices от
+    # старых версий integration) → None. Применяется один раз per entry.
+    migration_changed = _migrate_legacy_disabled_state(hass, entry)
+
+    # Visibility sync: hidden в /settings/screens → entity.hidden_by=INTEGRATION.
+    # `hidden_by` (НЕ disabled_by) — state machine продолжает работать
+    # (automations доступны), entity не показывается в default UI views.
+    # Пользователь может easily Show через Settings → Entities → filter Hidden.
+    sync_changed = _sync_visibility(hass, entry, coordinator.data or {})
+
+    if migration_changed or sync_changed:
+        hass.async_create_task(
+            hass.config_entries.async_reload(entry.entry_id),
+            name=f"{DOMAIN}_visibility_reload",
+        )
+
     return True
+
+
+_MIGRATION_FLAG_KEY = "visibility_migration_v2"
+
+
+def _migrate_legacy_disabled_state(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> bool:
+    """One-time cleanup legacy disabled_by markers (entity + device).
+
+    Применяется один раз per entry, флаг в entry.options.
+
+    Background: до перехода на hidden_by-based visibility sync интеграция
+    использовала disabled_by:
+    - entity.disabled_by=INTEGRATION/DEVICE (от cascade)
+    - device.disabled_by=INTEGRATION (от device-level sync)
+    - entity.disabled_by=USER (от bulk-disable пользователем в HA UI до bi-dir sync)
+
+    Все эти markers надо сбросить — новая модель использует только hidden_by,
+    который потом устанавливается _sync_visibility согласно current API state.
+
+    Returns True если что-то изменилось.
+    """
+    if entry.options.get(_MIGRATION_FLAG_KEY):
+        return False
+
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    changed = False
+    reset_count = 0
+
+    # 1. Entities: disabled_by INTEGRATION/DEVICE/USER → None.
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if entity.disabled_by in (
+            er.RegistryEntryDisabler.INTEGRATION,
+            er.RegistryEntryDisabler.DEVICE,
+            er.RegistryEntryDisabler.USER,
+        ):
+            ent_reg.async_update_entity(entity.entity_id, disabled_by=None)
+            reset_count += 1
+            changed = True
+
+    # 2. Devices: disabled_by INTEGRATION/USER → None (CONFIG_ENTRY HA сам).
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        if device.disabled_by in (
+            dr.DeviceEntryDisabler.INTEGRATION,
+            dr.DeviceEntryDisabler.USER,
+        ):
+            dev_reg.async_update_device(device.id, disabled_by=None)
+            reset_count += 1
+            changed = True
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, _MIGRATION_FLAG_KEY: True},
+    )
+
+    if reset_count:
+        LOGGER.info(
+            "One-time visibility migration: reset %d disabled_by markers "
+            "(entity + device). Sync будет использовать hidden_by вместо disabled_by.",
+            reset_count,
+        )
+
+    return changed
+
+
+def _sync_visibility(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    data: dict[str, Any],
+) -> bool:
+    """Two-way visibility sync через `hidden_by` ↔ /settings/screens из приложения.
+
+    Логика (entity-level, без device manipulation):
+    - hidden в API + entity.hidden_by=None → set hidden_by=INTEGRATION.
+    - visible в API + entity.hidden_by=INTEGRATION → set hidden_by=None.
+    - entity.hidden_by=USER → НЕ trogaem (явный user choice через HA UI).
+
+    Почему `hidden_by`, а не `disabled_by`:
+    - disabled_by INTEGRATION блокирует UI override («устройство деактивировано
+      интеграцией»). Пользователь не может easily enable.
+    - hidden_by INTEGRATION просто скрывает из default UI views. State machine
+      работает (automations доступны). Пользователь может easily Show через
+      Settings → Entities → filter Hidden.
+
+    Returns True если что-то изменилось (caller schedule reload).
+    """
+    hidden_uids: set[str] = set()
+
+    for cam in data.get("cameras") or []:
+        if cam.get("hidden") and cam.get("id"):
+            hidden_uids.add(f"{DOMAIN}_camera_{cam['id']}")
+
+    for lk in data.get("locks") or []:
+        if lk.get("hidden"):
+            hidden_uids.add(
+                lock_unique_id(
+                    lk.get("place_id"),
+                    lk.get("access_control_id"),
+                    lk.get("entrance_id"),
+                )
+            )
+
+    ent_reg = er.async_get(hass)
+    changed = False
+    hid = 0
+    shown = 0
+
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if entity.domain not in ("camera", "lock"):
+            continue
+
+        api_hidden = entity.unique_id in hidden_uids
+
+        if api_hidden and entity.hidden_by is None:
+            LOGGER.debug(
+                "Hiding entity %s (unique_id=%s) — hidden in user app",
+                entity.entity_id, entity.unique_id,
+            )
+            ent_reg.async_update_entity(
+                entity.entity_id, hidden_by=er.RegistryEntryHider.INTEGRATION
+            )
+            hid += 1
+            changed = True
+        elif (
+            not api_hidden
+            and entity.hidden_by == er.RegistryEntryHider.INTEGRATION
+        ):
+            LOGGER.debug(
+                "Showing entity %s (unique_id=%s) — visible in user app",
+                entity.entity_id, entity.unique_id,
+            )
+            ent_reg.async_update_entity(entity.entity_id, hidden_by=None)
+            shown += 1
+            changed = True
+
+    if hid or shown:
+        LOGGER.info(
+            "Visibility sync: hidden_uids=%d, hid=%d, shown=%d (entry %s)",
+            len(hidden_uids), hid, shown, entry.entry_id,
+        )
+    return changed
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
@@ -87,6 +256,21 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Update options for entry that was configured via user interface."""
     await hass.config_entries.async_reload(entry.entry_id)
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    device_entry: DeviceEntry,
+) -> bool:
+    """Разрешить пользователю удалить device через UI / WS-API.
+
+    Возвращаем True безусловно — orphan devices (после переименований в
+    приложении оператора или смены device-identifier между релизами)
+    должны удаляться. На следующем тике coordinator пересоздаст актуальные
+    devices, а удалённые останутся удалёнными.
+    """
+    return True
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:

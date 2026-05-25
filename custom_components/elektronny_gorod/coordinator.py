@@ -196,58 +196,164 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
     async def _collect_cameras_for_place(self, place_id: str) -> list[dict[str, Any]]:
         """Камеры одного place — три источника (access_controls + public + cameras).
 
-        Раньше дубликат логики был в `get_cameras_info` и `update_camera_state`
-        (audit A-17). Теперь один helper.
+        ⚠️ **Структура API** (см. api-reference §Access controls):
+        `externalCameraId` существует на ДВУХ уровнях:
+        - `access_control.externalCameraId` — общая камера домофона;
+        - `access_control.entrances[*].externalCameraId` — камера конкретного
+          entrance (подъезд/калитка). Это **разные** камеры — у каждой entrance
+          обычно своя.
+
+        Поэтому для intercom-камер группировка идёт **по entrance**, не по ac.
+        Coordinator передаёт `place_id` + `access_control_id` + `entrance_id`
+        в camera dict — entity-слой делает device identifier
+        `entrance_{place}_{ac}_{entrance_id|main}`, общий с lock того же entrance.
+
+        Категоризация по `source`:
+        - intercom — от access_controls (домофоны);
+        - place — от `/rest/v1/.../cameras` (личные подписочные камеры);
+        - public — от `/rest/v2/.../public/cameras` (общедомовые + городские —
+          API не различает, оба идут одним списком).
+
+        Пользовательская видимость из `/settings/screens` прокидывается флагом
+        `hidden`: entity получит `_attr_entity_registry_enabled_default = False`
+        (uses user app preference как дефолт для новых установок).
         """
         cameras: list[dict[str, Any]] = []
 
-        # 1. Access controls (домофоны с externalCameraId).
+        # screens settings — для уважения user app preferences (visibility).
+        try:
+            screens = await self._api.query_screens_settings(place_id)
+        except Exception as ex:  # noqa: BLE001
+            LOGGER.warning("Screens settings failed for place_id=%s: %s", place_id, ex)
+            screens = {}
+        hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
+        hidden_entrance_ids = self._extract_hidden_ids(screens, "ACCESS_CONTROLS")
+
+        # 1. Access controls (домофоны).
+        # hidden для intercom-камеры берётся из ACCESS_CONTROLS.hidden — если
+        # user скрыл entrance в приложении, и lock и camera этого entrance
+        # получат `enabled_default=False`.
         access_controls = await self._api.query_access_controls(place_id)
         for ac in access_controls:
-            if not ac.get("externalCameraId"):
-                continue
-            cameras.append({"id": ac.get("externalCameraId"), "name": ac.get("name")})
+            ac_id = ac.get("id")
+            entrances = ac.get("entrances") or []
+            if entrances:
+                # Каждая entrance со своим externalCameraId → отдельная intercom-камера.
+                for entrance in entrances:
+                    eid = entrance.get("externalCameraId")
+                    if not eid:
+                        continue
+                    entrance_id = entrance.get("id")
+                    cameras.append({
+                        "id": eid,
+                        "name": entrance.get("name"),
+                        "place_id": place_id,
+                        "access_control_id": ac_id,
+                        "entrance_id": entrance_id,
+                        "source": "intercom",
+                        "hidden": str(entrance_id) in hidden_entrance_ids,
+                    })
+            else:
+                # AC без entrances — сам по себе door. Используем ac.externalCameraId.
+                cid = ac.get("externalCameraId")
+                if cid:
+                    cameras.append({
+                        "id": cid,
+                        "name": ac.get("name"),
+                        "place_id": place_id,
+                        "access_control_id": ac_id,
+                        "entrance_id": None,
+                        "source": "intercom",
+                        "hidden": False,  # AC без entrance не отображается в screens
+                    })
 
-        # 2. Public cameras (дворовые).
-        public_cameras = await self._api.query_public_cameras(place_id)
-        for cam in public_cameras:
-            cameras.append({
-                "id": cam.get("externalCameraId") or cam.get("id"),
-                "name": cam.get("name"),
-            })
-
-        # 3. Place-cameras.
+        # 2. Place-cameras (личные подписочные камеры).
+        # Идут ВТОРЫМИ чтобы dedupe_by_id отдал приоритет intercom > place > public.
         place_cameras = await self._api.query_cameras(place_id)
         for cam in place_cameras:
+            cid = cam.get("externalCameraId") or cam.get("id")
             cameras.append({
-                "id": cam.get("externalCameraId") or cam.get("id"),
+                "id": cid,
                 "name": cam.get("name"),
+                "source": "place",
+                "hidden": False,  # личные камеры всегда видимы по дефолту
+            })
+
+        # 3. Public cameras (общедомовые + городские, API не разделяет).
+        # Видимость берётся из /settings/screens — user в приложении сам решает
+        # какие camera ему интересны, какие скрыть.
+        public_cameras = await self._api.query_public_cameras(place_id)
+        for cam in public_cameras:
+            cid = cam.get("externalCameraId") or cam.get("id")
+            cameras.append({
+                "id": cid,
+                "name": cam.get("name"),
+                "source": "public",
+                "hidden": str(cid) in hidden_cam_ids,
             })
 
         return cameras
 
+    @staticmethod
+    def _extract_hidden_ids(screens: dict[str, Any], screen_type: str) -> set[str]:
+        """Из ответа `/settings/screens` достать id-шки скрытых entities.
+
+        Возвращает set строковых id. Если screen-тип не найден — пустой set
+        (значит ничего не скрыто).
+        """
+        result: set[str] = set()
+        for screen in screens.get("screens") or []:
+            if screen.get("type") != screen_type:
+                continue
+            for item in screen.get("hidden") or []:
+                iid = item.get("id")
+                if iid is not None:
+                    result.add(str(iid))
+        return result
+
     async def _collect_locks_for_place(self, place_id: str) -> list[dict[str, Any]]:
-        """Locks одного place (один per entrance, либо per AC если без entrances)."""
+        """Locks одного place (один per entrance, либо per AC если без entrances).
+
+        `name` — entrance.name (для UI entity, чтобы различать "Подъезд 1" /
+        "Калитка 2"). `ac_name` — имя access_control (физического домофона),
+        используется как `device_info.name` — общее для всех entrances + camera
+        этого домофона. `hidden` — из ACCESS_CONTROLS.hidden в `/settings/screens`
+        (user в приложении скрыл entrance) → entity получит enabled_default=False.
+        """
         locks: list[dict[str, Any]] = []
+        # screens для hidden — повторный вызов после _collect_cameras_for_place;
+        # это +1 HTTP per place per refresh. TODO: вынести screens на верхний
+        # уровень `_async_update_data` чтобы запросить один раз.
+        try:
+            screens = await self._api.query_screens_settings(place_id)
+        except Exception:  # noqa: BLE001
+            screens = {}
+        hidden_entrance_ids = self._extract_hidden_ids(screens, "ACCESS_CONTROLS")
         access_controls = await self._api.query_access_controls(place_id)
         for ac in access_controls:
+            ac_name = ac.get("name")
             entrances = ac.get("entrances") or []
             if entrances:
                 for entrance in entrances:
+                    eid = entrance.get("id")
                     locks.append({
                         "place_id": place_id,
                         "access_control_id": ac.get("id"),
-                        "entrance_id": entrance.get("id"),
+                        "entrance_id": eid,
                         "name": entrance.get("name"),
+                        "ac_name": ac_name,
                         "openable": entrance.get("allowOpen"),
+                        "hidden": str(eid) in hidden_entrance_ids,
                     })
             else:
                 locks.append({
                     "place_id": place_id,
                     "access_control_id": ac.get("id"),
                     "entrance_id": None,
-                    "name": ac.get("name"),
+                    "name": ac_name,
+                    "ac_name": ac_name,
                     "openable": ac.get("allowOpen"),
+                    "hidden": False,
                 })
         return locks
 

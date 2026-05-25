@@ -18,10 +18,14 @@ from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    AREA_INTERCOM,
+    AREA_INDOOR_CAM,
+    AREA_PUBLIC_CAM,
     CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_PASSWORD,
     CONF_GO2RTC_RTSP_HOST,
@@ -106,9 +110,19 @@ async def async_setup_entry(
 class ElektronnyGorodCamera(
     CoordinatorEntity[ElektronnyGorodUpdateCoordinator], Camera
 ):
-    """Camera entity (CoordinatorEntity)."""
+    """Camera entity (CoordinatorEntity).
+
+    Slice 3c (Bronze polish):
+    - Стабильный `unique_id = f"{DOMAIN}_camera_{camera_id}"` (без `name`,
+      см. ADR-0002, A-12). Миграция старого формата `{id}_{name}` — в
+      `async_setup_entry` через `er.async_migrate_entries`.
+    - `_attr_has_entity_name = True` + `_attr_name = None`: camera как
+      самостоятельный device, имя берётся из `device_info.name`.
+    """
 
     _attr_supported_features = CameraEntityFeature.STREAM
+    _attr_has_entity_name = True
+    _attr_name = None
 
     def __init__(
         self,
@@ -128,12 +142,52 @@ class ElektronnyGorodCamera(
         self._id: str = camera_info.get("id") or ""
         self._name: str = camera_info.get("name") or self._id
 
-        LOGGER.debug("Camera init id=%s", self._id)
+        # Intercom-камеры (от entrances в access_controls) имеют place_id +
+        # access_control_id + entrance_id и разделяют device с lock того же
+        # entrance. Public/place-cameras без этих полей → standalone devices.
+        ac_id = camera_info.get("access_control_id")
+        place_id = camera_info.get("place_id")
+        entrance_id = camera_info.get("entrance_id")
+        source = camera_info.get("source") or "public"  # fallback
+        is_intercom = source == "intercom" and bool(ac_id and place_id)
+
+        # Visibility управляется на DEVICE-уровне в __init__.py:_sync_visibility:
+        # если все entities device hidden в API → device.disabled_by=INTEGRATION,
+        # HA автоматически set entity.disabled_by=DEVICE (cascade).
+        LOGGER.debug("Camera init id=%s source=%s hidden=%s",
+                     self._id, source, camera_info.get("hidden"))
 
         self._last_src: str | None = None
         self._image: bytes | None = None
-        # TODO(slice-3c): убрать `_name` из unique_id (A-12 — stable id).
-        self._attr_unique_id = f"{self._id}_{self._name}"
+        self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
+        if is_intercom:
+            device_uid = f"entrance_{place_id}_{ac_id}_{entrance_id or 'main'}"
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, device_uid)},
+                name=self._name,
+                manufacturer="Электронный город",
+                model="Intercom",
+                suggested_area=AREA_INTERCOM,
+                via_device=(DOMAIN, f"place_{place_id}"),
+            )
+        else:
+            # source="place" — личные подписочные камеры из /rest/v1/.../cameras
+            # (юзер их купил отдельно). source="public" — всё из
+            # /rest/v2/.../public/cameras (общедомовые + городские, API не
+            # разделяет; юзер может скрыть конкретные через app — см. `hidden`).
+            if source == "place":
+                model = "Indoor Camera"
+                area = AREA_INDOOR_CAM
+            else:
+                model = "Public Camera"
+                area = AREA_PUBLIC_CAM
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"camera_{self._id}")},
+                name=self._name,
+                manufacturer="Электронный город",
+                model=model,
+                suggested_area=area,
+            )
 
         self._go2rtc_base_url = go2rtc_base_url
         self._go2rtc_rtsp_host = go2rtc_rtsp_host
@@ -141,11 +195,6 @@ class ElektronnyGorodCamera(
         self._go2rtc_stream_name = f"eg_{self._id}"
         self._go2rtc_username = go2rtc_username
         self._go2rtc_password = go2rtc_password
-
-    @property
-    def name(self) -> str:
-        """Return camera name."""
-        return self._name
 
     @property
     def _coordinator_camera_info(self) -> dict[str, Any] | None:

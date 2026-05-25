@@ -32,6 +32,12 @@
 - **HTTP: shared `ClientSession`** через HA-стандартный `async_get_clientsession(hass)`. `HTTP.__init__` и `ElektronnyGorodAPI.__init__` принимают `hass`. Closes [A-05](docs/audit/project-audit.md) / [S-05](docs/audit/security.md). См. [ADR-0008](docs/decisions/0008-shared-client-session.md). Эффект: экономия TLS-handshake на каждом запросе, общий pool с HA-core, нет утечки сокетов в TIME_WAIT.
 - **Coordinator pattern: реальный polling** ([ADR-0002](docs/decisions/0002-coordinator-pattern.md), [ADR-0003](docs/decisions/0003-iot-class-strategy.md)). `DataUpdateCoordinator` теперь имеет `update_interval=timedelta(minutes=5)` и `_async_update_data` за один тик собирает `{places, balances, cameras, locks}` (последовательно по places из-за shared UA state). Closes [A-08](docs/audit/project-audit.md), [A-16](docs/audit/project-audit.md) (`async_unsubscribe` из unload), [A-17](docs/audit/project-audit.md) (дубликат сбора камер), [A-18](docs/audit/project-audit.md) (мёртвый `available_sections`).
 - **Entities на CoordinatorEntity** (slice 3b). Camera / Lock / Sensor наследуют `CoordinatorEntity[ElektronnyGorodUpdateCoordinator]`. `async_update` удалён из всех 3 платформ — обновления приходят через `_handle_coordinator_update`. Backwards-compat shims (`get_*_info`, `update_*_state`) удалены из coordinator. Lock state-cycle (UNLOCKED → 5s → LOCKED) переписан с `asyncio.sleep` на `async_call_later` — не блокирует event loop, совместимо с `CoordinatorEntity` (`should_poll=False`). Closes [A-09](docs/audit/project-audit.md), [A-44](docs/audit/project-audit.md).
+- **Bronze IQS entity polish** (slice 3c, [ADR-0002](docs/decisions/0002-coordinator-pattern.md) §Entity naming).
+  - **Stable `unique_id`** ([A-12](docs/audit/project-audit.md)): camera `{DOMAIN}_camera_{id}`, lock `{DOMAIN}_lock_{place_id}_{ac_id}_{entrance_id|main}`. Старые UID содержали динамический `name` от API оператора. Existing entries мигрируются автоматически через `entity_registry.async_migrate_entries` в `async_setup_entry` — `entity_id`, automations и historical data сохраняются.
+  - **`_attr_has_entity_name = True`** + `_attr_translation_key = "balance"` для sensor ([A-13](docs/audit/project-audit.md)). Camera/Lock — `_attr_name = None`, имя приходит из `device_info.name`. Добавлен раздел `entity.sensor.balance.name` в `strings.json` + `translations/{ru,en}.json`.
+  - **`device_info`** для всех entity: sensor группируется per place, camera/lock — самостоятельные device (lock с `via_device` на place).
+  - **Sensor balance — long-term statistics** ([A-14](docs/audit/project-audit.md)): `device_class=MONETARY`, `state_class=TOTAL`, `native_unit_of_measurement="RUB"` (ISO 4217 — требование `MONETARY` device_class; константа `CURRENCY_RUBLE` удалена из HA core).
+  - **manifest.json** ([A-34](docs/audit/project-audit.md)): `quality_scale: "bronze"`, `integration_type: "hub"` (cloud account → many devices, по HA dev docs — аналог Tuya/SmartThings/Husqvarna).
 
 ### Removed
 
@@ -40,6 +46,13 @@
 ### Tests
 
 - Добавлен `tests/test_logging_redact.py` — unit-тесты для `_logging.redact()` helper.
+- Добавлен `tests/test_entity_migration.py` — unit-тесты `_camera_new_uid`/`_lock_new_uid` + golden vector для `lock_unique_id`.
+
+### Fixed
+
+- `async_migrate_entity_unique_ids` пропускает коллизии вместо падения с `ValueError`. Если у camera/lock накопилось несколько legacy записей в `entity_registry` (разные `name` за время) — все они мапятся в один stable UID. Мигрируется первая, остальные остаются orphan с warning в лог (пользователь удаляет вручную). Раньше ValueError ломал весь `async_setup_entry` → entity не создавались.
+- `manifest.json`: `integration_type: "hub"` (после короткого ошибочного переключения на `service` и отката). По HA dev docs hub = «one config_entry → many devices» (как Tuya/SmartThings/Husqvarna cloud), что точно описывает наш случай (один аккаунт оператора = camera/lock/sensor по местам). `service` подходит только single-service integrations (Spotify, Google Calendar, DuckDNS — 1 entity per account).
+- **Группировка intercom по entrance** (HAR-verified). Каждая `entrance` access_control имеет свою `externalCameraId` (api-reference §Access controls). Camera + lock одной entrance → один device с identifier `entrance_{place}_{ac}_{eid|main}`. Раньше группировал по access_control — но `ac.externalCameraId` иногда расходится с `entrance.externalCameraId` в реальных установках, и пользователь видел чужую камеру в device. Coordinator теперь итерирует `entrances[]`, source camera_id = `entrance.externalCameraId`. AC-level используется только когда у access_control нет entrances. Lock entity: `_attr_translation_key="lock"` (раздел `entity.lock.lock.name` в strings + переводы «Замок» / «Lock»), device.name = entrance.name. Standalone камеры (городские / place_cameras) остаются отдельными devices.
 
 ### Documentation
 

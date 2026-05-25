@@ -98,3 +98,14 @@ find research/api -mindepth 1 -not -name README.md -delete
 ```
 
 Однако имеет смысл хранить «эталонные» снимки для regression checking (сравнить трафик нашей интеграции с приложением).
+
+## Локальный индекс снимков
+
+Локальные `.har` / `.chlz` файлы — gitignored. Их содержимое (имена,
+размеры, конкретные сценарии) **не документируется в публичных файлах**
+(включая этот README). Сводное покрытие сценариев — в
+[`docs/architecture/api-reference.md` §Source HAR](../../docs/architecture/api-reference.md)
+в форме `(дата + аккаунт-плейсхолдер + бренд + сценарий)`, без имён
+файлов и реальных идентификаторов.
+
+См. [memory: har-sources-priority] и [ADR-0006](../../docs/decisions/0006-mirror-app-behavior.md).

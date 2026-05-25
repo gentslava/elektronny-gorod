@@ -128,13 +128,27 @@ Used by agents:
 | Pass | для каждого изменённого `Source files:` обновлены связанные docs |
 | Fail | новый flow без обновления `architecture/overview.md`; новый source of truth без обновления `source-of-truth.md` |
 
+## HISTORY_CLEAN
+
+| Поле | Значение |
+|---|---|
+| Purpose | git-история feature-ветки чистая перед merge в master |
+| Owner | [Git Historian Agent](../../.claude/agents/git-historian.md) |
+| Required evidence | каждый коммит — substantive (нет hotfix-цепочек, DIAG-логов, typo-правок); commit messages conventional-стиля с body; diff vs master сохранён после rebase; backup-ветка создана |
+| Pass | `git log --oneline master..HEAD` показывает короткую серию logically-grouped коммитов; каждое сообщение читается отдельно |
+| Fail | >3 hotfix-ов подряд на одну фичу; коммиты «WIP», «fix typo», «revert prev»; DIAG/debug код в финальном diff |
+| Stop | merge feature-ветки без cleanup'а; force-push в master |
+
+См. [`.claude/rules/git-history.md`](../../.claude/rules/git-history.md) и
+slash-команду `/git-cleanup`.
+
 ## READY_FOR_RELEASE
 
 | Поле | Значение |
 |---|---|
 | Purpose | Релиз готов к публикации |
 | Owner | Lead Architect / разработчик |
-| Required gates passed | TESTS_PASS + SECURITY_OK + REVIEW_OK + DOCS_UPDATED + AUDIT_DONE |
+| Required gates passed | TESTS_PASS + SECURITY_OK + REVIEW_OK + DOCS_UPDATED + AUDIT_DONE + HISTORY_CLEAN |
 | Required evidence | CHANGELOG entry; обновлённый README, если есть user-facing изменения; брендинг |
 | Pass | все обязательные gates зелёные; нет открытых P0 |
 | Fail | хотя бы один обязательный gate красный |
@@ -154,6 +168,7 @@ Used by agents:
 | REVIEW_OK | merge | n/a |
 | SECURITY_OK | merge | 🔴 (3 P0 утечки) |
 | DOCS_UPDATED | merge | 🟢 (только что заложено) |
+| HISTORY_CLEAN | merge | 🟡 (агент создан, gate активен с этого момента) |
 | READY_FOR_RELEASE | публикация | 🔴 |
 
 ## Принцип
