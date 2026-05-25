@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 import json
+from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
@@ -21,7 +23,7 @@ from .const import (
     DEFAULT_GO2RTC_RTSP_HOST,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
-from .entity_migration import async_migrate_entity_unique_ids
+from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .user_agent import UserAgent
 
 PLATFORMS: list[Platform] = [
@@ -51,7 +53,72 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
+    # Visibility sync (см. PR #35 follow-up): на re-add HA восстанавливает
+    # entity из `deleted_entities` с сохранённым `disabled_by`,
+    # игнорируя `_attr_entity_registry_enabled_default`. После того как
+    # platforms зарегистрировали entity — синхронно подгоняем disabled_by
+    # для entities, скрытых в /settings/screens.
+    _sync_hidden_entities_disabled_by(hass, entry, coordinator.data or {})
+
     return True
+
+
+def _sync_hidden_entities_disabled_by(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    data: dict[str, Any],
+) -> None:
+    """Single source of truth для entity visibility на основе /settings/screens.
+
+    Запускается на каждом setup_entry (включая re-add после remove). Покрывает
+    оба сценария — first add (entity ещё нет в registry) и re-add (HA восстановил
+    из `deleted_entities` с прежним `disabled_by`).
+
+    Стратегия:
+    - Собираем `unique_id` всех hidden-камер и hidden-locks из coordinator.data.
+    - Для каждой entity нашего config_entry с unique_id в этом множестве и
+      `disabled_by is None` → устанавливаем `disabled_by=INTEGRATION`.
+      `INTEGRATION` (не `CONFIG_ENTRY`) — `CONFIG_ENTRY` сбрасывается HA-core
+      при restore из `deleted_entities`, см. entity_registry.py.
+    - **One-way**: НЕ enable обратно visible-в-API entities — это перетёрло бы
+      явный user choice (если человек целенаправленно отключил видимую entity).
+    - Никогда не трогаем `disabled_by=USER` — пользователь явно решил.
+    """
+    hidden_uids: set[str] = set()
+
+    for cam in data.get("cameras") or []:
+        if cam.get("hidden") and cam.get("id"):
+            hidden_uids.add(f"{DOMAIN}_camera_{cam['id']}")
+
+    for lk in data.get("locks") or []:
+        if lk.get("hidden"):
+            hidden_uids.add(
+                lock_unique_id(
+                    lk.get("place_id"),
+                    lk.get("access_control_id"),
+                    lk.get("entrance_id"),
+                )
+            )
+
+    if not hidden_uids:
+        return
+
+    ent_reg = er.async_get(hass)
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if entity.unique_id not in hidden_uids:
+            continue
+        if entity.disabled_by is not None:
+            # USER / DEVICE / CONFIG_ENTRY / HASS / INTEGRATION — не трогаем.
+            continue
+        LOGGER.debug(
+            "Disabling entity %s (unique_id=%s) — hidden in user app",
+            entity.entity_id,
+            entity.unique_id,
+        )
+        ent_reg.async_update_entity(
+            entity.entity_id,
+            disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+        )
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

@@ -151,11 +151,6 @@ class ElektronnyGorodCamera(
         source = camera_info.get("source") or "public"  # fallback
         is_intercom = source == "intercom" and bool(ac_id and place_id)
 
-        # `hidden` приходит из user app settings (/settings/screens). Для НОВЫХ
-        # entity registry-записей задаёт enabled_default=False; existing entities
-        # сохраняют свой пользовательский выбор.
-        self._attr_entity_registry_enabled_default = not camera_info.get("hidden", False)
-
         LOGGER.debug("Camera init id=%s source=%s hidden=%s",
                      self._id, source, camera_info.get("hidden"))
 
