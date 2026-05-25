@@ -248,7 +248,7 @@ Quality gates:
 
 ### A-34. Manifest без `quality_scale`, `integration_type`
 
-- **Status:** ✅ **RESOLVED** в ветке `feat/bronze-entity-polish` (slice 3c). `manifest.json`: `"quality_scale": "bronze"`, `"integration_type": "service"` (cloud API оператора, не локальный hub — см. CHANGELOG hot-fix #5).
+- **Status:** ✅ **RESOLVED** в ветке `feat/bronze-entity-polish` (slice 3c). `manifest.json`: `"quality_scale": "bronze"`, `"integration_type": "hub"` (по HA dev docs: «one config_entry → many devices» — аналог Tuya/SmartThings/Husqvarna cloud integrations).
 
 ### A-35. CHANGELOG.md отсутствует
 

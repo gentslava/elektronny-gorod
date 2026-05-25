@@ -37,7 +37,7 @@
   - **`_attr_has_entity_name = True`** + `_attr_translation_key = "balance"` для sensor ([A-13](docs/audit/project-audit.md)). Camera/Lock — `_attr_name = None`, имя приходит из `device_info.name`. Добавлен раздел `entity.sensor.balance.name` в `strings.json` + `translations/{ru,en}.json`.
   - **`device_info`** для всех entity: sensor группируется per place, camera/lock — самостоятельные device (lock с `via_device` на place).
   - **Sensor balance — long-term statistics** ([A-14](docs/audit/project-audit.md)): `device_class=MONETARY`, `state_class=TOTAL`, `native_unit_of_measurement="RUB"` (ISO 4217 — требование `MONETARY` device_class; константа `CURRENCY_RUBLE` удалена из HA core).
-  - **manifest.json** ([A-34](docs/audit/project-audit.md)): `quality_scale: "bronze"`, `integration_type: "service"`.
+  - **manifest.json** ([A-34](docs/audit/project-audit.md)): `quality_scale: "bronze"`, `integration_type: "hub"` (cloud account → many devices, по HA dev docs — аналог Tuya/SmartThings/Husqvarna).
 
 ### Removed
 
@@ -51,7 +51,7 @@
 ### Fixed
 
 - `async_migrate_entity_unique_ids` пропускает коллизии вместо падения с `ValueError`. Если у camera/lock накопилось несколько legacy записей в `entity_registry` (разные `name` за время) — все они мапятся в один stable UID. Мигрируется первая, остальные остаются orphan с warning в лог (пользователь удаляет вручную). Раньше ValueError ломал весь `async_setup_entry` → entity не создавались.
-- `manifest.json`: `integration_type` исправлен `hub` → `service`. Каждый entry представляет cloud-аккаунт оператора (как Spotify / Yandex.Station), а не локальный физический bridge — в UI карточки попадают в раздел «Сервисы», а не «Хабы».
+- `manifest.json`: `integration_type: "hub"` (после короткого ошибочного переключения на `service` и отката). По HA dev docs hub = «one config_entry → many devices» (как Tuya/SmartThings/Husqvarna cloud), что точно описывает наш случай (один аккаунт оператора = camera/lock/sensor по местам). `service` подходит только single-service integrations (Spotify, Google Calendar, DuckDNS — 1 entity per account).
 - **Группировка intercom по entrance** (HAR-verified). Каждая `entrance` access_control имеет свою `externalCameraId` (api-reference §Access controls). Camera + lock одной entrance → один device с identifier `entrance_{place}_{ac}_{eid|main}`. Раньше группировал по access_control — но `ac.externalCameraId` иногда расходится с `entrance.externalCameraId` в реальных установках, и пользователь видел чужую камеру в device. Coordinator теперь итерирует `entrances[]`, source camera_id = `entrance.externalCameraId`. AC-level используется только когда у access_control нет entrances. Lock entity: `_attr_translation_key="lock"` (раздел `entity.lock.lock.name` в strings + переводы «Замок» / «Lock»), device.name = entrance.name. Standalone камеры (городские / place_cameras) остаются отдельными devices.
 
 ### Documentation

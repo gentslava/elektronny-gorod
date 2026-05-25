@@ -88,7 +88,7 @@ def is_auth_path(url_or_path: str) -> bool:
 #   /auth/v2/login/1131686                  → /auth/v2/login/***
 #   /auth/v2/auth/+79991234567/password     → /auth/v2/auth/***/password
 #   /auth/v3/auth/79991234567/confirmation  → /auth/v3/auth/***/confirmation
-_AUTH_PATH_ID_PATTERN = re.compile(r"(/auth/v\d+/[a-z]+/)\+?\d+")
+_AUTH_PATH_ID_PATTERN = re.compile(r"(/auth/v\d+/[a-z]+/)\+?\d+", re.IGNORECASE)
 
 
 def redact_path(url_or_path: str) -> str:

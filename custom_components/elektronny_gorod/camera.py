@@ -174,7 +174,7 @@ class ElektronnyGorodCamera(
             # source="place" — личные подписочные камеры из /rest/v1/.../cameras
             # (юзер их купил отдельно). source="public" — всё из
             # /rest/v2/.../public/cameras (общедомовые + городские, API не
-            # разделяет; juzер может скрыть конкретные через app — см. `hidden`).
+            # разделяет; юзер может скрыть конкретные через app — см. `hidden`).
             if source == "place":
                 model = "Indoor Camera"
                 area = AREA_INDOOR_CAM

@@ -132,7 +132,7 @@ def test_lock_skips_entries_with_missing_ids():
         ("12345", "67890", "abc", f"{DOMAIN}_lock_12345_67890_abc"),
     ],
 )
-def testlock_unique_id_golden(pid, ac, eid, expected):
+def test_lock_unique_id_golden(pid, ac, eid, expected):
     """Изменение формата `lock_unique_id` — breaking change для существующих
     установок (даже после миграции). Этот тест ловит случайные правки.
     """
