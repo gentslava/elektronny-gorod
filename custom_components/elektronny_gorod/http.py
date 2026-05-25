@@ -5,7 +5,7 @@ from aiohttp import ClientError, ClientResponse
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from ._logging import redact, is_auth_path
+from ._logging import redact, is_auth_path, redact_path
 from .const import (
     BASE_API_URL,
     LOGGER,
@@ -84,14 +84,20 @@ class HTTP:
         См. ADR-0008. Не создаём свою ClientSession — это нарушение HA convention
         (audit A-05, security S-05).
         """
-        if self.access_token is not None:
-            self._headers["authorization"] = f"Bearer {self.access_token}"
-        self._headers["user-agent"] = str(self.user_agent)
-        if method == "POST":
-            self._headers["content-type"] = "application/json; charset=UTF-8"
-
         session = async_get_clientsession(self._hass)
         url = f"{self._base_url}{endpoint}"
+
+        # Per-request headers (не накапливаем в self._headers, чтобы Authorization
+        # из прошлых запросов не утекал в pre-auth endpoints).
+        headers: dict[str, str] = dict(self._headers)
+        headers["user-agent"] = str(self.user_agent)
+        if method == "POST":
+            headers["content-type"] = "application/json; charset=UTF-8"
+        # Bearer НЕ шлём на pre-auth endpoints (/auth/*) — иначе backend видит
+        # expired Bearer и отдаёт 401 даже на login, блокируя reauth flow.
+        # Реальное приложение шлёт Authorization только на post-auth REST.
+        if self.access_token is not None and not is_auth_path(url):
+            headers["authorization"] = f"Bearer {self.access_token}"
         # data может быть str/bytes/None. Размер считаем безопасно.
         if data is None:
             body_size = 0
@@ -99,11 +105,11 @@ class HTTP:
             body_size = len(data)
         else:
             body_size = len(str(data).encode("utf-8"))
-        _log_request(url, method, self._headers, body_size)
+        _log_request(url, method, headers, body_size)
         if method == "GET":
-            response = await session.get(url, headers=self._headers)
+            response = await session.get(url, headers=headers)
         elif method == "POST":
-            response = await session.post(url, data=data, headers=self._headers)
+            response = await session.post(url, data=data, headers=headers)
 
         if binary:
             return await response.read()
@@ -112,7 +118,7 @@ class HTTP:
         if response.ok:
             return response
         else:
-            LOGGER.error("API request failed: %s [%s]", endpoint, response.status)
+            LOGGER.error("API request failed: %s [%s]", redact_path(endpoint), response.status)
             raise ClientError(response)
 
     async def get(self, endpoint: str, binary: bool = False) -> ClientResponse | bytes:

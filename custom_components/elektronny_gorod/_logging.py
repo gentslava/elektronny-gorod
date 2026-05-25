@@ -6,12 +6,15 @@
 - password / SMS-код;
 - entry.data / entry.options целиком;
 - тело auth-ответов;
-- go2rtc_username / go2rtc_password.
+- go2rtc_username / go2rtc_password;
+- phone / contract_id / account_id в auth URL path.
 
 Используй redact(data) для dict/headers, попадающих в логи.
+Используй redact_path(url) для URL/path попадающих в логи.
 """
 from __future__ import annotations
 
+import re
 from typing import Any
 
 REDACTED = "***"
@@ -75,3 +78,24 @@ AUTH_PATH_MARKERS: tuple[str, ...] = (
 def is_auth_path(url_or_path: str) -> bool:
     """True, если URL/path относится к auth-flow и body не должно попадать в логи."""
     return any(marker in url_or_path for marker in AUTH_PATH_MARKERS)
+
+
+# Заменяет numeric identifier (phone, contract_id, account_id) внутри auth-URL
+# на REDACTED. Применяется ТОЛЬКО к auth-paths — обычные REST URL (с place_id,
+# camera_id и т.д.) не маскируются, т.к. это не PII, а internal references.
+#
+# Примеры:
+#   /auth/v2/login/1131686                  → /auth/v2/login/***
+#   /auth/v2/auth/+79991234567/password     → /auth/v2/auth/***/password
+#   /auth/v3/auth/79991234567/confirmation  → /auth/v3/auth/***/confirmation
+_AUTH_PATH_ID_PATTERN = re.compile(r"(/auth/v\d+/[a-z]+/)\+?\d+")
+
+
+def redact_path(url_or_path: str) -> str:
+    """Маскировать PII identifier в auth-URL path.
+
+    Для non-auth path — возвращает строку без изменений.
+    """
+    if not is_auth_path(url_or_path):
+        return url_or_path
+    return _AUTH_PATH_ID_PATTERN.sub(r"\1***", url_or_path)
