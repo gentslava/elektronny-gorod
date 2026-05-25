@@ -404,25 +404,13 @@ Quality gates:
 
 ### A-56. DND switches не реализованы
 
-- **Severity:** P2 (Silver-уровневая feature).
-- **Area:** Feature gap.
-- **Evidence:** `GET|POST /api/mh-customer/.../settings/do_not_disturb` —
-  см. [`api-reference.md` §do_not_disturb](../architecture/api-reference.md).
-  Endpoint возвращает массив из трёх settings: `DO_NOT_DISTURB_ROOT` (master)
-  + `INTERCOM_CALLS` и `MANAGEMENT_COMPANY_CALLS` (dependent).
-- **Semantics (подтверждено пользователем):** master + 2 dependent, по
-  default OFF. При `DO_NOT_DISTURB_ROOT.status=false` dependent switch-и
-  скрыты в UI приложения; при включении master — появляются и оба тоже OFF
-  по дефолту.
-- **Impact:** интеграция не управляет уведомлениями (звонки домофона
-  / новости от УК). Не блокер, но это user-facing feature, доступная в
-  оригинальном приложении одним switch.
-- **Recommended fix:** новая платформа `switch` (3 entity per place):
-  `switch.dnd_root` (всегда available), `switch.dnd_intercom_calls` и
-  `switch.dnd_management_company_calls` (`_attr_available =
-  coordinator.data["dnd"][place_id]["root"]["status"]`). Coordinator
-  fetches DND state в `_async_update_data`. Switch state toggle → POST
-  массива объектов (без обёртки `{do_not_disturb: ...}`).
+- **Status:** ✅ **RESOLVED** в PR #38 (commit `2dc07ae`). Новая платформа
+  `switch.py` с 3 entity per place: master `dnd_root` (всегда available) +
+  2 dependent `dnd_intercom_calls` / `dnd_management_company_calls`
+  (`_attr_available = root.status`). Coordinator fetches DND state в
+  `_async_update_data`, `async_set_dnd()` wrapper для toggle с UA race-safety.
+  Translation keys в `entity.switch.{key}.name` (ru/en). 4 unit-теста
+  (`tests/test_dnd.py`). См. CHANGELOG `[3.2.0]` (TBD).
 
 ### A-57. Sensor balance — нет дополнительных attrs из `/finance` response
 
@@ -549,7 +537,7 @@ Quality gates:
 | A-08..A-14, A-16..A-21, A-23, A-24, A-44, A-55 | Итерация 2 (Bronze IQS — shipped в 3.1.0) |
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
-| A-56, A-57, A-58, A-59, A-61, A-62 | Итерация 3 (Silver feature gaps) |
+| ✅ A-56 (shipped 3.2.0 TBD), A-57, A-58, A-59, A-61, A-62 | Итерация 3 (Silver feature gaps) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
