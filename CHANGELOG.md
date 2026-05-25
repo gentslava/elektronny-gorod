@@ -5,6 +5,16 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 проект использует [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- **Do Not Disturb switches** ([A-56](docs/audit/project-audit.md)). Для каждого place добавлены 3 switch entity (mirror приложения «Мой Дом» → Настройки → Уведомления → Не беспокоить):
+  - `switch.{place}_do_not_disturb` — master switch.
+  - `switch.{place}_mute_intercom_calls` — отключить звонки с домофона (dependent, available только если master ON).
+  - `switch.{place}_mute_management_company_calls` — отключить уведомления УК (dependent).
+  - Полностью server-side: при включении backend перестаёт слать push о звонках. Toggle через HA UI — POST `/api/mh-customer/.../settings/do_not_disturb`. См. api-reference §do_not_disturb.
+
 ## [3.1.0] - 2026-05-25
 
 ### Security 🔴

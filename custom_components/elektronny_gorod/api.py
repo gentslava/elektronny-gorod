@@ -294,6 +294,52 @@ class ElektronnyGorodAPI:
         except Exception:
             return {}
 
+    async def query_dnd_settings(self, place_id: str) -> list[dict[str, Any]]:
+        """Get Do Not Disturb settings for a place.
+
+        Response shape (см. api-reference §settings/do_not_disturb):
+            {"do_not_disturb": [
+                {"type": "DO_NOT_DISTURB_ROOT",       "name": ..., "status": bool, "hint": ..., "editable": bool},
+                {"type": "INTERCOM_CALLS",            "name": ..., "status": bool, ...},
+                {"type": "MANAGEMENT_COMPANY_CALLS",  "name": ..., "status": bool, ...}
+            ]}
+
+        Returns plain list (внутренности `do_not_disturb`), либо `[]` на ошибку.
+        """
+        api_url = (
+            f"/api/mh-customer/mobile/v1/customers/places/{place_id}/settings/do_not_disturb"
+        )
+        try:
+            response = await self.http.get(api_url)
+            if not isinstance(response, ClientResponse):
+                raise TypeError(f"Unexpected response type: {type(response)!r}")
+            data = await response.json()
+            return (data or {}).get("do_not_disturb") or []
+        except Exception:
+            return []
+
+    async def post_dnd_settings(
+        self,
+        place_id: str,
+        items: list[dict[str, Any]],
+    ) -> bool:
+        """Update Do Not Disturb settings for a place.
+
+        Body — массив объектов того же shape что GET-response (без обёртки
+        `{do_not_disturb: ...}`), с обновлёнными `status`. Response: пустое
+        тело (200).
+
+        Returns True если backend принял (HTTP 2xx), False иначе.
+        """
+        api_url = (
+            f"/api/mh-customer/mobile/v1/customers/places/{place_id}/settings/do_not_disturb"
+        )
+        try:
+            response = await self.http.post(api_url, json.dumps(items))
+            return isinstance(response, ClientResponse) and response.ok
+        except Exception:
+            return False
+
     async def query_camera_stream(self, camera_id: str) -> str | None:
         """Query the stream URL for the given camera."""
         api_url = f"/rest/v1/forpost/cameras/{camera_id}/video?&LightStream=0"

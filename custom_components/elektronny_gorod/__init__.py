@@ -30,6 +30,7 @@ PLATFORMS: list[Platform] = [
     Platform.CAMERA,
     Platform.LOCK,
     Platform.SENSOR,
+    Platform.SWITCH,
 ]
 
 

@@ -88,6 +88,26 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return
 
     # ------------------------------------------------------------------ #
+    # Public service methods (вызываются entity-слоем)                   #
+    # ------------------------------------------------------------------ #
+
+    async def async_set_dnd(
+        self,
+        place_id: str,
+        items: list[dict[str, Any]],
+    ) -> bool:
+        """Update DND settings for a place.
+
+        Wraps `api.post_dnd_settings` с UA race-safety (place_id в shared
+        user_agent должен быть выставлен до запроса). Caller (switch entity)
+        формирует полный payload (3 items с обновлёнными `status`).
+
+        Returns True если backend принял.
+        """
+        self._api.http.user_agent.place_id = place_id
+        return await self._api.post_dnd_settings(place_id, items)
+
+    # ------------------------------------------------------------------ #
     # Periodic refresh (`_async_update_data`)                            #
     # ------------------------------------------------------------------ #
 
@@ -96,10 +116,11 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         Возвращает dict:
             {
-                "places":   list[dict],          # subscriber places
-                "balances": list[dict],          # per-place balance info
-                "cameras":  list[dict],          # уникальные камеры (по id)
-                "locks":    list[dict],          # по entrance (или AC, если нет entrances)
+                "places":   list[dict],            # subscriber places
+                "balances": list[dict],            # per-place balance info
+                "cameras":  list[dict],            # уникальные камеры (по id)
+                "locks":    list[dict],            # по entrance (или AC, если нет entrances)
+                "dnd":      dict[str, list[dict]], # do_not_disturb per place_id
             }
 
         Стратегия ошибок:
@@ -119,11 +140,12 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if not places:
             LOGGER.warning("No subscriber places returned by API")
-            return {"places": [], "balances": [], "cameras": [], "locks": []}
+            return {"places": [], "balances": [], "cameras": [], "locks": [], "dnd": {}}
 
         balances: list[dict[str, Any]] = []
         cameras: list[dict[str, Any]] = []
         locks: list[dict[str, Any]] = []
+        dnd: dict[str, list[dict[str, Any]]] = {}
 
         for _, place_id in self._iter_place_ids(places):
             # Установка `place_id` в shared UA — критично сделать ДО любого
@@ -148,11 +170,19 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             except Exception as ex:  # noqa: BLE001
                 LOGGER.warning("Locks fetch failed for place_id=%s: %s", place_id, ex)
 
+            try:
+                dnd_items = await self._api.query_dnd_settings(place_id)
+            except Exception as ex:  # noqa: BLE001
+                LOGGER.warning("DND fetch failed for place_id=%s: %s", place_id, ex)
+            else:
+                if dnd_items:
+                    dnd[str(place_id)] = dnd_items
+
         cameras = dedupe_by_id(cameras) if cameras else []
 
         LOGGER.debug(
-            "Coordinator refresh: %d places, %d balances, %d cameras, %d locks",
-            len(places), len(balances), len(cameras), len(locks),
+            "Coordinator refresh: %d places, %d balances, %d cameras, %d locks, %d dnd",
+            len(places), len(balances), len(cameras), len(locks), len(dnd),
         )
 
         return {
@@ -160,6 +190,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "balances": balances,
             "cameras": cameras,
             "locks": locks,
+            "dnd": dnd,
         }
 
     @staticmethod
