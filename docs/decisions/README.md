@@ -23,6 +23,7 @@
 | [0006](0006-mirror-app-behavior.md) | Mirror application behavior | accepted | 2026-05-23 |
 | [0007](0007-stateful-emulator-baseline.md) | Stateful emulator baseline для HAR-сбора | accepted | 2026-05-23 |
 | [0008](0008-shared-client-session.md) | Shared `ClientSession` через `async_get_clientsession(hass)` | accepted | 2026-05-24 |
+| [0009](0009-polling-event-detection.md) | Polling `/events/search` для real-time event detection (вместо STOMP/FCM/SIP) | accepted | 2026-05-25 |
 
 ## Когда писать ADR
 
