@@ -161,43 +161,86 @@ Quality gates:
 
 **Quality gates passed:** `READY_FOR_RELEASE` + Silver IQS.
 
-## Итерация 4 — Polling-based event detection (≈ 3-5 дней)
+## Итерация 4 — Real-time events: research-фаза + ADR (≈ research-фаза, неопределённо)
 
-**Цель:** реализовать near-real-time приём событий домофона (звонок → автоматизация HA) через polling endpoint **без** STOMP/FCM/SIP.
+**Цель research-фазы:** определить **лучший** канал доставки событий
+домофона в HA (звонок → автоматизация). Решение должно опираться на
+факты, не на предположения. ADR — **после** research, не до.
 
-**Принцип:** строго следуем [ADR-0006](decisions/0006-mirror-app-behavior.md) — никаких догадок без подтверждения через HAR. Polling-стратегия выбрана **именно потому**, что подтверждена через HAR (`/events/search` использует само приложение); STOMP/FCM/SIP — нет.
+**Принцип:** строго следуем [ADR-0006](decisions/0006-mirror-app-behavior.md)
+— никаких выводов без HAR/APK evidence.
 
-### Почему отказались от STOMP / FCM / SIP
+### Что НЕ решено (открытые research-вопросы)
 
-HAR-research цикл показал:
+**Real push** через FCM не отброшен — требует исследования:
 
-- **STOMP**: `GET /rest/v1/stomp/available-features` для абонентов ЭГ возвращает `null` — backend feature-flag отключён. Видимо, это **платная фича Дом.ру** («Умный дом»), не включена в подписку обычных абонентов «Мой Дом». Реализация STOMP-клиента для пустого канала — пустая трата времени.
-- **FCM**: push приходят через Google Play Services, минуя HTTPS-каналы. Bridge'инг в HA требует APK реверса (FCM `project_id`, `sender_key`) → **юридически серая зона**, в scope проекта не входит.
-- **SIP**: трафик идёт вне HTTP (RTP/UDP). Полный SIP UAC в HA — серьёзный архитектурный proxy + зависимость (`pjsip`, `linphone`). Слишком жирно для базовой «звонок → автоматизация» цели.
-- **`/events/search` polling** ✅ — REST endpoint, использует то же приложение для backfill, retention 6 месяцев, page-pagination. Latency 15-30s acceptable для большинства HA-автоматизаций. Требует только cron-tick поверх существующего coordinator-паттерна.
+- **`google-services.json`** внутри APK содержит Firebase config
+  (`project_id`, `app_id`, `api_key`, `sender_id`). Декомпиляция APK
+  (apktool/jadx) — стандартная процедура, не требует обфускации-bypass.
+- **Mimicry**: технически возможно зарегистрировать HA-instance как
+  «FCM client» приложения «Мой Дом», получая push **напрямую**.
+  Реализация: Python библиотеки типа `firebase_messaging` / `aiohttp`
+  + STOMP-emulation Google CCS protocol. Существуют open-source
+  imp'ы для подобных задач (например, Eufy, Olarm, и другие
+  HACS-интеграции делают именно так).
+- **HA Companion bridge**: HA Companion уже регистрирует FCM-token,
+  но в **другом** Firebase project (HA-вшем). Backend оператора шлёт
+  push в **свой** project → routing невозможен без mimicry.
+- **Sub-second latency** — если research подтвердит технически
+  возможным — это **существенно** лучше polling (15-30s).
 
-### План (А-58 как основной driver)
+### Research tasks (до любого implementation)
 
-- [ ] **ADR-0009** — Polling vs STOMP/FCM для event detection. Зафиксировать **почему** отказались от других каналов. Required before code.
-- [ ] **A-58** Coordinator polls `/rest/v1/events/search?page=0` каждые 15-30 секунд (отдельный interval, **не** общий 5-минутный refresh):
-  - Dedup новых событий по `id`.
-  - `async_dispatcher_send` → HA `event` entity на каждый `accessControl` / camera.
-  - Backfill при первом setup (опционально) — до N страниц истории в HA logbook.
-  - Page-size = 20 (фикс backend), respect `last:true`.
-- [ ] **A-50** Camera events — реализовать через **тот же** `/events/search` filter по `source.type = camera` (вместо отдельного `/cameras/{id}/events` endpoint). Один polling-loop, один event-stream.
-- [ ] **ADR-0010** (опционально) — зафиксировать visibility sync strategy (`hidden_by`-based, two-way, USER override respect). Прецедент уже реализован в коде (PR #35 + A-60); ADR закрепит решение, чтобы будущие модификации не deviated.
+- [ ] **R-1 APK Firebase config extraction**: распаковать
+  `research/apk/myhome-9.7.0-original.apks` → найти
+  `assets/google-services.json` или эквивалент. Зафиксировать
+  `project_id`, `sender_id`, `app_id`, `api_key`. **Не** публиковать
+  в git (приватная инфо оператора, может triggers ToS issue).
+- [ ] **R-2 FCM mimicry feasibility**: исследовать open-source
+  Python библиотеки (`firebase_messaging`, `aiogoogle` GCM, etc.) —
+  можно ли зарегистрировать HA как receiver для arbitrary FCM project?
+  Поискать аналогичные HACS-интеграции (Eufy Security, Olarm Pro,
+  Tuya, Hikvision push).
+- [ ] **R-3 Test push delivery**: на тестовом аккаунте — register
+  HA's FCM token через `POST /rest/v1/subscriberNotifications` с
+  payload-эмуляцией приложения. Тригернуть звонок в домофон от
+  внешнего источника. Проверить — придёт ли push на HA сторону.
+- [ ] **R-4 Legal review**: mimicry приложения может нарушать ToS
+  оператора. Оценить риск. Если высокий — не идти этим путём,
+  fallback на polling.
+- [ ] **R-5 Backup plan**: parallel research на polling
+  `/rest/v1/events/search` (что уже было предложено в ADR-0009).
+  Latency 15-30s, простая реализация. Использовать как **fallback**
+  если R-2/R-3 не получится, или как **safe default** для пользователей,
+  которые не хотят push-mimicry.
 
-### Понижены / отложены
+### Только после research
 
-- ~~**A-47** STOMP-клиент~~ — понижен до **P3 / skip**. Если когда-то backend включит STOMP feature flag для ЭГ абонентов — пересмотреть. Сейчас канал пуст.
-- ~~**A-49** SIP-клиент~~ — остаётся **P3 future**. Только если потребуется full intercom-call feature (RTP audio в HA) — отдельная итерация с явным spec.
+- [ ] **ADR-0009 (rewrite)** — Event delivery strategy. Документ
+  **после** R-1..R-5. Возможные исходы: «push-mimicry primary, polling
+  fallback» / «polling-only» / «hybrid auto-detect».
+- [ ] **A-58** — implementation выбранного решения (form depends on ADR).
+- [ ] **A-50** Camera events — поглощается общим event-stream
+  (независимо от ADR-0009 outcome).
 
-### Ожидаемые исходы
+### Не блокирующие основной scope
 
-- **Realistic best case**: 15-30s latency на звонок в домофон, retention 6 месяцев истории для backfill. Покрывает «90% use-cases» автоматизации «звонок → подсветить экран / уведомить».
-- **Limitation**: не real-time (latency, не sub-second). Если пользователю нужна моментальная реакция — это **out of scope без STOMP/SIP**, документировать в README.
+- **A-47** STOMP — остаётся **P3 / skip**. Backend feature-flag null для
+  ЭГ абонентов. Реализация только если backend когда-нибудь включит
+  STOMP для нашей аудитории — пересмотр.
+- **A-49** SIP — остаётся **P3 future**. Только для full intercom-call
+  feature (RTP audio в HA) — отдельная итерация.
 
-**Quality gates passed:** `READY_FOR_RELEASE` + Silver IQS + polling-based event entity работает.
+### Ожидаемые исходы research
+
+| Outcome | Latency | Сложность реализации | Зависимости |
+|---|---|---|---|
+| FCM mimicry работает | sub-second | средне-высоко | Python firebase lib, APK config |
+| FCM mimicry не работает | — | — | fallback → polling |
+| Polling-only | 15-30s | низко | aiohttp (уже есть) |
+
+**Quality gates passed (итерация):** `READY_FOR_RELEASE` + Silver IQS +
+working real-time event entity (path TBD после ADR).
 
 ## Принципы
 
@@ -239,7 +282,7 @@ Tests
 | 0006 | Mirror application behavior | accepted |
 | 0007 | Stateful emulator baseline | accepted |
 | 0008 | Shared aiohttp ClientSession | Итерация 2 |
-| 0009 | Polling vs STOMP/FCM для event detection | **required** перед A-58 (Итерация 4) |
+| 0009 | Event delivery strategy (push-mimicry / polling / hybrid) | **required** after R-1..R-5 research, перед A-58 (Итерация 4) |
 | 0010 | Visibility sync strategy (hidden_by, two-way) | опц., Итерация 3-4 (post-factum для PR #35) |
 
 ## Risks

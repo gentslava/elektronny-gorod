@@ -447,26 +447,26 @@ Quality gates:
 - Группировать в одном PR — один coordinator dict-key, один device,
   пять entities.
 
-### A-58. `/rest/v1/events/search` polling не реализован
+### A-58. Real-time event delivery (polling vs FCM push — research pending)
 
-- **Severity:** P1 (основа Silver real-time без APK реверса).
+- **Severity:** P1 (Silver real-time path для домофонных звонков).
 - **Area:** Feature gap / real-time alternative.
-- **Evidence:** `POST /rest/v1/events/search?page={n}&sort=occurredAt,DESC`
-  с body `{placeIds: [<PLACE_ID>]}` — см.
-  [`api-reference.md` §events](../architecture/api-reference.md). Spring Pageable,
-  retention ~6 месяцев, page size = 20, `last:true` означает исчерпание.
-- **Impact:** **реалистичная альтернатива STOMP/FCM** для real-time event
-  detection в HA. Latency 15-30s (polling interval) acceptable для
-  большинства автоматизаций («звонок в домофон → подсветить экран»,
-  «motion → уведомление»). Не требует STOMP-клиента или APK реверса.
-- **Recommended fix:** coordinator polls `/events/search?page=0` каждые
-  15-30 сек (отдельный interval, **не** общий 5-минутный refresh) →
-  dedup по `id` → `async_dispatcher_send` для новых событий → HA `event`
-  entity на каждый camera/access_control. Backfill при первом setup —
-  опционально (до 6 месяцев истории в logbook).
-- **ADR:** требуется новый **ADR-0009** (см. §«ADR кандидаты» в roadmap)
-  до начала имплементации — зафиксировать почему отказались от STOMP/FCM
-  в пользу polling.
+- **Evidence:** Два кандидатных канала:
+  1. **Polling** `POST /rest/v1/events/search?page={n}&sort=occurredAt,DESC`
+     с body `{placeIds: [<PLACE_ID>]}` — см.
+     [`api-reference.md` §events](../architecture/api-reference.md).
+     Spring Pageable, retention ~6 месяцев, page size = 20. Latency 15-30s.
+  2. **FCM mimicry** — приложение получает push через Firebase, конфиг
+     внутри APK (`google-services.json`). Технически возможно зарегистрировать
+     HA как FCM-receiver того же project. Latency sub-second. См. R-1..R-5
+     в roadmap Итерации 4.
+- **Status:** **research pending**. До завершения R-1..R-5 (APK Firebase
+  extraction + feasibility test + legal review) — не принимать ADR-0009
+  и не начинать implementation. Polling — safe fallback если push-mimicry
+  не получится.
+- **ADR:** **ADR-0009** будет написан **после** research как accepted
+  выбор одного из вариантов (push primary / polling primary / hybrid).
+  См. roadmap Итерация 4.
 
 ### A-59. Video archive retention не учитывается при формировании URL
 
@@ -550,7 +550,7 @@ Quality gates:
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | A-56, A-57, A-58, A-59, A-61, A-62 | Итерация 3 (Silver feature gaps) |
-| A-58 + A-47 (понижен), A-49, A-50 | Итерация 4 (real-time event detection — polling-first) |
+| A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 
