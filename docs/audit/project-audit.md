@@ -414,26 +414,16 @@ Quality gates:
 
 ### A-57. Sensor balance — нет дополнительных attrs из `/finance` response
 
-- **Severity:** P2 (Silver UX).
-- **Area:** Feature gap.
-- **Evidence:** `/api/mh-payment/mobile/v1/finance` response содержит:
-  `balance, blockType, amountSum, targetDate, paymentLink, daysToBlock,
-  daysToWarning, company, blocked` — см.
-  [`api-reference.md` §finance](../architecture/api-reference.md). Coordinator
-  уже извлекает большинство этих полей (`coordinator.py:_fetch_balance`),
-  но sensor использует только `balance` как native_value.
-- **Impact:** пользователь не может easily автоматизировать «оплати счёт»
-  (нет binary_sensor) или предупредить «скоро блокировка» (нет
-  `days_to_block`). API-данные уже на руках в `coordinator.data`.
-- **Recommended fix (несколько entities):**
-  - `binary_sensor.balance_blocked` (BinarySensorDeviceClass.PROBLEM) —
-    из `blocked: bool`.
-  - `sensor.balance_days_to_block` — из `daysToBlock` (когда не null).
-  - `sensor.balance_next_payment_amount` (MONETARY) — из `amountSum`.
-  - `sensor.balance_next_payment_date` (TIMESTAMP) — из `targetDate`.
-  - `button.balance_pay` — открывает `paymentLink` в браузере.
-- Группировать в одном PR — один coordinator dict-key, один device,
-  пять entities.
+- **Status:** ✅ **RESOLVED** в branch `feat/a57-balance-attrs` (PR TBD).
+  3 entity per place добавлены к существующему balance device:
+  - `binary_sensor.{place}_account_blocked` (BinarySensorDeviceClass.PROBLEM).
+  - `sensor.{place}_days_to_block` (DURATION + UnitOfTime.DAYS).
+  - `button.{place}_pay` (press → persistent_notification с payment_link).
+  Coordinator `_fetch_balance` теперь extracts `days_to_block`, `days_to_warning`,
+  `company`. 0 новых HTTP calls — поля из существующего `/finance` response.
+  6 unit-тестов (TDD strict — RED first, потом GREEN). Translations ru/en.
+  `amountSum` / `targetDate` остались в balance sensor extra_state_attributes
+  (не выделены в отдельные entity) — достаточно для automation. См. CHANGELOG.
 
 ### A-58. Real-time event delivery (polling vs FCM push — research pending)
 
@@ -537,7 +527,7 @@ Quality gates:
 | A-08..A-14, A-16..A-21, A-23, A-24, A-44, A-55 | Итерация 2 (Bronze IQS — shipped в 3.1.0) |
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
-| ✅ A-56 (shipped 3.2.0 TBD), A-57, A-58, A-59, A-61, A-62 | Итерация 3 (Silver feature gaps) |
+| ✅ A-56 + ✅ A-57 (shipped 3.2.0 TBD), A-58, A-59, A-61, A-62 | Итерация 3 (Silver feature gaps) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |

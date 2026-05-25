@@ -95,6 +95,19 @@
     "sensor": {
       "balance": {
         "name": "Account balance"
+      },
+      "days_to_block": {
+        "name": "Days to block"
+      }
+    },
+    "binary_sensor": {
+      "blocked": {
+        "name": "Account blocked"
+      }
+    },
+    "button": {
+      "pay": {
+        "name": "Pay"
       }
     },
     "lock": {
