@@ -42,8 +42,8 @@ AREA_INDOOR_CAM: Final = "Камеры дома"
 AREA_PUBLIC_CAM: Final = "Городские камеры"
 
 APP_VERSION: Final = {
-    "name": "9.1.0",
-    "code": "90100000"
+    "name": "9.7.0",
+    "code": "90700000"
 }
 
 ANDROID_OS_VER: Final = "16"
