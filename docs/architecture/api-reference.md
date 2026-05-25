@@ -38,7 +38,7 @@ Quality gates:
 
 | Приложение | Package | Backend | Auth |
 |---|---|---|---|
-| **«Мой Дом»** (наша цель) | `ru.proptech.myhome` (?) | `myhome.proptech.ru` | Signed-request (sha1+md5 hashes) |
+| **«Мой Дом»** (наша цель) | `ru.inetra.intercom` | `myhome.proptech.ru` | Signed-request (sha1+md5 hashes) |
 | «Электронный город» (старое) | `com.electronnijgorod.novosibirsk` | `my.2090000.ru` (`api.novotelecom.ru` для OAuth) | Keycloak OAuth2 (`client_id=mlk:android`) |
 
 **Наша HA integration реализует только «Мой Дом»** (`myhome.proptech.ru`).
@@ -46,6 +46,17 @@ Quality gates:
 objectId, title, isMain, address, model, mac, ip}` через
 `/api/ntk-video-equipment/rest/v1/devices`) и Keycloak — реализация
 параллельного backend-клиента — отдельная задача.
+
+⚠️ **Capture HAR от ЭГ через MITM-proxy не работает.** Сервер `my.2090000.ru`
+имеет anti-MITM WAF: 403 на первый же `GET /api/appVersionCheck` с
+response header `x-sp-crid` (correlation id WAF). Patched через apk-mitm
+APK НЕ помогает — header `ntk-user-agent: MLK/3.6.6 (...)` приложение
+шлёт правильно (interceptor работает), но WAF блокирует по **TLS
+fingerprint (JA3)**: handshake Charles/mitmproxy ≠ handshake OkHttp
+Android. Решение существует только через **in-process Frida**
+(frida-gadget injected в APK, hook OkHttp до encryption — TLS handshake
+делает приложение само, свой JA3 сохраняется). Для нашей integration
+ЭГ не нужен, поэтому в scope не входит.
 
 **Важное общее знание из reverse engineering обоих приложений:**
 - Ни один из бэкендов **не различает на API-уровне** «домовая камера»
