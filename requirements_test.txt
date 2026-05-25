@@ -1,0 +1,9 @@
+# Test dependencies for elektronny_gorod custom integration.
+#
+# pytest-homeassistant-custom-component (PHC) транзитивно тянет HA core,
+# pytest, pytest-cov, coverage, pytest-asyncio. Версия PHC выбирается
+# отдельно — в CI из matrix (.github/workflows/python-tests.yaml).
+# Локально установите вручную:
+#   pip install pytest-homeassistant-custom-component==0.13.175
+# Подробнее: docs/aidd/runbooks/testing.md
+aioresponses

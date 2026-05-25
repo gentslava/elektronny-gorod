@@ -1,8 +1,16 @@
 """Common fixtures for the Elektronny Gorod tests."""
+import sys
 from collections.abc import Generator
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+
+# pytest-homeassistant-custom-component не тянет optional HA-deps вроде
+# `turbojpeg` (используется в homeassistant.components.camera.img_util).
+# HA импортирует `camera` лениво при async_forward_entry_setups — это
+# происходит после загрузки conftest.py, поэтому sys.modules-mock здесь
+# успевает применится до реального импорта.
+sys.modules.setdefault("turbojpeg", MagicMock())
 
 
 @pytest.fixture(autouse=True)
