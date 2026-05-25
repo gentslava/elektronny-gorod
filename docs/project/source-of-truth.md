@@ -71,7 +71,7 @@ Quality gates:
 | `README.md` badge | `2024.10+` ✅ |
 | Код (`ConfigFlowResult`, `LockState`) | ≥ 2024.10 ✅ совпадает с hacs.json |
 
-**Резолюция:** код — источник реальной минимальной версии. Требуется обновить `hacs.json` и README до фактической `2024.1.0` (минимально).
+**Резолюция:** ✅ закрыт. Все источники синхронизированы на `2024.10.4` — первая stable HA с `LockState` enum, который импортирует `lock.py`. См. audit [A-11](../audit/project-audit.md#a-11-hacsjson-minimum-ha--202280).
 
 ### Конфликт 2: iot_class vs реальная модель
 

@@ -76,7 +76,7 @@ Quality gates:
 - [ ] **A-23 + A-45** Создать `diagnostics.py` с redaction (см. [`audit/security.md#S-08`](audit/security.md), [`S-16`](audit/security.md)). В `TO_REDACT` включить также `go2rtc_username`/`go2rtc_password`.
 - [ ] **A-44** Убрать дублирующий `get_camera_stream` в `async_update` камеры (закрывается через A-09 CoordinatorEntity).
 - [ ] **Tests-1..N** Написать реальные тесты по плану [`testing/strategy.md`](testing/strategy.md): config_flow happy + abort, options_flow, миграции, coordinator, api.
-- [ ] **CI-1** Создать `.github/workflows/python-tests.yaml`.
+- [x] **CI-1** ✅ Создан `.github/workflows/python-tests.yaml` с matrix по двум HA-версиям (min 2024.10.4 + current 2026.5.4), pip-cache, coverage artifact. Tests-1..N расширят покрытие — см. ниже.
 - [x] **A-34** ✅ slice 3c — `quality_scale: "bronze"`, `integration_type: "hub"` в `manifest.json`.
 - [ ] **A-35** Создать `CHANGELOG.md`.
 - [ ] **A-36** Создать `CONTRIBUTING.md` со ссылкой на `aidd/contributing.md`.

@@ -170,7 +170,8 @@ PLATFORMS: `[CAMERA, LOCK, SENSOR]` ([`__init__.py:25-29`](../../custom_componen
 |---|---|---|
 | `hassfest.yaml` | manifest validation | ✅ есть |
 | `hacs.yaml` | HACS validation | ✅ есть |
-| **pytest workflow** | unit tests | 🔴 отсутствует |
+| `python-tests.yaml` | pytest + coverage (matrix min/current HA) | ✅ есть |
+| `prerelease.yaml` | PR pre-release zip (filtered: paths + draft) | ✅ есть |
 | `release.yaml` | release zip + autocommit | ✅ есть |
 
 ## Brand assets
