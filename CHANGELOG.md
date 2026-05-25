@@ -5,7 +5,7 @@
 Формат основан на [Keep a Changelog](https://keepachangelog.com/),
 проект использует [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [3.1.0] - 2026-05-25
 
 ### Security 🔴
 
