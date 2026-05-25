@@ -68,6 +68,8 @@ class ElektronnyGorodLock(
         self._access_control_id = lock_info["access_control_id"]
         self._entrance_id = lock_info["entrance_id"]
         self._name: str = lock_info["name"]
+        # Visibility управляется на DEVICE-уровне в __init__.py:_sync_visibility
+        # (cascade через HA core: device disabled → entity disabled_by=DEVICE).
         # Synthetic state — управляется async_unlock + async_call_later.
         self._state: LockState = LockState.LOCKED
         # Cancel-handle для запланированного reset (если есть).

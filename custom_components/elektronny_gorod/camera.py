@@ -151,6 +151,9 @@ class ElektronnyGorodCamera(
         source = camera_info.get("source") or "public"  # fallback
         is_intercom = source == "intercom" and bool(ac_id and place_id)
 
+        # Visibility управляется на DEVICE-уровне в __init__.py:_sync_visibility:
+        # если все entities device hidden в API → device.disabled_by=INTEGRATION,
+        # HA автоматически set entity.disabled_by=DEVICE (cascade).
         LOGGER.debug("Camera init id=%s source=%s hidden=%s",
                      self._id, source, camera_info.get("hidden"))
 

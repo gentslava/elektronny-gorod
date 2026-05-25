@@ -5,7 +5,7 @@ import json
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
@@ -53,36 +53,111 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Visibility sync (см. PR #35 follow-up): на re-add HA восстанавливает
-    # entity из `deleted_entities` с сохранённым `disabled_by`,
-    # игнорируя `_attr_entity_registry_enabled_default`. После того как
-    # platforms зарегистрировали entity — синхронно подгоняем disabled_by
-    # для entities, скрытых в /settings/screens.
-    _sync_hidden_entities_disabled_by(hass, entry, coordinator.data or {})
+    # One-time migration: legacy state (disabled_by на entities/devices от
+    # старых версий integration) → None. Применяется один раз per entry.
+    migration_changed = _migrate_legacy_disabled_state(hass, entry)
+
+    # Visibility sync: hidden в /settings/screens → entity.hidden_by=INTEGRATION.
+    # `hidden_by` (НЕ disabled_by) — state machine продолжает работать
+    # (automations доступны), entity не показывается в default UI views.
+    # Пользователь может easily Show через Settings → Entities → filter Hidden.
+    sync_changed = _sync_visibility(hass, entry, coordinator.data or {})
+
+    if migration_changed or sync_changed:
+        hass.async_create_task(
+            hass.config_entries.async_reload(entry.entry_id),
+            name=f"{DOMAIN}_visibility_reload",
+        )
 
     return True
 
 
-def _sync_hidden_entities_disabled_by(
+_MIGRATION_FLAG_KEY = "visibility_migration_v2"
+
+
+def _migrate_legacy_disabled_state(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+) -> bool:
+    """One-time cleanup legacy disabled_by markers (entity + device).
+
+    Применяется один раз per entry, флаг в entry.options.
+
+    Background: до перехода на hidden_by-based visibility sync интеграция
+    использовала disabled_by:
+    - entity.disabled_by=INTEGRATION/DEVICE (от cascade)
+    - device.disabled_by=INTEGRATION (от device-level sync)
+    - entity.disabled_by=USER (от bulk-disable пользователем в HA UI до bi-dir sync)
+
+    Все эти markers надо сбросить — новая модель использует только hidden_by,
+    который потом устанавливается _sync_visibility согласно current API state.
+
+    Returns True если что-то изменилось.
+    """
+    if entry.options.get(_MIGRATION_FLAG_KEY):
+        return False
+
+    ent_reg = er.async_get(hass)
+    dev_reg = dr.async_get(hass)
+    changed = False
+    reset_count = 0
+
+    # 1. Entities: disabled_by INTEGRATION/DEVICE/USER → None.
+    for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if entity.disabled_by in (
+            er.RegistryEntryDisabler.INTEGRATION,
+            er.RegistryEntryDisabler.DEVICE,
+            er.RegistryEntryDisabler.USER,
+        ):
+            ent_reg.async_update_entity(entity.entity_id, disabled_by=None)
+            reset_count += 1
+            changed = True
+
+    # 2. Devices: disabled_by INTEGRATION/USER → None (CONFIG_ENTRY HA сам).
+    for device in dr.async_entries_for_config_entry(dev_reg, entry.entry_id):
+        if device.disabled_by in (
+            dr.DeviceEntryDisabler.INTEGRATION,
+            dr.DeviceEntryDisabler.USER,
+        ):
+            dev_reg.async_update_device(device.id, disabled_by=None)
+            reset_count += 1
+            changed = True
+
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, _MIGRATION_FLAG_KEY: True},
+    )
+
+    if reset_count:
+        LOGGER.info(
+            "One-time visibility migration: reset %d disabled_by markers "
+            "(entity + device). Sync будет использовать hidden_by вместо disabled_by.",
+            reset_count,
+        )
+
+    return changed
+
+
+def _sync_visibility(
     hass: HomeAssistant,
     entry: ConfigEntry,
     data: dict[str, Any],
-) -> None:
-    """Single source of truth для entity visibility на основе /settings/screens.
+) -> bool:
+    """Two-way visibility sync через `hidden_by` ↔ /settings/screens из приложения.
 
-    Запускается на каждом setup_entry (включая re-add после remove). Покрывает
-    оба сценария — first add (entity ещё нет в registry) и re-add (HA восстановил
-    из `deleted_entities` с прежним `disabled_by`).
+    Логика (entity-level, без device manipulation):
+    - hidden в API + entity.hidden_by=None → set hidden_by=INTEGRATION.
+    - visible в API + entity.hidden_by=INTEGRATION → set hidden_by=None.
+    - entity.hidden_by=USER → НЕ trogaem (явный user choice через HA UI).
 
-    Стратегия:
-    - Собираем `unique_id` всех hidden-камер и hidden-locks из coordinator.data.
-    - Для каждой entity нашего config_entry с unique_id в этом множестве и
-      `disabled_by is None` → устанавливаем `disabled_by=INTEGRATION`.
-      `INTEGRATION` (не `CONFIG_ENTRY`) — `CONFIG_ENTRY` сбрасывается HA-core
-      при restore из `deleted_entities`, см. entity_registry.py.
-    - **One-way**: НЕ enable обратно visible-в-API entities — это перетёрло бы
-      явный user choice (если человек целенаправленно отключил видимую entity).
-    - Никогда не трогаем `disabled_by=USER` — пользователь явно решил.
+    Почему `hidden_by`, а не `disabled_by`:
+    - disabled_by INTEGRATION блокирует UI override («устройство деактивировано
+      интеграцией»). Пользователь не может easily enable.
+    - hidden_by INTEGRATION просто скрывает из default UI views. State machine
+      работает (automations доступны). Пользователь может easily Show через
+      Settings → Entities → filter Hidden.
+
+    Returns True если что-то изменилось (caller schedule reload).
     """
     hidden_uids: set[str] = set()
 
@@ -100,25 +175,45 @@ def _sync_hidden_entities_disabled_by(
                 )
             )
 
-    if not hidden_uids:
-        return
-
     ent_reg = er.async_get(hass)
+    changed = False
+    hid = 0
+    shown = 0
+
     for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
-        if entity.unique_id not in hidden_uids:
+        if entity.domain not in ("camera", "lock"):
             continue
-        if entity.disabled_by is not None:
-            # USER / DEVICE / CONFIG_ENTRY / HASS / INTEGRATION — не трогаем.
-            continue
-        LOGGER.debug(
-            "Disabling entity %s (unique_id=%s) — hidden in user app",
-            entity.entity_id,
-            entity.unique_id,
+
+        api_hidden = entity.unique_id in hidden_uids
+
+        if api_hidden and entity.hidden_by is None:
+            LOGGER.debug(
+                "Hiding entity %s (unique_id=%s) — hidden in user app",
+                entity.entity_id, entity.unique_id,
+            )
+            ent_reg.async_update_entity(
+                entity.entity_id, hidden_by=er.RegistryEntryHider.INTEGRATION
+            )
+            hid += 1
+            changed = True
+        elif (
+            not api_hidden
+            and entity.hidden_by == er.RegistryEntryHider.INTEGRATION
+        ):
+            LOGGER.debug(
+                "Showing entity %s (unique_id=%s) — visible in user app",
+                entity.entity_id, entity.unique_id,
+            )
+            ent_reg.async_update_entity(entity.entity_id, hidden_by=None)
+            shown += 1
+            changed = True
+
+    if hid or shown:
+        LOGGER.info(
+            "Visibility sync: hidden_uids=%d, hid=%d, shown=%d (entry %s)",
+            len(hidden_uids), hid, shown, entry.entry_id,
         )
-        ent_reg.async_update_entity(
-            entity.entity_id,
-            disabled_by=er.RegistryEntryDisabler.INTEGRATION,
-        )
+    return changed
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
