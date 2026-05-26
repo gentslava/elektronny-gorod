@@ -257,25 +257,43 @@ class ElektronnyGorodCamera(
             self._rtsp_url(),
         )
 
+        # A-66v3: если HA Stream worker уже running — force restart, чтобы
+        # новый ffmpeg producer (с свежим operator src) активировался немедленно.
+        # Без этого worker продолжает старое подключение, при истечении operator
+        # токена впадает в retry-with-backoff (10-60 сек).
+        # `update_source()` устанавливает `_fast_restart_once=True` +
+        # `_thread_quit.set()` (см. homeassistant.components.stream).
+        stream = self.stream
+        if stream is not None:
+            try:
+                stream.update_source(self._rtsp_url())
+                LOGGER.debug(
+                    "Camera %s (%s): forced HA Stream restart after go2rtc PUT",
+                    self._name, self._id,
+                )
+            except Exception:  # noqa: BLE001 — defensive: HA Stream API edge cases
+                LOGGER.exception(
+                    "Failed to update HA Stream source for camera %s (%s)",
+                    self._name, self._id,
+                )
+
     # ------------------------------------------------------------------ #
     # On-demand actions                                                  #
     # ------------------------------------------------------------------ #
 
     def _is_hidden(self) -> bool:
-        """A-63: skip stream/snapshot fetch если entity не показывается в UI.
+        """A-63 (PARTIAL): skip только для snapshot, НЕ для stream_source.
 
-        Skip когда `registry_entry.hidden_by is not None` — любой reason:
-        - INTEGRATION: наш `_sync_visibility` пометил на основе API hidden=True;
-        - USER: юзер выключил «Показывать на панели» через HA UI;
-        - DEVICE: каскад от device-level (не используем сейчас).
+        Используется ТОЛЬКО в `async_camera_image` — snapshot on-demand,
+        lifecycle проблем нет, skip безопасен.
 
-        Любой hidden = юзер не видит camera card в UI = HTTP/stream бесполезен.
-        Чтобы включить обратно — toggle «Показывать на панели» в entity-edit
-        page (HA устанавливает `hidden_by=None`).
-
-        `registry_entry` is None в окне между `__init__` и `async_added_to_hass` —
-        safe default «не скрыто» (этот код всё равно вызывается уже после
-        async_added_to_hass, но guard на всякий случай).
+        Для `stream_source` skip убран (см. A-66v3): HA Stream worker pin-ится
+        к RTSP URL который мы вернули один раз; `stream_source` повторно не
+        вызывается. Если мы возвращаем None после того как stream была
+        активна, worker зависает в retry-loop на устаревшем RTSP/producer.
+        Лучше всегда возвращать живой URL + полагаться на HA prefetch для
+        обновления go2rtc producer + Stream.update_source() для force restart
+        при изменении src в go2rtc.
         """
         reg = self.registry_entry
         return reg is not None and reg.hidden_by is not None
@@ -292,9 +310,14 @@ class ElektronnyGorodCamera(
         return self._image
 
     async def stream_source(self) -> str | None:
-        """Return the source of the stream."""
-        if self._is_hidden():
-            return None
+        """Return the source of the stream.
+
+        НЕ skip-аем для hidden (см. A-66v3). HA Stream lifecycle несовместим
+        с возвратом None после того как stream была активна — worker зависает.
+        Operator FLV URL c коротким TTL обновляется через постоянный prefetch
+        + `Stream.update_source()` в `_ensure_go2rtc_stream` форсит worker
+        restart при изменении operator src.
+        """
         stream_url = await self.coordinator.get_camera_stream(self._id)
         if not stream_url:
             LOGGER.warning("Camera %s (%s): empty source stream url", self._name, self._id)

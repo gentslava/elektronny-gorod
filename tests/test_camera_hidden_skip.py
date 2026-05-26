@@ -135,11 +135,17 @@ def _get_camera_entity(hass: HomeAssistant, unique_id: str):
 # ─── Test A: hidden camera — stream_source returns None, no API call ─────────
 
 
-async def test_stream_source_returns_none_for_hidden_camera(
+async def test_stream_source_returns_url_for_hidden_camera_v3(
     hass: HomeAssistant, mock_api_with_streams
 ):
-    """A-63: hidden_by=INTEGRATION → stream_source() возвращает None
-    БЕЗ вызова coordinator.get_camera_stream → API."""
+    """A-66v3: hidden_by=INTEGRATION → stream_source() ВСЁ РАВНО возвращает URL.
+
+    Skip для stream_source убран (см. A-66v3): HA Stream worker pin-ится к
+    RTSP URL который мы вернули один раз; повторно stream_source не
+    вызывается. Если возвращаем None после того как stream была активна,
+    worker зависает в retry-loop. Skip применяется ТОЛЬКО к snapshot
+    (async_camera_image — on-demand, lifecycle проблем нет).
+    """
     entry = _make_config_entry()
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -151,22 +157,18 @@ async def test_stream_source_returns_none_for_hidden_camera(
     hidden_camera = _get_camera_entity(
         hass, f"{DOMAIN}_camera_{HIDDEN_CAMERA_ID}"
     )
-    assert hidden_camera is not None, "hidden camera entity должна существовать (state machine работает)"
+    assert hidden_camera is not None
 
-    # Sanity: registry_entry правда hidden_by=INTEGRATION (precondition).
+    # Precondition.
     registry = er.async_get(hass)
-    reg_entry = registry.async_get(hidden_camera.entity_id)
-    assert reg_entry.hidden_by == er.RegistryEntryHider.INTEGRATION, (
-        f"precondition: hidden camera должна иметь hidden_by=INTEGRATION, "
-        f"got {reg_entry.hidden_by!r}"
-    )
+    assert registry.async_get(hidden_camera.entity_id).hidden_by == er.RegistryEntryHider.INTEGRATION
 
     result = await hidden_camera.stream_source()
-    assert result is None, f"stream_source() для hidden должен вернуть None, got {result!r}"
-    assert instance.query_camera_stream.await_count == 0, (
-        f"query_camera_stream НЕ должен вызываться для hidden camera, "
-        f"got call_count={instance.query_camera_stream.await_count}"
+    assert result == "https://example/stream.flv", (
+        f"v3: hidden camera stream_source ВСЁ РАВНО возвращает URL (HA Stream "
+        f"lifecycle requirement), got {result!r}"
     )
+    assert instance.query_camera_stream.await_count == 1
 
 
 # ─── Test B: visible camera — поведение не меняется ──────────────────────────
@@ -235,12 +237,11 @@ async def test_async_camera_image_returns_none_for_hidden_camera(
 # ─── Test D: USER-hidden — skip (юзер отключил «Показывать на панели») ──────
 
 
-async def test_stream_source_returns_none_for_user_hidden_camera(
+async def test_stream_source_returns_url_for_user_hidden_camera_v3(
     hass: HomeAssistant, mock_api_with_streams
 ):
-    """A-63: юзер выключил «Показывать на панели» в HA UI → hidden_by=USER →
-    skip. Hide через UI = «не хочу видеть данные» = stream бесполезен.
-    Чтобы вернуть — toggle обратно (hidden_by=None)."""
+    """A-66v3: USER hidden_by → stream_source() всё равно возвращает URL
+    (HA Stream lifecycle requirement). Snapshot skip — отдельно."""
     entry = _make_config_entry()
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -259,10 +260,10 @@ async def test_stream_source_returns_none_for_user_hidden_camera(
 
     visible_camera = _get_camera_entity(hass, visible_uid)
     result = await visible_camera.stream_source()
-    assert result is None, (
-        f"USER-hidden camera stream_source должен вернуть None, got {result!r}"
+    assert result == "https://example/stream.flv", (
+        f"v3: USER-hidden stream_source всё равно возвращает URL, got {result!r}"
     )
-    assert instance.query_camera_stream.await_count == 0
+    assert instance.query_camera_stream.await_count == 1
 
 
 # ─── Test E: юзер включил «Показывать на панели» для INTEGRATION-hidden → отдаём
