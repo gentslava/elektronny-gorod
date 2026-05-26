@@ -343,6 +343,9 @@ const + go2rtc ← config_flow, camera
 3. **Сильная связанность `coordinator` ↔ `api` ↔ `http`** — coordinator unit-тестируется только с mock `aioresponses` (см. `tests/`); inject-абстракции пока нет.
 4. **UA shared state в `user_agent.place_id`** — кросс-слойная связанность через `self._api.http.user_agent.place_id = place_id`. Из-за этого refresh идёт сериально по places (см. async-паттерны). Лучше прокидывать `place_id` через параметры HTTP-вызовов; рефакторинг open.
 5. **Нет `ClientTimeout`** (A-21) — медленный backend может заморозить refresh-тик.
+6. **Hidden camera entities всё равно отвечают на `stream_source()`** (A-63) — `hidden_by=INTEGRATION` скрывает entity в UI, но HA core / downstream-интеграции (frigate, webrtc preview) могут запросить stream/snapshot для всех зарегистрированных camera entities. Сейчас `camera.py:stream_source` не проверяет `registry_entry.hidden_by` → лишний HTTP-fetch на hidden cams. Кандидат на ранний `return None` для hidden.
+7. **Reload-каскад при cold start** (A-64) — `_migrate_legacy_disabled_state` пишет flag в `entry.options` → `async_update_options` listener триггерит `async_reload`; параллельно сам `async_setup_entry` дёргает `async_reload` через `migration_changed or sync_changed`. Наблюдалось до 4× reload в 34 сек. Лечится: storage migration-flag в `entry.data` (или через `async_migrate_entry`), а `_sync_visibility` должен возвращать `False` если registry value не изменился фактически.
+8. **Лог-spam от временно сломанных камер** (A-65) — `camera.py:stream_source` логирует `WARNING "empty source stream url"` на каждый вызов. Под нагрузкой frigate/webrtc preview одна broken камера даёт десятки одинаковых WARNING. Кандидат на per-camera consecutive-fail throttle (1й WARNING, 2й+ DEBUG, reset на success).
 
 Решённые с момента предыдущего ревью архитектуры:
 - ✅ Coordinator имеет `update_interval` + dict-snapshot (A-08, slice 3a).

@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-05-25
+Last reviewed: 2026-05-26
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -518,6 +518,110 @@ Quality gates:
   парсить FAVORITES с учётом mixed-typed items (item.type → camera /
   entrance), затем union с уже извлечёнными hidden_ids. Не блокер.
 
+## Findings из production-логов (2026-05-26)
+
+> Источник — production log `home-assistant_elektronny_gorod_2026-05-26T03-09-25.409Z.log`
+> (gitignored, не фиксируем конкретные ID/имена/account_id). Каждый finding
+> снят с фактического runtime-поведения интеграции в HA. Принцип ADR-0006
+> соблюдён — фиксируем поведение, не догадки.
+
+### A-63. HA prefetches `stream_source()` для hidden cameras
+
+- **Severity:** P2 (perf — лишние HTTP, +UX noise).
+- **Area:** HA-compat / Performance.
+- **Evidence:** в логе зафиксированы повторяющиеся `Fetching camera <id> stream URL`
+  для camera_id с `hidden=True` (например `Camera init id=5593586 ... hidden=True`,
+  затем `Fetching camera 5593586 stream URL`). Hidden cameras всё равно
+  зарегистрированы как entities (`hidden_by=INTEGRATION` — state machine
+  работает), и HA core/integrations (frigate, webrtc preview, advanced lovelace)
+  могут вызывать `stream_source()` для всех зарегистрированных camera entities.
+- **Impact:** лишний HTTP-запрос (`/api/.../intercoms/{id}` или public-camera
+  endpoint) на каждую hidden camera. На квартире с 15 hidden public cams —
+  это +15 HTTP per stream-trigger event. Под нагрузкой frigate/webrtc/...
+  даёт ощутимый рост трафика без полезного результата.
+- **Recommended fix:** в [`camera.py:stream_source`](../../custom_components/elektronny_gorod/camera.py#L275)
+  ранний return `None` если `self.registry_entry.hidden_by is not None` (или
+  если `coordinator_camera_info["hidden"] is True`). Hidden камера не должна
+  fetch live stream — у юзера её даже нет в UI. Аналогично для
+  `async_camera_image` (snapshot prefetch).
+- **Test plan:** unit-тест — `stream_source()` возвращает None если entity
+  hidden, и не дёргает `coordinator.get_camera_stream`. Mock coordinator
+  call_count == 0 для hidden.
+
+### A-64. `_sync_visibility` / migration → reload cascade
+
+- **Severity:** P2 (UX — лишние reload на старте, потенциальный infinite loop).
+- **Area:** HA-compat / Architecture.
+- **Evidence:** в логе зафиксировано **4 `Integration loading entry`** в
+  течение 34 секунд после cold start:
+  - `10:07:06.579` — cold start
+  - `10:07:10.114` — `One-time visibility migration: reset 22 disabled_by markers`
+  - `10:07:10.117` — reload (через 3 мс после migration)
+  - `10:07:18.017` — reload (через 8 сек)
+  - `10:07:40.117` — reload (через 22 сек)
+- **Root cause:** два независимых триггера каскадно перезапускают setup:
+  1. [`__init__.py:_migrate_legacy_disabled_state`](../../custom_components/elektronny_gorod/__init__.py#L128)
+     пишет flag в `entry.options` → `async_update_options` listener
+     (зарегистрирован через `entry.add_update_listener` на строке 54) →
+     `hass.config_entries.async_reload`.
+  2. [`__init__.py:async_setup_entry`](../../custom_components/elektronny_gorod/__init__.py#L68)
+     также триггерит `async_reload` через `if migration_changed or sync_changed`.
+  3. Дополнительно `_sync_visibility` может возвращать `True` даже при
+     стабильном state, если entity_registry в моменте не отражает уже
+     применённые `hidden_by` значения (race с регистрацией entity по platforms).
+- **Impact:** 4× cold-start cost: 4× первичный refresh coordinator, 4× init
+  всех entities, 4× setup_platforms. По логу — задержка `setup → ready` в
+  ~34 секунды вместо ~1-2 сек. На больших аккаунтах (много мест) —
+  пропорционально хуже. Опасный режим: если `_sync_visibility` всегда
+  возвращает True (баг) — infinite loop.
+- **Recommended fix:**
+  1. Storage для migration flag — в `entry.data`, не `entry.options`
+     (`async_update_options` не срабатывает на data). Альтернатива:
+     переписать migration через `async_migrate_entry` (поднять `version` до 4).
+  2. После migration не дёргать `async_reload` явно — повторный setup
+     произойдёт автоматически из cycle update_listener; убрать
+     `migration_changed` из условия reload в setup_entry.
+  3. `_sync_visibility` должен возвращать `False` если `hid == 0 and shown == 0`
+     (no-op pass). Сейчас он уже так делает — но логика changed-флага
+     обновляется per-entity (`changed = True` на каждом матче), даже если
+     результат идентичен текущему state. Сделать строже: changed только
+     при фактической смене registry value.
+- **Test plan:**
+  - unit-тест: setup → второй setup (без изменений API) не триггерит reload.
+  - unit-тест: `_sync_visibility` на стабильном state возвращает False.
+  - integration-тест (real-style mock): cold setup → 1 reload (если migration_changed),
+    дальше — стабильно (0 reload).
+
+### A-65. Log noise от временно broken cameras
+
+- **Severity:** P3 (observability).
+- **Area:** Quality / UX.
+- **Evidence:** в логе 10 одинаковых WARNING за полчаса от ОДНОЙ временно
+  сломанной hardware-камеры:
+  ```
+  WARNING ... Camera <addr> (5593590): empty source stream url
+  ```
+  Источник — [`camera.py:279`](../../custom_components/elektronny_gorod/camera.py#L279):
+  `LOGGER.warning("Camera %s (%s): empty source stream url", ...)`. Логика
+  WARNING сама по себе корректна — API вернуло `null` source. Но логирование
+  каждого вызова даёт noise (особенно с frigate/webrtc preview, которые
+  тычут stream_source каждые N секунд).
+- **NOTE:** это **не** «у домофонных камер нет live stream» (был ошибочный
+  тейк в А-64 предыдущей итерации, удалён) — это конкретная hardware-камера
+  временно не работает. Когда её починят, stream вернётся.
+- **Impact:** перегрузка лога, юзеру тяжело отличить «временный fail» от
+  «постоянной проблемы». Может маскировать другие, более важные WARNING.
+- **Recommended fix:** «track consecutive failures per camera_id»:
+  - in-memory dict `{camera_id: consecutive_fail_count}` (на уровне coordinator или camera-class).
+  - 1й fail в серии → WARNING (как сейчас).
+  - 2й+ fail подряд → DEBUG (тихо).
+  - Reset counter на первый успешный stream URL.
+  - При reset из >0 → INFO «Camera N recovered after K failures» (опц.).
+- **Test plan:**
+  - unit-тест: 1й fail → WARNING, 2-10й → DEBUG.
+  - unit-тест: после success counter сбрасывается, следующий fail → снова WARNING.
+  - unit-тест: counters per camera_id независимы.
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
@@ -532,6 +636,7 @@ Quality gates:
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
+| A-63, A-64, A-65 (production-log findings, 3 отдельных PR) | Итерация 3 (Silver — runtime polish из реальных логов) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
