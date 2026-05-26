@@ -527,26 +527,37 @@ Quality gates:
 
 ### A-63. HA prefetches `stream_source()` для hidden cameras
 
-- **Severity:** P2 (perf — лишние HTTP, +UX noise).
-- **Area:** HA-compat / Performance.
-- **Evidence:** в логе зафиксированы повторяющиеся `Fetching camera <id> stream URL`
-  для camera_id с `hidden=True` (например `Camera init id=5593586 ... hidden=True`,
-  затем `Fetching camera 5593586 stream URL`). Hidden cameras всё равно
-  зарегистрированы как entities (`hidden_by=INTEGRATION` — state machine
-  работает), и HA core/integrations (frigate, webrtc preview, advanced lovelace)
-  могут вызывать `stream_source()` для всех зарегистрированных camera entities.
-- **Impact:** лишний HTTP-запрос (`/api/.../intercoms/{id}` или public-camera
-  endpoint) на каждую hidden camera. На квартире с 15 hidden public cams —
-  это +15 HTTP per stream-trigger event. Под нагрузкой frigate/webrtc/...
-  даёт ощутимый рост трафика без полезного результата.
-- **Recommended fix:** в [`camera.py:stream_source`](../../custom_components/elektronny_gorod/camera.py#L275)
-  ранний return `None` если `self.registry_entry.hidden_by is not None` (или
-  если `coordinator_camera_info["hidden"] is True`). Hidden камера не должна
-  fetch live stream — у юзера её даже нет в UI. Аналогично для
-  `async_camera_image` (snapshot prefetch).
-- **Test plan:** unit-тест — `stream_source()` возвращает None если entity
-  hidden, и не дёргает `coordinator.get_camera_stream`. Mock coordinator
-  call_count == 0 для hidden.
+- **Status:** ✅ **RESOLVED** в branch `fix/a63-skip-hidden-stream-source` (PR TBD).
+  Helper `camera.py:_is_hidden` проверяет `registry_entry.hidden_by is not None`
+  (любой reason — INTEGRATION/USER/DEVICE). `stream_source()` и
+  `async_camera_image()` возвращают `None` БЕЗ обращения к
+  `coordinator.get_camera_stream` / `get_camera_snapshot`.
+
+  **Логика:** hidden_by = entity не показывается в UI юзеру = HTTP/stream
+  бесполезен. Чтобы включить обратно — toggle «Показывать на панели» в
+  entity-edit page (HA устанавливает `hidden_by=None`).
+
+  **Дизайн-эволюция fix (через 3 итерации фидбэка)**:
+  1. **v1**: skip любой `hidden_by != None`. Юзер обнаружил: «нашёл скрытую
+     камеру в Settings → Entities, ожидаю видео — а нет».
+  2. **v2 (narrow)**: skip только `INTEGRATION + API hidden`. USER-hidden
+     stream работает. Юзер обнаружил: «выключил Показывать на панели,
+     stream всё равно тянется — почему?»
+  3. **v3 (final)**: skip любой `hidden_by != None`. Юзер может через
+     toggle «Показывать на панели» (`hidden_by=None`) включить видео.
+
+  5 unit-тестов (`tests/test_camera_hidden_skip.py`):
+  visible / INTEGRATION-hidden / snapshot variant / USER-hidden /
+  user-override show. См. CHANGELOG.
+- **Original Severity:** P2 (perf — лишние HTTP, +UX noise).
+- **Original Evidence:** в production-логе 2026-05-26 повторяющиеся
+  `Fetching camera <id> stream URL` для camera_id с `hidden=True`. На
+  квартире с 15 hidden public cams — +15 HTTP per stream-trigger event
+  от frigate/webrtc preview.
+- **Known follow-up:** наш `_sync_visibility` сейчас **overrides** user
+  «Показать» на следующем 5-минутном refresh (ставит INTEGRATION обратно).
+  Это отдельная UX-проблема — track как отдельный finding или включить в
+  A-64 scope (sync_visibility semantics rewrite).
 
 ### A-64. `_sync_visibility` / migration → reload cascade
 
