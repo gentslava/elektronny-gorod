@@ -95,6 +95,14 @@
     "sensor": {
       "balance": {
         "name": "Баланс аккаунта"
+      },
+      "days_to_block": {
+        "name": "Дней до блокировки"
+      }
+    },
+    "binary_sensor": {
+      "blocked": {
+        "name": "Аккаунт заблокирован"
       }
     },
     "lock": {

@@ -18,6 +18,7 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -32,14 +33,16 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up Elektronny Gorod Balance Sensor based on a config entry."""
+    """Set up Elektronny Gorod Sensors (balance + days_to_block per place)."""
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     balances = (coordinator.data or {}).get("balances") or []
-    async_add_entities(
-        ElektronnyGorodBalanceSensor(coordinator, balance_info["place_id"])
-        for balance_info in balances
-    )
+    entities: list[SensorEntity] = []
+    for balance_info in balances:
+        place_id = balance_info["place_id"]
+        entities.append(ElektronnyGorodBalanceSensor(coordinator, place_id))
+        entities.append(ElektronnyGorodDaysToBlockSensor(coordinator, place_id))
+    async_add_entities(entities)
 
 
 class ElektronnyGorodBalanceSensor(
@@ -159,4 +162,63 @@ class ElektronnyGorodBalanceSensor(
     @callback
     def _handle_coordinator_update(self) -> None:
         """Coordinator обновился — нашу state читаем из coordinator.data в propertах."""
+        self.async_write_ha_state()
+
+
+class ElektronnyGorodDaysToBlockSensor(
+    CoordinatorEntity[ElektronnyGorodUpdateCoordinator], SensorEntity
+):
+    """Days-to-block из /finance response (A-57).
+
+    Backend возвращает `daysToBlock` int — дней до автоматической блокировки
+    аккаунта оператором при отсутствии оплаты. Полезно для automation:
+    «if days_to_block <= 3 → уведомить + (опц.) кликнуть button.pay».
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "days_to_block"
+    _attr_icon = "mdi:calendar-clock"
+    _attr_device_class = SensorDeviceClass.DURATION
+    _attr_native_unit_of_measurement = UnitOfTime.DAYS
+    _attr_state_class = SensorStateClass.MEASUREMENT
+
+    def __init__(
+        self,
+        coordinator: ElektronnyGorodUpdateCoordinator,
+        place_id: str,
+    ) -> None:
+        super().__init__(coordinator)
+        LOGGER.debug("DaysToBlockSensor init for place_id=%s", place_id)
+        self._place_id = place_id
+        self._attr_unique_id = f"{DOMAIN}_{place_id}_days_to_block"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"place_{place_id}")},
+        )
+
+    @property
+    def _balance_info(self) -> dict[str, Any] | None:
+        balances = (self.coordinator.data or {}).get("balances") or []
+        for entry in balances:
+            if entry.get("place_id") == self._place_id:
+                return entry
+        return None
+
+    @property
+    def available(self) -> bool:
+        info = self._balance_info
+        return (
+            super().available
+            and info is not None
+            and info.get("days_to_block") is not None
+        )
+
+    @property
+    def native_value(self) -> int | None:
+        info = self._balance_info
+        if info is None:
+            return None
+        return info.get("days_to_block")
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
         self.async_write_ha_state()

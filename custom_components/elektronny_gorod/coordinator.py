@@ -229,6 +229,9 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "payment_date": finance.get("targetDate"),
             "payment_sum": finance.get("amountSum"),
             "payment_link": finance.get("paymentLink"),
+            "days_to_block": finance.get("daysToBlock"),
+            "days_to_warning": finance.get("daysToWarning"),
+            "company": finance.get("company"),
         }
 
     async def _collect_cameras_for_place(self, place_id: str) -> list[dict[str, Any]]:

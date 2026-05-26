@@ -27,6 +27,7 @@ from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .user_agent import UserAgent
 
 PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
     Platform.CAMERA,
     Platform.LOCK,
     Platform.SENSOR,
