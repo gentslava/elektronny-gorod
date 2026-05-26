@@ -63,12 +63,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # `hidden_by` (НЕ disabled_by) — state machine продолжает работать
     # (automations доступны), entity не показывается в default UI views.
     # Пользователь может easily Show через Settings → Entities → filter Hidden.
-    sync_changed = _sync_visibility(hass, entry, coordinator.data or {})
+    # Sync не требует reload — registry update подхватывается HA core напрямую.
+    _sync_visibility(hass, entry, coordinator.data or {})
 
-    if migration_changed or sync_changed:
+    # Reload только если migration реально сбросила disabled_by markers — entity
+    # требуют re-init платформ для применения. Sync visibility update в registry
+    # — это live operation, не нужен reload (см. A-64).
+    if migration_changed:
         hass.async_create_task(
             hass.config_entries.async_reload(entry.entry_id),
-            name=f"{DOMAIN}_visibility_reload",
+            name=f"{DOMAIN}_migration_reload",
         )
 
     return True
@@ -83,7 +87,10 @@ def _migrate_legacy_disabled_state(
 ) -> bool:
     """One-time cleanup legacy disabled_by markers (entity + device).
 
-    Применяется один раз per entry, флаг в entry.options.
+    Применяется один раз per entry, флаг в `entry.data` (НЕ options) — чтобы
+    запись flag-а не триггерила `async_update_options` listener → reload cascade
+    (см. A-64). Backward-compat: если flag уже в options от старой версии,
+    считаем migration выполненной и переносим в data.
 
     Background: до перехода на hidden_by-based visibility sync интеграция
     использовала disabled_by:
@@ -94,9 +101,19 @@ def _migrate_legacy_disabled_state(
     Все эти markers надо сбросить — новая модель использует только hidden_by,
     который потом устанавливается _sync_visibility согласно current API state.
 
-    Returns True если что-то изменилось.
+    Returns True если что-то реально изменилось в registry (caller schedule
+    reload — entity нужны re-init платформ для применения disabled_by сброса).
     """
-    if entry.options.get(_MIGRATION_FLAG_KEY):
+    if entry.data.get(_MIGRATION_FLAG_KEY) or entry.options.get(_MIGRATION_FLAG_KEY):
+        # Backward-compat: если flag в options от прошлой версии, перенесём в data
+        # без re-running миграции (registry уже cleaned).
+        if entry.options.get(_MIGRATION_FLAG_KEY) and not entry.data.get(_MIGRATION_FLAG_KEY):
+            new_options = {k: v for k, v in entry.options.items() if k != _MIGRATION_FLAG_KEY}
+            hass.config_entries.async_update_entry(
+                entry,
+                data={**entry.data, _MIGRATION_FLAG_KEY: True},
+                options=new_options,
+            )
         return False
 
     ent_reg = er.async_get(hass)
@@ -127,7 +144,7 @@ def _migrate_legacy_disabled_state(
 
     hass.config_entries.async_update_entry(
         entry,
-        options={**entry.options, _MIGRATION_FLAG_KEY: True},
+        data={**entry.data, _MIGRATION_FLAG_KEY: True},
     )
 
     if reset_count:
@@ -145,21 +162,35 @@ def _sync_visibility(
     entry: ConfigEntry,
     data: dict[str, Any],
 ) -> bool:
-    """Two-way visibility sync через `hidden_by` ↔ /settings/screens из приложения.
+    """Two-way visibility sync `hidden_by` ↔ /settings/screens с user-override tracking.
 
-    Логика (entity-level, без device manipulation):
-    - hidden в API + entity.hidden_by=None → set hidden_by=INTEGRATION.
-    - visible в API + entity.hidden_by=INTEGRATION → set hidden_by=None.
-    - entity.hidden_by=USER → НЕ trogaem (явный user choice через HA UI).
+    Базовая логика:
+    - hidden в API + hidden_by=None + НЕТ user override → set INTEGRATION.
+    - visible в API + hidden_by=INTEGRATION → set None.
+    - hidden_by=USER → НЕ trogaem (явный user Hide через HA UI).
+
+    User-override tracking (A-64): хранится в `entity.options[DOMAIN]`
+    (entity_registry, persistent, НЕ триггерит config_entry listener):
+    - `we_set_integration: True` — мы пометили эту entity hidden_by=INTEGRATION.
+      Сбрасывается когда API возвращает visible.
+    - `user_shown: True` — юзер включил «Показывать на панели» (мы видим
+      `we_set_integration=True` но `hidden_by=None`). С этого момента не
+      восстанавливаем INTEGRATION даже если API hidden. Сбрасывается когда
+      приложение тоже разрешит показ.
+
+    Когда вызывается: только в `async_setup_entry` (cold start, reload,
+    reauth, любой options change). НЕ на каждом coordinator-tick — это
+    осознанно, чтобы избежать постоянного registry write activity. Изменения
+    `/settings/screens` в приложении подхватятся при следующем reload entry
+    или рестарте HA.
 
     Почему `hidden_by`, а не `disabled_by`:
-    - disabled_by INTEGRATION блокирует UI override («устройство деактивировано
-      интеграцией»). Пользователь не может easily enable.
-    - hidden_by INTEGRATION просто скрывает из default UI views. State machine
-      работает (automations доступны). Пользователь может easily Show через
-      Settings → Entities → filter Hidden.
+    - disabled_by INTEGRATION блокирует UI override («устройство деактивировано»).
+    - hidden_by — entity скрыта из default UI views, state machine работает,
+      юзер easily Show через toggle «Показывать на панели».
 
-    Returns True если что-то изменилось (caller schedule reload).
+    Returns True если что-то реально изменилось в hidden_by. Caller использует
+    для logging — reload НЕ требуется (registry update live).
     """
     hidden_uids: set[str] = set()
 
@@ -178,7 +209,7 @@ def _sync_visibility(
             )
 
     ent_reg = er.async_get(hass)
-    changed = False
+    registry_changed = False
     hid = 0
     shown = 0
 
@@ -186,36 +217,70 @@ def _sync_visibility(
         if entity.domain not in ("camera", "lock"):
             continue
 
-        api_hidden = entity.unique_id in hidden_uids
+        uid = entity.unique_id
+        api_hidden = uid in hidden_uids
+        current = entity.hidden_by
+        opts = dict(entity.options.get(DOMAIN) or {})
+        we_set_integration = bool(opts.get("we_set_integration"))
+        user_shown = bool(opts.get("user_shown"))
+        new_opts = dict(opts)
 
-        if api_hidden and entity.hidden_by is None:
-            LOGGER.debug(
-                "Hiding entity %s (unique_id=%s) — hidden in user app",
-                entity.entity_id, entity.unique_id,
+        # Detect user-shown override: мы ранее set INTEGRATION, но registry уже None.
+        # Юзер кликнул «Показывать на панели» — сохраняем флаг.
+        if we_set_integration and current is None and not user_shown:
+            new_opts["user_shown"] = True
+            user_shown = True
+            LOGGER.info(
+                "User override saved: %s (unique_id=%s) — пользователь включил "
+                "«Показывать на панели», не восстанавливаем INTEGRATION",
+                entity.entity_id, uid,
             )
-            ent_reg.async_update_entity(
-                entity.entity_id, hidden_by=er.RegistryEntryHider.INTEGRATION
-            )
-            hid += 1
-            changed = True
-        elif (
-            not api_hidden
-            and entity.hidden_by == er.RegistryEntryHider.INTEGRATION
-        ):
+
+        # Auto-clear user override если приложение тоже разрешило показ.
+        if not api_hidden and user_shown:
+            new_opts.pop("user_shown", None)
+            user_shown = False
+
+        if api_hidden and not user_shown:
+            # Должна быть скрыта по API и юзер не override.
+            if current is None:
+                LOGGER.debug(
+                    "Hiding entity %s (unique_id=%s) — hidden in user app",
+                    entity.entity_id, uid,
+                )
+                ent_reg.async_update_entity(
+                    entity.entity_id, hidden_by=er.RegistryEntryHider.INTEGRATION
+                )
+                hid += 1
+                registry_changed = True
+                new_opts["we_set_integration"] = True
+            elif current == er.RegistryEntryHider.INTEGRATION:
+                # Уже скрыто нами — поддерживаем флаг (важно для restart).
+                new_opts["we_set_integration"] = True
+        elif not api_hidden and current == er.RegistryEntryHider.INTEGRATION:
+            # API разрешил показ — снимаем INTEGRATION.
             LOGGER.debug(
                 "Showing entity %s (unique_id=%s) — visible in user app",
-                entity.entity_id, entity.unique_id,
+                entity.entity_id, uid,
             )
             ent_reg.async_update_entity(entity.entity_id, hidden_by=None)
             shown += 1
-            changed = True
+            registry_changed = True
+            new_opts.pop("we_set_integration", None)
+        elif not api_hidden:
+            # API visible и hidden_by не INTEGRATION — наш marker неактуален.
+            new_opts.pop("we_set_integration", None)
+
+        # Persist options только если изменились (не триггерит config_entry listener).
+        if new_opts != opts:
+            ent_reg.async_update_entity_options(entity.entity_id, DOMAIN, new_opts)
 
     if hid or shown:
         LOGGER.info(
             "Visibility sync: hidden_uids=%d, hid=%d, shown=%d (entry %s)",
             len(hidden_uids), hid, shown, entry.entry_id,
         )
-    return changed
+    return registry_changed
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

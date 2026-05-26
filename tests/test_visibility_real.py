@@ -177,8 +177,10 @@ async def test_migration_resets_legacy_disabled_by_markers(
             )
 
     # Удаляем migration flag — эмулируем что entry — pre-migration.
+    # После A-64 fix flag в entry.data, не options (backward-compat читает оба).
     hass.config_entries.async_update_entry(
         entry,
+        data={k: v for k, v in entry.data.items() if k != "visibility_migration_v2"},
         options={k: v for k, v in entry.options.items() if k != "visibility_migration_v2"},
     )
 
@@ -209,8 +211,8 @@ async def test_migration_resets_legacy_disabled_by_markers(
             f"Sync после migration не set hidden_by для {cam_id}: {e.hidden_by!r}"
         )
 
-    # Flag установлен — на следующем reload migration не повторится.
-    assert entry.options.get("visibility_migration_v2") is True
+    # Flag установлен в entry.data (A-64: убран из options чтобы не триггерить listener).
+    assert entry.data.get("visibility_migration_v2") is True
 
 
 async def test_user_hidden_via_ha_ui_is_preserved(

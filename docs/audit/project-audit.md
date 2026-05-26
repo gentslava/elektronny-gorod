@@ -554,54 +554,41 @@ Quality gates:
   `Fetching camera <id> stream URL` для camera_id с `hidden=True`. На
   квартире с 15 hidden public cams — +15 HTTP per stream-trigger event
   от frigate/webrtc preview.
-- **Known follow-up:** наш `_sync_visibility` сейчас **overrides** user
-  «Показать» на следующем 5-минутном refresh (ставит INTEGRATION обратно).
-  Это отдельная UX-проблема — track как отдельный finding или включить в
-  A-64 scope (sync_visibility semantics rewrite).
+- **Follow-up closed:** наш `_sync_visibility` ранее overrides user «Показать»
+  каждые 5 мин — закрыто в A-64 (user_shown override через
+  `entity.options[DOMAIN]`).
 
-### A-64. `_sync_visibility` / migration → reload cascade
+### A-64. `_sync_visibility` / migration → reload cascade + user override
 
-- **Severity:** P2 (UX — лишние reload на старте, потенциальный infinite loop).
-- **Area:** HA-compat / Architecture.
-- **Evidence:** в логе зафиксировано **4 `Integration loading entry`** в
-  течение 34 секунд после cold start:
-  - `10:07:06.579` — cold start
-  - `10:07:10.114` — `One-time visibility migration: reset 22 disabled_by markers`
-  - `10:07:10.117` — reload (через 3 мс после migration)
-  - `10:07:18.017` — reload (через 8 сек)
-  - `10:07:40.117` — reload (через 22 сек)
-- **Root cause:** два независимых триггера каскадно перезапускают setup:
-  1. [`__init__.py:_migrate_legacy_disabled_state`](../../custom_components/elektronny_gorod/__init__.py#L128)
-     пишет flag в `entry.options` → `async_update_options` listener
-     (зарегистрирован через `entry.add_update_listener` на строке 54) →
-     `hass.config_entries.async_reload`.
-  2. [`__init__.py:async_setup_entry`](../../custom_components/elektronny_gorod/__init__.py#L68)
-     также триггерит `async_reload` через `if migration_changed or sync_changed`.
-  3. Дополнительно `_sync_visibility` может возвращать `True` даже при
-     стабильном state, если entity_registry в моменте не отражает уже
-     применённые `hidden_by` значения (race с регистрацией entity по platforms).
-- **Impact:** 4× cold-start cost: 4× первичный refresh coordinator, 4× init
-  всех entities, 4× setup_platforms. По логу — задержка `setup → ready` в
-  ~34 секунды вместо ~1-2 сек. На больших аккаунтах (много мест) —
-  пропорционально хуже. Опасный режим: если `_sync_visibility` всегда
-  возвращает True (баг) — infinite loop.
-- **Recommended fix:**
-  1. Storage для migration flag — в `entry.data`, не `entry.options`
-     (`async_update_options` не срабатывает на data). Альтернатива:
-     переписать migration через `async_migrate_entry` (поднять `version` до 4).
-  2. После migration не дёргать `async_reload` явно — повторный setup
-     произойдёт автоматически из cycle update_listener; убрать
-     `migration_changed` из условия reload в setup_entry.
-  3. `_sync_visibility` должен возвращать `False` если `hid == 0 and shown == 0`
-     (no-op pass). Сейчас он уже так делает — но логика changed-флага
-     обновляется per-entity (`changed = True` на каждом матче), даже если
-     результат идентичен текущему state. Сделать строже: changed только
-     при фактической смене registry value.
-- **Test plan:**
-  - unit-тест: setup → второй setup (без изменений API) не триггерит reload.
-  - unit-тест: `_sync_visibility` на стабильном state возвращает False.
-  - integration-тест (real-style mock): cold setup → 1 reload (если migration_changed),
-    дальше — стабильно (0 reload).
+- **Status:** ✅ **RESOLVED** в branch `fix/a64-reload-cascade-and-user-override` (PR TBD).
+  Три изменения в `__init__.py`:
+  1. **Migration flag в `entry.data`** (НЕ `entry.options`) — listener
+     `async_update_options` не срабатывает. Backward-compat: читает оба
+     места, переносит из options в data при первом setup после обновления.
+  2. **Reload только при `migration_changed`** — sync visibility теперь это
+     live registry update (HA core подхватывает изменения `hidden_by` без
+     reload entry). `sync_changed` больше не trigger reload.
+  3. **`_sync_visibility` track user override** через
+     `entity.options[DOMAIN]` (persistent в core.entity_registry, НЕ триггерит
+     entry update listener):
+     - `we_set_integration: True` — наша отметка после set INTEGRATION;
+     - `user_shown: True` — детектится когда `we_set_integration=True`,
+       а registry уже `hidden_by=None` (юзер кликнул «Показывать на панели»).
+       С этого момента не восстанавливаем INTEGRATION даже если API hidden.
+     - Auto-clear `user_shown` когда приложение тоже разрешит показ —
+       цикл закрывается, следующий «Скрыть в приложении» снова даст INTEGRATION.
+
+  5 новых тестов (`tests/test_visibility_user_override.py`): migration storage
+  + backward-compat + user override persist across reload + auto-clear после
+  un-hide в приложении + USER hidden_by regression-guard. 89 tests pass
+  (84 → +5). См. CHANGELOG.
+- **Original Severity:** P2 (UX — лишние reload на старте + перезапись user
+  выбора каждые 5 минут).
+- **Original Evidence:** production-лог 2026-05-26: 4× `Integration loading
+  entry` за 34 сек после cold start (`10:07:06.579 → 10.114 migration → 10.117
+  reload → 18.017 reload → 40.117 reload`).
+- **Связано:** этот fix закрывает known follow-up из A-63
+  (наш sync перезаписывал user «Показывать на панели» каждые 5 мин).
 
 ### A-65. Log noise от временно broken cameras
 
