@@ -261,11 +261,30 @@ class ElektronnyGorodCamera(
     # On-demand actions                                                  #
     # ------------------------------------------------------------------ #
 
+    def _is_hidden(self) -> bool:
+        """A-63: skip stream/snapshot fetch если entity не показывается в UI.
+
+        Skip когда `registry_entry.hidden_by is not None` — любой reason:
+        - INTEGRATION: наш `_sync_visibility` пометил на основе API hidden=True;
+        - USER: юзер выключил «Показывать на панели» через HA UI;
+        - DEVICE: каскад от device-level (не используем сейчас).
+
+        Любой hidden = юзер не видит camera card в UI = HTTP/stream бесполезен.
+        Чтобы включить обратно — toggle «Показывать на панели» в entity-edit
+        page (HA устанавливает `hidden_by=None`).
+
+        `registry_entry` is None в окне между `__init__` и `async_added_to_hass` —
+        safe default «не скрыто» (этот код всё равно вызывается уже после
+        async_added_to_hass, но guard на всякий случай).
+        """
+        reg = self.registry_entry
+        return reg is not None and reg.hidden_by is not None
+
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
-        if not self.available:
+        if self._is_hidden() or not self.available:
             return None
         image = await self.coordinator.get_camera_snapshot(self._id, width, height)
         if image:
@@ -274,6 +293,8 @@ class ElektronnyGorodCamera(
 
     async def stream_source(self) -> str | None:
         """Return the source of the stream."""
+        if self._is_hidden():
+            return None
         stream_url = await self.coordinator.get_camera_stream(self._id)
         if not stream_url:
             LOGGER.warning("Camera %s (%s): empty source stream url", self._name, self._id)

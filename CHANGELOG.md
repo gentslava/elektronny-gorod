@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Camera: skip stream/snapshot fetch для hidden cameras** ([A-63](docs/audit/project-audit.md)). HA core и downstream-интеграции (frigate, webrtc preview, advanced lovelace) могут вызывать `stream_source()` и `async_camera_image()` для всех зарегистрированных camera entities — включая скрытые в HA UI (`hidden_by` любого reason: `INTEGRATION` от visibility sync на основе `/settings/screens`, `USER` если юзер выключил «Показывать на панели»). Раньше это приводило к лишним HTTP-запросам к operator API для камер, которых юзер не видит (production-лог 2026-05-26: `Camera init id=... hidden=True` → `Fetching camera ... stream URL`). Теперь helper `_is_hidden()` skip-нет вызов БЕЗ обращения к coordinator если `registry_entry.hidden_by is not None`. Чтобы вернуть видео — toggle «Показывать на панели» в entity-edit page (HA устанавливает `hidden_by=None`). 5 regression-тестов (`tests/test_camera_hidden_skip.py`). Visible cameras работают без изменений. **NOTE**: наш sync пока overrides user «Показать» на следующем 5-min refresh — отдельный follow-up.
+
 ### Changed
 
 - **Coordinator: убран двойной HTTP в per-place collectors** ([A-61](docs/audit/project-audit.md)). `_collect_locks_for_place` ранее дублировал `query_screens_settings` + `query_access_controls`, уже вызванные `_collect_cameras_for_place`. Теперь pre-fetch в `_async_update_data` (один раз per place), передача в оба collectors как параметры. **Экономия: -2 HTTP per place per 5min refresh** (-576 calls/day для 1 place). Поведение неизменно — 74 tests pass (+3 new regression-guard). NOTE: при ошибке `query_access_controls` теперь и cameras, и locks для того места пусты (раньше locks могли survive независимо — теперь это атомарная per-place операция).
