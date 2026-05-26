@@ -620,7 +620,44 @@ Quality gates:
   - unit-тест: после success counter сбрасывается, следующий fail → снова WARNING.
   - unit-тест: counters per camera_id независимы.
 
-## Maintenance rules (повтор)
+### A-66. go2rtc stale producer URL после hidden→visible transition
+
+- **Status:** ✅ **RESOLVED** в branch `fix/a66-go2rtc-invalidate-on-unhide` (PR TBD).
+  Tracking `_was_hidden` флага в `camera.py`: при skip stream_source/snapshot
+  из-за `_is_hidden()=True` помечаем флаг; на следующем visible вызове
+  `stream_source()` сбрасываем `self._last_src = None` → forces fresh PUT
+  в go2rtc даже если operator API вернёт тот же URL. Regression-guard
+  сохраняет оптимизацию для visible→visible серии вызовов. 4 unit-теста
+  (`tests/test_camera_go2rtc_invalidate.py`). См. CHANGELOG.
+- **Severity:** P2 (UX — лаг 10-30 сек при включении видимости с go2rtc).
+- **Area:** go2rtc lifecycle / UX.
+- **Evidence (production-лог + live диагностика 2026-05-26 на
+  `camera.perekrestok_ul_gogolia_krasnyi_pr_kt` id=5593587):**
+  - Camera была hidden_by=INTEGRATION (A-63 skip).
+  - В go2rtc оставался stream config со stale producer URL
+    `https://forpost-02.../a833471/dZ9lxcy0GDRaZjdxWP2k/d=1` — `curl`
+    подтвердил `connection reset` (session token мёртв).
+  - Юзер toggle «Показывать на панели» → `hidden_by=None`.
+  - HA Stream worker (висевший с прошлой попытки) подключился к
+    `rtsp://127.0.0.1:8554/eg_5593587` → `Invalid data found when processing
+    input` (`stream_worker` ERROR).
+  - 13 сек spустя retry → новый PUT в go2rtc → producer обновился с fresh URL
+    (`a834157/L8kd8hAfJV3cOsyIMpAk`) → видео заработало.
+- **Root cause:** оптимизация `_last_src == src` в
+  [`camera.py:_ensure_go2rtc_stream`](../../custom_components/elektronny_gorod/camera.py)
+  skip-нет PUT если operator вернёт тот же URL. Без сигнала «прошёл hidden
+  период» мы не знаем что в go2rtc producer токен уже мёртв.
+- **Impact:** UX «не грузится после toggle». Юзер ждёт 10-30 сек (HA Stream
+  worker backoff), может закрыть карточку раньше и не дождаться.
+- **Связано с A-63:** наш skip stream_source для hidden cameras прекращает
+  периодический PUT, который раньше скрывал эту проблему (постоянный refresh
+  в go2rtc держал producer alive). После A-63 fix проблема стала видимой.
+- **Known limitation:** `_was_hidden` это per-instance in-memory flag. При
+  HA restart сбрасывается на False. Если go2rtc deployed как separate
+  service и **переживает** HA restart с stale producer, то после restart
+  HA `_was_hidden=False` → no auto-invalidate. Mitigation: HA Stream retry
+  при first failure всё равно вызывает stream_source ещё раз, и operator
+  обычно возвращает свежий URL → PUT обновится. Риск считаем малым.
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
 
@@ -635,6 +672,7 @@ Quality gates:
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
 | A-63, A-64, A-65 (production-log findings, 3 отдельных PR) | Итерация 3 (Silver — runtime polish из реальных логов) |
+| A-66 (go2rtc lifecycle, диагностика 2026-05-26) | Итерация 3 (отдельный PR после A-63) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |

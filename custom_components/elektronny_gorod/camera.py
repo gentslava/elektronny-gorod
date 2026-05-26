@@ -158,6 +158,12 @@ class ElektronnyGorodCamera(
                      self._id, source, camera_info.get("hidden"))
 
         self._last_src: str | None = None
+        # A-66: tracking hidden→visible transition. Если предыдущий вызов
+        # stream_source/async_camera_image был skipped (camera hidden),
+        # следующий visible вызов forcefully invalidate `_last_src`. Это
+        # нужно потому что operator FLV URL содержит short-TTL session token
+        # — за время hidden token expired в go2rtc producer, и нужен fresh PUT.
+        self._was_hidden: bool = False
         self._image: bytes | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
@@ -280,11 +286,32 @@ class ElektronnyGorodCamera(
         reg = self.registry_entry
         return reg is not None and reg.hidden_by is not None
 
+    def _consume_hidden_transition(self) -> bool:
+        """A-66: detect hidden→visible transition.
+
+        Возвращает True если предыдущий вызов был skipped из-за hidden, а
+        сейчас camera visible. Caller invalidate-нет кеш (e.g. `_last_src`).
+        Также используется symmetric для snapshot path. Hidden marker
+        обновляется через установку `self._was_hidden=True` в каждом
+        `_is_hidden()`-skip-нутом вызове stream_source/async_camera_image.
+
+        Thread-safety: `_was_hidden` это shared между stream_source и
+        async_camera_image, но safe без lock — HA event loop single-threaded,
+        и между чтением+записью нет await. Read+reset атомарны.
+        """
+        transition = self._was_hidden
+        self._was_hidden = False
+        return transition
+
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
         """Return bytes of camera image."""
-        if self._is_hidden() or not self.available:
+        if self._is_hidden():
+            self._was_hidden = True
+            return None
+        self._consume_hidden_transition()  # snapshot не использует _last_src — просто reset flag
+        if not self.available:
             return None
         image = await self.coordinator.get_camera_snapshot(self._id, width, height)
         if image:
@@ -294,7 +321,16 @@ class ElektronnyGorodCamera(
     async def stream_source(self) -> str | None:
         """Return the source of the stream."""
         if self._is_hidden():
+            self._was_hidden = True
             return None
+        # A-66: hidden→visible — operator session token в кешированном
+        # `_last_src` мог expired, force fresh PUT в go2rtc.
+        if self._consume_hidden_transition() and self._use_go2rtc and self._last_src is not None:
+            LOGGER.debug(
+                "Camera %s (%s): hidden→visible, invalidate go2rtc cache",
+                self._name, self._id,
+            )
+            self._last_src = None
         stream_url = await self.coordinator.get_camera_stream(self._id)
         if not stream_url:
             LOGGER.warning("Camera %s (%s): empty source stream url", self._name, self._id)
