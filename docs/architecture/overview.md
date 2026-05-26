@@ -343,9 +343,7 @@ const + go2rtc ← config_flow, camera
 3. **Сильная связанность `coordinator` ↔ `api` ↔ `http`** — coordinator unit-тестируется только с mock `aioresponses` (см. `tests/`); inject-абстракции пока нет.
 4. **UA shared state в `user_agent.place_id`** — кросс-слойная связанность через `self._api.http.user_agent.place_id = place_id`. Из-за этого refresh идёт сериально по places (см. async-паттерны). Лучше прокидывать `place_id` через параметры HTTP-вызовов; рефакторинг open.
 5. **Нет `ClientTimeout`** (A-21) — медленный backend может заморозить refresh-тик.
-6. **Hidden camera entities всё равно отвечают на `stream_source()`** (A-63) — `hidden_by=INTEGRATION` скрывает entity в UI, но HA core / downstream-интеграции (frigate, webrtc preview) могут запросить stream/snapshot для всех зарегистрированных camera entities. Сейчас `camera.py:stream_source` не проверяет `registry_entry.hidden_by` → лишний HTTP-fetch на hidden cams. Кандидат на ранний `return None` для hidden.
-7. **Reload-каскад при cold start** (A-64) — `_migrate_legacy_disabled_state` пишет flag в `entry.options` → `async_update_options` listener триггерит `async_reload`; параллельно сам `async_setup_entry` дёргает `async_reload` через `migration_changed or sync_changed`. Наблюдалось до 4× reload в 34 сек. Лечится: storage migration-flag в `entry.data` (или через `async_migrate_entry`), а `_sync_visibility` должен возвращать `False` если registry value не изменился фактически.
-8. **Лог-spam от временно сломанных камер** (A-65) — `camera.py:stream_source` логирует `WARNING "empty source stream url"` на каждый вызов. Под нагрузкой frigate/webrtc preview одна broken камера даёт десятки одинаковых WARNING. Кандидат на per-camera consecutive-fail throttle (1й WARNING, 2й+ DEBUG, reset на success).
+6. **Лог-spam от временно сломанных камер** (A-65) — `camera.py:stream_source` логирует `WARNING "empty source stream url"` на каждый вызов. Под нагрузкой frigate/webrtc preview одна broken камера даёт десятки одинаковых WARNING. Кандидат на per-camera consecutive-fail throttle (1й WARNING, 2й+ DEBUG, reset на success).
 
 Решённые с момента предыдущего ревью архитектуры:
 - ✅ Coordinator имеет `update_interval` + dict-snapshot (A-08, slice 3a).
@@ -355,7 +353,10 @@ const + go2rtc ← config_flow, camera
 - ✅ Token-redaction ([ADR-0004](../decisions/0004-token-redaction.md), A-01..A-04).
 - ✅ Bearer не отправляется на `/auth/*` paths — reauth login flow проходит корректно.
 - ✅ Synthetic lock-cycle через `async_call_later` (А-15 частично; полный fix lock→button в [ADR-0005](../decisions/0005-lock-vs-button.md)).
-- 🟡 Тестируемость — частично (71 тестов на config_flow / coordinator / api / migrations); coverage growing.
+- 🟡 Тестируемость — частично (90+ тестов на config_flow / coordinator / api / migrations / visibility); coverage growing.
+- ✅ **Reload-каскад при cold start** (A-64, PR #43) — migration flag перенесён в `entry.data` (не триггерит `async_update_options` listener), explicit reload только при `migration_changed`. `_sync_visibility` отслеживает user_shown override через `entity.options[DOMAIN]`.
+- 🟡 **A-63 — Won't fix** (PR #46 final). Skip `stream_source()` для hidden cameras несовместим с HA Stream lifecycle (worker pin-ится к URL, не пересоздаёт session). Лишние HTTP к operator для hidden cameras приняты как acceptable. Skip оставлен только в `async_camera_image` (snapshot on-demand).
+- ✅ **go2rtc producer auto-refresh** (A-66, PR #46) — `_ensure_go2rtc_stream` после каждого PUT вызывает `Stream.update_source(rtsp_url)` если HA Stream worker уже running → forces restart с обновлённым ffmpeg producer, избегает 10-30s retry-backoff при истечении operator session token.
 
 ## Архитектурные решения (ADR)
 

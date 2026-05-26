@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-05-26
+Last reviewed: 2026-05-27
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -527,36 +527,67 @@ Quality gates:
 
 ### A-63. HA prefetches `stream_source()` для hidden cameras
 
-- **Status:** ✅ **RESOLVED** в branch `fix/a63-skip-hidden-stream-source` (PR TBD).
-  Helper `camera.py:_is_hidden` проверяет `registry_entry.hidden_by is not None`
-  (любой reason — INTEGRATION/USER/DEVICE). `stream_source()` и
-  `async_camera_image()` возвращают `None` БЕЗ обращения к
-  `coordinator.get_camera_stream` / `get_camera_snapshot`.
-
-  **Логика:** hidden_by = entity не показывается в UI юзеру = HTTP/stream
-  бесполезен. Чтобы включить обратно — toggle «Показывать на панели» в
-  entity-edit page (HA устанавливает `hidden_by=None`).
-
-  **Дизайн-эволюция fix (через 3 итерации фидбэка)**:
-  1. **v1**: skip любой `hidden_by != None`. Юзер обнаружил: «нашёл скрытую
-     камеру в Settings → Entities, ожидаю видео — а нет».
-  2. **v2 (narrow)**: skip только `INTEGRATION + API hidden`. USER-hidden
-     stream работает. Юзер обнаружил: «выключил Показывать на панели,
-     stream всё равно тянется — почему?»
-  3. **v3 (final)**: skip любой `hidden_by != None`. Юзер может через
-     toggle «Показывать на панели» (`hidden_by=None`) включить видео.
-
-  5 unit-тестов (`tests/test_camera_hidden_skip.py`):
-  visible / INTEGRATION-hidden / snapshot variant / USER-hidden /
-  user-override show. См. CHANGELOG.
-- **Original Severity:** P2 (perf — лишние HTTP, +UX noise).
+- **Status:** 🟡 **WON'T FIX** (revert через PR #46 — A-66 final). `stream_source()`
+  оставлен **без** skip для hidden, всегда возвращает живой URL. Snapshot
+  (`async_camera_image`) skip-ает для hidden (lifecycle-safe, on-demand).
+- **Severity:** P2 (perf — был оригинальный finding) → **переоценён** как
+  acceptable overhead.
+- **Почему revert** — A-63 fix фундаментально несовместим с HA Stream lifecycle:
+  - HA Stream worker создаёт session при первом `stream_source()` и pin-ится
+    к возвращённому URL. Если возвращаем None, worker **никогда** не пере-
+    запрашивает stream_source автоматически.
+  - Cold start hidden → `self.stream` is None навсегда. Toggle ON не помогает.
+  - Эксперимент с 3 вариантами (PR #44 X / #45 Y / #46 Z) подтвердил:
+    - X (`_was_hidden` invalidate в stream_source) — не работает, source не дёргается
+    - Y (registry listener + `Stream.stop()`/`update_source()`) — частично, требует reload entity
+    - Z (revert skip + `Stream.update_source()` в `_ensure_go2rtc_stream`) — работает
+  - HA Stream не designed для «entity внезапно перестаёт отдавать stream».
 - **Original Evidence:** в production-логе 2026-05-26 повторяющиеся
-  `Fetching camera <id> stream URL` для camera_id с `hidden=True`. На
-  квартире с 15 hidden public cams — +15 HTTP per stream-trigger event
-  от frigate/webrtc preview.
-- **Follow-up closed:** наш `_sync_visibility` ранее overrides user «Показать»
-  каждые 5 мин — закрыто в A-64 (user_shown override через
-  `entity.options[DOMAIN]`).
+  `Fetching camera <id> stream URL` для camera_id с `hidden=True`.
+- **Реальный impact overhead:**
+  - Без frigate: stream_source вызывается редко (только при открытии card) — overhead negligible.
+  - С frigate: +10-20 HTTP/мин к operator. **Это поведение было в 3.1.0** — не регрессия.
+  - Operator не имеет rate-limit на эти endpoints.
+- **Cache rejected** — рассматривался cache stream URL в coordinator с TTL 30s,
+  но opasen: cache может вернуть expired URL во время HA Stream recovery
+  retry-loop, усугубляя failure. Cache snapshot — мало benefit для сложности.
+- **Related (A-66):** Z подход добавил `Stream.update_source()` после каждого
+  PUT в go2rtc — это форсит worker restart с обновлённым ffmpeg producer.
+  Решает «invalid data при истечении operator токена» автоматически.
+
+### A-66. go2rtc stale producer URL после long idle + revert A-63
+
+- **Status:** ✅ **RESOLVED** в PR #46 (Z variant after experimentation).
+  `camera.py:stream_source` больше не skip-ает для hidden cameras (revert A-63).
+  Snapshot skip оставлен. `_ensure_go2rtc_stream` после каждого успешного
+  PUT вызывает `Stream.update_source(rtsp_url)` если worker уже running —
+  forces restart с обновлённым ffmpeg producer (избегаем 10-30s retry-backoff
+  при истечении operator токена).
+- **Severity:** P2 (UX — было «не грузится после toggle видимости»).
+- **Area:** HA Stream lifecycle / go2rtc integration.
+- **Evidence (production diagnostics 2026-05-26):**
+  - `eg_5593587` в go2rtc держал producer URL `a833471/dZ9lxcy0GDRaZjdxWP2k`
+  - `curl` к этому URL → `connection reset` (token expired)
+  - HA Stream worker retry → `Invalid data found when processing input` →
+    `Server returned 404 Not Found` (после go2rtc evict config)
+- **Эксперимент (3 PR-а, X/Y/Z):**
+  - **X (PR #44):** `_was_hidden` flag + invalidate `_last_src` при transition.
+    **Не работает** — HA Stream не вызывает stream_source повторно, invalidate
+    в stream_source мёртвый код.
+  - **Y (PR #45):** Registry event listener (hide=`Stream.stop()`,
+    unhide=fetch+PUT+`update_source()`). **Работает только после reload entity** —
+    cold start hidden даёт `self.stream is None`, нечего restart-ить.
+  - **Z (PR #46, accepted):** revert stream_source skip + `Stream.update_source()`
+    в `_ensure_go2rtc_stream`. HA Stream lifecycle работает as designed,
+    минимум кода (+24/-4 LOC), `update_source()` обеспечивает что после
+    каждого operator URL change worker сразу restart-ает с свежим producer.
+- **Trade-off:** возвращены лишние HTTP к operator для hidden cameras (см.
+  A-63 → Won't fix). Это меньшее зло чем broken video lifecycle.
+- **Dev lessons:**
+  - HA Stream не designed для «entity внезапно перестаёт отдавать stream»
+    — никаких «оптимизаций» через возврат None из stream_source.
+  - `Stream.update_source()` — официальный HA API для force restart worker
+    с новым source. Использовать когда обновляется upstream producer config.
 
 ### A-64. `_sync_visibility` / migration → reload cascade + user override
 
@@ -634,7 +665,7 @@ Quality gates:
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
-| A-63, A-64, A-65 (production-log findings, 3 отдельных PR) | Итерация 3 (Silver — runtime polish из реальных логов) |
+| 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-66 (PR #46) + A-65 (TBD) | Итерация 3 (Silver — runtime polish из реальных логов) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
