@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### CI
+
+- **PR pre-release auto-cleanup**. Workflow `.github/workflows/prerelease.yaml` теперь слушает `pull_request:closed` и удаляет `pr-NN` release + tag через `gh release delete --cleanup-tag`. Раньше pre-releases накапливались (15+ висящих для merged PR на момент 2026-05-26) — теперь GitHub Releases остаются чистыми, в списке видны только настоящие версии и активные PR pre-releases. Разовая чистка: удалены pr-25, pr-27, pr-31..35, pr-38..40, pr-42..45.
+
 ### Fixed
 
 - **Visibility sync: reload cascade + user override** ([A-64](docs/audit/project-audit.md)). Раньше cold start давал **4× reload в 34 сек** (production-лог 2026-05-26): `_migrate_legacy_disabled_state` писал flag в `entry.options` → triggers `async_update_options` listener → `async_reload` → setup_entry; параллельно setup триггерил reload через `migration_changed or sync_changed`. Помимо этого `_sync_visibility` на каждом setup восстанавливал `INTEGRATION` для hidden-в-API камер — перезаписывал юзерский выбор «Показывать на панели» (через 5 мин камера снова hidden в HA UI). **Изменения**: (1) migration flag перенесён в `entry.data` (НЕ триггерит options-listener); backward-compat читает оба места, переносит при первом setup; (2) explicit `async_reload` теперь только при `migration_changed` — sync visibility это live registry update, reload не нужен; (3) `_sync_visibility` track per-entity flags через `entity.options[DOMAIN]` (persistent, не триггерит entry-listener): `we_set_integration` — наша отметка, `user_shown` — детектится когда мы set INTEGRATION, а registry уже None (юзер кликнул «Показывать на панели»). С `user_shown=True` мы НЕ восстанавливаем INTEGRATION даже если API hidden. При un-hide в приложении (API visible) — `user_shown` auto-clear. 5 новых тестов (`tests/test_visibility_user_override.py`). USER hidden_by override продолжает уважаться (regression-guard).
