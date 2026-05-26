@@ -133,6 +133,23 @@ Quality gates:
 - [ ] **A-61** Двойной HTTP в per-place collectors — вынести `screens` + `access_controls` на уровень `_async_update_data`, передавать как параметры. Perf, не функциональная проблема.
 - [ ] **A-62** FAVORITES section в `_extract_hidden_ids` — расширить парсинг с учётом mixed-typed items. Fallback OK, не блокер.
 
+#### Production-log polish (A-63..A-65 — 3 отдельных PR)
+
+> Findings собраны из production-лога (см. audit §A-63..A-65). Каждый
+> закрывается отдельным PR — изолированные, легко review/revert.
+
+- [ ] **A-63** Hidden cameras prefetch — `stream_source()` ранний return
+  None если `entity.hidden_by is not None`. Экономит лишние HTTP на hidden
+  камерах под нагрузкой frigate/webrtc preview. См. audit.
+- [ ] **A-64** Reload cascade — починить `_migrate_legacy_disabled_state`
+  + `_sync_visibility` так, чтобы cold start не давал 4× reload. Migration
+  flag в `entry.data` (или через `async_migrate_entry`), `_sync_visibility`
+  возвращает `False` если ничего реально не изменилось. Test: cold setup
+  → 1 reload (на migration), дальше — стабильно.
+- [ ] **A-65** Log throttling от broken cameras — track consecutive
+  failures per camera_id; 1й fail → WARNING, 2й+ → DEBUG; reset на
+  success. Снимает spam от temporary-broken hardware.
+
 #### Code quality
 
 - [ ] **A-30** `extra_state_attributes` — snake_case ключи.
