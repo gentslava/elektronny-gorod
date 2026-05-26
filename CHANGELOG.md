@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Coordinator: убран двойной HTTP в per-place collectors** ([A-61](docs/audit/project-audit.md)). `_collect_locks_for_place` ранее дублировал `query_screens_settings` + `query_access_controls`, уже вызванные `_collect_cameras_for_place`. Теперь pre-fetch в `_async_update_data` (один раз per place), передача в оба collectors как параметры. **Экономия: -2 HTTP per place per 5min refresh** (-576 calls/day для 1 place). Поведение неизменно — 74 tests pass (+3 new regression-guard). NOTE: при ошибке `query_access_controls` теперь и cameras, и locks для того места пусты (раньше locks могли survive независимо — теперь это атомарная per-place операция).
+
 ### Added
 
 - **Do Not Disturb switches** ([A-56](docs/audit/project-audit.md)). Для каждого place добавлены 3 switch entity (mirror приложения «Мой Дом» → Настройки → Уведомления → Не беспокоить):
