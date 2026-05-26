@@ -2,13 +2,13 @@ name: PR Pre-Release
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, closed]
     paths:
       - 'custom_components/**'
 
 jobs:
   prerelease:
-    if: github.event.pull_request.draft == false
+    if: github.event.action != 'closed' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -34,3 +34,17 @@ jobs:
           files: custom_components/elektronny_gorod/elektronny_gorod.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  cleanup:
+    if: github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Delete pre-release and tag
+        run: |
+          gh release delete "pr-${{ github.event.pull_request.number }}" \
+            --repo "${{ github.repository }}" \
+            --yes --cleanup-tag || echo "No pre-release for this PR — nothing to delete."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
