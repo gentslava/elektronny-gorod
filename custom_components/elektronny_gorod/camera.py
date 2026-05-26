@@ -16,7 +16,8 @@ from aiohttp import ClientSession, ClientError
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -312,3 +313,107 @@ class ElektronnyGorodCamera(
     def _handle_coordinator_update(self) -> None:
         """Coordinator refresh — actuality берётся из property `available`."""
         self.async_write_ha_state()
+
+    # ------------------------------------------------------------------ #
+    # A-66v2: HA Stream lifecycle hooks                                  #
+    # ------------------------------------------------------------------ #
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to entity_registry events для stream lifecycle.
+
+        A-66v2: HA Stream worker pin-ится к RTSP URL который вернул
+        `stream_source()` один раз. Если мы возвращаем None для hidden
+        (A-63), worker зависает в retry-loop на устаревшем RTSP
+        (`Invalid data found` → 404 после go2rtc evict).
+
+        Hook через `EVENT_ENTITY_REGISTRY_UPDATED`:
+        - visible→hidden: `Stream.stop()` — корректный cleanup worker.
+        - hidden→visible: fetch fresh URL + PUT в go2rtc + `Stream.update_source()`
+          форсит worker restart, чтобы новый ffmpeg producer активировался
+          с свежим operator токеном немедленно.
+        """
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.hass.bus.async_listen(
+                er.EVENT_ENTITY_REGISTRY_UPDATED,
+                self._handle_registry_update,
+            )
+        )
+
+    @callback
+    def _handle_registry_update(self, event: Event) -> None:
+        """A-66v2: react на hidden_by change в registry."""
+        if event.data.get("action") != "update":
+            return
+        if event.data.get("entity_id") != self.entity_id:
+            return
+        changes = event.data.get("changes") or {}
+        if "hidden_by" not in changes:
+            return
+
+        old_hidden_by = changes["hidden_by"]
+        reg = self.registry_entry
+        new_hidden_by = reg.hidden_by if reg is not None else None
+
+        if old_hidden_by is None and new_hidden_by is not None:
+            # visible → hidden
+            self.hass.async_create_task(
+                self._stop_stream_on_hide(),
+                name=f"{DOMAIN}_camera_{self._id}_stop_on_hide",
+            )
+        elif old_hidden_by is not None and new_hidden_by is None:
+            # hidden → visible
+            self.hass.async_create_task(
+                self._pickup_stream_on_unhide(),
+                name=f"{DOMAIN}_camera_{self._id}_pickup_on_unhide",
+            )
+
+    async def _stop_stream_on_hide(self) -> None:
+        """A-66v2: cleanup HA Stream worker при visible→hidden transition."""
+        stream = self.stream
+        if stream is None:
+            return
+        try:
+            await stream.stop()
+            LOGGER.debug(
+                "Camera %s (%s): stopped HA Stream worker after hide",
+                self._name, self._id,
+            )
+        except Exception:  # noqa: BLE001 — defensive: HA Stream API edge cases
+            LOGGER.exception(
+                "Failed to stop HA Stream for camera %s (%s)",
+                self._name, self._id,
+            )
+
+    async def _pickup_stream_on_unhide(self) -> None:
+        """A-66v2: refresh go2rtc producer + restart worker при hidden→visible."""
+        if not self._use_go2rtc:
+            # Без go2rtc нет cached producer URL — при первом frontend
+            # запросе HA сама вызовет `stream_source()` и получит свежий URL.
+            return
+        try:
+            # Invalidate cache — operator токен мог expired за время hidden.
+            self._last_src = None
+            fresh_url = await self.coordinator.get_camera_stream(self._id)
+            if not fresh_url:
+                LOGGER.debug(
+                    "Camera %s (%s): empty stream URL on unhide pickup",
+                    self._name, self._id,
+                )
+                return
+            await self._ensure_go2rtc_stream(fresh_url)
+            # Если HA Stream worker уже существует (был активен до hide
+            # и не cleaned до того как listener сработал) — forces restart
+            # с обновлённым go2rtc producer.
+            stream = self.stream
+            if stream is not None:
+                stream.update_source(self._rtsp_url())
+                LOGGER.debug(
+                    "Camera %s (%s): triggered HA Stream restart after unhide",
+                    self._name, self._id,
+                )
+        except Exception:  # noqa: BLE001 — defensive
+            LOGGER.exception(
+                "Failed to pickup stream for camera %s (%s)",
+                self._name, self._id,
+            )
