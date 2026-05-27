@@ -8,6 +8,7 @@ Closes A-44: `async_update` удалён, дублирующий `get_camera_str
 """
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from typing import Any
@@ -162,6 +163,11 @@ class ElektronnyGorodCamera(
         # A-65: counter consecutive empty stream URL responses для лог-throttling.
         # 1й fail → WARNING, 2й+ подряд → DEBUG, reset на первый success.
         self._consecutive_empty_count: int = 0
+        # A-68: in-flight future для dedup concurrent stream_source() calls.
+        # HA Stream worker + Frigate + Lovelace могут одновременно дёргать
+        # stream_source — без dedup это создаёт N HTTP к operator + N PUT в
+        # go2rtc + N `Stream.update_source()` restart → «мигание видео».
+        self._inflight_stream_future: asyncio.Future[str | None] | None = None
         self._image: bytes | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
@@ -318,9 +324,41 @@ class ElektronnyGorodCamera(
 
         НЕ skip-аем для hidden (см. A-66v3). HA Stream lifecycle несовместим
         с возвратом None после того как stream была активна — worker зависает.
-        Operator FLV URL c коротким TTL обновляется через постоянный prefetch
-        + `Stream.update_source()` в `_ensure_go2rtc_stream` форсит worker
-        restart при изменении operator src.
+
+        A-68: dedup concurrent calls через future-pattern. HA Stream worker +
+        Frigate + Lovelace могут одновременно дёргать stream_source — без
+        dedup создаётся N HTTP к operator + N PUT в go2rtc + N
+        `Stream.update_source()` restart, что приводит к «миганию видео».
+        Concurrent callers wait first in-flight future → получают одинаковый
+        результат → 1 HTTP + 1 PUT + 1 restart.
+        """
+        if self._inflight_stream_future is not None:
+            return await self._inflight_stream_future
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[str | None] = loop.create_future()
+        self._inflight_stream_future = fut
+        try:
+            result = await self._fetch_stream_source_impl()
+            if not fut.done():
+                fut.set_result(result)
+            return result
+        except BaseException as exc:
+            if not fut.done():
+                fut.set_exception(exc)
+            raise
+        finally:
+            # Safety net: если future остался unresolved (например, exception
+            # пробросился до set_result/set_exception, или task cancelled
+            # между присваиванием _inflight_stream_future и try) — cancel-нём
+            # его, чтобы waiters не зависли навсегда.
+            if not fut.done():
+                fut.cancel()
+            self._inflight_stream_future = None
+
+    async def _fetch_stream_source_impl(self) -> str | None:
+        """Реальная логика fetch — operator stream URL + go2rtc PUT.
+
+        Вызывается из `stream_source` под защитой in-flight future (A-68).
         """
         stream_url = await self.coordinator.get_camera_stream(self._id)
         if not stream_url:
