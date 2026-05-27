@@ -156,14 +156,22 @@ Quality gates:
 
 > Логи 2026-05-27 показали 2 новых проблемы после deployment A-64/A-66.
 
-- [x] **A-68** ✅ **P1 UX** Concurrent `stream_source()` dedup (PR TBD).
-  In-flight future-pattern в `Camera.stream_source` — concurrent callers
-  wait first future вместо параллельного fetch. N callers → 1 HTTP +
-  1 PUT + 1 `Stream.update_source()` restart.
-- [ ] **A-67** P2 Cold-start go2rtc warmup. После HA restart первые 60
-  секунд видео broken — go2rtc держит stale config от прошлой сессии.
-  Fix: proactive `_ensure_go2rtc_stream` в `async_added_to_hass` через
-  `async_call_later(2)`.
+- [x] **A-68** ✅ **P2 defensive** Concurrent `stream_source()` dedup
+  (PR #51). In-flight future-pattern в `Camera.stream_source` — concurrent
+  callers wait first future вместо параллельного fetch. N concurrent
+  callers → 1 HTTP + 1 PUT + 1 `Stream.update_source()` restart. **Scope
+  clarification**: defensive cleanup для concurrent-thrash (Frigate /
+  WebRTC probe / Lovelace card в параллель). **Не фикс** «мигание видео
+  после cold start» — у него отдельный root cause (production-тест
+  2026-05-27 подтвердил: с A-68 мигание остаётся). Investigation
+  flicker'а перенесена в отдельный track (требует browser-side runtime
+  diagnostic: Network m3u8/m4s + Console MediaSource events).
+- [ ] **A-67** P2 Cold-start go2rtc warmup — **attempted, didn't help**.
+  Эксперимент в 3 итерациях (A-67 PUT-only pre-warm / A-71 active probe
+  via `/api/frame.jpeg` / A-72 `/api/preload` через go2rtc-research): все
+  проверены runtime'ом на production-сервере, ни один не убрал видимое
+  мигание видео. Hypothesis «ffmpeg cold-start race» оказалась неверной
+  (нужна другая diagnostic-сессия). Закрыт без PR'а.
 
 #### Code quality
 

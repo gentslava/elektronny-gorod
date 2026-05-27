@@ -689,43 +689,53 @@ Quality gates:
 
 ### A-68. Concurrent stream_source() для одной camera дублирует HTTP + go2rtc restart
 
-- **Status:** ✅ **RESOLVED** в branch `fix/a68-dedup-concurrent-stream-source` (PR TBD).
-  In-flight future-pattern в `Camera.stream_source()`. Если concurrent caller
-  обнаруживает `self._inflight_stream_future is not None` — wait existing future
-  вместо запуска параллельного fetch. Существующая логика вынесена в helper
-  `_fetch_stream_source_impl()`. Future cleared в `finally` блоке → sequential
-  calls после batch делают свежий fetch. Per-instance attr = per-camera dedup.
-  4 unit-теста (`tests/test_camera_stream_dedup.py`): concurrent dedup /
-  sequential fresh fetch / exception propagation / per-camera independence.
-- **Severity:** **P1 (UX critical)** — каждый дубль приводит к лишнему
-  `Stream.update_source()` → restart worker → 1-2 sec **video interruption**.
+- **Status:** ✅ **RESOLVED** в branch `fix/a68-dedup-concurrent-stream-source`
+  (PR #51). In-flight future-pattern в `Camera.stream_source()`. Если
+  concurrent caller обнаруживает `self._inflight_stream_future is not None` —
+  wait existing future вместо запуска параллельного fetch. Существующая
+  логика вынесена в helper `_fetch_stream_source_impl()`. Future cleared в
+  `finally` блоке → sequential calls после batch делают свежий fetch.
+  Per-instance attr = per-camera dedup. 5 unit-тестов
+  (`tests/test_camera_stream_dedup.py`): concurrent dedup / sequential fresh
+  fetch / exception propagation / per-camera independence / cancellation
+  safety net (P1 follow-up из code-review).
+- **Severity:** **P2 (defensive concurrency cleanup)** — снижает thrash на
+  operator API + go2rtc PUT при concurrent callers. Изначально классифицирован
+  P1 UX (предполагалось что fix устранит видимое мигание видео), но
+  production-тест 2026-05-27 показал что мигание имеет **отдельный root
+  cause** — A-68 dedup его не устраняет.
 - **Area:** HA Stream / go2rtc integration / API throttling.
 - **Evidence (2026-05-27 12:59:21 log):**
   ```
   12:59:21.304 Fetching camera 5593578 stream URL    ← запрос #1
   12:59:21.317 Fetching camera 5593578 stream URL    ← запрос #2 (через 13 ms!)
-  12:59:21.619 Response 5593578 video [200 OK]      ← разные tokens!
+  12:59:21.619 Response 5593578 video [200 OK]      ← разные tokens
   12:59:21.668 Response 5593578 video [200 OK]
   ```
-  И на 13:00:14-15 для camera 5593590:
-  ```
-  13:00:14.214 go2rtc stream updated: name=eg_5593590
-  13:00:14.214 Camera ... 5593590: forced HA Stream restart after go2rtc PUT
-  13:00:15.097 go2rtc stream updated: name=eg_5593590  ← снова через 0.88 сек
-  13:00:15.097 Camera ... 5593590: forced HA Stream restart after go2rtc PUT
-  ```
-  **2 restart за 0.88 сек** для одной camera → видео мигает.
-- **Root cause:** `Camera.stream_source()` может быть вызван конкурентно
-  из нескольких источников (HA Stream worker + Frigate + Lovelace tap
-  + advanced WebRTC requests). Operator возвращает разные URL (fresh
-  tokens каждый раз), поэтому `_last_src != src` → каждый дубль делает:
+  Этот случай — настоящий concurrent dedup. 13 мс ≪
+  `STREAM_RESTART_INCREMENT` (5 сек минимум для HA Stream retry) → не
+  retry-цепочка, а два независимых caller'а (HA Stream worker + второй
+  источник: Frigate / WebRTC probe / Lovelace card preview / HA Camera
+  snapshot polling).
+
+  Второй паттерн из лога (13:00:14-15, gap=0.88 сек, 2× `forced HA Stream
+  restart`) **ambiguous**: 0.88 сек укладывается в окно retry-after-error,
+  значит может быть следствием отдельного flicker-бага (HA Stream worker
+  retries после `Invalid data found` → fresh `stream_source()` → fresh PUT
+  → fresh restart). На этот паттерн A-68 dedup **не повлияет** (calls
+  sequential, не concurrent).
+- **Root cause:** `Camera.stream_source()` может быть вызван конкурентно из
+  нескольких источников (HA Stream worker + Frigate + Lovelace tap +
+  advanced WebRTC requests). Operator возвращает разные URL (fresh tokens
+  каждый раз), поэтому `_last_src != src` → каждый concurrent дубль делает:
   - HTTP к operator
   - PUT в go2rtc
   - `Stream.update_source()` → restart worker
-- **Impact:** **UX-critical** — пользователь видит «мигающее» видео когда
-  несколько источников активно дёргают camera. На активных setup-ах
-  (frigate с motion detection + lovelace card open) это происходит
-  регулярно.
+- **Impact:** при активном multi-consumer setup (Frigate motion detection +
+  Lovelace card open + WebRTC) — defensive thrash без пользы (N HTTP вместо
+  1). С dedup'ом — N-1 HTTP сэкономлено per batch. **Не** фикс видимого
+  «мигание видео после cold start» — у него другой root cause (см. отдельный
+  track investigation, не закрыт).
 - **Recommended fix:** in-flight deduplication через future-pattern в
   `stream_source`:
   ```python

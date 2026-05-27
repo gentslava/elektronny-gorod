@@ -7,9 +7,9 @@
 
 ## [Unreleased]
 
-### Fixed (Camera UX)
+### Changed (Camera resilience)
 
-- **Camera: dedup concurrent `stream_source()` для одной camera** ([A-68](docs/audit/project-audit.md)). Production-лог 2026-05-27 показал «мигание видео»: HA Stream worker + Frigate + Lovelace независимо вызывают `stream_source()` параллельно (видно 2 concurrent запроса за 13ms; 2× `forced HA Stream restart after go2rtc PUT` за 0.88s). Operator API возвращает разные session tokens на каждый запрос → каждый дубль = HTTP + PUT в go2rtc + `Stream.update_source()` worker restart, что приводит к 1-2 sec interruption при каждом restart. **Fix**: in-flight future-pattern в `stream_source()`. Если concurrent caller обнаруживает уже идущий запрос — wait его future вместо запуска параллельного. Результат: N concurrent callers → **1 HTTP + 1 PUT + 1 restart** вместо N. Future cleared в `finally` блоке → sequential calls после батча делают свежий fetch (no stale cache). 4 unit-теста (`tests/test_camera_stream_dedup.py`).
+- **Camera: dedup concurrent `stream_source()` calls** ([A-68](docs/audit/project-audit.md)). Production-лог 2026-05-27 12:59:21 показал **two concurrent `Fetching camera 5593578 stream URL` за 13 мс** — это не retry-цепочка (HA Stream `STREAM_RESTART_INCREMENT` ≥ 5 сек), а два независимых caller'а (HA Stream worker + другой источник: Frigate / WebRTC probe / Lovelace card preview). Каждый concurrent caller делал отдельный HTTP к operator (свежий session token) + PUT в go2rtc + `Stream.update_source()` restart — defensive thrash без пользы. **Fix**: in-flight future-pattern в `stream_source()`. Если concurrent caller видит уже идущий запрос — wait его future вместо запуска параллельного. N concurrent callers → **1 HTTP + 1 PUT + 1 restart** вместо N. Future cleared в `finally` блоке → sequential calls после batch делают свежий fetch. 5 unit-тестов (`tests/test_camera_stream_dedup.py`). **Scope clarification**: это defensive concurrency cleanup. Видимое «мигание видео после cold start», наблюдаемое в production-тестах, **не устранилось** этим патчем — у него отдельный root cause (изучение перенесено в отдельный track).
 
 ### CI
 
