@@ -23,6 +23,7 @@
 | [0006](0006-mirror-app-behavior.md) | Mirror application behavior | accepted | 2026-05-23 |
 | [0007](0007-stateful-emulator-baseline.md) | Stateful emulator baseline для HAR-сбора | accepted | 2026-05-23 |
 | [0008](0008-shared-client-session.md) | Shared `ClientSession` через `async_get_clientsession(hass)` | accepted | 2026-05-24 |
+| [0009](0009-camera-stream-auto-recovery.md) | Camera stream auto-recovery при истечении operator session | accepted | 2026-05-27 |
 
 ## Когда писать ADR
 

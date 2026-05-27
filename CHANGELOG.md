@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Camera: auto-recovery стрима при истечении operator session** ([A-71](docs/audit/project-audit.md) / [ADR-0009](docs/decisions/0009-camera-stream-auto-recovery.md)). Долго открытое видео переставало воспроизводиться через ~30 мин. Production-лог 2026-05-27 + HAR показали: operator forpost live-stream имеет серверный TTL ~30 мин (PUT 21:25:14 → first error 21:55:19 = 30:05), потом backend закрывает сессию → go2rtc producer ловит `EOF`, HA Stream worker ретраит **тот же** мёртвый `self.source` с backoff и **никогда** не перевызывает `stream_source()` → URL не обновляется → видео заморожено до ручного reopen. (Оригинальное приложение «Мой Дом» зависает идентично — это by-design лимит бэкенда.) **Fix**: оборачиваем HA Stream update-callback; при переходе `stream.available → False` запускаем throttled (`STREAM_RECOVERY_COOLDOWN=30s`) re-fetch свежего operator URL + `_ensure_go2rtc_stream`/`Stream.update_source()` — те же API-вызовы, что HA делает на WebRTC re-offer и пользователь при reopen карточки (минимальная deviation от mirror-app-behavior). Покрывает legacy Stream / `preload_stream` путь (наблюдаемый в логах); непрерывный WebRTC-only — осознанно отложено (ADR-0009 §Limitations). 6 unit-тестов (`tests/test_camera_auto_recovery.py`).
+
 ## [3.2.0] - 2026-05-27
 
 ### Changed (Camera resilience)

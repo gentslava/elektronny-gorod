@@ -11,7 +11,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
-from typing import Any
+import time
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from aiohttp import ClientSession, ClientError
@@ -38,6 +39,14 @@ from .const import (
     LOGGER,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
+
+if TYPE_CHECKING:
+    from homeassistant.components.stream import Stream
+
+# A-71 / ADR-0009: минимальный интервал между авто-recovery попытками.
+# HA Stream worker сигналит unavailable на каждый retry-tick (10/20/30с);
+# без cooldown re-fetch забивал бы operator API. См. ADR-0009.
+STREAM_RECOVERY_COOLDOWN = 30.0
 
 
 def _build_go2rtc_src(source_url: str) -> str:
@@ -168,6 +177,8 @@ class ElektronnyGorodCamera(
         # stream_source — без dedup это создаёт N HTTP к operator + N PUT в
         # go2rtc + N `Stream.update_source()` restart → «мигание видео».
         self._inflight_stream_future: asyncio.Future[str | None] | None = None
+        # A-71: monotonic-метка последней авто-recovery (throttle, см. ADR-0009).
+        self._last_recovery_monotonic: float = 0.0
         self._image: bytes | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
@@ -389,3 +400,85 @@ class ElektronnyGorodCamera(
     def _handle_coordinator_update(self) -> None:
         """Coordinator refresh — actuality берётся из property `available`."""
         self.async_write_ha_state()
+
+    # ------------------------------------------------------------------ #
+    # Stream auto-recovery (A-71 / ADR-0009)                             #
+    # ------------------------------------------------------------------ #
+
+    async def async_create_stream(self) -> "Stream | None":
+        """Создать HA Stream и обернуть update-callback для auto-recovery.
+
+        Базовый `Camera` вешает `stream.set_update_callback(async_write_ha_state)`.
+        Мы оборачиваем callback своим `_on_stream_state_change`: сохраняем
+        `async_write_ha_state` + детектим переход stream в unavailable (operator
+        session истекла, ~30 мин — A-71) → throttled re-fetch свежего URL.
+        """
+        stream = await super().async_create_stream()
+        if stream is not None:
+            stream.set_update_callback(self._on_stream_state_change)
+        return stream
+
+    @callback
+    def _on_stream_state_change(self) -> None:
+        """Wrapped HA Stream update-callback (A-71).
+
+        HA Stream worker зовёт это при смене availability (`_set_state`).
+        Сохраняем штатный `async_write_ha_state`; при отказе worker'а
+        (`available == False`) планируем throttled recovery.
+        """
+        self.async_write_ha_state()
+        stream = self.stream
+        if stream is not None and not stream.available:
+            self._maybe_schedule_stream_recovery()
+
+    @callback
+    def _maybe_schedule_stream_recovery(self) -> None:
+        """Запланировать recovery, если прошёл cooldown (защита от шторма)."""
+        now = time.monotonic()
+        if now - self._last_recovery_monotonic < STREAM_RECOVERY_COOLDOWN:
+            return
+        self._last_recovery_monotonic = now
+        # Background task — авто-отмена при HA shutdown; не держит unload.
+        self.hass.async_create_background_task(
+            self._async_recover_stream(),
+            name=f"{DOMAIN}_stream_recovery_{self._id}",
+        )
+
+    async def _async_recover_stream(self) -> None:
+        """Re-fetch свежий operator URL + перенаправить источник (A-71).
+
+        Вызывается когда HA Stream worker сигналит unavailable (operator
+        forpost session истекла, ~30 мин — см. ADR-0009). Делает те же вызовы,
+        что HA на WebRTC re-offer / пользователь при reopen карточки:
+        fresh `stream_source` → `_ensure_go2rtc_stream` (PATCH go2rtc +
+        `Stream.update_source()`, A-66) либо прямой `update_source` без go2rtc.
+        """
+        # `available` здесь = ElektronnyGorodCamera.available, т.е.
+        # `CoordinatorEntity.available` (coordinator.last_update_success) И
+        # наличие камеры в coordinator.data. Это guard «не восстанавливать,
+        # если координатор down или камера выпала из снапшота» — НЕ проверка
+        # stream-availability (она перекрыта CoordinatorEntity.available).
+        if not self.available:
+            return
+        try:
+            stream_url = await self.coordinator.get_camera_stream(self._id)
+        except Exception:  # noqa: BLE001 — defensive: не валим callback-цепочку
+            LOGGER.exception(
+                "Camera %s (%s): stream recovery fetch failed",
+                self._name, self._id,
+            )
+            return
+        if not stream_url:
+            LOGGER.debug(
+                "Camera %s (%s): stream recovery got empty url — skip",
+                self._name, self._id,
+            )
+            return
+        LOGGER.debug(
+            "Camera %s (%s): auto-recovery — refreshing stalled stream",
+            self._name, self._id,
+        )
+        if self._use_go2rtc:
+            await self._ensure_go2rtc_stream(stream_url)
+        elif self.stream is not None:
+            self.stream.update_source(stream_url)

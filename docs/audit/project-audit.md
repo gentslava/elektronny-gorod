@@ -770,8 +770,15 @@ Quality gates:
 
 ### A-71. Operator forpost session TTL (~30 мин) — long-open video stops без refresh
 
-- **Status:** 🟡 **BY-DESIGN limitation** (root cause confirmed; решение =
-  design tradeoff, требует ADR — см. ниже). НЕ баг интеграции.
+- **Status:** ✅ **RESOLVED** (branch `fix/a71-camera-stream-auto-recovery`).
+  Root cause = by-design лимит бэкенда (НЕ баг). Выбран **Вариант 1 —
+  event-driven auto-recovery** ([ADR-0009](../decisions/0009-camera-stream-auto-recovery.md)):
+  оборачиваем HA Stream update-callback, при `stream.available → False`
+  делаем throttled (`STREAM_RECOVERY_COOLDOWN=30s`) re-fetch свежего operator
+  URL + `_ensure_go2rtc_stream`/`update_source` — те же вызовы, что reopen в
+  приложении. 6 unit-тестов (`tests/test_camera_auto_recovery.py`). Покрывает
+  legacy Stream / preload (наблюдаемый кейс); непрерывный WebRTC-only —
+  осознанно отложено (см. ADR-0009 §Limitations).
 - **Severity:** **P2 (UX, by-design)**: видео останавливается через ~30 мин
   непрерывного просмотра. **Оригинальное приложение «Мой Дом» ведёт себя
   идентично** (зависает примерно через те же полчаса) — это архитектурный
@@ -814,23 +821,19 @@ Quality gates:
   значение (~30 мин) не влияет на решение — это известный лимит бэкенда,
   воспроизводимый и в оригинальном приложении. Поэтому **active diagnostic
   patch (измерение TTL) не делается** — измерять нечего, мы уже знаем поведение.
-- **Решение = design tradeoff (требует ADR).** Конфликт с принципом
+- **Решение = design tradeoff (ADR-0009).** Конфликт с принципом
   [mirror-app-behavior]: интеграция воспроизводит приложение, а приложение
-  **намеренно** даёт зависнуть. Варианты:
-  - **Вариант 0 — pure mirror (default):** ничего не «чинить», задокументировать
-    лимит (~30 мин live). Соответствует принципу. Минус: HA-сценарии (wall-panel,
-    долгий просмотр) ломаются сильнее, чем в мобильном приложении.
-  - **Вариант 1 — auto-recovery (мягкая deviation):** при детекте stall
-    (worker timeout / go2rtc EOF) автоматически дёрнуть свежий `stream_source()`
-    — это **те же API-вызовы**, что делает приложение при reopen, просто
-    автоматически. Не выдумывает новых эндпоинтов. Минус: нужен сигнал stall.
+  **намеренно** даёт зависнуть. Рассмотренные варианты:
+  - **Вариант 0 — pure mirror:** ничего не «чинить». Отклонён (HA-сценарии
+    долгого просмотра ломаются сильнее, чем в мобильном приложении).
+  - ✅ **Вариант 1 — auto-recovery (мягкая deviation) — ВЫБРАН:** при детекте
+    stall (`stream.available → False`) автоматически дёрнуть свежий
+    `stream_source()` — это **те же API-вызовы**, что делает приложение при
+    reopen, просто автоматически. Не выдумывает новых эндпоинтов. См.
+    [ADR-0009](../decisions/0009-camera-stream-auto-recovery.md).
   - **Вариант 2 — proactive keep-alive (полная deviation):** фоновый refresh
-    каждые `T < TTL` (~10-15 мин) с PATCH go2rtc + `update_source()`. Лучший
-    UX, но это **паттерн, которого в приложении нет** (нарушает mirror-принцип),
-    + лишние HTTP к operator.
-  - Любой из 1/2 должен учесть **двойной go2rtc-слой**: наши `eg_*` + встроенный
-    HA `elektronny_gorod_elektronny_gorod_camera_*` (HA go2rtc оборачивает наш
-    RTSP) — refresh должен проходить оба.
+    каждые `T < TTL`. Отклонён как primary (паттерн, которого в приложении нет;
+    лишние HTTP). Возможное будущее расширение для WebRTC-only.
 - **Secondary:** [api.py:query_camera_stream](../../custom_components/elektronny_gorod/api.py#L343)
   `except Exception: return None` глотает бизнес-ошибку `Error != null` при
   HTTP 200 (см. api-reference §video) — маскирует диагностику истечения.
@@ -851,7 +854,7 @@ Quality gates:
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
 | A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR #51 — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
-| 🟡 A-71 (P2 by-design — long-open video freeze ~30 мин, mirror app; решение через ADR) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
+| ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
