@@ -156,10 +156,10 @@ Quality gates:
 
 > Логи 2026-05-27 показали 2 новых проблемы после deployment A-64/A-66.
 
-- [ ] **A-68** 🔴 **P1 UX** Concurrent `stream_source()` dedup. Видно
-  «мигание видео» когда несколько источников (HA Stream + Frigate +
-  Lovelace) одновременно дёргают одну camera → 2× `Stream.update_source()`
-  restart за <1s. Fix: in-flight future-pattern в `stream_source`.
+- [x] **A-68** ✅ **P1 UX** Concurrent `stream_source()` dedup (PR TBD).
+  In-flight future-pattern в `Camera.stream_source` — concurrent callers
+  wait first future вместо параллельного fetch. N callers → 1 HTTP +
+  1 PUT + 1 `Stream.update_source()` restart.
 - [ ] **A-67** P2 Cold-start go2rtc warmup. После HA restart первые 60
   секунд видео broken — go2rtc держит stale config от прошлой сессии.
   Fix: proactive `_ensure_go2rtc_stream` в `async_added_to_hass` через

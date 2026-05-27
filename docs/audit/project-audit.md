@@ -689,6 +689,14 @@ Quality gates:
 
 ### A-68. Concurrent stream_source() для одной camera дублирует HTTP + go2rtc restart
 
+- **Status:** ✅ **RESOLVED** в branch `fix/a68-dedup-concurrent-stream-source` (PR TBD).
+  In-flight future-pattern в `Camera.stream_source()`. Если concurrent caller
+  обнаруживает `self._inflight_stream_future is not None` — wait existing future
+  вместо запуска параллельного fetch. Существующая логика вынесена в helper
+  `_fetch_stream_source_impl()`. Future cleared в `finally` блоке → sequential
+  calls после batch делают свежий fetch. Per-instance attr = per-camera dedup.
+  4 unit-теста (`tests/test_camera_stream_dedup.py`): concurrent dedup /
+  sequential fresh fetch / exception propagation / per-camera independence.
 - **Severity:** **P1 (UX critical)** — каждый дубль приводит к лишнему
   `Stream.update_source()` → restart worker → 1-2 sec **video interruption**.
 - **Area:** HA Stream / go2rtc integration / API throttling.
@@ -765,7 +773,7 @@ Quality gates:
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
-| A-67 (P2 cold-start warmup) + **A-68 (P1 UX dedup concurrent stream_source)** | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
+| A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR TBD — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |

@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Fixed (Camera UX)
+
+- **Camera: dedup concurrent `stream_source()` для одной camera** ([A-68](docs/audit/project-audit.md)). Production-лог 2026-05-27 показал «мигание видео»: HA Stream worker + Frigate + Lovelace независимо вызывают `stream_source()` параллельно (видно 2 concurrent запроса за 13ms; 2× `forced HA Stream restart after go2rtc PUT` за 0.88s). Operator API возвращает разные session tokens на каждый запрос → каждый дубль = HTTP + PUT в go2rtc + `Stream.update_source()` worker restart, что приводит к 1-2 sec interruption при каждом restart. **Fix**: in-flight future-pattern в `stream_source()`. Если concurrent caller обнаруживает уже идущий запрос — wait его future вместо запуска параллельного. Результат: N concurrent callers → **1 HTTP + 1 PUT + 1 restart** вместо N. Future cleared в `finally` блоке → sequential calls после батча делают свежий fetch (no stale cache). 4 unit-теста (`tests/test_camera_stream_dedup.py`).
+
 ### CI
 
 - **PR pre-release auto-cleanup**. Workflow `.github/workflows/prerelease.yaml` теперь слушает `pull_request:closed` и удаляет `pr-NN` release + tag через `gh release delete --cleanup-tag`. Раньше pre-releases накапливались (15+ висящих для merged PR на момент 2026-05-26) — теперь GitHub Releases остаются чистыми, в списке видны только настоящие версии и активные PR pre-releases. Разовая чистка: удалены pr-25, pr-27, pr-31..35, pr-38..40, pr-42..45.
