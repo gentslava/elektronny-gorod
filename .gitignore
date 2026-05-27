@@ -78,3 +78,6 @@ logs/
 
 # HA / integration zip от release workflow (если случайно собран локально)
 custom_components/elektronny_gorod/elektronny_gorod.zip
+
+# Playwright MCP runtime artifacts (console-*.log, page-*.yml snapshots)
+.playwright-mcp/
