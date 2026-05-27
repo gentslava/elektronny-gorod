@@ -266,13 +266,23 @@ class ElektronnyGorodCamera(
             userpass = f"{self._go2rtc_username}:{self._go2rtc_password}"
             b64 = base64.b64encode(userpass.encode()).decode()
             headers["Authorization"] = f"Basic {b64}"
-        await _go2rtc_upsert_stream(
-            session=session,
-            base_url=base_url,
-            stream_name=self._go2rtc_stream_name,
-            src=src,
-            headers=headers,
-        )
+        try:
+            await _go2rtc_upsert_stream(
+                session=session,
+                base_url=base_url,
+                stream_name=self._go2rtc_stream_name,
+                src=src,
+                headers=headers,
+            )
+        except Exception:  # noqa: BLE001 — defensive: go2rtc PUT может fail
+            # A-70: PUT failure → invalidate cache чтобы next call сделал
+            # fresh fetch + fresh PUT (faster recovery, не ждём TTL expire).
+            self._cached_stream_url = None
+            LOGGER.exception(
+                "go2rtc PUT failed for %s (%s) — cache invalidated",
+                self._name, self._id,
+            )
+            raise
         self._last_src = src
 
         LOGGER.debug(
@@ -280,26 +290,15 @@ class ElektronnyGorodCamera(
             self._go2rtc_stream_name,
             self._rtsp_url(),
         )
-
-        # A-66v3: если HA Stream worker уже running — force restart, чтобы
-        # новый ffmpeg producer (с свежим operator src) активировался немедленно.
-        # Без этого worker продолжает старое подключение, при истечении operator
-        # токена впадает в retry-with-backoff (10-60 сек).
-        # `update_source()` устанавливает `_fast_restart_once=True` +
-        # `_thread_quit.set()` (см. homeassistant.components.stream).
-        stream = self.stream
-        if stream is not None:
-            try:
-                stream.update_source(self._rtsp_url())
-                LOGGER.debug(
-                    "Camera %s (%s): forced HA Stream restart after go2rtc PUT",
-                    self._name, self._id,
-                )
-            except Exception:  # noqa: BLE001 — defensive: HA Stream API edge cases
-                LOGGER.exception(
-                    "Failed to update HA Stream source for camera %s (%s)",
-                    self._name, self._id,
-                )
+        # A-66 partial revert: `stream.update_source()` forced restart УБРАН.
+        # Каждый PUT приводил к interruption видео ~1-2 сек. Operator выдаёт
+        # unique token на каждый запрос → cache miss = inevitable PUT, что
+        # значило restart каждые 30-60s (A-69 cache TTL) = постоянное «мигание»
+        # (production-лог 2026-05-27). HA Stream lifecycle сам обрабатывает
+        # producer failure: при stale token go2rtc producer fail → HA Stream
+        # worker `Invalid data` → backoff retry → fresh stream_source →
+        # fresh PUT → reconnect. Lag 10-30s после рare token expire vs
+        # continuous «мигание» — приемлемый trade-off.
 
     # ------------------------------------------------------------------ #
     # On-demand actions                                                  #

@@ -557,12 +557,15 @@ Quality gates:
 
 ### A-66. go2rtc stale producer URL после long idle + revert A-63
 
-- **Status:** ✅ **RESOLVED** в PR #46 (Z variant after experimentation).
-  `camera.py:stream_source` больше не skip-ает для hidden cameras (revert A-63).
-  Snapshot skip оставлен. `_ensure_go2rtc_stream` после каждого успешного
-  PUT вызывает `Stream.update_source(rtsp_url)` если worker уже running —
-  forces restart с обновлённым ffmpeg producer (избегаем 10-30s retry-backoff
-  при истечении operator токена).
+- **Status:** 🟡 **PARTIALLY RESOLVED**. Часть про revert A-63 stream_source
+  skip (PR #46) — остаётся. Часть про `Stream.update_source()` после PUT —
+  **reverted в A-70** после того как production-лог 2026-05-27 показал
+  continuous «мигание видео» (каждый PUT с unique operator token = restart).
+- **Original status note:** `camera.py:stream_source` больше не skip-ает
+  для hidden cameras (revert A-63). Snapshot skip оставлен.
+  ~~`_ensure_go2rtc_stream` после каждого успешного PUT вызывает
+  `Stream.update_source(rtsp_url)` если worker уже running~~ — **revert
+  в A-70**, см. trade-off там.
 - **Severity:** P2 (UX — было «не грузится после toggle видимости»).
 - **Area:** HA Stream lifecycle / go2rtc integration.
 - **Evidence (production diagnostics 2026-05-26):**
@@ -810,28 +813,39 @@ Quality gates:
   `test_sequential_stream_source_after_dedup_fetches_fresh` — добавлен
   manual cache invalidate для изоляции от A-69 поведения.
 
-### A-70. Cache invalidation на operator-side de-auth (follow-up A-69)
+### A-70. Cache invalidation on PUT failure + revert A-66 update_source
 
-- **Severity:** P2 (recovery window до 30s при rare events).
-- **Area:** A-69 follow-up / failure recovery.
-- **Evidence:** code-review A-69 (PR TBD) — stale-cache window:
-  operator de-authorize-нул сессию (token revoke, IP block, аккаунт
-  kicked) → URL в cache становится мёртвым, но cache TTL ещё не expired
-  → `_ensure_go2rtc_stream` PUT-ит мёртвый URL → go2rtc producer fail →
-  HA Stream retry → cache всё ещё «здоров» → loop до 30s expire.
-- **Impact:** до 30 секунд broken video при de-auth events. В
-  production-логе не наблюдалось (de-auth редкие).
-- **Recommended fix:**
-  - `_ensure_go2rtc_stream` ловит `RuntimeError` от `_go2rtc_upsert_stream`
-    (PUT 4xx/5xx) → invalidate cache (`_cached_stream_url = None`).
-  - Опционально: catch `Stream.update_source` exception → invalidate.
-  - Опционально: hook на HA Stream worker fail event (если HA core
-    предоставляет такой) → invalidate cache для этой entity.
-- **Test plan:**
-  - unit-тест: PUT failure → cache invalidated → next call fresh fetch.
-  - unit-тест: stream.update_source exception → cache invalidated.
-- **Priority:** defer (рассматривать после анализа реальных de-auth
-  логов; в текущей выборке 2026-05-27 не наблюдалось).
+- **Status:** ✅ **RESOLVED** в branch `fix/a70-revert-update-source-invalidate-on-failure`
+  (stacked on PR #52). Два изменения в `camera.py:_ensure_go2rtc_stream`:
+  1. **A-70 invalidate**: `try/except` вокруг `_go2rtc_upsert_stream` PUT.
+     При exception (HTTP error, network fail) → `self._cached_stream_url = None` +
+     re-raise. Next call → cache miss → fresh fetch + fresh PUT (recovery
+     не ждёт 30s TTL expire).
+  2. **A-66 partial revert**: `stream.update_source(rtsp_url)` после PUT
+     **УБРАН**. Production-лог 2026-05-27 (после deploy A-68 + A-69) показал
+     постоянное «мигание видео» каждые 30-60 сек. Корень: operator выдаёт
+     **unique token** на каждый запрос → cache miss (A-69 TTL=30s) =
+     inevitable PUT с новым src → `update_source()` restart → video прерывается
+     1-2 сек. Restart сам себя провоцировал (прерывание active ffmpeg
+     consumer → token expire → next fetch unique URL → restart).
+- **Trade-off (принят пользователем 2026-05-27):**
+  - **Plus:** НЕТ continuous мигания каждые 30-60 сек.
+  - **Minus:** lag 10-30 сек после реального token expire (HA Stream worker
+    fail → backoff retry → fresh stream_source → fresh PUT → reconnect).
+  - Lag реже и acceptable vs continuous flicker.
+- **Evidence (production-лог 2026-05-27 13:58-13:59 с A-69):**
+  - 13:58:49 — batch #1: 6 cameras `forced HA Stream restart`
+  - 13:59:25 — batch #2 через 36s (cache TTL=30s expired): снова 6 restart
+  - Юзер: «видео начинает идти, идёт какое-то время, потом снова
+    перезагружается видео поток, хотя всё нормально воспроизводилось».
+- **3 unit-теста** (`tests/test_camera_a70_invalidate.py`):
+  1. update_source НЕ вызывается после PUT (regression-guard для revert).
+  2. PUT failure → cache invalidated → next call fresh.
+  3. PUT success → cache populated (A-69 sanity).
+- **Notes for future:**
+  - Если recovery lag окажется hурtful — рассмотреть hook на HA Stream
+    worker fail event (если HA core добавит). Сейчас нет API.
+  - Альтернатива — debounce update_source (раз в 2 мин): открытый вариант.
 
 ## Maintenance rules (повтор)
 
@@ -847,8 +861,8 @@ Quality gates:
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
-| 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
-| 🟡 A-67 (subsumed by A-69) + ✅ A-68 (PR #51) + ✅ A-69 (PR TBD, stacked) + A-70 (follow-up, defer) | Итерация 3 (findings из лога 2026-05-27, stacked PRs) |
+| 🟡 A-63 (Won't fix) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + 🟡 A-66 (update_source часть reverted в A-70) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
+| 🟡 A-67 (subsumed by A-69) + ✅ A-68 (PR #51) + ✅ A-69 (PR #52 stacked) + ✅ A-70 (PR TBD stacked on #52 — revert + invalidate) | Итерация 3 (findings из логов 2026-05-27, stacked PRs) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |

@@ -168,6 +168,14 @@ Quality gates:
 - [x] ~~**A-67**~~ → **Subsumed by A-69**. Cold-start warmup больше
   не нужен — первый legitimate call от HA Stream preload делает fresh
   PUT, A-69 cache защищает последующие retry batches.
+- [x] **A-70** ✅ **Cache invalidate on PUT failure + revert A-66 update_source**
+  (PR TBD, stacked on #52). После A-68+A-69 deployment production-лог
+  2026-05-27 показал continuous «мигание» каждые 30-60 сек (cache TTL).
+  Корень: operator → unique token каждый запрос → cache miss = PUT =
+  restart. Fix: убран `Stream.update_source()` после PUT (HA Stream
+  lifecycle сам восстанавливается via retry-backoff). + invalidate cache
+  при PUT failure для faster recovery. Trade-off: 10-30s lag при token
+  expire **vs** continuous flicker.
 
 #### Code quality
 
