@@ -133,19 +133,21 @@ Quality gates:
 - [ ] **A-61** Двойной HTTP в per-place collectors — вынести `screens` + `access_controls` на уровень `_async_update_data`, передавать как параметры. Perf, не функциональная проблема.
 - [ ] **A-62** FAVORITES section в `_extract_hidden_ids` — расширить парсинг с учётом mixed-typed items. Fallback OK, не блокер.
 
-#### Production-log polish (A-63..A-65 — 3 отдельных PR)
+#### Production-log polish (A-63..A-66 — отдельные PR)
 
-> Findings собраны из production-лога (см. audit §A-63..A-65). Каждый
-> закрывается отдельным PR — изолированные, легко review/revert.
+> Findings собраны из production-лога (см. audit §A-63..A-66).
 
-- [ ] **A-63** Hidden cameras prefetch — `stream_source()` ранний return
-  None если `entity.hidden_by is not None`. Экономит лишние HTTP на hidden
-  камерах под нагрузкой frigate/webrtc preview. См. audit.
-- [ ] **A-64** Reload cascade — починить `_migrate_legacy_disabled_state`
-  + `_sync_visibility` так, чтобы cold start не давал 4× reload. Migration
-  flag в `entry.data` (или через `async_migrate_entry`), `_sync_visibility`
-  возвращает `False` если ничего реально не изменилось. Test: cold setup
-  → 1 reload (на migration), дальше — стабильно.
+- [x] ~~**A-63**~~ → **Won't fix** (PR #46 final). Оригинальная идея skip
+  `stream_source()` для hidden cameras фундаментально несовместима с HA
+  Stream lifecycle. Эксперимент в 3 PR (#44 X / #45 Y / #46 Z) подтвердил.
+  Skip оставлен только в `async_camera_image` (snapshot). Лишние HTTP к
+  operator приемлемы (поведение 3.1.0, без rate-limit). См. audit A-63.
+- [x] **A-64** ✅ Reload cascade + user override (PR #43). Migration flag
+  в `entry.data`, sync через `entity.options[DOMAIN]` track per-entity
+  user_shown override.
+- [x] **A-66** ✅ go2rtc stale producer URL после long idle (PR #46).
+  `Stream.update_source()` после каждого PUT в go2rtc — forces worker
+  restart с обновлённым ffmpeg producer. Избегает 10-30s retry-backoff.
 - [ ] **A-65** Log throttling от broken cameras — track consecutive
   failures per camera_id; 1й fail → WARNING, 2й+ → DEBUG; reset на
   success. Снимает spam от temporary-broken hardware.
