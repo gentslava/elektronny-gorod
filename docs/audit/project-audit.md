@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-05-27
+Last reviewed: 2026-05-27 (A-67/A-68 added)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -645,6 +645,111 @@ Quality gates:
   другой класс ошибок, логируется отдельно через `LOGGER.exception` в
   coordinator/HTTP слое.
 
+## Findings из production-логов (2026-05-27)
+
+> Источник — production log
+> `home-assistant_elektronny_gorod_2026-05-27T06-00-36.030Z.log` (gitignored).
+> Логи показывают deployed PR #43 (A-64) и PR #46 (A-66 final).
+
+### A-67. Cold-start go2rtc state mismatch
+
+- **Severity:** P2 (UX — 30-60 sec lag после HA restart до восстановления стримов).
+- **Area:** HA Stream lifecycle / go2rtc integration.
+- **Evidence (2026-05-27 12:57 log):**
+  - HA start at 12:57:14.
+  - **12:57:25.816** (через 11 сек) — `Error opening stream (Invalid data found ...
+    rtsp://127.0.0.1:8554/eg_5595470)`.
+  - 12:57:25.981, 12:57:25.998 — то же для eg_5595471, eg_5595472.
+  - 12:58:05.469 — для eg_5593578.
+  - 12:58:49.988 — `go2rtc.server WRN ... i/o timeout url=rtsp://127.0.0.1:8554/eg_5595472`.
+  - Recovery только в 12:58:54 (через ~90 сек после start) когда HA core
+    позвал `stream_source` → fresh PUT в go2rtc → producer обновился.
+- **Root cause:** go2rtc — отдельный процесс, **переживает** HA restart.
+  При HA shutdown remained config со stale URL (operator token expired).
+  После HA start, HA Stream worker (preload_stream) немедленно подключается
+  к `rtsp://127.0.0.1:8554/eg_<id>`, go2rtc активирует ffmpeg producer
+  с устаревшим upstream URL → fail. HA Stream backoff retry (10-30s) →
+  через 1-2 минуты `stream_source` вызывается → A-66 force restart →
+  работает.
+- **Impact:** юзер открывает Lovelace в первые 1-2 минуты после restart →
+  видит ошибки/чёрный экран. UX broken на ~60 секунд после cold start.
+- **Recommended fix:** proactive go2rtc warmup в `async_added_to_hass`:
+  - Для camera с `use_go2rtc=True` и не hidden → schedule async task
+    через `async_call_later(2)` (даём HA core bootstrap).
+  - Task делает `await self.coordinator.get_camera_stream(self._id)` +
+    `await self._ensure_go2rtc_stream(url)` → fresh PUT в go2rtc.
+  - Если HA Stream worker уже подключился → A-66 `Stream.update_source()`
+    auto-restart его с fresh producer.
+- **Trade-off:** +N HTTP к operator при startup (N = visible cameras).
+  На 10 cameras = +10 HTTP в начале (один раз), приемлемо.
+- **Test plan:**
+  - unit-тест: warmup task scheduled при `async_added_to_hass` (use_go2rtc=True).
+  - unit-тест: warmup НЕ запускается для hidden cameras / use_go2rtc=False.
+  - integration-тест: после warmup `_ensure_go2rtc_stream` вызван (`_last_src` != None).
+
+### A-68. Concurrent stream_source() для одной camera дублирует HTTP + go2rtc restart
+
+- **Severity:** **P1 (UX critical)** — каждый дубль приводит к лишнему
+  `Stream.update_source()` → restart worker → 1-2 sec **video interruption**.
+- **Area:** HA Stream / go2rtc integration / API throttling.
+- **Evidence (2026-05-27 12:59:21 log):**
+  ```
+  12:59:21.304 Fetching camera 5593578 stream URL    ← запрос #1
+  12:59:21.317 Fetching camera 5593578 stream URL    ← запрос #2 (через 13 ms!)
+  12:59:21.619 Response 5593578 video [200 OK]      ← разные tokens!
+  12:59:21.668 Response 5593578 video [200 OK]
+  ```
+  И на 13:00:14-15 для camera 5593590:
+  ```
+  13:00:14.214 go2rtc stream updated: name=eg_5593590
+  13:00:14.214 Camera ... 5593590: forced HA Stream restart after go2rtc PUT
+  13:00:15.097 go2rtc stream updated: name=eg_5593590  ← снова через 0.88 сек
+  13:00:15.097 Camera ... 5593590: forced HA Stream restart after go2rtc PUT
+  ```
+  **2 restart за 0.88 сек** для одной camera → видео мигает.
+- **Root cause:** `Camera.stream_source()` может быть вызван конкурентно
+  из нескольких источников (HA Stream worker + Frigate + Lovelace tap
+  + advanced WebRTC requests). Operator возвращает разные URL (fresh
+  tokens каждый раз), поэтому `_last_src != src` → каждый дубль делает:
+  - HTTP к operator
+  - PUT в go2rtc
+  - `Stream.update_source()` → restart worker
+- **Impact:** **UX-critical** — пользователь видит «мигающее» видео когда
+  несколько источников активно дёргают camera. На активных setup-ах
+  (frigate с motion detection + lovelace card open) это происходит
+  регулярно.
+- **Recommended fix:** in-flight deduplication через future-pattern в
+  `stream_source`:
+  ```python
+  async def stream_source(self) -> str | None:
+      if self._is_hidden():
+          return None
+      # A-68: dedup concurrent calls
+      if self._inflight_stream_future is not None:
+          return await self._inflight_stream_future
+      fut = asyncio.get_running_loop().create_future()
+      self._inflight_stream_future = fut
+      try:
+          result = await self._fetch_stream_uncached()
+          fut.set_result(result)
+          return result
+      except BaseException as exc:
+          fut.set_exception(exc)
+          raise
+      finally:
+          self._inflight_stream_future = None
+  ```
+  Concurrent вызовы wait-ают первый → получают одинаковый URL → 1 HTTP +
+  1 PUT + 1 restart. Future-pattern (а не Lock) потому что Lock привёл
+  бы к sequential HTTP, future re-uses single result.
+- **Test plan:**
+  - unit-тест: 2 concurrent `await stream_source()` → 1 mock HTTP call →
+    оба получают одинаковый URL.
+  - unit-тест: после первого finish — следующий call делает свежий HTTP
+    (не stuck cache).
+  - unit-тест: если первый бросает exception → второй тоже получает
+    exception (без зависания).
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
@@ -659,7 +764,8 @@ Quality gates:
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
-| 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR TBD) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов) |
+| 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
+| A-67 (P2 cold-start warmup) + **A-68 (P1 UX dedup concurrent stream_source)** | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
