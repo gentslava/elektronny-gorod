@@ -264,3 +264,128 @@ async def test_recovery_go2rtc_path_calls_ensure(hass: HomeAssistant, mock_api):
     mock_ensure.assert_awaited_once()
     # Прямой update_source НЕ вызывается на go2rtc-пути (это делает _ensure).
     stream.update_source.assert_not_called()
+
+
+# ─── A-71 v2: go2rtc producer-health poll (go2rtc/WebRTC-only, лифты) ──────
+#
+# Контекст: камеры без legacy HA Stream worker (обслуживаются только через
+# go2rtc/WebRTC — напр. лифты) не дают сигнала `stream.available → False`.
+# Для них поллим go2rtc `/api/streams` producer `bytes_recv`: заморожен при
+# наличии consumers → producer мёртв (operator EOF) → тот же recovery.
+
+
+async def test_go2rtc_poll_frozen_triggers_recovery(hass: HomeAssistant, mock_api):
+    """bytes_recv не растёт между опросами при consumers>0 → recovery."""
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    cam._fetch_go2rtc_stream_info = AsyncMock(
+        return_value=([{"bytes_recv": 1000}], [{}])
+    )
+
+    with patch.object(cam, "_ensure_go2rtc_stream", new=AsyncMock()) as mock_ensure:
+        await cam._async_poll_go2rtc_health()  # baseline (prev=None) — без recovery
+        await cam._async_poll_go2rtc_health()  # тот же bytes_recv → frozen → recovery
+        await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 1
+    mock_ensure.assert_awaited_once()
+
+
+async def test_go2rtc_poll_first_call_only_baselines(hass: HomeAssistant, mock_api):
+    """Первый опрос лишь ставит baseline — recovery не запускается."""
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    cam._fetch_go2rtc_stream_info = AsyncMock(
+        return_value=([{"bytes_recv": 1000}], [{}])
+    )
+
+    await cam._async_poll_go2rtc_health()
+    await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 0
+    assert cam._go2rtc_last_bytes_recv == 1000
+
+
+async def test_go2rtc_poll_growing_no_recovery(hass: HomeAssistant, mock_api):
+    """bytes_recv растёт (живой поток) → recovery не запускается."""
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    cam._fetch_go2rtc_stream_info = AsyncMock(side_effect=[
+        ([{"bytes_recv": 1000}], [{}]),
+        ([{"bytes_recv": 2000}], [{}]),
+        ([{"bytes_recv": 3000}], [{}]),
+    ])
+
+    for _ in range(3):
+        await cam._async_poll_go2rtc_health()
+    await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 0
+
+
+async def test_go2rtc_poll_no_consumers_resets_baseline(hass: HomeAssistant, mock_api):
+    """Нет consumers (никто не смотрит) → baseline сброшен, recovery нет даже
+    при «замороженном» bytes_recv."""
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    cam._fetch_go2rtc_stream_info = AsyncMock(
+        return_value=([{"bytes_recv": 1000}], [])
+    )
+
+    await cam._async_poll_go2rtc_health()
+    await cam._async_poll_go2rtc_health()
+    await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 0
+    assert cam._go2rtc_last_bytes_recv is None
+
+
+async def test_go2rtc_poll_fetch_failure_graceful(hass: HomeAssistant, mock_api):
+    """go2rtc недоступен / не-JSON (_fetch вернул None) → no-op, без падения."""
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    cam._fetch_go2rtc_stream_info = AsyncMock(return_value=None)
+
+    await cam._async_poll_go2rtc_health()
+    await cam._async_poll_go2rtc_health()
+    await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 0
+
+
+async def test_health_poll_registered_only_for_go2rtc(hass: HomeAssistant, mock_api):
+    """Таймер health-poll регистрируется для use_go2rtc, и НЕ для прямого FLV."""
+    cam_go2rtc = await _setup_camera(hass, use_go2rtc=True)
+    assert cam_go2rtc._unsub_health_poll is not None
+
+
+async def test_health_poll_not_registered_without_go2rtc(
+    hass: HomeAssistant, mock_api
+):
+    cam_direct = await _setup_camera(hass, use_go2rtc=False)
+    assert cam_direct._unsub_health_poll is None
+
+
+async def test_fetch_go2rtc_stream_info_parses_response(
+    hass: HomeAssistant, mock_api
+):
+    """`_fetch_go2rtc_stream_info` парсит реальный shape go2rtc /api/streams."""
+    from aioresponses import aioresponses
+
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    with aioresponses() as m:
+        m.get(
+            "http://127.0.0.1:1984/api/streams?src=eg_100",
+            payload={"producers": [{"bytes_recv": 42}], "consumers": [{}]},
+        )
+        info = await cam._fetch_go2rtc_stream_info()
+
+    assert info is not None
+    producers, consumers = info
+    assert producers[0]["bytes_recv"] == 42
+    assert isinstance(consumers, list) and len(consumers) == 1

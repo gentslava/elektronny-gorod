@@ -770,15 +770,21 @@ Quality gates:
 
 ### A-71. Operator forpost session TTL (~30 мин) — long-open video stops без refresh
 
-- **Status:** ✅ **RESOLVED** (branch `fix/a71-camera-stream-auto-recovery`).
-  Root cause = by-design лимит бэкенда (НЕ баг). Выбран **Вариант 1 —
-  event-driven auto-recovery** ([ADR-0009](../decisions/0009-camera-stream-auto-recovery.md)):
-  оборачиваем HA Stream update-callback, при `stream.available → False`
-  делаем throttled (`STREAM_RECOVERY_COOLDOWN=30s`) re-fetch свежего operator
-  URL + `_ensure_go2rtc_stream`/`update_source` — те же вызовы, что reopen в
-  приложении. 6 unit-тестов (`tests/test_camera_auto_recovery.py`). Покрывает
-  legacy Stream / preload (наблюдаемый кейс); непрерывный WebRTC-only —
-  осознанно отложено (см. ADR-0009 §Limitations).
+- **Status:** ✅ **RESOLVED** (branch `fix/a71-camera-stream-auto-recovery`, PR #57).
+  Root cause = by-design лимит бэкенда (НЕ баг). **Auto-recovery**, два пути
+  ([ADR-0009](../decisions/0009-camera-stream-auto-recovery.md)):
+  - **v1 event-driven** — оборачиваем HA Stream update-callback; при
+    `stream.available → False` throttled (`STREAM_RECOVERY_COOLDOWN=30s`)
+    re-fetch свежего URL + `_ensure_go2rtc_stream`/`update_source`. Покрывает
+    камеры с legacy HA Stream worker (**домофоны**). **Прод-проверка
+    2026-05-27 23:39: домофоны восстановились** (stream_worker timeout →
+    recovery → 0 ошибок после).
+  - **v2 go2rtc producer-health poll** — `GET /api/streams?src=eg_<id>` каждые
+    `GO2RTC_HEALTH_POLL_INTERVAL=30s`; `bytes_recv` заморожен при `consumers>0`
+    → stall → тот же recovery. Покрывает **go2rtc/WebRTC-only камеры (лифты)**,
+    у которых нет legacy Stream worker. Прод-диагностика live подтвердила
+    сигнал: домофоны +750 КБ/5с (живые), лифты +0 (заморожены).
+  - 14 unit-тестов (`tests/test_camera_auto_recovery.py`).
 - **Severity:** **P2 (UX, by-design)**: видео останавливается через ~30 мин
   непрерывного просмотра. **Оригинальное приложение «Мой Дом» ведёт себя
   идентично** (зависает примерно через те же полчаса) — это архитектурный

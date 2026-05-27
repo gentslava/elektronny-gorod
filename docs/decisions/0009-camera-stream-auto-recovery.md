@@ -67,6 +67,7 @@ async def _async_recover_stream(self) -> None:
     if not self.available:
         return
     stream_url = await self.coordinator.get_camera_stream(self._id)  # fresh
+
     if not stream_url:
         return
     if self._use_go2rtc:
@@ -79,9 +80,39 @@ async def _async_recover_stream(self) -> None:
 
 Worker фейлит каждые 10/20/30с и на каждый отказ зовёт callback. Без cooldown
 мы бы забили operator API. `STREAM_RECOVERY_COOLDOWN=30s` + recovery идёт через
-`hass.async_create_task` (не блокирует callback). Если свежий URL тоже мёртвый
-(operator реально down) → падаем в штатный backoff HA, повторная попытка не
-раньше чем через cooldown.
+`hass.async_create_background_task` (не блокирует callback, авто-отмена при
+shutdown). Если свежий URL тоже мёртвый (operator реально down) → падаем в
+штатный backoff HA, повторная попытка не раньше чем через cooldown.
+
+### v2 — go2rtc producer-health poll (go2rtc/WebRTC-only путь)
+
+**Прод-проверка v1 (лог 2026-05-27 23:39)** подтвердила: event-driven recovery
+сработал для **домофонов** (есть legacy HA Stream worker → `available → False`),
+но **лифты зависли** — они обслуживаются **только** через go2rtc consumer
+(WebRTC), legacy Stream worker отсутствует → сигнала `available=False` нет.
+
+**Диагностика go2rtc `/api/streams` (live, тот же момент)** дала health-сигнал:
+
+| go2rtc stream | bytes_recv за 5с | consumers | |
+|---|---|---|---|
+| eg_5593590/92/94 (домофоны) | +750–800 КБ | 1 | живые (recovered v1) |
+| eg_5595470/71/72 (лифты) | **+0 (заморожен)** | 1 | мёртвый producer |
+
+Живой forpost-producer непрерывно принимает байты (~150 КБ/с). `bytes_recv`,
+**не изменившийся за интервал при наличии `consumers`**, = producer мёртв
+(operator EOF), но go2rtc держит stale-producer.
+
+**Решение v2:** per-camera poll `GET /api/streams?src=eg_<id>` каждые
+`GO2RTC_HEALTH_POLL_INTERVAL=30s` (только `use_go2rtc`, регистрируется в
+`async_added_to_hass`, снимается в `async_will_remove_from_hass`). Если
+`bytes_recv` заморожен с прошлого опроса при `consumers>0` → тот же
+`_maybe_schedule_stream_recovery()` (общий cooldown с event-driven путём).
+`consumers==0` → сброс baseline (idle producer легитимен, не трогаем).
+
+Recovery-действие для лифтов идентично: `_ensure_go2rtc_stream` делает PUT/PATCH
+go2rtc с свежим URL; `update_source` пропускается (legacy Stream у лифтов нет —
+и не нужен, go2rtc сам переподключит producer к consumer). Прод-факт: домофоны
+с `consumers=1` после PUT свежего URL льют байты → PUT-resume-consumer доказан.
 
 ## Consequences
 
@@ -92,32 +123,38 @@ Worker фейлит каждые 10/20/30с и на каждый отказ зо
 - Не выдумывает новых эндпоинтов: recovery = `get_camera_stream` +
   `_ensure_go2rtc_stream` — те же вызовы, что reopen в приложении. Минимальная
   deviation от [mirror-app-behavior](0006-mirror-app-behavior.md).
-- Event-driven, без polling — нулевой overhead в нормальном режиме.
+- **v1** event-driven — нулевой overhead в нормальном режиме (домофоны).
+- **v2** poll покрывает go2rtc/WebRTC-only камеры (лифты), которых v1 не достаёт.
 
 ### Negative / Limitations
 
-- **Не покрывает непрерывный WebRTC-only просмотр** без переподключения: там
-  legacy Stream может быть idle, его callback не сработает. Для этого
-  понадобился бы poll go2rtc `/api/streams` producer-health (тяжелее, ближе к
-  keep-alive) — **осознанно отложено** до репорта такого кейса.
+- v2 poll = `GET /api/streams?src=eg_<id>` каждые 30с на `use_go2rtc` камеру.
+  Это localhost-запрос к go2rtc; overhead незначителен (N камер / 30с). Для
+  растущих (живых) потоков poll лишь сверяет счётчик — recovery не триггерит.
+- Детект stall имеет задержку ≤ интервала poll (~30–60с) + до ~30с на av-timeout
+  при event-пути. Видео восстанавливается не мгновенно, но автоматически.
 - Лишние HTTP к operator при recovery (1 на эпизод stall, throttled) —
   приемлемо (operator без rate-limit, частота ≤ 1/30с).
+- Признак stall — `bytes_recv` заморожен за интервал; формат поля подтверждён
+  на go2rtc этого инстанса. При смене схемы go2rtc API (маловероятно) poll
+  деградирует gracefully (нет `bytes_recv` int → no-op), event-путь не зависит.
 
 ### Mitigation
 
-- Cooldown ограничивает частоту.
-- `_async_recover_stream` ловит исключения fetch (не валит callback-цепочку).
+- Общий cooldown (`STREAM_RECOVERY_COOLDOWN`) для обоих путей — нет двойного
+  recovery если event и poll совпали.
+- `_async_recover_stream` и `_fetch_go2rtc_stream_info` ловят исключения
+  (не валят callback/таймер-цепочку).
 
 ## Alternatives considered
 
-1. **Proactive keep-alive** (фоновый refresh каждые ~10-15 мин). Отклонено
-   как primary: паттерн, которого нет в приложении (сильнее нарушает mirror),
-   + постоянные HTTP. Зафиксирован как «Вариант 2» в A-71.
-2. **go2rtc `/api/streams` producer-health polling.** Отклонено как primary:
-   надёжнее (покрывает WebRTC), но polling-overhead и сложность; ближе к
-   keep-alive. Возможное будущее расширение.
-3. **Pure mirror — ничего не делать**, задокументировать лимит. Отклонено
+1. **Proactive keep-alive** (фоновый refresh каждые ~10-15 мин вслепую).
+   Отклонено: re-mint даже healthy потоков (лишние HTTP), паттерн, которого нет
+   в приложении. Producer-health poll действует только на реальный stall.
+2. **Pure mirror — ничего не делать**, задокументировать лимит. Отклонено
    пользователем (нужен HA-UX для долгого просмотра).
+3. **Только v1 event-driven** (без poll). Отклонено после прод-проверки: не
+   покрывает go2rtc/WebRTC-only камеры (лифты зависли).
 
 ## Supersedes / Superseded by
 

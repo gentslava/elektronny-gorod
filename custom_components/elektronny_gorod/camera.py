@@ -12,17 +12,19 @@ import asyncio
 import base64
 import logging
 import time
+from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
-from aiohttp import ClientSession, ClientError
+from aiohttp import ClientSession, ClientError, ClientTimeout
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
@@ -47,6 +49,12 @@ if TYPE_CHECKING:
 # HA Stream worker сигналит unavailable на каждый retry-tick (10/20/30с);
 # без cooldown re-fetch забивал бы operator API. См. ADR-0009.
 STREAM_RECOVERY_COOLDOWN = 30.0
+
+# A-71 v2 / ADR-0009: интервал poll'а go2rtc producer-health для
+# go2rtc/WebRTC-only пути (камеры без legacy HA Stream worker — напр. лифты).
+# Живой forpost-поток шлёт ~150 КБ/с; `bytes_recv`, замороженный за интервал
+# при наличии consumers → producer мёртв (operator session EOF) → recovery.
+GO2RTC_HEALTH_POLL_INTERVAL = timedelta(seconds=30)
 
 
 def _build_go2rtc_src(source_url: str) -> str:
@@ -179,6 +187,10 @@ class ElektronnyGorodCamera(
         self._inflight_stream_future: asyncio.Future[str | None] | None = None
         # A-71: monotonic-метка последней авто-recovery (throttle, см. ADR-0009).
         self._last_recovery_monotonic: float = 0.0
+        # A-71 v2: go2rtc producer-health poll (go2rtc/WebRTC-only путь, лифты).
+        # baseline `bytes_recv` с прошлого опроса + unsub таймера.
+        self._go2rtc_last_bytes_recv: int | None = None
+        self._unsub_health_poll: CALLBACK_TYPE | None = None
         self._image: bytes | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
@@ -243,6 +255,15 @@ class ElektronnyGorodCamera(
             f"{self._go2rtc_stream_name}"
         )
 
+    def _go2rtc_auth_headers(self) -> dict[str, str]:
+        """Basic-auth заголовок для go2rtc API (если заданы creds)."""
+        headers: dict[str, str] = {}
+        if self._go2rtc_username and self._go2rtc_password:
+            userpass = f"{self._go2rtc_username}:{self._go2rtc_password}"
+            b64 = base64.b64encode(userpass.encode()).decode()
+            headers["Authorization"] = f"Basic {b64}"
+        return headers
+
     async def _ensure_go2rtc_stream(self, source_url: str) -> None:
         if not self._use_go2rtc:
             return
@@ -258,17 +279,12 @@ class ElektronnyGorodCamera(
             return
 
         session: ClientSession = async_get_clientsession(self.hass)
-        headers: dict[str, str] = {}
-        if self._go2rtc_username and self._go2rtc_password:
-            userpass = f"{self._go2rtc_username}:{self._go2rtc_password}"
-            b64 = base64.b64encode(userpass.encode()).decode()
-            headers["Authorization"] = f"Basic {b64}"
         await _go2rtc_upsert_stream(
             session=session,
             base_url=base_url,
             stream_name=self._go2rtc_stream_name,
             src=src,
-            headers=headers,
+            headers=self._go2rtc_auth_headers(),
         )
         self._last_src = src
 
@@ -482,3 +498,98 @@ class ElektronnyGorodCamera(
             await self._ensure_go2rtc_stream(stream_url)
         elif self.stream is not None:
             self.stream.update_source(stream_url)
+
+    # ------------------------------------------------------------------ #
+    # go2rtc producer-health poll (A-71 v2 / ADR-0009)                   #
+    # ------------------------------------------------------------------ #
+
+    async def async_added_to_hass(self) -> None:
+        """Подписка на coordinator + (для go2rtc) запуск producer-health poll.
+
+        Event-driven recovery (`_on_stream_state_change`) ловит только camera с
+        активным legacy HA Stream worker (домофоны). go2rtc/WebRTC-only camera
+        (напр. лифты) такого сигнала не дают — для них poll'им go2rtc producer.
+        """
+        await super().async_added_to_hass()
+        if (
+            self._use_go2rtc
+            and self._go2rtc_base_url
+            and self._unsub_health_poll is None  # idempotent: не плодим таймеры
+        ):
+            self._unsub_health_poll = async_track_time_interval(
+                self.hass,
+                self._async_poll_go2rtc_health,
+                GO2RTC_HEALTH_POLL_INTERVAL,
+            )
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Снять health-poll таймер при удалении entity."""
+        if self._unsub_health_poll is not None:
+            self._unsub_health_poll()
+            self._unsub_health_poll = None
+        await super().async_will_remove_from_hass()
+
+    async def _fetch_go2rtc_stream_info(
+        self,
+    ) -> tuple[list[dict[str, Any]], Any] | None:
+        """GET go2rtc `/api/streams?src=<name>` → `(producers, consumers)`.
+
+        Возвращает None при сетевой ошибке / не-200 / не-JSON (graceful).
+        """
+        base_url = self._go2rtc_base_url
+        if not base_url:
+            return None
+        session = async_get_clientsession(self.hass)
+        url = f"{base_url}/api/streams?{urlencode({'src': self._go2rtc_stream_name})}"
+        try:
+            async with session.get(
+                url,
+                headers=self._go2rtc_auth_headers(),
+                timeout=ClientTimeout(total=10),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+        except (ClientError, asyncio.TimeoutError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        return data.get("producers") or [], data.get("consumers")
+
+    async def _async_poll_go2rtc_health(self, now: datetime | None = None) -> None:
+        """Детект stall по go2rtc producer `bytes_recv` (A-71 v2).
+
+        Живой forpost-producer непрерывно принимает байты. Если `bytes_recv` не
+        изменился с прошлого опроса **при наличии consumers** — producer мёртв
+        (operator session EOF), но go2rtc держит stale-producer → запускаем тот
+        же throttled recovery, что и event-driven путь. Покрывает камеры без
+        legacy HA Stream worker (go2rtc/WebRTC-only, напр. лифты).
+        """
+        # `available` тут = координатор жив И камера в coordinator.data
+        # (CoordinatorEntity.available перекрывает Camera stream-check) —
+        # guard «координатор down → не дёргаем», НЕ проверка живости потока.
+        if not self.available:
+            return
+        info = await self._fetch_go2rtc_stream_info()
+        if info is None:
+            return
+        producers, consumers = info
+        n_consumers = len(consumers) if isinstance(consumers, list) else 0
+        if n_consumers == 0 or not producers:
+            # Никто не смотрит — producer может быть idle легитимно; baseline сброс.
+            self._go2rtc_last_bytes_recv = None
+            return
+        cur = producers[0].get("bytes_recv")
+        if not isinstance(cur, int):
+            return
+        prev = self._go2rtc_last_bytes_recv
+        self._go2rtc_last_bytes_recv = cur
+        if prev is not None and cur == prev:
+            LOGGER.debug(
+                "Camera %s (%s): go2rtc producer frozen "
+                "(bytes_recv=%d, %d consumer(s)) — triggering recovery",
+                self._name, self._id, cur, n_consumers,
+            )
+            self._maybe_schedule_stream_recovery()
+            # Ре-baseline: после re-mint producer стартует заново.
+            self._go2rtc_last_bytes_recv = None
