@@ -148,9 +148,9 @@ Quality gates:
 - [x] **A-66** ✅ go2rtc stale producer URL после long idle (PR #46).
   `Stream.update_source()` после каждого PUT в go2rtc — forces worker
   restart с обновлённым ffmpeg producer. Избегает 10-30s retry-backoff.
-- [ ] **A-65** Log throttling от broken cameras — track consecutive
-  failures per camera_id; 1й fail → WARNING, 2й+ → DEBUG; reset на
-  success. Снимает spam от temporary-broken hardware.
+- [x] **A-65** ✅ Log throttling от broken cameras (PR TBD). Per-entity
+  `_consecutive_empty_count` counter в `ElektronnyGorodCamera`. 1й fail
+  → WARNING, 2й+ подряд → DEBUG. Counter сбрасывается на первый success.
 
 #### Code quality
 
