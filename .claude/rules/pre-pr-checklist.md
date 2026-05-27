@@ -19,6 +19,25 @@ implementation → tests (TDD) → review → fixes → docs → commit → push
 
 ## Обязательные шаги
 
+### 0. (Для bug-fix PR) `diagnose-before-fix` — root cause confirmed
+
+**Применяется к:** PR типа `fix(*)` для production-bug (найдено в
+production-логах, observed user-pain, runtime issue). См.
+[`diagnose-before-fix.md`](diagnose-before-fix.md) для full spec.
+
+🔴 **Запрещено писать fix-код без runtime-evidence root cause.** В PR
+body / audit finding должно быть:
+- **Hypothesis** — формальная formulation «A → B → C → symptom».
+- **Diagnostic evidence** — log excerpt с timestamps + caller chain
+  (`traceback.extract_stack()` для lifecycle/async/concurrency bugs)
+  + state snapshot external services (go2rtc `/api/streams`, HTTP curl).
+- **Active diagnostic step done** — patch с trace logging, runtime
+  probe, controlled reproduce. **Не просто «читал лог»**.
+- **Root cause явно записан** — «Causal chain: ... → observed symptom».
+
+**Skip allowed:** trivial typo/copy-paste fix, cosmetic/docs PR,
+revert (diagnostic был у оригинала).
+
 ### 1. `incremental-implementation` + `test-driven-development`
 
 - Тесты для нового behavior **зелёные** локально (`PYTHONPATH=. .venv/bin/pytest tests/ -q`).
@@ -84,6 +103,7 @@ Agent(
 
 Считается зелёным если:
 
+0. ✅ (Для bug-fix PR) `ROOT_CAUSE_CONFIRMED` — runtime diagnostic evidence в PR / audit; явно записана causal chain. См. [`diagnose-before-fix.md`](diagnose-before-fix.md).
 1. ✅ Tests pass.
 2. ✅ Code-reviewer запущен, P0/P1 findings либо применены, либо обоснованы как deferred (с audit-record).
 3. ✅ Docs sync (CHANGELOG минимум, прочее по необходимости).
@@ -92,6 +112,7 @@ Agent(
 
 ## Anti-patterns (не делать)
 
+- 🔴 **Fix-by-guess**: hypothesis-driven coding без runtime evidence. Lessons learned: A-66 эксперимент (3 параллельных PR X/Y/Z + закрытые #52/#53 = 5 PR, из которых 4 закрыты без merge) — потеря ~4 часов на «угадывание» вместо 5-минутного `traceback.extract_stack()` patch. См. [`diagnose-before-fix.md`](diagnose-before-fix.md).
 - 🔴 **Push first, review later**: создавать PR, потом запускать code-reviewer, потом fixить review fixes отдельным commit'ом. Это плодит шум в истории.
 - 🔴 **Docs after merge**: «обновлю audit/CHANGELOG после merge» — это **никогда не происходит** в реальности. Docs должны быть в **том же** PR что фича.
 - 🔴 **Skip review для «маленьких» фич**: формально маленькие фичи всё равно могут иметь architectural concerns, security gaps. Subagent занимает 30-90s, экономия от skip — иллюзорна.
