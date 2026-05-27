@@ -9,6 +9,7 @@ Closes A-44: `async_update` удалён, дублирующий `get_camera_str
 from __future__ import annotations
 
 import base64
+import logging
 from typing import Any
 from urllib.parse import urlencode
 
@@ -158,6 +159,9 @@ class ElektronnyGorodCamera(
                      self._id, source, camera_info.get("hidden"))
 
         self._last_src: str | None = None
+        # A-65: counter consecutive empty stream URL responses для лог-throttling.
+        # 1й fail → WARNING, 2й+ подряд → DEBUG, reset на первый success.
+        self._consecutive_empty_count: int = 0
         self._image: bytes | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
@@ -320,8 +324,20 @@ class ElektronnyGorodCamera(
         """
         stream_url = await self.coordinator.get_camera_stream(self._id)
         if not stream_url:
-            LOGGER.warning("Camera %s (%s): empty source stream url", self._name, self._id)
+            # A-65: log throttling — 1й fail в серии WARNING, 2й+ DEBUG.
+            # Counter сбрасывается при первом успешном response.
+            self._consecutive_empty_count += 1
+            level = (
+                logging.WARNING if self._consecutive_empty_count == 1
+                else logging.DEBUG
+            )
+            LOGGER.log(
+                level,
+                "Camera %s (%s): empty source stream url",
+                self._name, self._id,
+            )
             return None
+        self._consecutive_empty_count = 0
         if not self._use_go2rtc:
             return stream_url
         await self._ensure_go2rtc_stream(stream_url)

@@ -623,33 +623,27 @@ Quality gates:
 
 ### A-65. Log noise от временно broken cameras
 
+- **Status:** ✅ **RESOLVED** в branch `fix/a65-log-throttling` (PR TBD).
+  Per-entity counter `_consecutive_empty_count` в `ElektronnyGorodCamera`.
+  В `stream_source()` при empty URL: counter incremented, level выбирается
+  динамически — `WARNING` если counter==1, `DEBUG` если counter>=2. При
+  первом успешном response counter сбрасывается → следующий fail снова
+  WARNING. Per-entity = per-camera независимые counters (другая broken
+  camera всегда получает WARNING для первого fail).
 - **Severity:** P3 (observability).
-- **Area:** Quality / UX.
-- **Evidence:** в логе 10 одинаковых WARNING за полчаса от ОДНОЙ временно
-  сломанной hardware-камеры:
-  ```
-  WARNING ... Camera <addr> (5593590): empty source stream url
-  ```
-  Источник — [`camera.py:279`](../../custom_components/elektronny_gorod/camera.py#L279):
-  `LOGGER.warning("Camera %s (%s): empty source stream url", ...)`. Логика
-  WARNING сама по себе корректна — API вернуло `null` source. Но логирование
-  каждого вызова даёт noise (особенно с frigate/webrtc preview, которые
-  тычут stream_source каждые N секунд).
-- **NOTE:** это **не** «у домофонных камер нет live stream» (был ошибочный
-  тейк в А-64 предыдущей итерации, удалён) — это конкретная hardware-камера
-  временно не работает. Когда её починят, stream вернётся.
-- **Impact:** перегрузка лога, юзеру тяжело отличить «временный fail» от
-  «постоянной проблемы». Может маскировать другие, более важные WARNING.
-- **Recommended fix:** «track consecutive failures per camera_id»:
-  - in-memory dict `{camera_id: consecutive_fail_count}` (на уровне coordinator или camera-class).
-  - 1й fail в серии → WARNING (как сейчас).
-  - 2й+ fail подряд → DEBUG (тихо).
-  - Reset counter на первый успешный stream URL.
-  - При reset из >0 → INFO «Camera N recovered after K failures» (опц.).
-- **Test plan:**
-  - unit-тест: 1й fail → WARNING, 2-10й → DEBUG.
-  - unit-тест: после success counter сбрасывается, следующий fail → снова WARNING.
-  - unit-тест: counters per camera_id независимы.
+- **Original Evidence:** production-лог 2026-05-26 — 10 одинаковых WARNING
+  за полчаса от ОДНОЙ temporary-broken hardware-камеры. Особенно noise под
+  нагрузкой frigate/webrtc preview которые тычут `stream_source` часто.
+- **3 unit-теста** (`tests/test_camera_log_throttle.py`):
+  1. 1й fail → WARNING, 2й-6й → DEBUG.
+  2. Recovery (success) → counter reset → следующий fail снова WARNING.
+  3. Per-camera counters независимы.
+- **Skipped optional:** `INFO "Camera recovered after K failures"` —
+  избыточно для production logs, можно добавить позже если будет потребность.
+- **Out of scope:** transport exceptions из `get_camera_stream` (network/timeout)
+  не throttle-аются — counter трогается только для empty-URL path. Это
+  другой класс ошибок, логируется отдельно через `LOGGER.exception` в
+  coordinator/HTTP слое.
 
 ## Maintenance rules (повтор)
 
@@ -665,7 +659,7 @@ Quality gates:
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
-| 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-66 (PR #46) + A-65 (TBD) | Итерация 3 (Silver — runtime polish из реальных логов) |
+| 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR TBD) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
