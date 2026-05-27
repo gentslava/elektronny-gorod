@@ -201,8 +201,10 @@ async def test_success_resets_counter(
     result = await broken.stream_source()
     assert result == "https://example/recovered.flv"
 
-    # Phase 3: камера снова сломалась
+    # Phase 3: камера снова сломалась. Invalidate A-69 cache, чтобы fail
+    # path сработал (без invalidate cache hit вернул бы Phase 2 URL).
     instance.query_camera_stream = AsyncMock(return_value=None)
+    broken._cached_stream_url = None
     caplog.clear()
     assert await broken.stream_source() is None
 

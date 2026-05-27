@@ -176,8 +176,9 @@ async def test_concurrent_stream_source_makes_single_http_call(
 async def test_sequential_stream_source_after_dedup_fetches_fresh(
     hass: HomeAssistant, mock_api_with_delayed_stream
 ):
-    """A-68: после завершения первого dedup-batch, следующий sequential
-    call делает свежий HTTP (in-flight future cleared)."""
+    """A-68: после завершения dedup-batch, in-flight future cleared —
+    sequential call **за пределами** A-69 TTL cache делает свежий HTTP.
+    Cache invalidated manually для изоляции от A-69 поведения."""
     entry = _make_config_entry(use_go2rtc=False)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -190,12 +191,17 @@ async def test_sequential_stream_source_after_dedup_fetches_fresh(
     # Batch #1: 2 concurrent.
     await asyncio.gather(cam.stream_source(), cam.stream_source())
     assert instance.query_camera_stream.await_count == 1
+    # in-flight future cleared (после batch).
+    assert cam._inflight_stream_future is None
 
-    # Sequential call после batch — должен сделать новый HTTP.
+    # Invalidate A-69 cache, чтобы test изолированно проверял A-68 future.
+    cam._cached_stream_url = None
+
+    # Sequential call после batch + invalidate — должен сделать новый HTTP.
     await cam.stream_source()
     assert instance.query_camera_stream.await_count == 2, (
-        f"Sequential call после dedup-batch должен fetch свежий URL, "
-        f"got call_count={instance.query_camera_stream.await_count}"
+        f"Sequential call после dedup-batch (cache invalidated) должен "
+        f"fetch свежий URL, got call_count={instance.query_camera_stream.await_count}"
     )
 
 

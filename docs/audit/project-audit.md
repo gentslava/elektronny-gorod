@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-05-27 (A-67/A-68 added)
+Last reviewed: 2026-05-27 (A-67/A-68/A-69)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -653,6 +653,13 @@ Quality gates:
 
 ### A-67. Cold-start go2rtc state mismatch
 
+- **Status:** 🟡 **SUBSUMED by A-69** (TTL cache). Изначальный план —
+  proactive `_ensure_go2rtc_stream` warmup в `async_added_to_hass`.
+  С A-69 cache: первый legitimate stream_source call (от HA Stream
+  preload или Frigate prefetch) делает fresh PUT в go2rtc, последующие
+  retry batches в пределах 30s cache TTL → cache hit → no extra HTTP.
+  Эффективно эквивалентно proactive warmup, без +N HTTP на startup.
+  Cold start lag минимизирован естественным образом.
 - **Severity:** P2 (UX — 30-60 sec lag после HA restart до восстановления стримов).
 - **Area:** HA Stream lifecycle / go2rtc integration.
 - **Evidence (2026-05-27 12:57 log):**
@@ -758,6 +765,74 @@ Quality gates:
   - unit-тест: если первый бросает exception → второй тоже получает
     exception (без зависания).
 
+### A-69. TTL cache stream URL для подавления sequential batches
+
+- **Status:** ✅ **RESOLVED** в branch `fix/a69-stream-url-ttl-cache`
+  (stacked on PR #51 A-68). Дополняет A-68 (future-pattern для overlap
+  в одной таске) для случая sequential batches.
+- **Severity:** **P1 (UX critical)** — продолжение «мигания видео» которое
+  A-68 закрыл только частично.
+- **Area:** HA Stream / go2rtc integration / API throttling.
+- **Evidence (production-лог 2026-05-27 13:30-13:31, A-68 уже задеплоен):**
+  ```
+  13:31:02.807-810  Fetching 6 cameras stream URL  ← batch #1
+  13:31:03.155-196  Response × 6
+  13:31:03.734-746  Fetching те же 6 cameras       ← batch #2 через 0.9s
+  13:31:04.068-219  Response × 6 + 6 go2rtc PUT + 6 forced restart
+  ```
+  Sequential batches с интервалом 0.5-7 сек после cold start (HA Stream
+  preload session retry, Frigate prefetch, WebRTC reconnect) — A-68
+  future cleared в `finally` после batch #1, batch #2 валидно запускает
+  новый fetch → каждая camera получает второй PUT → второй restart →
+  видео мигает.
+- **Root cause:** A-68 покрывает только **overlap во времени** (concurrent
+  внутри одной таски). Sequential calls через 0.5-7 сек — это
+  legitimate новые requests, future уже cleared.
+- **Fix:** TTL cache в `_fetch_stream_source_impl`. Cache TTL = 30s
+  (меньше operator session token TTL ~минуты — URL всегда живой):
+  - Cache hit → return cached URL → `_ensure_go2rtc_stream` видит
+    `src == _last_src` → skip PUT → **нет `update_source()` restart**.
+  - Cache miss → fresh HTTP fetch → PUT (как раньше).
+  - Failure (empty URL) **НЕ кэшируется** → next call fresh fetch.
+- **Trade-off:** stream URL может быть stale до 30s. Operator token TTL
+  ~минуты → safe window для healthy session. При operator-side de-auth
+  (token revoke, IP block, аккаунт kicked) cache отдаёт URL который
+  go2rtc/HA Stream не сможет открыть → video broken до TTL expire (≤30s).
+  Это **известный recovery-window** — см. A-70 follow-up. Frequency low
+  (de-auth редкие events, в production-логе не наблюдалось).
+- **Subsumes A-67:** original A-67 (cold-start warmup) теперь не нужен —
+  A-69 cache + первый legitimate call от HA Stream preload работают
+  тот же самый сценарий без proactive HTTP. A-67 → marked subsumed.
+- **4 unit-теста** (`tests/test_camera_stream_ttl_cache.py`):
+  sequential within TTL / sequential after TTL / failure not cached /
+  per-camera independent.
+- **Updated tests**: A-65 `test_success_resets_counter` + A-68
+  `test_sequential_stream_source_after_dedup_fetches_fresh` — добавлен
+  manual cache invalidate для изоляции от A-69 поведения.
+
+### A-70. Cache invalidation на operator-side de-auth (follow-up A-69)
+
+- **Severity:** P2 (recovery window до 30s при rare events).
+- **Area:** A-69 follow-up / failure recovery.
+- **Evidence:** code-review A-69 (PR TBD) — stale-cache window:
+  operator de-authorize-нул сессию (token revoke, IP block, аккаунт
+  kicked) → URL в cache становится мёртвым, но cache TTL ещё не expired
+  → `_ensure_go2rtc_stream` PUT-ит мёртвый URL → go2rtc producer fail →
+  HA Stream retry → cache всё ещё «здоров» → loop до 30s expire.
+- **Impact:** до 30 секунд broken video при de-auth events. В
+  production-логе не наблюдалось (de-auth редкие).
+- **Recommended fix:**
+  - `_ensure_go2rtc_stream` ловит `RuntimeError` от `_go2rtc_upsert_stream`
+    (PUT 4xx/5xx) → invalidate cache (`_cached_stream_url = None`).
+  - Опционально: catch `Stream.update_source` exception → invalidate.
+  - Опционально: hook на HA Stream worker fail event (если HA core
+    предоставляет такой) → invalidate cache для этой entity.
+- **Test plan:**
+  - unit-тест: PUT failure → cache invalidated → next call fresh fetch.
+  - unit-тест: stream.update_source exception → cache invalidated.
+- **Priority:** defer (рассматривать после анализа реальных de-auth
+  логов; в текущей выборке 2026-05-27 не наблюдалось).
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
@@ -773,7 +848,7 @@ Quality gates:
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
-| A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR TBD — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
+| 🟡 A-67 (subsumed by A-69) + ✅ A-68 (PR #51) + ✅ A-69 (PR TBD, stacked) + A-70 (follow-up, defer) | Итерация 3 (findings из лога 2026-05-27, stacked PRs) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |

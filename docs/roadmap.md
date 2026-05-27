@@ -154,16 +154,20 @@ Quality gates:
 
 #### Production-log polish (2026-05-27 — новые findings)
 
-> Логи 2026-05-27 показали 2 новых проблемы после deployment A-64/A-66.
+> Логи 2026-05-27 показали 3 связанные проблемы после deployment A-64/A-66.
 
-- [x] **A-68** ✅ **P1 UX** Concurrent `stream_source()` dedup (PR TBD).
+- [x] **A-68** ✅ **P1 UX** Concurrent `stream_source()` dedup (PR #51).
   In-flight future-pattern в `Camera.stream_source` — concurrent callers
   wait first future вместо параллельного fetch. N callers → 1 HTTP +
-  1 PUT + 1 `Stream.update_source()` restart.
-- [ ] **A-67** P2 Cold-start go2rtc warmup. После HA restart первые 60
-  секунд видео broken — go2rtc держит stale config от прошлой сессии.
-  Fix: proactive `_ensure_go2rtc_stream` в `async_added_to_hass` через
-  `async_call_later(2)`.
+  1 PUT + 1 `Stream.update_source()` restart. Покрывает overlap во
+  времени.
+- [x] **A-69** ✅ **P1 UX** TTL cache stream URL (PR TBD, stacked on #51).
+  Дополняет A-68 для **sequential** batches с интервалом 0.5-30 сек
+  (HA Stream retry, Frigate prefetch). Cache TTL=30s < operator token
+  TTL. Cache hit → no HTTP + no PUT + no restart. Failure НЕ кэшируется.
+- [x] ~~**A-67**~~ → **Subsumed by A-69**. Cold-start warmup больше
+  не нужен — первый legitimate call от HA Stream preload делает fresh
+  PUT, A-69 cache защищает последующие retry batches.
 
 #### Code quality
 

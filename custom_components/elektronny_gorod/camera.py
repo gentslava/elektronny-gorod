@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import logging
+import time
 from typing import Any
 from urllib.parse import urlencode
 
@@ -38,6 +39,15 @@ from .const import (
     LOGGER,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
+
+# A-69: TTL для cached stream URL в `Camera._fetch_stream_source_impl`.
+# Sequential calls в пределах TTL hit cache → 0 HTTP к operator + 0 PUT в
+# go2rtc + 0 `Stream.update_source()` restart (т.к. src == _last_src).
+# TTL подобран короче operator session token TTL (~минуты) — URL всегда живой.
+# Покрывает sequential batches (HA Stream retry, Frigate prefetch с
+# интервалом 0.5-30 сек), которые A-68 future-pattern не ловит (overlap
+# окно слишком короткое).
+_STREAM_URL_TTL_SECONDS = 30
 
 
 def _build_go2rtc_src(source_url: str) -> str:
@@ -168,6 +178,10 @@ class ElektronnyGorodCamera(
         # stream_source — без dedup это создаёт N HTTP к operator + N PUT в
         # go2rtc + N `Stream.update_source()` restart → «мигание видео».
         self._inflight_stream_future: asyncio.Future[str | None] | None = None
+        # A-69: TTL cache stream URL для sequential batches (HA Stream retry,
+        # Frigate prefetch с интервалом 0.5-30 сек). См. `_STREAM_URL_TTL_SECONDS`.
+        self._cached_stream_url: str | None = None
+        self._cached_stream_ts: float = 0.0
         self._image: bytes | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
@@ -360,21 +374,35 @@ class ElektronnyGorodCamera(
 
         Вызывается из `stream_source` под защитой in-flight future (A-68).
         """
-        stream_url = await self.coordinator.get_camera_stream(self._id)
-        if not stream_url:
-            # A-65: log throttling — 1й fail в серии WARNING, 2й+ DEBUG.
-            # Counter сбрасывается при первом успешном response.
-            self._consecutive_empty_count += 1
-            level = (
-                logging.WARNING if self._consecutive_empty_count == 1
-                else logging.DEBUG
-            )
-            LOGGER.log(
-                level,
-                "Camera %s (%s): empty source stream url",
-                self._name, self._id,
-            )
-            return None
+        # A-69: TTL cache — sequential calls в пределах TTL возвращают
+        # cached URL без HTTP. Дополняет A-68 (future dedup для overlap)
+        # для случая sequential batch через 0.5-30 сек (HA Stream retry,
+        # Frigate prefetch). Failure НЕ кэшируется (cache update только
+        # после `if not stream_url: return None`).
+        now = time.monotonic()
+        if (
+            self._cached_stream_url is not None
+            and now - self._cached_stream_ts < _STREAM_URL_TTL_SECONDS
+        ):
+            stream_url: str | None = self._cached_stream_url
+        else:
+            stream_url = await self.coordinator.get_camera_stream(self._id)
+            if not stream_url:
+                # A-65: log throttling — 1й fail в серии WARNING, 2й+ DEBUG.
+                # Counter сбрасывается при первом успешном response.
+                self._consecutive_empty_count += 1
+                level = (
+                    logging.WARNING if self._consecutive_empty_count == 1
+                    else logging.DEBUG
+                )
+                LOGGER.log(
+                    level,
+                    "Camera %s (%s): empty source stream url",
+                    self._name, self._id,
+                )
+                return None
+            self._cached_stream_url = stream_url
+            self._cached_stream_ts = now
         self._consecutive_empty_count = 0
         if not self._use_go2rtc:
             return stream_url
