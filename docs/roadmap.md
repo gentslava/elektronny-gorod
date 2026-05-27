@@ -148,9 +148,22 @@ Quality gates:
 - [x] **A-66** ✅ go2rtc stale producer URL после long idle (PR #46).
   `Stream.update_source()` после каждого PUT в go2rtc — forces worker
   restart с обновлённым ffmpeg producer. Избегает 10-30s retry-backoff.
-- [x] **A-65** ✅ Log throttling от broken cameras (PR TBD). Per-entity
+- [x] **A-65** ✅ Log throttling от broken cameras (PR #49). Per-entity
   `_consecutive_empty_count` counter в `ElektronnyGorodCamera`. 1й fail
   → WARNING, 2й+ подряд → DEBUG. Counter сбрасывается на первый success.
+
+#### Production-log polish (2026-05-27 — новые findings)
+
+> Логи 2026-05-27 показали 2 новых проблемы после deployment A-64/A-66.
+
+- [ ] **A-68** 🔴 **P1 UX** Concurrent `stream_source()` dedup. Видно
+  «мигание видео» когда несколько источников (HA Stream + Frigate +
+  Lovelace) одновременно дёргают одну camera → 2× `Stream.update_source()`
+  restart за <1s. Fix: in-flight future-pattern в `stream_source`.
+- [ ] **A-67** P2 Cold-start go2rtc warmup. После HA restart первые 60
+  секунд видео broken — go2rtc держит stale config от прошлой сессии.
+  Fix: proactive `_ensure_go2rtc_stream` в `async_added_to_hass` через
+  `async_call_later(2)`.
 
 #### Code quality
 
