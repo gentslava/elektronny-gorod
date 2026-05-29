@@ -56,6 +56,19 @@ STREAM_RECOVERY_COOLDOWN = 30.0
 # при наличии consumers → producer мёртв (operator session EOF) → recovery.
 GO2RTC_HEALTH_POLL_INTERVAL = timedelta(seconds=30)
 
+# A-71 v3 / ADR-0009: PROACTIVE keep-alive refresh интервал.
+# Production DIAG (2026-05-28 17h): v1/v2 reactive механизмы не покрывают
+# реальный кейс — WebRTC consumer отваливается БЫСТРЕЕ poll-интервала, а
+# session-level cutoff бэкенда бьёт ВСЕ потоки синхронно независимо от
+# наблюдателей. Нужен proactive refresh.
+# Архитектурная оптимизация: рефреш ТОЛЬКО для streams с активными consumers
+# (someone currently viewing) — не нагружаем сеть для камер, которые никто не
+# смотрит. Первое открытие после idle → HA go2rtc triggers stream_source() →
+# fresh fetch автоматически.
+# Интервал 25 мин = ~83% от observed minimum TTL 30 мин (5 мин safety margin
+# на случай если реальный TTL колеблется 27-32 мин).
+GO2RTC_PROACTIVE_REFRESH_INTERVAL = timedelta(minutes=25)
+
 
 def _build_go2rtc_src(source_url: str) -> str:
     # Video copy, audio -> AAC/OPUS (go2rtc will then output to WebRTC/HLS as needed)
@@ -191,6 +204,8 @@ class ElektronnyGorodCamera(
         # baseline `bytes_recv` с прошлого опроса + unsub таймера.
         self._go2rtc_last_bytes_recv: int | None = None
         self._unsub_health_poll: CALLBACK_TYPE | None = None
+        # A-71 v3: proactive keep-alive refresh для активных consumers.
+        self._unsub_proactive_refresh: CALLBACK_TYPE | None = None
         self._image: bytes | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
@@ -529,12 +544,26 @@ class ElektronnyGorodCamera(
                 self._async_poll_go2rtc_health,
                 GO2RTC_HEALTH_POLL_INTERVAL,
             )
+        # A-71 v3: proactive keep-alive refresh для streams с активными viewers.
+        if (
+            self._use_go2rtc
+            and self._go2rtc_base_url
+            and self._unsub_proactive_refresh is None
+        ):
+            self._unsub_proactive_refresh = async_track_time_interval(
+                self.hass,
+                self._async_proactive_refresh,
+                GO2RTC_PROACTIVE_REFRESH_INTERVAL,
+            )
 
     async def async_will_remove_from_hass(self) -> None:
-        """Снять health-poll таймер при удалении entity."""
+        """Снять health-poll и proactive-refresh таймеры при удалении entity."""
         if self._unsub_health_poll is not None:
             self._unsub_health_poll()
             self._unsub_health_poll = None
+        if self._unsub_proactive_refresh is not None:
+            self._unsub_proactive_refresh()
+            self._unsub_proactive_refresh = None
         await super().async_will_remove_from_hass()
 
     async def _fetch_go2rtc_stream_info(
@@ -626,3 +655,54 @@ class ElektronnyGorodCamera(
                 self._id, cur - prev,
                 (cur - prev) / 1024 / GO2RTC_HEALTH_POLL_INTERVAL.total_seconds(),
             )
+
+    async def _async_proactive_refresh(
+        self, now: datetime | None = None
+    ) -> None:
+        """Proactive keep-alive refresh для активных streams (A-71 v3).
+
+        Запускается каждые `GO2RTC_PROACTIVE_REFRESH_INTERVAL` (~25 мин).
+        Архитектурное решение: НЕ ждать пока stream упадёт. Рефрешим до того
+        как backend закроет session, **только** для streams с активными
+        consumers (someone watching).
+
+        - consumers > 0 → есть viewer → refresh (избегаем stall в их видео).
+        - consumers == 0 → никто не смотрит → skip. При первом открытии
+          камеры HA go2rtc вызовет stream_source() → fresh fetch автоматически.
+
+        Cooldown общий с v1/v2: если кто-то уже re-mint'нул недавно, skip
+        (нет смысла рефрешить только что minted token).
+        """
+        if not self.available:
+            LOGGER.debug("[DIAG-A71] proactive %s: skip — entity unavailable", self._id)
+            return
+        info = await self._fetch_go2rtc_stream_info()
+        if info is None:
+            LOGGER.debug("[DIAG-A71] proactive %s: skip — fetch failed", self._id)
+            return
+        producers, consumers = info
+        n_consumers = len(consumers) if isinstance(consumers, list) else 0
+        if n_consumers == 0:
+            LOGGER.debug(
+                "[DIAG-A71] proactive %s: skip — no consumers (nobody watching)",
+                self._id,
+            )
+            return
+        # Cooldown: общая throttle-метка с v1/v2 recovery.
+        now_mono = time.monotonic()
+        elapsed = now_mono - self._last_recovery_monotonic
+        # Минимальный возраст последнего refresh = половина интервала.
+        # Если v1/v2 пере-minted поток <12.5 мин назад — он ещё свежий, skip.
+        min_age = GO2RTC_PROACTIVE_REFRESH_INTERVAL.total_seconds() / 2
+        if elapsed < min_age:
+            LOGGER.debug(
+                "[DIAG-A71] proactive %s: skip — recent refresh %.0fs ago (< %.0fs)",
+                self._id, elapsed, min_age,
+            )
+            return
+        LOGGER.debug(
+            "Camera %s (%s): proactive keep-alive refresh (%d consumer(s), "
+            "last refresh %.0fs ago)",
+            self._name, self._id, n_consumers, elapsed,
+        )
+        self._maybe_schedule_stream_recovery()
