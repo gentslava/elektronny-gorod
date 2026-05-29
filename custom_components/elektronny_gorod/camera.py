@@ -82,21 +82,38 @@ async def _go2rtc_upsert_stream(
     src: str,
     headers: dict | None = None,
 ) -> None:
+    """Создать/обновить go2rtc stream.
+
+    🔑 КРИТИЧНОЕ: **PATCH first** (не PUT).
+
+    Эмпирически подтверждено на go2rtc API:
+    - **PATCH** на existing stream — idempotent: обновляет config metadata,
+      но НЕ убивает running ffmpeg-producer и НЕ disconnect-ит consumers.
+      Текущий producer продолжает работать со старым src до natural EOF;
+      go2rtc применит новый src при следующем restart. Это идеально для
+      proactive refresh (свежий URL подгружается тихо).
+    - **PATCH** на non-existing — тоже работает (HTTP 200), создаёт stream.
+    - **PUT** на existing — **DESTROY + RECREATE**: убивает текущий ffmpeg,
+      consumers падают до 0, требуется reconnect. Раньше мы делали PUT first
+      → это причина disruption consumers (root cause A-71 v3 failure).
+
+    PUT оставлен как fallback на случай если PATCH не поддерживается
+    конкретной версией go2rtc (защита от старых deployments).
+    """
     qs = urlencode({"name": stream_name, "src": src})
-    put_url = f"{base_url}/api/streams?{qs}"
+    url = f"{base_url}/api/streams?{qs}"
+    # PATCH first — safe для existing producers + consumers.
     try:
-        async with session.put(put_url, headers=headers or {}) as resp:
+        async with session.patch(url, headers=headers or {}) as resp:
             if resp.status in (200, 201, 204):
                 return
     except ClientError:
-        # PATCH
         pass
-
-    patch_url = f"{base_url}/api/streams?{qs}"
-    async with session.patch(patch_url, headers=headers or {}) as resp:
+    # PUT fallback — для старых go2rtc или если PATCH вернул 4xx/5xx.
+    async with session.put(url, headers=headers or {}) as resp:
         if resp.status >= 400:
             body = await resp.text()
-            raise RuntimeError(f"go2rtc PATCH failed: {resp.status} {body}")
+            raise RuntimeError(f"go2rtc PUT failed: {resp.status} {body}")
 
 
 def _get_go2rtc_cfg(
@@ -279,7 +296,19 @@ class ElektronnyGorodCamera(
             headers["Authorization"] = f"Basic {b64}"
         return headers
 
-    async def _ensure_go2rtc_stream(self, source_url: str) -> None:
+    async def _ensure_go2rtc_stream(
+        self, source_url: str, *, force_restart: bool = True
+    ) -> None:
+        """PATCH fresh source в go2rtc; опционально force-restart HA Stream.
+
+        `force_restart=True` (default, для event-driven recovery v1/v2): worker
+        stuck → дёргаем `Stream.update_source()` для fast restart.
+
+        `force_restart=False` (для proactive v3): worker ещё работает на старом
+        ffmpeg-producer'е. PATCH go2rtc idempotent (см. `_go2rtc_upsert_stream`
+        docstring) — текущий producer продолжает работать со старым URL до EOF,
+        затем go2rtc применит новый. consumers и WebRTC peers выживают.
+        """
         if not self._use_go2rtc:
             return
 
@@ -304,17 +333,16 @@ class ElektronnyGorodCamera(
         self._last_src = src
 
         LOGGER.debug(
-            "go2rtc stream updated: name=%s rtsp=%s",
+            "go2rtc stream updated: name=%s rtsp=%s (force_restart=%s)",
             self._go2rtc_stream_name,
             self._rtsp_url(),
+            force_restart,
         )
 
-        # A-66v3: если HA Stream worker уже running — force restart, чтобы
-        # новый ffmpeg producer (с свежим operator src) активировался немедленно.
-        # Без этого worker продолжает старое подключение, при истечении operator
-        # токена впадает в retry-with-backoff (10-60 сек).
-        # `update_source()` устанавливает `_fast_restart_once=True` +
-        # `_thread_quit.set()` (см. homeassistant.components.stream).
+        if not force_restart:
+            return
+
+        # A-66: force restart нужен для event-driven recovery (worker stuck).
         stream = self.stream
         if stream is not None:
             try:
@@ -463,19 +491,28 @@ class ElektronnyGorodCamera(
             self._maybe_schedule_stream_recovery()
 
     @callback
-    def _maybe_schedule_stream_recovery(self) -> None:
-        """Запланировать recovery, если прошёл cooldown (защита от шторма)."""
+    def _maybe_schedule_stream_recovery(
+        self, *, force_restart: bool = True
+    ) -> None:
+        """Запланировать recovery, если прошёл cooldown.
+
+        `force_restart=True` (default): event-driven recovery (v1/v2) — worker
+        stuck → дёргаем `Stream.update_source()` для fast restart.
+
+        `force_restart=False`: proactive (v3) — worker ещё работает, PATCH
+        go2rtc idempotent (см. `_go2rtc_upsert_stream` docstring), не нужен
+        restart, transition smooth.
+        """
         now = time.monotonic()
         if now - self._last_recovery_monotonic < STREAM_RECOVERY_COOLDOWN:
             return
         self._last_recovery_monotonic = now
-        # Background task — авто-отмена при HA shutdown; не держит unload.
         self.hass.async_create_background_task(
-            self._async_recover_stream(),
+            self._async_recover_stream(force_restart=force_restart),
             name=f"{DOMAIN}_stream_recovery_{self._id}",
         )
 
-    async def _async_recover_stream(self) -> None:
+    async def _async_recover_stream(self, *, force_restart: bool = True) -> None:
         """Re-fetch свежий operator URL + перенаправить источник (A-71).
 
         Вызывается когда HA Stream worker сигналит unavailable (operator
@@ -513,14 +550,16 @@ class ElektronnyGorodCamera(
         )
         try:
             if self._use_go2rtc:
-                await self._ensure_go2rtc_stream(stream_url)
-            elif self.stream is not None:
+                await self._ensure_go2rtc_stream(
+                    stream_url, force_restart=force_restart
+                )
+            elif self.stream is not None and force_restart:
                 self.stream.update_source(stream_url)
         except Exception:  # noqa: BLE001 — [DIAG-A71] catch для видимости PUT-fails
             LOGGER.exception("[DIAG-A71] recovery %s: _ensure_go2rtc_stream/update_source raised", self._id)
             return
-        LOGGER.debug("[DIAG-A71] recovery %s: completed (use_go2rtc=%s, has_stream=%s)",
-                     self._id, self._use_go2rtc, self.stream is not None)
+        LOGGER.debug("[DIAG-A71] recovery %s: completed (use_go2rtc=%s, has_stream=%s, force_restart=%s)",
+                     self._id, self._use_go2rtc, self.stream is not None, force_restart)
 
     # ------------------------------------------------------------------ #
     # go2rtc producer-health poll (A-71 v2 / ADR-0009)                   #
@@ -705,4 +744,8 @@ class ElektronnyGorodCamera(
             "last refresh %.0fs ago)",
             self._name, self._id, n_consumers, elapsed,
         )
-        self._maybe_schedule_stream_recovery()
+        # CRITICAL v3.2: force_restart=False для proactive.
+        # PATCH-first в `_go2rtc_upsert_stream` НЕ убивает running producer,
+        # `update_source()` HA Stream worker НЕ нужен. Existing consumers
+        # (WebRTC peers + preload) выживают, transition smooth при EOF.
+        self._maybe_schedule_stream_recovery(force_restart=False)
