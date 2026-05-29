@@ -389,3 +389,100 @@ async def test_fetch_go2rtc_stream_info_parses_response(
     producers, consumers = info
     assert producers[0]["bytes_recv"] == 42
     assert isinstance(consumers, list) and len(consumers) == 1
+
+
+# ─── A-71 v3: proactive keep-alive refresh (active streams only) ───────────
+#
+# DIAG (T20-08, 17ч): v1/v2 не покрывают реальный кейс — consumers падает с
+# >0 до 0 ВНУТРИ 30с poll-окна, session-level cutoff операторского бэкенда
+# бьёт ВСЕ потоки разом. Решение: proactive refresh ~25 мин, ТОЛЬКО для
+# streams с активными consumers (не нагружаем сеть впустую).
+
+
+async def test_proactive_refresh_active_consumers_triggers_recovery(
+    hass: HomeAssistant, mock_api
+):
+    """consumers > 0 + cooldown прошёл → recovery scheduled."""
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    # Cooldown очень давно (никогда не recovery'или).
+    cam._last_recovery_monotonic = 0.0
+    cam._fetch_go2rtc_stream_info = AsyncMock(
+        return_value=([{"bytes_recv": 100000}], [{}])
+    )
+
+    with patch.object(cam, "_ensure_go2rtc_stream", new=AsyncMock()) as mock_ensure:
+        await cam._async_proactive_refresh()
+        await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 1
+    mock_ensure.assert_awaited_once()
+
+
+async def test_proactive_refresh_no_consumers_skips(
+    hass: HomeAssistant, mock_api
+):
+    """consumers == 0 → skip (нет смысла рефрешить кого никто не смотрит)."""
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    cam._last_recovery_monotonic = 0.0
+    cam._fetch_go2rtc_stream_info = AsyncMock(
+        return_value=([{"bytes_recv": 100000}], [])
+    )
+
+    await cam._async_proactive_refresh()
+    await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 0
+
+
+async def test_proactive_refresh_recent_cooldown_skips(
+    hass: HomeAssistant, mock_api
+):
+    """Recent v1/v2 recovery → cooldown активен → skip."""
+    import time as _time
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    # Только что было recovery (cooldown активен — refresh не нужен).
+    cam._last_recovery_monotonic = _time.monotonic()
+    cam._fetch_go2rtc_stream_info = AsyncMock(
+        return_value=([{"bytes_recv": 100000}], [{}])
+    )
+
+    await cam._async_proactive_refresh()
+    await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 0
+
+
+async def test_proactive_refresh_fetch_failure_graceful(
+    hass: HomeAssistant, mock_api
+):
+    """go2rtc недоступен → skip без падений."""
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    cam._last_recovery_monotonic = 0.0
+    cam._fetch_go2rtc_stream_info = AsyncMock(return_value=None)
+
+    await cam._async_proactive_refresh()
+    await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 0
+
+
+async def test_proactive_refresh_registered_only_for_go2rtc(
+    hass: HomeAssistant, mock_api
+):
+    cam_go2rtc = await _setup_camera(hass, use_go2rtc=True)
+    assert cam_go2rtc._unsub_proactive_refresh is not None
+
+
+async def test_proactive_refresh_not_registered_without_go2rtc(
+    hass: HomeAssistant, mock_api
+):
+    cam_direct = await _setup_camera(hass, use_go2rtc=False)
+    assert cam_direct._unsub_proactive_refresh is None
