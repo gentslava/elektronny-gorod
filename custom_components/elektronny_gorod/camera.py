@@ -102,18 +102,24 @@ async def _go2rtc_upsert_stream(
     """
     qs = urlencode({"name": stream_name, "src": src})
     url = f"{base_url}/api/streams?{qs}"
+    timeout = ClientTimeout(total=10)
     # PATCH first — safe для existing producers + consumers.
     try:
-        async with session.patch(url, headers=headers or {}) as resp:
+        async with session.patch(
+            url, headers=headers or {}, timeout=timeout
+        ) as resp:
             if resp.status in (200, 201, 204):
                 return
     except ClientError:
         pass
     # PUT fallback — для старых go2rtc или если PATCH вернул 4xx/5xx.
-    async with session.put(url, headers=headers or {}) as resp:
+    async with session.put(
+        url, headers=headers or {}, timeout=timeout
+    ) as resp:
         if resp.status >= 400:
-            body = await resp.text()
-            raise RuntimeError(f"go2rtc PUT failed: {resp.status} {body}")
+            # NB: НЕ логируем response body — go2rtc может echo'нуть src=
+            # обратно, включая operator token (см. no-secret-logs rule).
+            raise RuntimeError(f"go2rtc PUT failed: HTTP {resp.status}")
 
 
 def _get_go2rtc_cfg(
