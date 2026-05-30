@@ -19,6 +19,7 @@ Acceptance:
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -406,8 +407,10 @@ async def test_proactive_refresh_active_consumers_triggers_recovery(
     cam = await _setup_camera(hass, use_go2rtc=True)
     instance = mock_api.return_value
     instance.query_camera_stream.reset_mock()
-    # Cooldown очень давно (никогда не recovery'или).
-    cam._last_recovery_monotonic = 0.0
+    # Cooldown давно прошёл. NB: используем relative offset от
+    # `time.monotonic()`, а не 0.0 — в CI-контейнерах с малым uptime
+    # `monotonic()-0.0` может быть < `min_age` (855s) → proactive skip.
+    cam._last_recovery_monotonic = time.monotonic() - 10000.0
     cam._fetch_go2rtc_stream_info = AsyncMock(
         return_value=([{"bytes_recv": 100000}], [{}])
     )
@@ -427,7 +430,7 @@ async def test_proactive_refresh_no_consumers_skips(
     cam = await _setup_camera(hass, use_go2rtc=True)
     instance = mock_api.return_value
     instance.query_camera_stream.reset_mock()
-    cam._last_recovery_monotonic = 0.0
+    cam._last_recovery_monotonic = time.monotonic() - 10000.0
     cam._fetch_go2rtc_stream_info = AsyncMock(
         return_value=([{"bytes_recv": 100000}], [])
     )
@@ -442,12 +445,11 @@ async def test_proactive_refresh_recent_cooldown_skips(
     hass: HomeAssistant, mock_api
 ):
     """Recent v1/v2 recovery → cooldown активен → skip."""
-    import time as _time
     cam = await _setup_camera(hass, use_go2rtc=True)
     instance = mock_api.return_value
     instance.query_camera_stream.reset_mock()
     # Только что было recovery (cooldown активен — refresh не нужен).
-    cam._last_recovery_monotonic = _time.monotonic()
+    cam._last_recovery_monotonic = time.monotonic()
     cam._fetch_go2rtc_stream_info = AsyncMock(
         return_value=([{"bytes_recv": 100000}], [{}])
     )
@@ -465,7 +467,7 @@ async def test_proactive_refresh_fetch_failure_graceful(
     cam = await _setup_camera(hass, use_go2rtc=True)
     instance = mock_api.return_value
     instance.query_camera_stream.reset_mock()
-    cam._last_recovery_monotonic = 0.0
+    cam._last_recovery_monotonic = time.monotonic() - 10000.0
     cam._fetch_go2rtc_stream_info = AsyncMock(return_value=None)
 
     await cam._async_proactive_refresh()
