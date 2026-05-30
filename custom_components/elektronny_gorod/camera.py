@@ -65,9 +65,11 @@ GO2RTC_HEALTH_POLL_INTERVAL = timedelta(seconds=30)
 # (someone currently viewing) — не нагружаем сеть для камер, которые никто не
 # смотрит. Первое открытие после idle → HA go2rtc triggers stream_source() →
 # fresh fetch автоматически.
-# Интервал 25 мин = ~83% от observed minimum TTL 30 мин (5 мин safety margin
-# на случай если реальный TTL колеблется 27-32 мин).
-GO2RTC_PROACTIVE_REFRESH_INTERVAL = timedelta(minutes=25)
+# Интервал 28:30 = 95% от observed minimum TTL 30:00 (1.5 мин safety margin).
+# Эмпирически TTL operator-сессии deterministic = 30:00. Margin 90с = 180x
+# recovery latency (<1с) + 100x client jitter (~800мс) — race-window закрыт.
+# Если v3 пропустит (network blip) — v1/v2 поймают.
+GO2RTC_PROACTIVE_REFRESH_INTERVAL = timedelta(minutes=28, seconds=30)
 
 
 def _build_go2rtc_src(source_url: str) -> str:
@@ -677,7 +679,7 @@ class ElektronnyGorodCamera(
     ) -> None:
         """Proactive keep-alive refresh для активных streams (A-71 v3).
 
-        Запускается каждые `GO2RTC_PROACTIVE_REFRESH_INTERVAL` (~25 мин).
+        Запускается каждые `GO2RTC_PROACTIVE_REFRESH_INTERVAL` (28:30).
         Архитектурное решение: НЕ ждать пока stream упадёт. Рефрешим до того
         как backend закроет session, **только** для streams с активными
         consumers (someone watching).

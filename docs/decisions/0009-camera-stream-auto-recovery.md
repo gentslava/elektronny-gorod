@@ -121,7 +121,7 @@ go2rtc с свежим URL; `update_source` пропускается (legacy Str
 `frozen+consumers>0`), session-level cutoff бэкенда бьёт ВСЕ потоки
 синхронно независимо от наблюдателей.
 
-**v3 решение:** PROACTIVE refresh каждые ~25 мин (~83% от observed
+**v3 решение:** PROACTIVE refresh каждые 28:30 (95% от observed
 min TTL 30 мин) **только** для streams с активными consumers — не нагружаем
 сеть для idle камер. Первое открытие после idle → HA go2rtc дёрнет
 `stream_source()` → fresh fetch автоматически.
