@@ -24,6 +24,7 @@
       "go2rtc_unreachable": "Could not connect to go2rtc (check the URL or network)",
       "go2rtc_auth_failed": "go2rtc requires authentication (HTTP 401). Enter username/password, or disable auth on the go2rtc server, or uncheck \"Use go2rtc\" to save without connecting.",
       "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)",
+      "go2rtc_rtsp_port_closed": "go2rtc HTTP API is reachable, but the RTSP port (8554) is closed. Check firewall, bind address, or that go2rtc was built with RTSP support.",
       "unknown_status": "Received an unknown response. Please create an issue.",
       "unauthorized": "Authorization error",
       "unknown": "Unexpected error"
@@ -90,7 +91,8 @@
       "go2rtc_invalid_url": "Invalid URL (could not determine host)",
       "go2rtc_unreachable": "Could not connect to go2rtc (check the URL or network)",
       "go2rtc_auth_failed": "go2rtc requires authentication (HTTP 401). Enter username/password, or disable auth on the go2rtc server, or uncheck \"Use go2rtc\" to save without connecting.",
-      "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)"
+      "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)",
+      "go2rtc_rtsp_port_closed": "go2rtc HTTP API is reachable, but the RTSP port (8554) is closed. Check firewall, bind address, or that go2rtc was built with RTSP support."
     }
   },
   "entity": {

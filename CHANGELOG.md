@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- **go2rtc validation: TCP-probe RTSP-порта** ([A-79](docs/audit/project-audit.md)). После успешной HTTP-валидации (`GET /api` + `PUT /api/streams`) теперь делается `asyncio.open_connection(rtsp_host, 8554)` с timeout 3с. Если RTSP-порт закрыт (firewall / отдельный bind-address / go2rtc собран без RTSP) — config-flow возвращает отдельный error key `go2rtc_rtsp_port_closed` с понятным сообщением. Раньше юзер обнаруживал проблему только когда камера не воспроизводится. **G-9 closure**: первые direct unit-тесты для `validate_go2rtc` / `_go2rtc_upsert_stream` / `cleanup_go2rtc_stream` — 39 тестов в `tests/test_go2rtc_validate.py` + `tests/test_go2rtc_upsert.py` фиксируют HTTP-контракт с go2rtc API (PATCH-first vs PUT-fallback, S-A71-01 token-leak guard, cleanup `?src=` semantics).
+
 ## [3.3.0] - 2026-05-30
 
 ### Added

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import uuid
 import base64
 from dataclasses import dataclass
@@ -8,7 +9,13 @@ from urllib.parse import urlencode
 from aiohttp import ClientError, ClientSession
 from yarl import URL
 
-from .const import LOGGER
+from .const import GO2RTC_RTSP_PORT, LOGGER
+
+# G-7 / A-79: TCP-probe RTSP-порта go2rtc после успешной HTTP-валидации.
+# Если HTTP API открыт, а RTSP-порт закрыт (firewall, иной bind-address,
+# go2rtc собран без RTSP) — раньше юзер узнавал только при попытке
+# стриминга. Probe — 3с timeout, чтобы не висеть на медленных сетях.
+RTSP_PROBE_TIMEOUT_SEC = 3.0
 
 
 @dataclass(frozen=True)
@@ -32,6 +39,29 @@ def derive_rtsp_host(base_url: str) -> str | None:
         return None
 
 
+async def _probe_rtsp_port(host: str, port: int, timeout: float) -> bool:
+    """TCP-handshake probe `host:port`. True если порт открыт.
+
+    Используется validate_go2rtc для G-7/A-79: HTTP API может быть открыт,
+    а RTSP-порт — закрыт (firewall, иной bind-address, go2rtc собран без
+    RTSP-модуля). Без probe юзер обнаруживает проблему только когда
+    камера не воспроизводится.
+    """
+    try:
+        reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
+    except (OSError, asyncio.TimeoutError):
+        return False
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except OSError:
+        # connection reset во время close — порт всё равно был открыт
+        pass
+    return True
+
+
 async def validate_go2rtc(base_url: str, session: ClientSession, username: str | None = None, password: str | None = None) -> Go2RtcValidationResult:
     """
     Validate go2rtc HTTP API and that streams API is writable.
@@ -40,6 +70,7 @@ async def validate_go2rtc(base_url: str, session: ClientSession, username: str |
     1) GET  {base_url}/api -> 200
     2) PUT  {base_url}/api/streams?name=...&src=...
     3) DELETE cleanup {base_url}/api/streams?src=<name> (best-effort)
+    4) TCP-probe RTSP-порта (rtsp_host, GO2RTC_RTSP_PORT) — G-7/A-79.
 
     Returns:
       Go2RtcValidationResult(ok, error, rtsp_host)
@@ -86,6 +117,16 @@ async def validate_go2rtc(base_url: str, session: ClientSession, username: str |
     finally:
         # 3) cleanup (best-effort)
         await cleanup_go2rtc_stream(base_url, test_name, session, headers)
+
+    # 4) TCP-probe RTSP-порта. HTTP API мог пройти, а RTSP-порт быть
+    # недоступным (firewall / отдельный bind). Делаем отдельный error key,
+    # чтобы юзер сразу видел причину.
+    if not await _probe_rtsp_port(rtsp_host, GO2RTC_RTSP_PORT, RTSP_PROBE_TIMEOUT_SEC):
+        LOGGER.debug(
+            "go2rtc RTSP probe failed: %s:%s unreachable",
+            rtsp_host, GO2RTC_RTSP_PORT,
+        )
+        return Go2RtcValidationResult(False, "go2rtc_rtsp_port_closed", rtsp_host)
 
     return Go2RtcValidationResult(True, "", rtsp_host)
 

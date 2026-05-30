@@ -24,6 +24,7 @@
       "go2rtc_unreachable": "Не удалось подключиться к go2rtc (проверьте URL или сеть)",
       "go2rtc_auth_failed": "Сервер go2rtc требует авторизацию (HTTP 401). Введите логин/пароль, отключите авторизацию на сервере go2rtc, или снимите галочку «Использовать go2rtc» чтобы сохранить без подключения.",
       "go2rtc_streams_api_failed": "go2rtc доступен, но не принимает /api/streams (проверьте настройки/права)",
+      "go2rtc_rtsp_port_closed": "HTTP API go2rtc доступен, но RTSP-порт (8554) закрыт. Проверьте firewall, bind-address, или что go2rtc собран с поддержкой RTSP.",
       "unknown_status": "Неизвестный ответ получен. Пожалуйста, создайте issue.",
       "unauthorized": "Ошибка авторизации",
       "unknown": "Неожиданная ошибка"
@@ -90,7 +91,8 @@
       "go2rtc_invalid_url": "Некорректный URL (не удалось определить host)",
       "go2rtc_unreachable": "Не удалось подключиться к go2rtc (проверьте URL или сеть)",
       "go2rtc_auth_failed": "Сервер go2rtc требует авторизацию (HTTP 401). Введите логин/пароль, отключите авторизацию на сервере go2rtc, или снимите галочку «Использовать go2rtc» чтобы сохранить без подключения.",
-      "go2rtc_streams_api_failed": "go2rtc доступен, но не принимает /api/streams (проверьте настройки/права)"
+      "go2rtc_streams_api_failed": "go2rtc доступен, но не принимает /api/streams (проверьте настройки/права)",
+      "go2rtc_rtsp_port_closed": "HTTP API go2rtc доступен, но RTSP-порт (8554) закрыт. Проверьте firewall, bind-address, или что go2rtc собран с поддержкой RTSP."
     }
   },
   "entity": {
