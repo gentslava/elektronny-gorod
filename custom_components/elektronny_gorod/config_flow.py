@@ -406,15 +406,15 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
     async def async_step_init(self, user_input=None) -> ConfigFlowResult:
         """Edit go2rtc settings after the integration has been set up."""
         errors: dict[str, str] = {}
-
-        username = None
-        password = None
+        result = None
 
         if user_input is not None:
             use_go2rtc = bool(user_input.get(CONF_USE_GO2RTC, False))
             base_url = normalize_base_url(user_input.get(CONF_GO2RTC_BASE_URL))
-            username = user_input.get(CONF_GO2RTC_USERNAME)
-            password = user_input.get(CONF_GO2RTC_PASSWORD)
+            # Optional fields without schema default — empty submit stays empty
+            # (not back-filled to previous value, see HA add_suggested_values_to_schema).
+            username = user_input.get(CONF_GO2RTC_USERNAME) or ""
+            password = user_input.get(CONF_GO2RTC_PASSWORD) or ""
 
             # If go2rtc is enabled, validate the URL
             if use_go2rtc:
@@ -430,7 +430,7 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
                 data = {
                     CONF_USE_GO2RTC: use_go2rtc,
                     CONF_GO2RTC_BASE_URL: base_url,
-                    CONF_GO2RTC_RTSP_HOST: result.rtsp_host if use_go2rtc else None,
+                    CONF_GO2RTC_RTSP_HOST: result.rtsp_host if (use_go2rtc and result) else None,
                     CONF_GO2RTC_USERNAME: username,
                     CONF_GO2RTC_PASSWORD: password,
                 }
@@ -453,11 +453,25 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
             self.entry.data.get(CONF_GO2RTC_PASSWORD, ""),
         )
 
+        # NB: username/password — vol.Optional WITHOUT default. voluptuous
+        # default would be back-filled into empty submit (HA frontend омит
+        # пустые Optional поля) → юзер не мог бы очистить creds. Текущие
+        # значения подаются через add_suggested_values_to_schema — это
+        # «подсказка» в UI, но пустой submit остаётся пустым.
         schema = vol.Schema({
             vol.Optional(CONF_USE_GO2RTC, default=bool(use_go2rtc_default)): bool,
             vol.Optional(CONF_GO2RTC_BASE_URL, default=str(go2rtc_host_default)): str,
-            vol.Optional(CONF_GO2RTC_USERNAME, default=str(go2rtc_username_default)): str,
-            vol.Optional(CONF_GO2RTC_PASSWORD, default=str(go2rtc_password_default)): str,
+            vol.Optional(CONF_GO2RTC_USERNAME): str,
+            vol.Optional(CONF_GO2RTC_PASSWORD): str,
         })
 
-        return self.async_show_form(step_id="init", data_schema=schema, errors=errors)
+        suggested_values = {
+            CONF_GO2RTC_USERNAME: str(go2rtc_username_default or ""),
+            CONF_GO2RTC_PASSWORD: str(go2rtc_password_default or ""),
+        }
+
+        return self.async_show_form(
+            step_id="init",
+            data_schema=self.add_suggested_values_to_schema(schema, suggested_values),
+            errors=errors,
+        )

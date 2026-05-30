@@ -909,36 +909,61 @@ Quality gates:
   (force restart механизм), [A-71](#a-71-operator-forpost-session-ttl-30-мин--long-open-video-stops-без-refresh)
   (auto-recovery архитектура), [ADR-0009](../decisions/0009-camera-stream-auto-recovery.md).
 
-### A-78. Options flow — нельзя очистить go2rtc creds при включенной auth на сервере
+### A-78. Options flow — нельзя очистить go2rtc creds (voluptuous default back-fill)
 
 - **Status:** 🟢 **RESOLVED** (PR #58 — fix scope S-A71-02).
-- **Severity:** **P3 (UX confusion, нет data loss).**
-- **Area:** `config_flow.py:OptionsFlowHandler.async_step_init`, `go2rtc.py:validate_go2rtc`.
+- **Severity:** **P2 (UX-baked silent corruption — юзер думает «save успешен», а данные не меняются).**
+- **Area:** `config_flow.py:OptionsFlowHandler.async_step_init` (schema construction),
+  `go2rtc.py:validate_go2rtc` (UX-улучшение для 401).
 - **Symptom:** Юзер открывает «Настройки go2rtc», очищает поля username/password,
-  нажимает «Сохранить» — форма показывает generic ошибку «Не удалось подключиться
-  к go2rtc» и перерисовывается с **прежними** значениями creds (defaults
-  перезаливаются из `self.entry.options`). Юзер видит «creds не очистились».
-- **Root cause:** `validate_go2rtc` ходит на go2rtc API. Если на сервере
-  включена auth, а в форме юзер очистил creds → запрос без `Authorization`
-  header → сервер отвечает **401** → код мапил это на `go2rtc_unreachable`
-  («не удалось подключиться»), хотя сервер был достижим — просто отверг auth.
-  Форма перерисовывалась с defaults из options → визуально «creds не
-  очистились».
-- **Fix:** различить HTTP 401 в `validate_go2rtc` (и `GET /api`, и `PUT
-  /api/streams`), вернуть отдельный error code `go2rtc_auth_failed` с
-  понятным сообщением: «go2rtc требует авторизацию. Введите creds, отключите
-  auth на сервере, или снимите галочку Use go2rtc чтобы сохранить без
-  подключения».
-- **Workaround для юзеров до релиза:** снять галочку «Использовать go2rtc»
-  → creds валидация скипается, форма сохраняется → если нужно вернуть go2rtc,
-  открыть форму снова и включить с новыми creds.
-- **Evidence:** пользователь самостоятельно репортил в этой сессии при
-  попытке очистить креды (go2rtc развернут с auth внутри Frigate).
-- **Test plan:** manual UX:
-  1. Включить auth на go2rtc сервере, прописать creds в опциях интеграции, save.
-  2. Открыть опции, очистить username/password, save → ожидается понятная
-     ошибка про auth (с указанием путей решения), а не «unreachable».
-  3. Снять галочку Use go2rtc, save → должно сохраниться без валидации.
+  нажимает «Сохранить» — форма показывает «Параметры успешно сохранены»,
+  но при следующем открытии options creds **снова на месте**.
+- **Evidence (production storage снимок 2026-05-30):**
+  Юзер репортил bug; SSH'нул на сервер, посмотрел
+  `/opt/homeassistant/.storage/core.config_entries`:
+  ```
+  "options": {
+    "go2rtc_username": "admin",
+    "go2rtc_password": "XPzqUkuCTr4639go2rtc",
+    ...
+  }
+  ```
+  Хотя юзер только что «сохранил» с пустыми полями.
+- **Root cause (real, доказан unit-test'ом):** schema использовала
+  `vol.Optional(KEY, default=str(old_value)): str` — это HA frontend омит
+  пустые Optional поля при submit → voluptuous подставляет **default обратно** →
+  user_input получает старое значение → save «успешен» без изменений.
+  Документировано HA: «The default value is used if the user leaves the field
+  empty» — это и есть наш сценарий. Изначально я диагностировал bug как
+  «validate_go2rtc мапил 401 на unreachable» — это была ВТОРИЧНАЯ проблема
+  (юзер видел misleading error). Реальный root cause обнаружен только когда
+  юзер сказал «save проходит успешно» — это противоречило моей первой гипотезе.
+- **Fix:** канонический HA pattern `add_suggested_values_to_schema`:
+  ```python
+  schema = vol.Schema({
+      vol.Optional(CONF_GO2RTC_USERNAME): str,  # ← НЕТ default
+      vol.Optional(CONF_GO2RTC_PASSWORD): str,
+  })
+  return self.async_show_form(
+      step_id="init",
+      data_schema=self.add_suggested_values_to_schema(
+          schema, {CONF_GO2RTC_USERNAME: old, CONF_GO2RTC_PASSWORD: old}
+      ),
+  )
+  ```
+  Подсказка показывает текущие creds в UI, но empty submit остаётся empty.
+  Плюс улучшен 401 detection в `validate_go2rtc` (отдельный
+  `go2rtc_auth_failed` error code).
+- **Regression-guard:** 3 unit-теста в `tests/test_options_flow_clear_creds.py`:
+  - `test_clear_creds_when_use_go2rtc_off` — clear creds + uncheck = save empty (этот тест **FAIL без fix**).
+  - `test_clear_creds_with_use_go2rtc_on_shows_auth_error` — UX для забывших unchecking.
+  - `test_change_creds_to_new_values` — happy path смены.
+- **Lesson learned:** при diagnose UX-багов **читай реальное persistent state**
+  (HA storage, БД), не только UI feedback. Юзер сказал «creds не очищаются» —
+  моя первая гипотеза была про validation block (logically valid, но не root cause).
+  SSH'нув на сервер за 1 запрос и посмотрев `core.config_entries.json`, увидел
+  что save реально проходит — это сразу указало на schema/voluptuous как
+  настоящего виновника.
 
 
 ## Maintenance rules (повтор)
