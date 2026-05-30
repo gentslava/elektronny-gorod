@@ -61,6 +61,8 @@ async def validate_go2rtc(base_url: str, session: ClientSession, username: str |
     # 1) ping /api
     try:
         async with session.get(f"{base_url}/api", headers=headers) as resp:
+            if resp.status == 401:
+                return Go2RtcValidationResult(False, "go2rtc_auth_failed", rtsp_host)
             if resp.status != 200:
                 return Go2RtcValidationResult(False, "go2rtc_unreachable", rtsp_host)
     except ClientError:
@@ -73,6 +75,8 @@ async def validate_go2rtc(base_url: str, session: ClientSession, username: str |
 
     try:
         async with session.put(f"{base_url}/api/streams?{put_qs}", headers=headers) as resp:
+            if resp.status == 401:
+                return Go2RtcValidationResult(False, "go2rtc_auth_failed", rtsp_host)
             if resp.status not in (200, 201, 204):
                 body = await resp.text()
                 LOGGER.debug("go2rtc streams check failed: %s %s", resp.status, body)

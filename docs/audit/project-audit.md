@@ -909,6 +909,37 @@ Quality gates:
   (force restart механизм), [A-71](#a-71-operator-forpost-session-ttl-30-мин--long-open-video-stops-без-refresh)
   (auto-recovery архитектура), [ADR-0009](../decisions/0009-camera-stream-auto-recovery.md).
 
+### A-78. Options flow — нельзя очистить go2rtc creds при включенной auth на сервере
+
+- **Status:** 🟢 **RESOLVED** (PR #58 — fix scope S-A71-02).
+- **Severity:** **P3 (UX confusion, нет data loss).**
+- **Area:** `config_flow.py:OptionsFlowHandler.async_step_init`, `go2rtc.py:validate_go2rtc`.
+- **Symptom:** Юзер открывает «Настройки go2rtc», очищает поля username/password,
+  нажимает «Сохранить» — форма показывает generic ошибку «Не удалось подключиться
+  к go2rtc» и перерисовывается с **прежними** значениями creds (defaults
+  перезаливаются из `self.entry.options`). Юзер видит «creds не очистились».
+- **Root cause:** `validate_go2rtc` ходит на go2rtc API. Если на сервере
+  включена auth, а в форме юзер очистил creds → запрос без `Authorization`
+  header → сервер отвечает **401** → код мапил это на `go2rtc_unreachable`
+  («не удалось подключиться»), хотя сервер был достижим — просто отверг auth.
+  Форма перерисовывалась с defaults из options → визуально «creds не
+  очистились».
+- **Fix:** различить HTTP 401 в `validate_go2rtc` (и `GET /api`, и `PUT
+  /api/streams`), вернуть отдельный error code `go2rtc_auth_failed` с
+  понятным сообщением: «go2rtc требует авторизацию. Введите creds, отключите
+  auth на сервере, или снимите галочку Use go2rtc чтобы сохранить без
+  подключения».
+- **Workaround для юзеров до релиза:** снять галочку «Использовать go2rtc»
+  → creds валидация скипается, форма сохраняется → если нужно вернуть go2rtc,
+  открыть форму снова и включить с новыми creds.
+- **Evidence:** пользователь самостоятельно репортил в этой сессии при
+  попытке очистить креды (go2rtc развернут с auth внутри Frigate).
+- **Test plan:** manual UX:
+  1. Включить auth на go2rtc сервере, прописать creds в опциях интеграции, save.
+  2. Открыть опции, очистить username/password, save → ожидается понятная
+     ошибка про auth (с указанием путей решения), а не «unreachable».
+  3. Снять галочку Use go2rtc, save → должно сохраниться без валидации.
+
 
 ## Maintenance rules (повтор)
 

@@ -21,7 +21,8 @@
       "invalid_code": "Invalid code",
       "go2rtc_required_fields": "Please fill in the go2rtc API URL field",
       "go2rtc_invalid_url": "Invalid URL (could not determine host)",
-      "go2rtc_unreachable": "Could not connect to go2rtc (check the URL, network, or credentials)",
+      "go2rtc_unreachable": "Could not connect to go2rtc (check the URL or network)",
+      "go2rtc_auth_failed": "go2rtc requires authentication (HTTP 401). Enter username/password, or disable auth on the go2rtc server, or uncheck \"Use go2rtc\" to save without connecting.",
       "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)",
       "unknown_status": "Received an unknown response. Please create an issue.",
       "unauthorized": "Authorization error",
@@ -87,7 +88,8 @@
     "error": {
       "go2rtc_required_fields": "Please fill in the go2rtc API URL field",
       "go2rtc_invalid_url": "Invalid URL (could not determine host)",
-      "go2rtc_unreachable": "Could not connect to go2rtc (check the URL, network, or credentials)",
+      "go2rtc_unreachable": "Could not connect to go2rtc (check the URL or network)",
+      "go2rtc_auth_failed": "go2rtc requires authentication (HTTP 401). Enter username/password, or disable auth on the go2rtc server, or uncheck \"Use go2rtc\" to save without connecting.",
       "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)"
     }
   },
