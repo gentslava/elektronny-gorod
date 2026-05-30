@@ -45,8 +45,14 @@ class UserAgent:
         _phone_model = self.phone_model
         _android_ver = self.android_ver
         _app_version = self.app_version
+        _app_name = _app_version["name"]
+        _app_code = _app_version["code"]
         _account_id = self.account_id
         _operator_id = self.operator_id
         _uuid = self.uuid
         _place_id = self.place_id
-        return f"{_phone_manufacturer} {_phone_model} | Android {_android_ver} | ntk | {_app_version["name"]} ({_app_version["code"]}) | {_account_id} | {_operator_id} | {_uuid} | {_place_id}"
+        return (
+            f"{_phone_manufacturer} {_phone_model} | Android {_android_ver} | "
+            f"ntk | {_app_name} ({_app_code}) | {_account_id} | "
+            f"{_operator_id} | {_uuid} | {_place_id}"
+        )

@@ -29,10 +29,14 @@ from .const import (
     # --- go2rtc ---
     CONF_USE_GO2RTC,
     CONF_GO2RTC_BASE_URL,
+    CONF_GO2RTC_PUBLISH_HIDDEN,
+    CONF_GO2RTC_REFRESH_INTERVAL,
     CONF_GO2RTC_RTSP_HOST,
     CONF_GO2RTC_USERNAME,
     CONF_GO2RTC_PASSWORD,
+    DEFAULT_GO2RTC_PUBLISH_HIDDEN,
     DEFAULT_GO2RTC_BASE_URL,
+    DEFAULT_GO2RTC_REFRESH_INTERVAL,
     DEFAULT_GO2RTC_RTSP_HOST,
 )
 from .api import ElektronnyGorodAPI
@@ -309,12 +313,30 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 prev_use_go2rtc = entry.options.get(CONF_USE_GO2RTC, entry.data.get(CONF_USE_GO2RTC))
                 prev_base_url = entry.options.get(CONF_GO2RTC_BASE_URL, entry.data.get(CONF_GO2RTC_BASE_URL))
                 prev_rtsp_host = entry.options.get(CONF_GO2RTC_RTSP_HOST, entry.data.get(CONF_GO2RTC_RTSP_HOST))
+                prev_refresh_interval = entry.options.get(
+                    CONF_GO2RTC_REFRESH_INTERVAL,
+                    entry.data.get(CONF_GO2RTC_REFRESH_INTERVAL),
+                )
+                prev_publish_hidden = entry.options.get(
+                    CONF_GO2RTC_PUBLISH_HIDDEN,
+                    entry.data.get(CONF_GO2RTC_PUBLISH_HIDDEN),
+                )
 
                 merged_data: dict[str, Any] = {
                     **data,
                     CONF_USE_GO2RTC: bool(prev_use_go2rtc) if prev_use_go2rtc is not None else False,
                     CONF_GO2RTC_BASE_URL: prev_base_url if prev_base_url else DEFAULT_GO2RTC_BASE_URL,
                     CONF_GO2RTC_RTSP_HOST: prev_rtsp_host if prev_rtsp_host else DEFAULT_GO2RTC_RTSP_HOST,
+                    CONF_GO2RTC_REFRESH_INTERVAL: (
+                        int(prev_refresh_interval)
+                        if prev_refresh_interval is not None
+                        else DEFAULT_GO2RTC_REFRESH_INTERVAL
+                    ),
+                    CONF_GO2RTC_PUBLISH_HIDDEN: (
+                        bool(prev_publish_hidden)
+                        if prev_publish_hidden is not None
+                        else DEFAULT_GO2RTC_PUBLISH_HIDDEN
+                    ),
                 }
 
                 self.hass.config_entries.async_update_entry(
@@ -357,6 +379,18 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             base_url = normalize_base_url(user_input.get(CONF_GO2RTC_BASE_URL))
             username = user_input.get(CONF_GO2RTC_USERNAME)
             password = user_input.get(CONF_GO2RTC_PASSWORD)
+            refresh_interval = int(
+                user_input.get(
+                    CONF_GO2RTC_REFRESH_INTERVAL,
+                    DEFAULT_GO2RTC_REFRESH_INTERVAL,
+                )
+            )
+            publish_hidden = bool(
+                user_input.get(
+                    CONF_GO2RTC_PUBLISH_HIDDEN,
+                    DEFAULT_GO2RTC_PUBLISH_HIDDEN,
+                )
+            )
 
             if not base_url:
                 errors["base"] = "go2rtc_required_fields"
@@ -374,6 +408,8 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_GO2RTC_RTSP_HOST: result.rtsp_host,
                     CONF_GO2RTC_USERNAME: username,
                     CONF_GO2RTC_PASSWORD: password,
+                    CONF_GO2RTC_REFRESH_INTERVAL: refresh_interval,
+                    CONF_GO2RTC_PUBLISH_HIDDEN: publish_hidden,
                 }
                 return self.async_create_entry(title=data[CONF_NAME], data=data)
 
@@ -381,6 +417,14 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_GO2RTC_BASE_URL, default=DEFAULT_GO2RTC_BASE_URL): str,
             vol.Optional(CONF_GO2RTC_USERNAME, default=""): str,
             vol.Optional(CONF_GO2RTC_PASSWORD, default=""): str,
+            vol.Optional(
+                CONF_GO2RTC_REFRESH_INTERVAL,
+                default=DEFAULT_GO2RTC_REFRESH_INTERVAL,
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+            vol.Optional(
+                CONF_GO2RTC_PUBLISH_HIDDEN,
+                default=DEFAULT_GO2RTC_PUBLISH_HIDDEN,
+            ): bool,
         })
 
         return self.async_show_form(
@@ -415,6 +459,18 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
             # (not back-filled to previous value, see HA add_suggested_values_to_schema).
             username = user_input.get(CONF_GO2RTC_USERNAME) or ""
             password = user_input.get(CONF_GO2RTC_PASSWORD) or ""
+            refresh_interval = int(
+                user_input.get(
+                    CONF_GO2RTC_REFRESH_INTERVAL,
+                    DEFAULT_GO2RTC_REFRESH_INTERVAL,
+                )
+            )
+            publish_hidden = bool(
+                user_input.get(
+                    CONF_GO2RTC_PUBLISH_HIDDEN,
+                    DEFAULT_GO2RTC_PUBLISH_HIDDEN,
+                )
+            )
 
             # If go2rtc is enabled, validate the URL
             if use_go2rtc:
@@ -433,6 +489,8 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
                     CONF_GO2RTC_RTSP_HOST: result.rtsp_host if (use_go2rtc and result) else None,
                     CONF_GO2RTC_USERNAME: username,
                     CONF_GO2RTC_PASSWORD: password,
+                    CONF_GO2RTC_REFRESH_INTERVAL: refresh_interval,
+                    CONF_GO2RTC_PUBLISH_HIDDEN: publish_hidden,
                 }
                 return self.async_create_entry(title="", data=data)
 
@@ -452,6 +510,20 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
             CONF_GO2RTC_PASSWORD,
             self.entry.data.get(CONF_GO2RTC_PASSWORD, ""),
         )
+        refresh_interval_default = self.entry.options.get(
+            CONF_GO2RTC_REFRESH_INTERVAL,
+            self.entry.data.get(
+                CONF_GO2RTC_REFRESH_INTERVAL,
+                DEFAULT_GO2RTC_REFRESH_INTERVAL,
+            ),
+        )
+        publish_hidden_default = self.entry.options.get(
+            CONF_GO2RTC_PUBLISH_HIDDEN,
+            self.entry.data.get(
+                CONF_GO2RTC_PUBLISH_HIDDEN,
+                DEFAULT_GO2RTC_PUBLISH_HIDDEN,
+            ),
+        )
 
         # NB: username/password — vol.Optional WITHOUT default. voluptuous
         # default would be back-filled into empty submit (HA frontend омит
@@ -463,6 +535,14 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
             vol.Optional(CONF_GO2RTC_BASE_URL, default=str(go2rtc_host_default)): str,
             vol.Optional(CONF_GO2RTC_USERNAME): str,
             vol.Optional(CONF_GO2RTC_PASSWORD): str,
+            vol.Optional(
+                CONF_GO2RTC_REFRESH_INTERVAL,
+                default=int(refresh_interval_default),
+            ): vol.All(vol.Coerce(int), vol.Range(min=1, max=1440)),
+            vol.Optional(
+                CONF_GO2RTC_PUBLISH_HIDDEN,
+                default=bool(publish_hidden_default),
+            ): bool,
         })
 
         suggested_values = {

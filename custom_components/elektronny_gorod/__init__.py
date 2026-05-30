@@ -24,6 +24,7 @@ from .const import (
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
+from .go2rtc_stream_publisher import Go2RtcStreamPublisher
 from .user_agent import UserAgent
 
 PLATFORMS: list[Platform] = [
@@ -74,6 +75,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.config_entries.async_reload(entry.entry_id),
             name=f"{DOMAIN}_migration_reload",
         )
+
+    publisher = Go2RtcStreamPublisher(hass, entry, coordinator)
+    await publisher.async_start()
+    entry.async_on_unload(
+        lambda: hass.async_create_task(
+            publisher.async_stop(),
+            name=f"{DOMAIN}_go2rtc_stream_sync_stop_{entry.entry_id}",
+        )
+    )
 
     return True
 
