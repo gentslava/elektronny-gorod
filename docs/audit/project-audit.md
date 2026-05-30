@@ -853,6 +853,119 @@ Quality gates:
   `except Exception: return None` глотает бизнес-ошибку `Error != null` при
   HTTP 200 (см. api-reference §video) — маскирует диагностику истечения.
 
+### A-77. HA Stream worker DTS discontinuity при producer restart
+
+- **Status:** 🟡 **KNOWN limitation** (документирована в
+  [ADR-0009 §v3+v3.2 Known limitation](../decisions/0009-camera-stream-auto-recovery.md)
+  и [A-71](#a-71-operator-forpost-session-ttl-30-мин--long-open-video-stops-без-refresh)).
+  Reactive workaround работает (v1 ловит и recovery'ит) — не блокер.
+- **Severity:** **P3 (UX cosmetic)** — ~5 секунд gap в видео раз на
+  cold-start cycle. Data loss нет, не блокирует UX надолго.
+- **Area:** HA Stream / go2rtc producer transition.
+- **Evidence (прод-лог 2026-05-30 03:04, после первого natural EOF):**
+  ```
+  03:04:26.610 ERROR (stream_worker) podezd_2: Timestamp discontinuity
+     detected: last dts = 161820000, dts = 308832340
+  03:04:27.437 ERROR (stream_worker) kalitka_2: ... last dts = 79306125,
+     dts = 3652483608
+  03:04:27.505 ERROR (stream_worker) kalitka_1: ... last dts = 79297362,
+     dts = 2820243242
+  03:04:30.559 ERROR (stream_worker) lift_pas_1: ... last dts = 161398890,
+     dts = 1172830309
+  ```
+  4 камеры разом при **первом** natural EOF (~30 мин после cold-start).
+  Subsequent cycles (03:23, 03:48, 04:13) прошли БЕЗ Timestamp discontinuity —
+  pipeline стабилизировался.
+- **Root cause:** go2rtc producer (ffmpeg к operator) при перезапуске начинает с
+  свежих DTS (PTS/DTS обычно с нуля или с offset). HA Stream worker (тоже
+  ffmpeg внутри) видит резкий jump DTS и считает это stream corruption —
+  exits с `StreamWorkerError`. Это **fundamental HA Stream behavior**, не bug
+  нашей интеграции.
+- **Impact:** только при **первом** EOF после cold-start; subsequent producer
+  restarts smooth (наблюдено в прод). v1 reactive recovery (`stream.available
+  → False` callback) ловит worker error → fresh fetch + `update_source()` →
+  restart worker → новый DTS baseline. **Gap ~5 сек**, потом OK.
+- **Why subsequent transitions smooth (гипотеза):** после первого force restart
+  worker pipeline переустанавливается с новой baseline. Дальнейшие
+  EOF/restart cycles в пределах того же session-семейства держат DTS в близкой
+  области. Точная динамика — не проверена, требует отдельной DIAG-сессии.
+- **Mitigation (текущая):** v1 callback ловит и recovery'ит. Acceptable UX
+  для большинства пользователей.
+- **Recommended fix (если станет приоритетным — не в этом цикле):**
+  - **Option A:** `ffmpeg:URL#input=-fflags +igndts+discardcorrupt#video=copy`
+    в go2rtc source spec — ffmpeg игнорирует DTS jumps. Может иметь
+    side effects на latency calculations / sync video+audio.
+  - **Option B:** `ffmpeg:URL#input=-fflags +genpts` — regenerate PTS. Аналогично.
+  - **Option C (изящный):** trigger producer restart по таймеру (контролируемо)
+    *до* natural EOF, в момент когда уже есть будущий PATCH с новым URL —
+    pipeline войдёт в "restarted" режим до того как настоящий EOF придёт.
+    Тонкий код.
+- **Trade-off отказа от fix:** один моргание ~5 сек раз на cold-start
+  (приемлемо). Возможна жалоба от пользователя с критическим setup
+  (recording, NVR pipeline) — тогда выбираем Option A.
+- **Test plan:** прод-метрика — частота `Timestamp discontinuity` errors на
+  стабильно работающей инсталляции (норма: 0-2/день после первого cold-start).
+- **Связь:** [A-66](#a-66-go2rtc-stale-producer-url-после-long-idle--revert-a-63)
+  (force restart механизм), [A-71](#a-71-operator-forpost-session-ttl-30-мин--long-open-video-stops-без-refresh)
+  (auto-recovery архитектура), [ADR-0009](../decisions/0009-camera-stream-auto-recovery.md).
+
+### A-78. Options flow — нельзя очистить go2rtc creds (voluptuous default back-fill)
+
+- **Status:** 🟢 **RESOLVED** (PR #58 — fix scope S-A71-02).
+- **Severity:** **P2 (UX-baked silent corruption — юзер думает «save успешен», а данные не меняются).**
+- **Area:** `config_flow.py:OptionsFlowHandler.async_step_init` (schema construction),
+  `go2rtc.py:validate_go2rtc` (UX-улучшение для 401).
+- **Symptom:** Юзер открывает «Настройки go2rtc», очищает поля username/password,
+  нажимает «Сохранить» — форма показывает «Параметры успешно сохранены»,
+  но при следующем открытии options creds **снова на месте**.
+- **Evidence (production storage снимок 2026-05-30):**
+  Юзер репортил bug; SSH'нул на сервер, посмотрел
+  `/opt/homeassistant/.storage/core.config_entries`:
+  ```
+  "options": {
+    "go2rtc_username": "admin",
+    "go2rtc_password": "XPzqUkuCTr4639go2rtc",
+    ...
+  }
+  ```
+  Хотя юзер только что «сохранил» с пустыми полями.
+- **Root cause (real, доказан unit-test'ом):** schema использовала
+  `vol.Optional(KEY, default=str(old_value)): str` — это HA frontend омит
+  пустые Optional поля при submit → voluptuous подставляет **default обратно** →
+  user_input получает старое значение → save «успешен» без изменений.
+  Документировано HA: «The default value is used if the user leaves the field
+  empty» — это и есть наш сценарий. Изначально я диагностировал bug как
+  «validate_go2rtc мапил 401 на unreachable» — это была ВТОРИЧНАЯ проблема
+  (юзер видел misleading error). Реальный root cause обнаружен только когда
+  юзер сказал «save проходит успешно» — это противоречило моей первой гипотезе.
+- **Fix:** канонический HA pattern `add_suggested_values_to_schema`:
+  ```python
+  schema = vol.Schema({
+      vol.Optional(CONF_GO2RTC_USERNAME): str,  # ← НЕТ default
+      vol.Optional(CONF_GO2RTC_PASSWORD): str,
+  })
+  return self.async_show_form(
+      step_id="init",
+      data_schema=self.add_suggested_values_to_schema(
+          schema, {CONF_GO2RTC_USERNAME: old, CONF_GO2RTC_PASSWORD: old}
+      ),
+  )
+  ```
+  Подсказка показывает текущие creds в UI, но empty submit остаётся empty.
+  Плюс улучшен 401 detection в `validate_go2rtc` (отдельный
+  `go2rtc_auth_failed` error code).
+- **Regression-guard:** 3 unit-теста в `tests/test_options_flow_clear_creds.py`:
+  - `test_clear_creds_when_use_go2rtc_off` — clear creds + uncheck = save empty (этот тест **FAIL без fix**).
+  - `test_clear_creds_with_use_go2rtc_on_shows_auth_error` — UX для забывших unchecking.
+  - `test_change_creds_to_new_values` — happy path смены.
+- **Lesson learned:** при diagnose UX-багов **читай реальное persistent state**
+  (HA storage, БД), не только UI feedback. Юзер сказал «creds не очищаются» —
+  моя первая гипотеза была про validation block (logically valid, но не root cause).
+  SSH'нув на сервер за 1 запрос и посмотрев `core.config_entries.json`, увидел
+  что save реально проходит — это сразу указало на schema/voluptuous как
+  настоящего виновника.
+
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
