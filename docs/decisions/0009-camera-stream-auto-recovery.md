@@ -159,11 +159,13 @@ natural EOF, затем go2rtc применит новый. Consumers выжив
 - Timestamp discontinuity errors: только 1 раз на cold-start (03:04),
   после стабилизации pipeline — natural EOF transitions проходят smoothly
 
-**Known limitation (отдельный follow-up):** при первом natural EOF после
-cold start HA Stream worker может выдать `Timestamp discontinuity detected`
-ошибку (DTS jump между producers). v1 reactive recovery ловит и фиксит
-(~5с gap). После первого transition pipeline стабилизируется и последующие
-EOF проходят без discontinuity.
+**Known limitation:** при первом natural EOF после cold start HA Stream
+worker может выдать `Timestamp discontinuity detected` ошибку (DTS jump
+между producers). v1 reactive recovery ловит и фиксит (~5с gap). После
+первого transition pipeline стабилизируется и последующие EOF проходят
+без discontinuity. Зафиксировано в
+[A-77](../audit/project-audit.md#a-77-ha-stream-worker-dts-discontinuity-при-producer-restart)
+с возможными вариантами фиксации (ffmpeg flags / proactive restart).
 
 ## Consequences
 
