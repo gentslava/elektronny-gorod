@@ -8,27 +8,36 @@
 .claude/
 ├── README.md                    ← этот файл
 ├── settings.json                ← permissions + hooks для проекта
-├── agents/                      ← 5 субагентов (роли)
+├── agents/                      ← субагенты (роли)
 │   ├── lead-architect.md
 │   ├── ha-expert.md
 │   ├── security-auditor.md
 │   ├── qa-engineer.md
-│   └── docs-keeper.md
+│   ├── docs-keeper.md
+│   ├── code-reviewer.md
+│   ├── git-historian.md
+│   └── reverse-engineer.md
 ├── commands/                    ← slash-команды
 │   ├── audit.md
+│   ├── capture-har.md
 │   ├── test-config-flow.md
 │   ├── security-check.md
 │   ├── docs-update.md
+│   ├── git-cleanup.md
 │   └── release-check.md
 ├── rules/                       ← path-specific правила
 │   ├── no-secret-logs.md
 │   ├── coordinator-pattern.md
 │   ├── ha-best-practices.md
 │   ├── test-coverage.md
-│   └── async-rules.md
+│   ├── async-rules.md
+│   ├── diagnose-before-fix.md
+│   ├── git-history.md
+│   └── pre-pr-checklist.md
 └── hooks/                       ← shell-хуки
-    ├── post-edit-redaction-check.sh
-    └── pre-commit-hassfest.sh
+    ├── post-edit-redaction-check.sh   (PostToolUse: Edit|Write)
+    ├── pre-commit-hassfest.sh
+    └── check-audit-reconciliation.sh  (SessionStart + /audit + /release-check; ADR-0010)
 ```
 
 ## settings.json

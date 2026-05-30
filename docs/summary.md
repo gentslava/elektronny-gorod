@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-05-30
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -35,18 +35,19 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - **Codeowner:** [@gentslava](https://github.com/gentslava).
 - **PR pre-release:** workflow [`prerelease.yaml`](../.github/workflows/prerelease.yaml) выкатывает pre-release zip для каждого открытого PR.
 
-## Состояние
+## Состояние (на 2026-05-30)
 
 | Аспект | Статус |
 |---|---|
 | Работает у пользователей | ✅ да (релизится через HACS) |
 | HA hassfest CI | ✅ зелёный |
 | HACS validation CI | ✅ зелёный |
-| pytest CI | 🔴 отсутствует |
-| Реальные тесты | 🔴 нет (есть stub из шаблона HA) |
-| Integration Quality Scale | 🔴 ниже Bronze |
-| Документация для пользователя | ⚠️ есть, но с битыми ссылками |
-| AIDD документация для агентов | ✅ только что заложена |
+| pytest CI | ✅ есть (`python-tests.yaml`, matrix HA 2024.10 + 2026.5) |
+| Реальные тесты | ✅ 117 тестов, ~61% coverage (но config_flow/api/helpers — gaps) |
+| Integration Quality Scale | 🟡 Bronze заявлен в manifest, но не defensible: нет config_flow-тестов (A-73) |
+| Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
+| Документация для пользователя | ⚠️ есть, но с битыми ссылками (A-27/A-28) |
+| AIDD документация для агентов | ✅ развёрнута; ⚠️ часть docs отставала, синхронизирована 2026-05-30 |
 
 ## Главные сильные стороны
 
@@ -57,52 +58,41 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - Локализация ru/en.
 - Автоматизированный release workflow (zip + автокоммит версии).
 
-## Что улучшилось в 3.0.5 (по сравнению с 3.0.4)
+## Что сделано (история итераций 1-3)
 
-- Camera: `_attr_available`/`_attr_is_on` теперь устанавливаются по факту наличия stream_url ([`camera.py:197-225`](../custom_components/elektronny_gorod/camera.py#L197-L225)). Частично закрывает «available default» для камеры.
-- go2rtc: добавлена поддержка Basic Auth (username/password) — новые поля в config/options flow.
-- CI: PR pre-release workflow.
+- **Итерация 1 (hotfix security):** закрыты все P0-утечки токенов — redaction через `_logging.py`/`redact()` (A-01..A-04, S-01..S-06), shared `ClientSession` (A-05), bug `c.get("ID")` (A-06).
+- **Итерация 2 (Bronze):** coordinator + `update_interval` (A-08), `CoordinatorEntity` на всех 5 платформах (A-09), стабильный `unique_id` (A-12), sensor MONETARY/RUB (A-14), `async_unsubscribe` (A-16), manifest `bronze`/`hub` (A-34), pytest CI workflow (A-24).
+- **Итерация 3 (Silver feature gaps + runtime polish):** DND switches (A-56), balance attrs + binary_sensor (A-57), double-HTTP fix (A-61), visibility/reload cascade (A-64), log throttling (A-65), go2rtc lifecycle (A-66), concurrent stream dedup (A-68), camera auto-recovery для long-open freeze ~30 мин (A-71, ADR-0009).
 
-Новые замечания, появившиеся вместе с этими изменениями:
-- `import base64` **внутри метода** [`camera.py:167`](../custom_components/elektronny_gorod/camera.py#L167) — антипаттерн.
-- В [`camera.py:215-225`](../custom_components/elektronny_gorod/camera.py#L215-L225) `async_update` делает **два запроса** (`update_camera_state` + `get_camera_stream`) — лишняя нагрузка.
-- `go2rtc_username` / `go2rtc_password` хранятся в `entry.data` в plaintext, без миграции для существующих v3 entries — security-sensitive.
+## Главные риски (на 2026-05-30)
 
-## Главные риски
+> Все исторические P0 token-leaks **закрыты** (verified по коду). Текущие
+> открытые риски — reliability + test-debt, не утечки секретов.
 
-### P0 — критичные (заслуживают hotfix-релиза)
+### P1 — важные (открыты)
 
-1. **Утечка access_token в логи** — [`config_flow.py:77`](../custom_components/elektronny_gorod/config_flow.py#L77), [`http.py:13`](../custom_components/elektronny_gorod/http.py#L13), [`http.py:22-25`](../custom_components/elektronny_gorod/http.py#L22-L25), [`config_flow.py:283`](../custom_components/elektronny_gorod/config_flow.py#L283), [`config_flow.py:291`](../custom_components/elektronny_gorod/config_flow.py#L291). При `debug` уровне любой пользователь может прочитать чужой bearer-токен в `home-assistant.log`.
-2. **Bug в [`coordinator.py:182`](../custom_components/elektronny_gorod/coordinator.py#L182)** — поиск камеры по `c.get("ID")` (верхний регистр) при реальном ключе `id`. Тихая ошибка, `update_camera_state` всегда падает.
-3. **`aiohttp.ClientSession()` per-request** в [`http.py:56`](../custom_components/elektronny_gorod/http.py#L56) — антипаттерн для HA, должен использоваться `async_get_clientsession(hass)`.
-4. **Тесты — нерабочий stub** в [`tests/test_config_flow.py`](../tests/test_config_flow.py) — импортирует несуществующие сущности. Coverage 0%.
-5. **`go2rtc_password` в plaintext в `entry.data`** ([`config_flow.py:362`](../custom_components/elektronny_gorod/config_flow.py#L362), [`config_flow.py:419`](../custom_components/elektronny_gorod/config_flow.py#L419)) — должен redact-иться в diagnostics; рассмотреть HA `auth_storage`.
+1. **Нет `ClientTimeout` на основном operator API** — [`http.py:110,112`](../custom_components/elektronny_gorod/http.py#L110-L112). Зависший запрос к `myhome.proptech.ru` блокирует coordinator tick / setup бессрочно. ⚠️ `ha-compatibility.md` ошибочно помечает это fixed. (A-21 / S-09)
+2. **`diagnostics.py` отсутствует** — при экспорте diagnostics HA дампит `entry.data` целиком (токены, go2rtc_password). Блокирует SECURITY_OK + Silver IQS. (A-23 / S-08 / S-16)
+3. **config_flow + миграции v1→2→3 без тестов** — `config_flow.py` 15% coverage, `async_migrate_entry` не покрыт. Bronze IQS требует config-flow-test-coverage → заявленный `quality_scale: bronze` пока не defensible. (A-73)
+4. **`helpers.py` crypto без golden vectors** — изменение формата бэкенда молча сломает auth. (A-74)
+5. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold).
 
-### P1 — важные
+### P2 — желательно
 
-- Coordinator без `update_interval` — данные не обновляются после старта.
-- Entity не используют `CoordinatorEntity`.
-- `iot_class: cloud_polling` не соответствует реальности (нет polling).
-- ✅ `hacs.json` минимальная HA = 2024.10.4 (LockState enum появился в 2024.10).
-- Sensor баланса: unit `"₽"` вместо `"RUB"`, нет `device_class`/`state_class`.
-- `unique_id` для Camera/Lock содержит локализованное `name`.
-- Нет `diagnostics.py` с redaction.
-- Camera `async_update` делает доп. запрос для проверки stream — лишний трафик; должно идти через coordinator.
+- `go2rtc.py` без `ClientTimeout` (A-72).
+- `api.py` — `e.args[0]` antipattern + широкий `except Exception` (A-19/A-20).
+- Cold-start go2rtc warmup (A-67), lock fake-state cosmetic-cycle (A-15 — `asyncio.sleep` уже убран).
 
 Полный список — в [`audit/project-audit.md`](audit/project-audit.md).
 
 ## Первое, что нужно сделать
 
-P0-фикс одним PR (< 1 дня), завершить hotfix-релизом:
+Reliability-слайс одним PR (отдельно от A-71 camera-работы):
 
-1. Удалить лог токена в [`config_flow.py:77`](../custom_components/elektronny_gorod/config_flow.py#L77).
-2. Маскировать headers и не логировать `data` в [`http.py:11-13`](../custom_components/elektronny_gorod/http.py#L11-L13).
-3. Не логировать тело auth-ответов в [`http.py:22-25`](../custom_components/elektronny_gorod/http.py#L22-L25).
-4. Заменить `entry.data` → `entry.entry_id` в [`config_flow.py:283,291`](../custom_components/elektronny_gorod/config_flow.py#L283).
-5. Исправить `c.get("ID")` → `c.get("id")` в [`coordinator.py:182`](../custom_components/elektronny_gorod/coordinator.py#L182).
-6. Удалить или skip-нуть нерабочий `tests/test_config_flow.py`.
-7. Поднять `import base64` на top of file в [`camera.py:167`](../custom_components/elektronny_gorod/camera.py#L167).
-8. Hotfix-релиз с changelog «security: redact tokens in logs».
+1. `ClientTimeout(total=30)` в [`http.py:110,112`](../custom_components/elektronny_gorod/http.py#L110-L112) + `ClientTimeout(total=10)` в [`go2rtc.py`](../custom_components/elektronny_gorod/go2rtc.py) (A-21/A-72).
+2. Создать [`diagnostics.py`](../custom_components/elektronny_gorod/) с `async_redact_data` + `TO_REDACT` (access_token, refresh_token, user_agent, go2rtc_password) — закрывает S-08/S-16, разблокирует SECURITY_OK (A-23).
+3. Написать `tests/test_config_flow.py` (happy path + abort `already_configured`) + `tests/test_init_migration.py` (v1→2→3) — Bronze gate (A-73).
+4. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
 
 ## AIDD-структура
 

@@ -36,11 +36,14 @@
 
 ### Hooks
 
-Сейчас hooks не настроены. План — добавить `.claude/hooks/`:
-- `pre-commit-redaction-check` — проверяет, что в diff нет логирования токенов;
-- `post-edit-test` — запускает релевантные тесты после правки.
+`.claude/hooks/` настроены:
+- `post-edit-redaction-check.sh` — проверяет, что в diff нет логирования токенов;
+- `pre-commit-hassfest.sh` — валидация manifest перед коммитом;
+- `check-audit-reconciliation.sh` — сверяет `RESOLVED` findings с git master +
+  ловит stale-маркеры в контрактах (ADR-0010); обязателен в `/release-check`.
 
-См. [`roadmap.md`](docs/roadmap.md) Итерация 3.
+Wiring — в [`.claude/settings.json`](.claude/settings.json). Roadmap новых
+хуков — [`roadmap.md`](docs/roadmap.md).
 
 ### Skills
 
@@ -57,7 +60,7 @@
 - Перезапись `tests/` (полная пересборка test suite);
 - Любые изменения crypto в `helpers.py` (auth ломается молча).
 
-Для каждого — сначала ADR в `docs/aidd/decisions/` (создаётся в Итерации 2-3).
+Для каждого — сначала ADR в [`docs/decisions/`](docs/decisions/README.md).
 
 ## Boundaries (повтор из AGENTS.md)
 

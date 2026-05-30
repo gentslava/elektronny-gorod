@@ -24,6 +24,7 @@
 | [0007](0007-stateful-emulator-baseline.md) | Stateful emulator baseline для HAR-сбора | accepted | 2026-05-23 |
 | [0008](0008-shared-client-session.md) | Shared `ClientSession` через `async_get_clientsession(hass)` | accepted | 2026-05-24 |
 | [0009](0009-camera-stream-auto-recovery.md) | Camera stream auto-recovery при истечении operator session | accepted | 2026-05-27 |
+| [0010](0010-aidd-state-reconciliation.md) | AIDD state-management + reconciliation findings↔git | accepted | 2026-05-30 |
 
 ## Когда писать ADR
 

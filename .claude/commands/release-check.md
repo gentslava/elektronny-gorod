@@ -9,18 +9,30 @@ allowed-tools: Read, Grep, Glob, Bash
 
 Проверь поочерёдно каждый пункт. Любой ❌ блокирует релиз.
 
+### 0. Reconciliation findings↔git (ADR-0010, обязателен)
+
+- [ ] `bash .claude/hooks/check-audit-reconciliation.sh` — зелёный:
+  - каждый `✅ RESOLVED` finding имеет commit в `git log master`;
+  - нет `🟢 resolved-in-branch` findings, заявленных как готовые к релизу
+    (они **блокируют** релиз до merge);
+  - контракты (`AGENTS.md`/`CLAUDE.md`/`workflow.md`) без stale-маркеров.
+
 ### 1. Quality gates
 
-- [ ] `TESTS_PASS` — `pytest tests/ -v` зелёный (если тесты уже переписаны).
+- [ ] `TESTS_PASS` — `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный.
 - [ ] `SECURITY_OK` — все P0 из `docs/audit/security.md` закрыты:
   ```bash
   grep -rE 'LOGGER\..*(token|password|sms|headers|entry\.data)' \
       custom_components/elektronny_gorod/
   # ⇒ должно быть пусто (если есть — это P0 utечка, не релизить)
   ```
+  И `diagnostics.py` существует с `TO_REDACT` (S-08/S-16).
 - [ ] `REVIEW_OK` — PR review пройден (5 осей).
-- [ ] `DOCS_UPDATED` — maintenance rules применены.
+- [ ] `DOCS_UPDATED` — maintenance rules применены (обе оси, ADR-0010).
 - [ ] `AUDIT_DONE` — `docs/audit/project-audit.md` актуален.
+- [ ] **quality_scale ≤ gate-confirmed (D-05)** — `manifest:quality_scale`
+  не выше реально подтверждённого гейтами уровня. Bronze ⇒ config_flow-тесты
+  существуют. Несоответствие без записанного waiver = blocker.
 
 ### 2. Manifest / HACS
 
@@ -43,9 +55,9 @@ gh run list --branch master --limit 5
 
 ### 4. Migration
 
-Если этот release меняет `VERSION` в `config_flow.py`:
-- [ ] есть соответствующая ветка в `async_migrate_entry`.
-- [ ] тест миграции (когда тесты будут).
+Если этот release меняет `VERSION` config-entry:
+- [ ] есть соответствующая ветка в `async_migrate_entry` (`__init__.py`).
+- [ ] тест миграции (`async_migrate_entry` v1→2→3 — см. finding A-73).
 
 ### 5. Breaking changes
 

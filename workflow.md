@@ -118,7 +118,7 @@ release (через GitHub Release → workflow `release.yaml`)
 | Inputs | code + tests |
 | Outputs | log выполнения pytest, coverage |
 | Gate | `TESTS_PASS` |
-| Required | pytest зелёный, hassfest зелёный, HACS validate зелёный |
+| Required | `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный, hassfest зелёный, HACS validate зелёный, `python-tests.yaml` зелёный |
 
 ### 8. Security check
 
@@ -158,6 +158,12 @@ release (через GitHub Release → workflow `release.yaml`)
 | CI workflows | `contributing.md`, `quality-gates.md` |
 | README | `summary.md`, `index.md` |
 | security-чувствительный код | `security.md`, `project-audit.md` |
+
+Плюс **ось B (событие состояния → docs)** — ADR-0010, см.
+[`project-map.md#maintenance-rules`](docs/project/project-map.md#maintenance-rules):
+finding→RESOLVED ⇒ `summary.md` риски + `CHANGELOG` + снять метку в `AGENTS.md`;
+finding→resolved-in-branch ⇒ только `project-audit.md` (не трогать риски до merge).
+🔴 Не дублировать «текущее состояние» — единый источник `project-audit.md` + `summary.md`.
 
 ### 10. Release
 
