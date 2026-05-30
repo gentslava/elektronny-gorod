@@ -113,11 +113,14 @@ v3.2.0): grep всех `LOGGER.*` в чувствительных файлах +
 
 ### S-08. Отсутствие diagnostics.py с redaction
 
-- **Status:** 🔴 **STILL OPEN** (P1) — подтверждено 2026-05-30,
-  `ls custom_components/elektronny_gorod/diagnostics.py` → No such file.
-  Это блокирует `SECURITY_OK` gate и Silver IQS (`diagnostics` rule).
-- **Файл:** ❌
-- **Impact:** когда пользователь экспортирует diagnostics через UI — HA по умолчанию пытается дампить `entry.data` целиком (через `async_get_config_entry_diagnostics`). Без нашего `diagnostics.py` пользователь не может безопасно поделиться диагностикой.
+- **Status:** ✅ **RESOLVED** — добавлен `diagnostics.py` (3.3.0).
+  `async_get_config_entry_diagnostics` → `async_redact_data(entry.as_dict(), TO_REDACT)`.
+  `TO_REDACT = SENSITIVE_KEYS ∪ {phone, contract, operator_id, account_id,
+  subscriber_id, name, address}` (синхронизирован с `_logging.py`; есть тест
+  `test_to_redact_covers_sensitive_keys`). Coordinator-снимок — только счётчики.
+  6 тестов `tests/test_diagnostics.py`. Разблокирует `SECURITY_OK`.
+- **Файл:** [`diagnostics.py`](../../custom_components/elektronny_gorod/diagnostics.py)
+- **Original Impact:** когда пользователь экспортирует diagnostics через UI — HA по умолчанию пытается дампить `entry.data` целиком (через `async_get_config_entry_diagnostics`). Без нашего `diagnostics.py` пользователь не может безопасно поделиться диагностикой.
 - **Fix:** создать `diagnostics.py`:
   ```python
   TO_REDACT = {
@@ -132,10 +135,14 @@ v3.2.0): grep всех `LOGGER.*` в чувствительных файлах +
 
 ### S-16. go2rtc credentials в `entry.data` plaintext
 
+- **Status:** 🟡 **MITIGATED** — `go2rtc_username`/`go2rtc_password` в `TO_REDACT`
+  → больше **не утекают** в diagnostics-выгрузку (S-08 RESOLVED). Остаётся
+  plaintext в `.storage`/backup (HA-storage limitation) — полное шифрование
+  (`Store`/pin) в backlog, не блокер.
 - **Файлы:** [`config_flow.py:362`](../../custom_components/elektronny_gorod/config_flow.py#L362), [`config_flow.py:419-420`](../../custom_components/elektronny_gorod/config_flow.py#L419-L420), [`camera.py:166-170`](../../custom_components/elektronny_gorod/camera.py#L166-L170)
-- **Severity:** P1
-- **Impact:** `go2rtc_password` (Basic Auth) хранится в `entry.data` без шифрования. Попадёт в diagnostics-выгрузку (S-08), в backup HA, в `.storage/core.config_entries`.
-- **Fix:** добавить ключи в `TO_REDACT`. Долгосрочно — рассмотреть HA `auth_storage` / `Store` с pin-кодом.
+- **Severity:** P1 → P3 (после mitigation)
+- **Impact:** `go2rtc_password` (Basic Auth) хранится в `entry.data` без шифрования. ~~Попадёт в diagnostics-выгрузку (S-08)~~ — закрыто redaction.
+- **Fix:** ✅ ключи в `TO_REDACT`. Долгосрочно — рассмотреть HA `Store` с pin-кодом.
 - **Дополнительно:** в [`camera.py:167`](../../custom_components/elektronny_gorod/camera.py#L167) `import base64` находится внутри метода — функционально безопасно, но плохая практика (плюс auth-header строится «вручную» вместо `aiohttp.BasicAuth`).
 
 ### S-09. Нет timeout на HTTP-запросы

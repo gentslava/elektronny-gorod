@@ -72,10 +72,12 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 ### P1 — важные (открыты)
 
 1. **Нет `ClientTimeout` на основном operator API** — [`http.py:110,112`](../custom_components/elektronny_gorod/http.py#L110-L112). Зависший запрос к `myhome.proptech.ru` блокирует coordinator tick / setup бессрочно. ⚠️ `ha-compatibility.md` ошибочно помечает это fixed. (A-21 / S-09)
-2. **`diagnostics.py` отсутствует** — при экспорте diagnostics HA дампит `entry.data` целиком (токены, go2rtc_password). Блокирует SECURITY_OK + Silver IQS. (A-23 / S-08 / S-16)
-3. **config_flow + миграции v1→2→3 без тестов** — `config_flow.py` 15% coverage, `async_migrate_entry` не покрыт. Bronze IQS требует config-flow-test-coverage → заявленный `quality_scale: bronze` пока не defensible. (A-73)
-4. **`helpers.py` crypto без golden vectors** — изменение формата бэкенда молча сломает auth. (A-74)
-5. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold).
+2. **config_flow + миграции v1→2→3 без тестов** — `config_flow.py` 15% coverage, `async_migrate_entry` не покрыт. Bronze IQS требует config-flow-test-coverage → заявленный `quality_scale: bronze` пока не defensible. (A-73)
+3. **`helpers.py` crypto без golden vectors** — изменение формата бэкенда молча сломает auth. (A-74)
+4. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold).
+
+✅ Закрыто в 3.3.0: `diagnostics.py` с redaction (A-23 / S-08; S-16 mitigated) —
+SECURITY_OK разблокирован.
 
 ### P2 — желательно
 

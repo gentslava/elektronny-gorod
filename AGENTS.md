@@ -70,6 +70,7 @@ custom_components/elektronny_gorod/
 ├── binary_sensor.py       # account_blocked
 ├── switch.py              # DND switches (intercom / management calls)
 ├── go2rtc.py              # validate_go2rtc + cleanup
+├── diagnostics.py         # redact-нутая diagnostics-выгрузка (TO_REDACT)
 ├── entity_migration.py    # стабильные unique_id + registry migration
 ├── helpers.py             # find, dedupe, hash_password (SHA1+MD5)
 ├── user_agent.py          # эмуляция Android-клиента (Pixel 6-10)
