@@ -208,9 +208,13 @@ Quality gates:
 
 ### A-23. Отсутствует `diagnostics.py`
 
-- **Area:** HA-compat
-- **Evidence:** в `custom_components/elektronny_gorod/` нет файла.
-- **Recommended fix:** см. [`SECURITY_AUDIT.md#S-08`](../audit/security.md).
+- **Status:** ✅ **RESOLVED** — добавлен `diagnostics.py` с
+  `async_get_config_entry_diagnostics` + `async_redact_data(TO_REDACT)`.
+  `TO_REDACT = SENSITIVE_KEYS ∪ PII-идентификаторы` (синхронизирован с
+  `_logging.py`). Coordinator-снимок — только счётчики, без значений.
+  6 тестов `tests/test_diagnostics.py`. Закрывает
+  [`security.md#S-08`](security.md) и [`#S-16`](security.md).
+- **Area:** HA-compat / Security
 
 ### A-24. Нет workflow для pytest
 
@@ -326,6 +330,10 @@ Quality gates:
 
 ### A-45. go2rtc credentials в `entry.data` plaintext
 
+- **Status:** 🟡 **MITIGATED** — creds по-прежнему в `entry.data`/`entry.options`
+  plaintext (HA-storage limitation), но больше **не утекают** в diagnostics:
+  `go2rtc_username`/`go2rtc_password` в `TO_REDACT` (A-23 / S-16). Полное
+  шифрование (`Store`/pin) — отдельный backlog-пункт, не блокер.
 - **Severity:** P1 (security)
 - **Evidence:** [`config_flow.py:362`](../../custom_components/elektronny_gorod/config_flow.py#L362), [`config_flow.py:419-420`](../../custom_components/elektronny_gorod/config_flow.py#L419-L420); подробно — в [`security.md#S-16`](security.md).
 - **Recommended fix:** добавить `go2rtc_username`/`go2rtc_password` в `TO_REDACT` для diagnostics.py (см. S-08).

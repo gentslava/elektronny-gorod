@@ -7,6 +7,16 @@
 
 ## [Unreleased]
 
+## [3.3.0] - 2026-05-30
+
+### Added
+
+- **Diagnostics с redaction** ([A-23](docs/audit/project-audit.md) / [S-08](docs/audit/security.md)). Добавлен `diagnostics.py` — теперь выгрузку diagnostics через UI можно безопасно расшарить: `async_redact_data(entry.as_dict(), TO_REDACT)` маскирует `access_token`/`refresh_token`/`user_agent`/go2rtc creds + PII (account_id, subscriber_id, phone, …). `TO_REDACT` синхронизирован с `SENSITIVE_KEYS` (`_logging.py`, есть guard-тест). Coordinator-снимок в выгрузке — только счётчики (places/cameras/locks/balances/dnd), без значений. Закрывает S-16 (go2rtc creds больше не утекают в diagnostics). 6 тестов `tests/test_diagnostics.py`.
+
+### Changed
+
+- **AIDD: state-management + reconciliation findings↔git** ([ADR-0010](docs/decisions/0010-aidd-state-reconciliation.md), internal). Устранён системный дрейф документации: контракты (`AGENTS.md`/`CLAUDE.md`/`workflow.md`) больше не описывают исправленный код как сломанный; audit-статусы `RESOLVED` сверяются с git master (`.claude/hooks/check-audit-reconciliation.sh`, SessionStart hook); «текущее состояние» живёт в одном источнике; maintenance-rules стали двунаправленными; гейты блокируют (`quality_scale ≤ gate-confirmed`). Не затрагивает код интеграции.
+
 ### Fixed
 
 - **Options flow: нельзя было очистить go2rtc creds (silent save без изменений)** ([A-78](docs/audit/project-audit.md)). Юзер открывал «Настройки go2rtc», очищал username/password, нажимал save → форма говорила «Параметры успешно сохранены», но при следующем открытии creds **снова на месте**. Никакой ошибки — просто silent revert. Root cause: schema использовала `vol.Optional(KEY, default=str(old_value))` — HA frontend омит пустые Optional поля при submit, voluptuous подставляет default **обратно** → user_input получает старое значение → save «успешен» без изменений. **Fix**: канонический HA pattern — schema без default для username/password, текущие значения подаются через `add_suggested_values_to_schema` (подсказка в UI, но пустой submit остаётся пустым). Бонус: `validate_go2rtc` теперь различает HTTP 401 (auth_failed) от других сетевых ошибок (unreachable) — error message указывает чёткий путь решения. 3 regression-теста в `tests/test_options_flow_clear_creds.py`.

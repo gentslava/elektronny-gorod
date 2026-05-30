@@ -56,10 +56,15 @@ elektronny-gorod/
 │   ├── coordinator.py             ← DataUpdateCoordinator
 │   ├── api.py                     ← REST API клиент
 │   ├── http.py                    ← низкоуровневый HTTP
-│   ├── camera.py                  ← Camera platform
+│   ├── _logging.py                ← redact() + SENSITIVE_KEYS (ADR-0004)
+│   ├── camera.py                  ← Camera platform + go2rtc + auto-recovery
 │   ├── lock.py                    ← Lock platform
-│   ├── sensor.py                  ← Sensor (balance) platform
+│   ├── sensor.py                  ← Sensor (balance + days-to-block) platform
+│   ├── binary_sensor.py           ← account_blocked platform
+│   ├── switch.py                  ← DND switches platform
 │   ├── go2rtc.py                  ← go2rtc валидация / upsert
+│   ├── entity_migration.py        ← стабильные unique_id + registry migration
+│   ├── diagnostics.py             ← redact-нутая diagnostics-выгрузка (S-08)
 │   ├── helpers.py                 ← utils + auth crypto
 │   ├── user_agent.py              ← эмуляция Android-клиента
 │   ├── time.py                    ← timestamp helpers
@@ -69,9 +74,9 @@ elektronny-gorod/
 │       ├── ru.json
 │       └── en.json
 │
-├── tests/                          ← 🔴 нерабочий stub
+├── tests/                          ← pytest suite (PHC-based, зелёный)
 │   ├── conftest.py
-│   └── test_config_flow.py
+│   └── …                          ← см. таблицу тестов ниже
 │
 ├── .github/workflows/
 │   ├── hassfest.yaml              ← manifest validation
@@ -142,6 +147,13 @@ elektronny-gorod/
 |---|---|
 | [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | validate_go2rtc (GET /api + PUT /api/streams + cleanup), upsert stream, derive_rtsp_host |
 
+### Diagnostics / безопасность
+
+| Файл | Назначение |
+|---|---|
+| [`_logging.py`](../../custom_components/elektronny_gorod/_logging.py) | `redact()` + `SENSITIVE_KEYS` + `redact_path()` (ADR-0004) |
+| [`diagnostics.py`](../../custom_components/elektronny_gorod/diagnostics.py) | `async_get_config_entry_diagnostics` + `TO_REDACT` (S-08/S-16); coordinator-снимок = только счётчики |
+
 ### Утилиты
 
 | Файл | Назначение | Особенности |
@@ -166,6 +178,7 @@ elektronny-gorod/
 | [`tests/conftest.py`](../../tests/conftest.py) | fixtures + `enable_custom_integrations` auto-applied |
 | [`tests/test_entity_migration.py`](../../tests/test_entity_migration.py) | unit-тесты `_camera_new_uid`/`_lock_new_uid` + golden vector для `lock_unique_id` |
 | [`tests/test_logging_redact.py`](../../tests/test_logging_redact.py) | unit-тесты `_logging.redact()` + `redact_path()` |
+| [`tests/test_diagnostics.py`](../../tests/test_diagnostics.py) | redaction secrets/options, non-sensitive preserved, coordinator counts-only, TO_REDACT ⊇ SENSITIVE_KEYS |
 | [`tests/test_http.py`](../../tests/test_http.py) | Bearer skip на pre-auth, no-leak между запросами, PII redact в error log |
 | [`tests/test_visibility.py`](../../tests/test_visibility.py) | hidden_by sync (first_add, USER override, un-hide, re-add) |
 | [`tests/test_visibility_real.py`](../../tests/test_visibility_real.py) | production-replica (реальные HAR-данные) + migration v2 |
