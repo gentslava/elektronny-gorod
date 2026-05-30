@@ -1,4 +1,18 @@
-"""Constants used by Elektronny Gorod integration."""
+"""Constants used by Elektronny Gorod integration.
+
+Содержит **только** shared / identity константы (см.
+[`.claude/rules/constants-locality.md`](../../.claude/rules/constants-locality.md)):
+
+- DOMAIN / LOGGER / BASE_API_URL — identity интеграции и бэкенда.
+- CONF_* — config-flow keys (shared между config_flow / coordinator / etc.).
+- DEFAULT_GO2RTC_* + GO2RTC_RTSP_PORT — shared между camera.py и go2rtc.py.
+- AREA_* — shared между camera.py и lock.py.
+- APP_VERSION / ANDROID_* — shared между user_agent и config_flow.
+
+Domain-specific timing (cooldown, poll interval, refresh budget, timeout)
+остаётся **в модуле**, который его использует — см. precedents в
+`camera.py`, `coordinator.py`, `go2rtc.py`.
+"""
 
 import logging
 from typing import Final
