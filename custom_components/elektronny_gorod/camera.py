@@ -542,11 +542,10 @@ class ElektronnyGorodCamera(
                 self._name, self._id,
             )
             return
-        # [DIAG-A71] зафиксируем длину URL (без самого URL — там token)
-        LOGGER.debug("[DIAG-A71] recovery %s: got fresh url (len=%d)", self._id, len(stream_url))
         LOGGER.debug(
-            "Camera %s (%s): auto-recovery — refreshing stalled stream",
-            self._name, self._id,
+            "Camera %s (%s): auto-recovery — refreshing stalled stream "
+            "(force_restart=%s)",
+            self._name, self._id, force_restart,
         )
         try:
             if self._use_go2rtc:
@@ -555,11 +554,11 @@ class ElektronnyGorodCamera(
                 )
             elif self.stream is not None and force_restart:
                 self.stream.update_source(stream_url)
-        except Exception:  # noqa: BLE001 — [DIAG-A71] catch для видимости PUT-fails
-            LOGGER.exception("[DIAG-A71] recovery %s: _ensure_go2rtc_stream/update_source raised", self._id)
-            return
-        LOGGER.debug("[DIAG-A71] recovery %s: completed (use_go2rtc=%s, has_stream=%s, force_restart=%s)",
-                     self._id, self._use_go2rtc, self.stream is not None, force_restart)
+        except Exception:  # noqa: BLE001 — defensive: не валим callback-цепочку
+            LOGGER.exception(
+                "Camera %s (%s): recovery — go2rtc/update_source failed",
+                self._name, self._id,
+            )
 
     # ------------------------------------------------------------------ #
     # go2rtc producer-health poll (A-71 v2 / ADR-0009)                   #
@@ -641,59 +640,31 @@ class ElektronnyGorodCamera(
         же throttled recovery, что и event-driven путь. Покрывает камеры без
         legacy HA Stream worker (go2rtc/WebRTC-only, напр. лифты).
         """
-        # [DIAG-A71] Per-poll instrumentation — временно, для diagnose-before-fix.
-        # Цель: понять, почему cameras прогрессивно выпадают из poll'а ночью
-        # (гипотеза: consumers→0 после отвала WebRTC-клиента, by-design no-op).
-        # После сбора лога — revert через `git revert` или ручную удаление.
         if not self.available:
-            LOGGER.debug("[DIAG-A71] poll %s: skip — entity unavailable", self._id)
             return
         info = await self._fetch_go2rtc_stream_info()
         if info is None:
-            LOGGER.debug("[DIAG-A71] poll %s: skip — fetch failed/None", self._id)
             return
         producers, consumers = info
         n_consumers = len(consumers) if isinstance(consumers, list) else 0
-        has_prod = bool(producers)
-        cur_raw = producers[0].get("bytes_recv") if has_prod else None
-        prev = self._go2rtc_last_bytes_recv
-        LOGGER.debug(
-            "[DIAG-A71] poll %s: consumers=%d has_prod=%s bytes_recv=%r prev=%r",
-            self._id, n_consumers, has_prod, cur_raw, prev,
-        )
         if n_consumers == 0 or not producers:
+            # Никто не смотрит → producer может быть idle легитимно; baseline сброс.
             self._go2rtc_last_bytes_recv = None
-            LOGGER.debug(
-                "[DIAG-A71] poll %s: -> reset baseline (no_consumers=%s no_producer=%s)",
-                self._id, n_consumers == 0, not has_prod,
-            )
             return
-        cur = cur_raw
+        cur = producers[0].get("bytes_recv")
         if not isinstance(cur, int):
-            LOGGER.debug(
-                "[DIAG-A71] poll %s: -> skip (bytes_recv type=%s, not int)",
-                self._id, type(cur).__name__,
-            )
             return
+        prev = self._go2rtc_last_bytes_recv
         self._go2rtc_last_bytes_recv = cur
-        if prev is None:
-            LOGGER.debug("[DIAG-A71] poll %s: -> baseline=%d (first)", self._id, cur)
-            return
-        if cur == prev:
+        if prev is not None and cur == prev:
             LOGGER.debug(
                 "Camera %s (%s): go2rtc producer frozen "
                 "(bytes_recv=%d, %d consumer(s)) — triggering recovery",
                 self._name, self._id, cur, n_consumers,
             )
             self._maybe_schedule_stream_recovery()
+            # Ре-baseline: после re-mint producer стартует заново.
             self._go2rtc_last_bytes_recv = None
-            LOGGER.debug("[DIAG-A71] poll %s: -> frozen → recovery scheduled, baseline reset", self._id)
-        else:
-            LOGGER.debug(
-                "[DIAG-A71] poll %s: -> growing (delta=%d, %.1f KB/s)",
-                self._id, cur - prev,
-                (cur - prev) / 1024 / GO2RTC_HEALTH_POLL_INTERVAL.total_seconds(),
-            )
 
     async def _async_proactive_refresh(
         self, now: datetime | None = None
@@ -713,19 +684,15 @@ class ElektronnyGorodCamera(
         (нет смысла рефрешить только что minted token).
         """
         if not self.available:
-            LOGGER.debug("[DIAG-A71] proactive %s: skip — entity unavailable", self._id)
             return
         info = await self._fetch_go2rtc_stream_info()
         if info is None:
-            LOGGER.debug("[DIAG-A71] proactive %s: skip — fetch failed", self._id)
             return
         producers, consumers = info
         n_consumers = len(consumers) if isinstance(consumers, list) else 0
         if n_consumers == 0:
-            LOGGER.debug(
-                "[DIAG-A71] proactive %s: skip — no consumers (nobody watching)",
-                self._id,
-            )
+            # Никто не смотрит → skip; при первом открытии HA go2rtc дёрнет
+            # stream_source() → fresh fetch автоматически.
             return
         # Cooldown: общая throttle-метка с v1/v2 recovery.
         now_mono = time.monotonic()
@@ -735,8 +702,8 @@ class ElektronnyGorodCamera(
         min_age = GO2RTC_PROACTIVE_REFRESH_INTERVAL.total_seconds() / 2
         if elapsed < min_age:
             LOGGER.debug(
-                "[DIAG-A71] proactive %s: skip — recent refresh %.0fs ago (< %.0fs)",
-                self._id, elapsed, min_age,
+                "Camera %s (%s): proactive skip — recent refresh %.0fs ago (< %.0fs)",
+                self._name, self._id, elapsed, min_age,
             )
             return
         LOGGER.debug(

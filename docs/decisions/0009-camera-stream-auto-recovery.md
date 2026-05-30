@@ -114,6 +114,57 @@ go2rtc с свежим URL; `update_source` пропускается (legacy Str
 и не нужен, go2rtc сам переподключит producer к consumer). Прод-факт: домофоны
 с `consumers=1` после PUT свежего URL льют байты → PUT-resume-consumer доказан.
 
+### v3 + v3.2 — Proactive keep-alive refresh (ROOT CAUSE FIX)
+
+**Прод-DIAG (T20-08, 17h):** v1/v2 не покрывают реальный кейс. `consumers`
+падает с >0 до 0 ВНУТРИ 30с poll-окна (мы никогда не видим
+`frozen+consumers>0`), session-level cutoff бэкенда бьёт ВСЕ потоки
+синхронно независимо от наблюдателей.
+
+**v3 решение:** PROACTIVE refresh каждые ~25 мин (~83% от observed
+min TTL 30 мин) **только** для streams с активными consumers — не нагружаем
+сеть для idle камер. Первое открытие после idle → HA go2rtc дёрнет
+`stream_source()` → fresh fetch автоматически.
+
+**ROOT CAUSE найден через прод-эксперимент с go2rtc API (2026-05-30):**
+
+| Метод | На existing stream | Эффект |
+|---|---|---|
+| **PUT** | DESTROY + RECREATE | producer killed, consumers=0, catastrophe |
+| **PATCH** | UPDATE config only | producer survives, consumers сохраняются |
+
+`_go2rtc_upsert_stream` исторически использовал PUT-first (PATCH был
+fallback при PUT exception, который никогда не выполнялся). Каждый refresh
+УБИВАЛ running producer → consumers падали → пользователь видел чёрный
+экран. Это объясняет ВСЕ предыдущие проблемы:
+
+- v3 с `force_restart=True`: PUT destroy + `update_source()` мог частично
+  спасти через worker restart, но WebRTC peers терялись (особенно у камер
+  без preload — нет backup-consumer'а)
+- v3.1 c `force_restart=False`: PUT destroy без координации = catastrophe
+
+**v3.2 фикс:** переключение порядка → **PATCH-first**, PUT fallback (для
+старых версий go2rtc). PATCH идемпотентен — обновляет только config
+metadata, текущий ffmpeg-producer продолжает работать со старым URL до
+natural EOF, затем go2rtc применит новый. Consumers выживают.
+
+С PATCH-first proactive снова использует `force_restart=False` —
+координация с HA Stream worker через `update_source()` не нужна.
+
+**Прод-верификация v3.2 (2026-05-30 02:58→04:18):**
+
+- 4 successful proactive cycles (02:58, 03:23, 03:48, 04:13)
+- Все cycles **peaceful** — `bytes_recv` растут НЕПРЕРЫВНО (producer не
+  restarted), consumers сохраняются между циклами
+- Timestamp discontinuity errors: только 1 раз на cold-start (03:04),
+  после стабилизации pipeline — natural EOF transitions проходят smoothly
+
+**Known limitation (отдельный follow-up):** при первом natural EOF после
+cold start HA Stream worker может выдать `Timestamp discontinuity detected`
+ошибку (DTS jump между producers). v1 reactive recovery ловит и фиксит
+(~5с gap). После первого transition pipeline стабилизируется и последующие
+EOF проходят без discontinuity.
+
 ## Consequences
 
 ### Positive

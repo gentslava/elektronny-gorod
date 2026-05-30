@@ -771,20 +771,29 @@ Quality gates:
 ### A-71. Operator forpost session TTL (~30 мин) — long-open video stops без refresh
 
 - **Status:** ✅ **RESOLVED** (branch `fix/a71-camera-stream-auto-recovery`, PR #57).
-  Root cause = by-design лимит бэкенда (НЕ баг). **Auto-recovery**, два пути
+  Root cause = by-design лимит бэкенда (НЕ баг). **Auto-recovery**, три пути
   ([ADR-0009](../decisions/0009-camera-stream-auto-recovery.md)):
   - **v1 event-driven** — оборачиваем HA Stream update-callback; при
     `stream.available → False` throttled (`STREAM_RECOVERY_COOLDOWN=30s`)
     re-fetch свежего URL + `_ensure_go2rtc_stream`/`update_source`. Покрывает
-    камеры с legacy HA Stream worker (**домофоны**). **Прод-проверка
-    2026-05-27 23:39: домофоны восстановились** (stream_worker timeout →
-    recovery → 0 ошибок после).
+    камеры с legacy HA Stream worker (**домофоны**).
   - **v2 go2rtc producer-health poll** — `GET /api/streams?src=eg_<id>` каждые
     `GO2RTC_HEALTH_POLL_INTERVAL=30s`; `bytes_recv` заморожен при `consumers>0`
     → stall → тот же recovery. Покрывает **go2rtc/WebRTC-only камеры (лифты)**,
-    у которых нет legacy Stream worker. Прод-диагностика live подтвердила
-    сигнал: домофоны +750 КБ/5с (живые), лифты +0 (заморожены).
-  - 14 unit-тестов (`tests/test_camera_auto_recovery.py`).
+    у которых нет legacy Stream worker.
+  - **v3 proactive keep-alive** — каждые `GO2RTC_PROACTIVE_REFRESH_INTERVAL=25 мин`
+    PATCH go2rtc с fresh operator URL **до** TTL hit (только для streams с
+    активными consumers — не нагружаем сеть впустую).
+  - **ROOT CAUSE (v3.2 fix, 2026-05-30):** `_go2rtc_upsert_stream` исторически
+    использовал PUT-first. Эмпирически на go2rtc API: **PUT** на existing
+    stream = DESTROY+RECREATE producer (consumers=0), **PATCH** = idempotent
+    update (producer survives). Переключение порядка → PATCH-first решает
+    catastrophic disruption WebRTC peers при каждом refresh.
+  - **Прод-верификация v3.2 (2026-05-30 02:58→04:18):** 4 successful proactive
+    cycles, peaceful (bytes_recv растут непрерывно, consumers сохраняются).
+    Timestamp discontinuity (DTS jump между producers) — только 1 раз на
+    cold-start, после стабилизации pipeline transitions проходят smoothly.
+  - 20 unit-тестов (`tests/test_camera_auto_recovery.py`).
 - **Severity:** **P2 (UX, by-design)**: видео останавливается через ~30 мин
   непрерывного просмотра. **Оригинальное приложение «Мой Дом» ведёт себя
   идентично** (зависает примерно через те же полчаса) — это архитектурный
