@@ -989,6 +989,34 @@ Quality gates:
   настоящего виновника.
 
 
+### A-79. validate_go2rtc — нет TCP-probe RTSP-порта
+
+- **Status:** ✅ **RESOLVED** — feat/g7-rtsp-probe-and-tests.
+- **Severity:** **P3 (UX-улучшение валидации; не блокирует работу).**
+- **Area:** `go2rtc.py:validate_go2rtc` (новая фаза probe),
+  `tests/test_go2rtc_validate.py`, `tests/test_go2rtc_upsert.py`.
+- **Symptom:** До фикса: HTTP API go2rtc успешно валидируется, юзер
+  жмёт «Сохранить» — а RTSP-порт `8554` закрыт (firewall, иной
+  bind-address, go2rtc собран без RTSP). Юзер обнаруживает проблему
+  только когда камера не воспроизводится — нет привязки причины к
+  config-flow шагу.
+- **Evidence:** аудит интеграции go2rtc-конфигурации (G-1..G-9 review
+  по issue #29). HTTP probe покрывает только `/api` и `/api/streams`,
+  RTSP-listener не проверяется ни разу.
+- **Fix:** после успешного HTTP-чека делаем `asyncio.open_connection
+  (rtsp_host, 8554)` с timeout 3с. При неудаче возвращаем отдельный
+  error key `go2rtc_rtsp_port_closed` с понятным сообщением (firewall
+  / bind-address / RTSP-support).
+- **Regression-guard:** 39 unit-тестов в `tests/test_go2rtc_validate.py`
+  + `tests/test_go2rtc_upsert.py` — first direct unit coverage для
+  `validate_go2rtc` / `_go2rtc_upsert_stream` / `cleanup_go2rtc_stream`
+  (раньше тестировались только через options-flow mock или camera
+  integration). Закрывает также **G-9** из go2rtc-аудита.
+- **Lesson learned:** при добавлении конфигурации с разделёнными
+  транспортами (HTTP API + RTSP) — валидировать **каждый** транспорт
+  отдельно. HTTP success ≠ RTSP success.
+
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
