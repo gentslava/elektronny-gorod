@@ -14,7 +14,7 @@ import logging
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from aiohttp import ClientSession, ClientError, ClientTimeout
 
@@ -298,10 +298,34 @@ class ElektronnyGorodCamera(
     # ------------------------------------------------------------------ #
 
     def _rtsp_url(self) -> str:
+        """RTSP URL для HA Stream worker / WebRTC pipeline.
+
+        Если у юзера в go2rtc включена RTSP auth (`rtsp.username/password`,
+        отдельно от HTTP API auth), URL должен содержать `user:pass@host` —
+        иначе HA Stream worker получает 401. Креды URL-encoded для защиты от
+        спец-символов в пароле (`@`, `:`, `/`, `+`, `%`).
+        """
         if not self._go2rtc_rtsp_host:
             raise RuntimeError("go2rtc rtsp host is not configured")
+        auth = ""
+        if self._go2rtc_username and self._go2rtc_password:
+            u = quote(self._go2rtc_username, safe="")
+            p = quote(self._go2rtc_password, safe="")
+            auth = f"{u}:{p}@"
         return (
-            f"rtsp://{self._go2rtc_rtsp_host}:{GO2RTC_RTSP_PORT}/"
+            f"rtsp://{auth}{self._go2rtc_rtsp_host}:{GO2RTC_RTSP_PORT}/"
+            f"{self._go2rtc_stream_name}"
+        )
+
+    def _rtsp_url_redacted(self) -> str:
+        """RTSP URL с замаскированными credentials — для логов."""
+        if not self._go2rtc_rtsp_host:
+            return "<unconfigured>"
+        auth = ""
+        if self._go2rtc_username and self._go2rtc_password:
+            auth = "***:***@"
+        return (
+            f"rtsp://{auth}{self._go2rtc_rtsp_host}:{GO2RTC_RTSP_PORT}/"
             f"{self._go2rtc_stream_name}"
         )
 
@@ -353,7 +377,7 @@ class ElektronnyGorodCamera(
         LOGGER.debug(
             "go2rtc stream updated: name=%s rtsp=%s (force_restart=%s)",
             self._go2rtc_stream_name,
-            self._rtsp_url(),
+            self._rtsp_url_redacted(),
             force_restart,
         )
 
@@ -466,7 +490,20 @@ class ElektronnyGorodCamera(
         self._consecutive_empty_count = 0
         if not self._use_go2rtc:
             return stream_url
-        await self._ensure_go2rtc_stream(stream_url)
+        try:
+            await self._ensure_go2rtc_stream(stream_url)
+        except RuntimeError as exc:
+            # go2rtc недоступен (401, 5xx, network). НЕ ломаем entity setup —
+            # fallback на direct operator FLV URL (HA Stream подключится к
+            # operator напрямую, минуя go2rtc proxy). Это degrades feature, но
+            # сохраняет работоспособность камеры.
+            LOGGER.error(
+                "Camera %s (%s): go2rtc недоступен (%s); fallback на direct "
+                "operator URL. Проверь go2rtc_username/password в integration "
+                "config.",
+                self._name, self._id, exc,
+            )
+            return stream_url
         return self._rtsp_url()
 
     # ------------------------------------------------------------------ #
