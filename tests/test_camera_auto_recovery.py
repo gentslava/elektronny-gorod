@@ -375,15 +375,34 @@ async def test_health_poll_not_registered_without_go2rtc(
 async def test_fetch_go2rtc_stream_info_parses_response(
     hass: HomeAssistant, mock_api
 ):
-    """`_fetch_go2rtc_stream_info` парсит реальный shape go2rtc /api/streams."""
-    from aioresponses import aioresponses
+    """`_fetch_go2rtc_stream_info` парсит реальный shape go2rtc /api/streams.
 
+    NB: используем прямой mock session.get вместо `aioresponses` — последний
+    leak'ает aiohttp `_run_safe_shutdown_loop` thread на старых комбах
+    HA/Python, что валит `verify_cleanup` фикстуру pytest-homeassistant.
+    """
     cam = await _setup_camera(hass, use_go2rtc=True)
-    with aioresponses() as m:
-        m.get(
-            "http://127.0.0.1:1984/api/streams?src=eg_100",
-            payload={"producers": [{"bytes_recv": 42}], "consumers": [{}]},
-        )
+
+    fake_resp = AsyncMock()
+    fake_resp.status = 200
+    fake_resp.json = AsyncMock(
+        return_value={"producers": [{"bytes_recv": 42}], "consumers": [{}]}
+    )
+
+    class _AsyncCtxMgr:
+        async def __aenter__(self_):
+            return fake_resp
+
+        async def __aexit__(self_, *args):
+            return False
+
+    session_mock = MagicMock()
+    session_mock.get = MagicMock(return_value=_AsyncCtxMgr())
+
+    with patch(
+        "custom_components.elektronny_gorod.camera.async_get_clientsession",
+        return_value=session_mock,
+    ):
         info = await cam._fetch_go2rtc_stream_info()
 
     assert info is not None
