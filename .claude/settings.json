@@ -71,6 +71,16 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/check-audit-reconciliation.sh"
+          }
+        ]
+      }
     ]
   },
   "env": {

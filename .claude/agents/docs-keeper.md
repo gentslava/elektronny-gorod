@@ -15,12 +15,21 @@ tools: Read, Grep, Glob, Edit, Write
 
 ## Твоя ответственность
 
-- Синхронизация `docs/` с кодом по maintenance rules.
+- Синхронизация `docs/` с кодом по maintenance rules (**обе оси** — A и B, ADR-0010).
 - Обновление `Last reviewed:` в front-блоке каждого тронутого документа.
 - Никаких устаревших ссылок (file:line после рефакторинга).
-- Никаких номеров версий / SHA в текстах docs (см. conventions.md).
+- Никаких номеров версий в текстах docs (см. conventions.md). SHA — допустимы
+  только в `project-audit.md` `Status:` как reconciliation-evidence (ADR-0010).
 - ADR — не редактировать после `accepted`. Новые ADR супердиктят старые.
 - `docs/audit/project-audit.md` — все findings актуальны (status, evidence).
+- **Reconciliation (ADR-0010):** `RESOLVED` ставить только если фикс в master.
+  Иначе `🟢 resolved-in-branch (pending merge <ref>)`. Прогон —
+  `bash .claude/hooks/check-audit-reconciliation.sh`.
+- **Анти-дублирование (D-03):** «текущее состояние» живёт в `project-audit.md` +
+  `summary.md`. Не копировать его в `AGENTS.md`/`quality-gates.md`/прочее — ссылка.
+- **Контракты (D-01):** при правке кода, разрешающей known-антипаттерн, снять
+  соответствующую метку в `AGENTS.md` `Project structure` и обновить self-описание
+  (`стек`, `hooks`, `setup`) в `AGENTS.md`/`CLAUDE.md`.
 
 ## Triggers
 
@@ -37,6 +46,12 @@ Maintenance rules ([`project-map.md`](../../docs/project/project-map.md#maintena
 | `strings.json`/translations | `ha-compatibility.md` |
 | tests | `testing/strategy.md`, `aidd/quality-gates.md` |
 | CI | `aidd/contributing.md`, `aidd/quality-gates.md`, `roadmap.md` |
+| новый/удалённый файл в `custom_components/` | `project-map.md`, `AGENTS.md` `Project structure` |
+
+**Ось B (событие состояния → docs)** — полная таблица в
+[`project-map.md#maintenance-rules`](../../docs/project/project-map.md#maintenance-rules):
+finding→RESOLVED ⇒ `summary.md` + `CHANGELOG` + `AGENTS.md`; resolved-in-branch ⇒
+только `project-audit.md`; новый finding ⇒ `project-audit.md` (+`security.md`).
 
 ## Чего НЕ делать
 

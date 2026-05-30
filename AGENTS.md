@@ -11,9 +11,9 @@ Home Assistant **custom integration** `elektronny_gorod` (домен) — инт
 ## Стек
 
 - Python 3.12+ (по HA core)
-- HomeAssistant ≥ 2024.1 (de-facto, см. [`ha-compatibility.md`](docs/architecture/ha-compatibility.md))
+- HomeAssistant ≥ 2024.10.4 (см. `hacs.json` + [`ha-compatibility.md`](docs/architecture/ha-compatibility.md))
 - `aiohttp`, `voluptuous`, `yarl`
-- Тесты: `pytest` + `pytest-homeassistant-custom-component` (планируется)
+- Тесты: `pytest` + `pytest-homeassistant-custom-component` (`requirements_test.txt`)
 
 ## Setup commands
 
@@ -27,37 +27,50 @@ ln -s "$(pwd)/custom_components/elektronny_gorod" \
 
 ## Test / lint commands
 
-🔴 На момент написания pytest **отсутствует в CI** и существующий тест — нерабочий stub. См. [`testing/strategy.md`](docs/testing/strategy.md). До переписывания тестов команды ниже **не запускать** на текущем коде:
-
 ```bash
-# Запланировано (не работает сейчас):
-pytest tests/ -q
+# Локальный прогон (зелёный):
+PYTHONPATH=. .venv/bin/pytest tests/ -q
+# С покрытием:
+PYTHONPATH=. .venv/bin/pytest tests/ --cov=custom_components/elektronny_gorod --cov-report=term-missing -q
 ```
+
+Состояние тестов (актуально — см. [`testing/strategy.md`](docs/testing/strategy.md)
+и [`project-audit.md`](docs/audit/project-audit.md)): suite зелёный; есть gap-и
+по `config_flow.py`/`api.py`/`helpers.py` (трекаются как findings).
 
 CI на сегодня:
 
 ```bash
+# python-tests.yaml — pytest matrix (HA min + current)
 # hassfest (manifest валидация)
 # HACS validate
 # release pipeline: zip + GH release + автокоммит версии
+# prerelease.yaml — pre-release zip для каждого PR
 ```
 
 См. [`.github/workflows/`](.github/workflows/).
 
 ## Project structure
 
+> Структура описывает **назначение** файлов. Текущее качество/findings —
+> в [`project-audit.md`](docs/audit/project-audit.md) (единый источник, ADR-0010).
+
 ```
 custom_components/elektronny_gorod/
-├── __init__.py            # async_setup_entry, миграции 1→2→3
-├── manifest.json          # version, domain, config_flow=true
+├── __init__.py            # async_setup_entry, async_migrate_entry 1→2→3, visibility sync
+├── manifest.json          # version, domain, config_flow, quality_scale, integration_type
 ├── config_flow.py         # ConfigFlow + OptionsFlow (token/password/SMS + go2rtc)
-├── coordinator.py         # DataUpdateCoordinator (без update_interval!)
+├── coordinator.py         # DataUpdateCoordinator (update_interval 5 мин)
 ├── api.py                 # REST-обёртка над myhome.proptech.ru
-├── http.py                # низкоуровневый HTTP (per-request ClientSession — антипаттерн)
-├── camera.py              # Camera entity + go2rtc upsert
-├── lock.py                # LockEntity (с fake-таймером)
-├── sensor.py              # Balance sensor
+├── http.py                # низкоуровневый HTTP (shared async_get_clientsession)
+├── _logging.py            # redact() + SENSITIVE_KEYS (ADR-0004)
+├── camera.py              # Camera entity + go2rtc upsert + auto-recovery (ADR-0009)
+├── lock.py                # LockEntity (домофон)
+├── sensor.py              # Balance sensor + days-to-block
+├── binary_sensor.py       # account_blocked
+├── switch.py              # DND switches (intercom / management calls)
 ├── go2rtc.py              # validate_go2rtc + cleanup
+├── entity_migration.py    # стабильные unique_id + registry migration
 ├── helpers.py             # find, dedupe, hash_password (SHA1+MD5)
 ├── user_agent.py          # эмуляция Android-клиента (Pixel 6-10)
 ├── time.py                # таймстемпы для auth
@@ -66,9 +79,10 @@ custom_components/elektronny_gorod/
 └── translations/
     ├── ru.json
     └── en.json
-tests/                     # 🔴 нерабочий stub
-.github/workflows/         # hassfest / hacs / release
+tests/                     # pytest suite (PHC-based)
+.github/workflows/         # python-tests / hassfest / hacs / release / prerelease
 docs/                      # AIDD-документация (project/architecture/audit/testing/aidd/)
+.claude/                   # agents / commands / rules / hooks / settings
 ```
 
 ## Code style

@@ -196,6 +196,12 @@ elektronny-gorod/
 
 ## Maintenance rules
 
+Две оси (ADR-0010). **Ось A** — «изменён код-файл → обнови docs». **Ось B** —
+«изменилось состояние (finding/CI/quality_scale) → обнови docs». Раньше была
+только ось A — поэтому `summary.md`/`AGENTS.md`/state-таблицы гнили (D-04).
+
+### Ось A — код-файл → docs
+
 | Если изменён | Обновить |
 |---|---|
 | `manifest.json` | `project-map.md`, `ha-compatibility.md`, `source-of-truth.md` |
@@ -208,8 +214,23 @@ elektronny-gorod/
 | `strings.json` / `translations/*` | `ha-compatibility.md` |
 | `tests/**` | `testing/strategy.md`, `quality-gates.md` |
 | `.github/workflows/**` | `contributing.md`, `quality-gates.md`, `roadmap.md` |
+| новый/удалённый файл в `custom_components/` | `project-map.md`, `AGENTS.md` (`Project structure`) |
 | `README.md` | `summary.md`, `index.md` |
-| AGENTS.md / CLAUDE.md | `contributing.md` |
+| `AGENTS.md` / `CLAUDE.md` (self-описание: стек, hooks, setup) | взаимная сверка обоих + `contributing.md` |
+
+### Ось B — событие состояния → docs
+
+| Событие | Обновить |
+|---|---|
+| finding → `✅ RESOLVED` (merged в master) | `summary.md` (риски), `CHANGELOG.md`, снять `🔴` в `AGENTS.md` `Project structure` если упоминался |
+| finding → `🟢 resolved-in-branch` | `project-audit.md` (статус + `pending merge <ref>`), **не** трогать `summary.md` риски до merge |
+| новый finding (A-NN / S-NN) | `project-audit.md` (+ `security.md` если security), `summary.md` риски если P0/P1 |
+| разрешён known-антипаттерн в коде | `AGENTS.md` `Project structure` (снять метку), `summary.md` |
+| изменилось CI / тест-состояние | `summary.md` «Состояние»; `quality-gates.md` — только ссылкой, не копией |
+| изменён `manifest:quality_scale` | сверить с гейтом (D-05); при несоответствии — finding в `project-audit.md` |
+
+🔴 **Запрет (ADR-0010):** дублировать «текущее состояние» в нескольких доках.
+Единый источник — `project-audit.md` + `summary.md`. Остальное ссылается.
 
 ## Next reading
 

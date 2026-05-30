@@ -1,6 +1,6 @@
 Status: Active
 Owner: Validator Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-05-30
 
 Source files:
 - весь репозиторий
@@ -90,7 +90,7 @@ Used by agents:
 |---|---|
 | Purpose | Тесты зелёные, реально выполнялись |
 | Owner | QA Agent |
-| Required commands |\| `pytest tests/ -v` |
+| Required commands | `PYTHONPATH=. .venv/bin/pytest tests/ -q` |
 | Required evidence | вывод pytest, coverage report |
 | Pass | все тесты зелёные; config_flow покрыт основными сценариями; нет тестов, маскирующих баги |
 | Fail | падающие тесты; pytest не запускался; тесты «исправлены» под сломанное поведение |
@@ -156,24 +156,41 @@ slash-команду `/git-cleanup`.
 
 ## Сводная таблица
 
-| Gate | Обязателен для | Реальное состояние сейчас |
-|---|---|---|
-| PROJECT_MAP_READY | старт работы | 🟢 |
-| SOURCE_OF_TRUTH_READY | старт работы | 🟢 |
-| ARCHITECTURE_UNDERSTOOD | планирование | 🟢 |
-| AUDIT_DONE | планирование | 🟢 |
-| PLAN_APPROVED | implementation | 🟡 ожидает approval owner |
-| IMPLEMENTATION_STEP_OK | каждый commit | n/a |
-| TESTS_PASS | merge | 🔴 |
-| REVIEW_OK | merge | n/a |
-| SECURITY_OK | merge | 🔴 (3 P0 утечки) |
-| DOCS_UPDATED | merge | 🟢 (только что заложено) |
-| HISTORY_CLEAN | merge | 🟡 (агент создан, gate активен с этого момента) |
-| READY_FOR_RELEASE | публикация | 🔴 |
+| Gate | Обязателен для |
+|---|---|
+| PROJECT_MAP_READY | старт работы |
+| SOURCE_OF_TRUTH_READY | старт работы |
+| ARCHITECTURE_UNDERSTOOD | планирование |
+| AUDIT_DONE | планирование |
+| PLAN_APPROVED | implementation |
+| IMPLEMENTATION_STEP_OK | каждый commit |
+| TESTS_PASS | merge |
+| REVIEW_OK | merge |
+| SECURITY_OK | merge |
+| DOCS_UPDATED | merge |
+| HISTORY_CLEAN | merge |
+| READY_FOR_RELEASE | публикация |
+
+> **«Реальное состояние сейчас» намеренно убрано из этой таблицы (ADR-0010,
+> D-03).** Live-состояние гниёт внутри методологического документа. Единый
+> источник «что зелёное / что красное» — [`project-audit.md`](../audit/project-audit.md)
+> (findings со `Status:`) + [`summary.md`](../summary.md) (таблица «Состояние»).
+> Здесь — только **определения** гейтов, не их текущий цвет.
 
 ## Принцип
 
-Gate можно «пропустить» только с явным письменным обоснованием от owner. Никаких «потом починим». Если gate красный — фиксить gate, а не идти дальше.
+Gate можно «пропустить» только с **записанным waiver** (ADR-0010, D-05):
+строка в `project-audit.md` / PR body вида «gate X skipped, owner: <…>,
+причина: <…>». Никаких «потом починим». Если gate красный — фиксить gate,
+а не идти дальше.
+
+### quality_scale ≤ gate-confirmed (D-05)
+
+`manifest.json:quality_scale` **не поднимать выше** уровня, реально
+подтверждённого гейтами. Пример: Bronze требует `config-flow-test-coverage`
+(happy path + abort `already_configured` + migrations) — пока этих тестов нет,
+`bronze` в manifest держится как **открытый finding**, а не как факт. Любое
+несоответствие manifest↔гейт — finding в `project-audit.md`.
 
 ## Next reading
 

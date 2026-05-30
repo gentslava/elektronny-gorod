@@ -36,6 +36,21 @@ Quality gates:
 - **P2** — желательно (UX, читаемость, лёгкие фиксы).
 - **P3** — низкий (опечатки, мёртвый код, mikkogeometry).
 
+## Status vocabulary (reconciliation — ADR-0010)
+
+Этот файл — **единый источник правды** о том, что сделано/открыто (ADR-0010).
+Статус сверяется с git master, не пишется авансом:
+
+- **✅ RESOLVED** — фикс **в master** (обязателен commit SHA или merged PR).
+- **🟢 resolved-in-branch (pending merge ...)** — код готов, но **ещё не в
+  master**. Не считать закрытым для релиза. Перевести в RESOLVED после merge.
+- **🟡 PARTIALLY RESOLVED** — часть закрыта, остаток описан.
+- **🔴 OPEN / STILL OPEN** — не сделано.
+- **🟡 WON'T FIX** — осознанно не чиним (с обоснованием).
+
+🔴 Статус-плейсхолдеры без reconciliation запрещены: указывай либо merged-SHA,
+либо `pending merge <ref>`. Сверку гоняет `.claude/hooks/check-audit-reconciliation.sh`.
+
 ## P0 — критичные
 
 ### A-01. Утечка access_token в логи
@@ -414,7 +429,7 @@ Quality gates:
 
 ### A-57. Sensor balance — нет дополнительных attrs из `/finance` response
 
-- **Status:** ✅ **RESOLVED** в branch `feat/a57-balance-attrs` (PR #39).
+- **Status:** ✅ **RESOLVED** — merged в master (commit `e5d9bbd`, PR #39).
   2 entity per place добавлены к существующему balance device:
   - `binary_sensor.{place}_account_blocked` (BinarySensorDeviceClass.PROBLEM).
   - `sensor.{place}_days_to_block` (DURATION + UnitOfTime.DAYS).
@@ -488,7 +503,7 @@ Quality gates:
 
 ### A-61. Двойной HTTP в per-place collectors
 
-- **Status:** ✅ **RESOLVED** в branch `feat/a61-fix-double-http` (PR TBD).
+- **Status:** ✅ **RESOLVED** — merged в master (commit `71eb4dd`).
   Pre-fetch `screens` + `access_controls` в `_async_update_data` per place,
   передача в оба collectors как параметры. `_collect_cameras_for_place`
   signature расширена до 4 параметров. `_collect_locks_for_place` теперь
@@ -591,7 +606,7 @@ Quality gates:
 
 ### A-64. `_sync_visibility` / migration → reload cascade + user override
 
-- **Status:** ✅ **RESOLVED** в branch `fix/a64-reload-cascade-and-user-override` (PR TBD).
+- **Status:** ✅ **RESOLVED** — merged в master (commit `20867c4`).
   Три изменения в `__init__.py`:
   1. **Migration flag в `entry.data`** (НЕ `entry.options`) — listener
      `async_update_options` не срабатывает. Backward-compat: читает оба
@@ -623,7 +638,7 @@ Quality gates:
 
 ### A-65. Log noise от временно broken cameras
 
-- **Status:** ✅ **RESOLVED** в branch `fix/a65-log-throttling` (PR TBD).
+- **Status:** ✅ **RESOLVED** — merged в master (commit `d4ea4b3`).
   Per-entity counter `_consecutive_empty_count` в `ElektronnyGorodCamera`.
   В `stream_source()` при empty URL: counter incremented, level выбирается
   динамически — `WARNING` если counter==1, `DEBUG` если counter>=2. При
@@ -689,8 +704,8 @@ Quality gates:
 
 ### A-68. Concurrent stream_source() для одной camera дублирует HTTP + go2rtc restart
 
-- **Status:** ✅ **RESOLVED** в branch `fix/a68-dedup-concurrent-stream-source`
-  (PR #51). In-flight future-pattern в `Camera.stream_source()`. Если
+- **Status:** ✅ **RESOLVED** — merged в master (commit `b771ba8`, PR #51).
+  In-flight future-pattern в `Camera.stream_source()`. Если
   concurrent caller обнаруживает `self._inflight_stream_future is not None` —
   wait existing future вместо запуска параллельного fetch. Существующая
   логика вынесена в helper `_fetch_stream_source_impl()`. Future cleared в
@@ -770,7 +785,7 @@ Quality gates:
 
 ### A-71. Operator forpost session TTL (~30 мин) — long-open video stops без refresh
 
-- **Status:** ✅ **RESOLVED** (branch `fix/a71-camera-stream-auto-recovery`, PR #57).
+- **Status:** ✅ **RESOLVED** — merged в master (PR #57, merge commit `aedf2a4`).
   Root cause = by-design лимит бэкенда (НЕ баг). **Auto-recovery**, три пути
   ([ADR-0009](../decisions/0009-camera-stream-auto-recovery.md)):
   - **v1 event-driven** — оборачиваем HA Stream update-callback; при
@@ -911,7 +926,7 @@ Quality gates:
 
 ### A-78. Options flow — нельзя очистить go2rtc creds (voluptuous default back-fill)
 
-- **Status:** 🟢 **RESOLVED** (PR #58 — fix scope S-A71-02).
+- **Status:** ✅ **RESOLVED** — merged в master (PR #58, merge commit `0ae029d`).
 - **Severity:** **P2 (UX-baked silent corruption — юзер думает «save успешен», а данные не меняются).**
 - **Area:** `config_flow.py:OptionsFlowHandler.async_step_init` (schema construction),
   `go2rtc.py:validate_go2rtc` (UX-улучшение для 401).
