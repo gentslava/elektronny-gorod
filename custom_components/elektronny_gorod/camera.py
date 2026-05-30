@@ -115,13 +115,23 @@ async def _go2rtc_upsert_stream(
     except ClientError:
         pass
     # PUT fallback — для старых go2rtc или если PATCH вернул 4xx/5xx.
-    async with session.put(
-        url, headers=headers or {}, timeout=timeout
-    ) as resp:
-        if resp.status >= 400:
-            # NB: НЕ логируем response body — go2rtc может echo'нуть src=
-            # обратно, включая operator token (см. no-secret-logs rule).
-            raise RuntimeError(f"go2rtc PUT failed: HTTP {resp.status}")
+    # NB: aiohttp's `ClientError` subclasses (особенно `InvalidURL`) могут включать
+    # полный URL в `str(exc)`. Наш URL = `.../streams?src=ffmpeg:<OPERATOR_URL_WITH_TOKEN>`.
+    # Если такой exception всплывёт в `LOGGER.exception(...)` через caller —
+    # operator token попадёт в traceback. Перехватываем и rebrand'им через
+    # `from None` чтобы оборвать exception chain (исходный exc и его URL не
+    # попадут в traceback). См. no-secret-logs.md + security audit S-A71-01.
+    try:
+        async with session.put(
+            url, headers=headers or {}, timeout=timeout
+        ) as resp:
+            if resp.status >= 400:
+                # Аналогично: response body может echo'нуть src= с токеном.
+                raise RuntimeError(f"go2rtc PUT failed: HTTP {resp.status}")
+    except ClientError as exc:
+        raise RuntimeError(
+            f"go2rtc PUT failed: {type(exc).__name__}"
+        ) from None
 
 
 def _get_go2rtc_cfg(
