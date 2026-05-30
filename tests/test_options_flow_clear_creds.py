@@ -10,7 +10,7 @@ Fix: schema без default'а для username/password, текущие знач�
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -27,6 +27,23 @@ from custom_components.elektronny_gorod.const import (
     CONF_GO2RTC_PASSWORD,
 )
 from custom_components.elektronny_gorod.go2rtc import Go2RtcValidationResult
+
+
+@pytest.fixture(autouse=True)
+def _no_real_clientsession():
+    """Не создавать реальную aiohttp-сессию в OptionsFlow.
+
+    `async_step_init` зовёт `async_get_clientsession(hass)` ДО (замоканного)
+    `validate_go2rtc` — реальная сессия поднимает aiodns/pycares DNS-резолвер
+    в daemon-потоке `_run_safe_shutdown_loop`, который на min-HA (2024.10)
+    ловит строгий PHC `verify_cleanup` в teardown → ERROR. Сессия в тестах
+    всё равно не используется (validate_go2rtc замокан), поэтому MagicMock.
+    """
+    with patch(
+        "custom_components.elektronny_gorod.config_flow.async_get_clientsession",
+        return_value=MagicMock(),
+    ):
+        yield
 
 
 @pytest.fixture
