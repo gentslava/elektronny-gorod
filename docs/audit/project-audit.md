@@ -768,6 +768,91 @@ Quality gates:
   - unit-тест: если первый бросает exception → второй тоже получает
     exception (без зависания).
 
+### A-71. Operator forpost session TTL (~30 мин) — long-open video stops без refresh
+
+- **Status:** ✅ **RESOLVED** (branch `fix/a71-camera-stream-auto-recovery`, PR #57).
+  Root cause = by-design лимит бэкенда (НЕ баг). **Auto-recovery**, три пути
+  ([ADR-0009](../decisions/0009-camera-stream-auto-recovery.md)):
+  - **v1 event-driven** — оборачиваем HA Stream update-callback; при
+    `stream.available → False` throttled (`STREAM_RECOVERY_COOLDOWN=30s`)
+    re-fetch свежего URL + `_ensure_go2rtc_stream`/`update_source`. Покрывает
+    камеры с legacy HA Stream worker (**домофоны**).
+  - **v2 go2rtc producer-health poll** — `GET /api/streams?src=eg_<id>` каждые
+    `GO2RTC_HEALTH_POLL_INTERVAL=30s`; `bytes_recv` заморожен при `consumers>0`
+    → stall → тот же recovery. Покрывает **go2rtc/WebRTC-only камеры (лифты)**,
+    у которых нет legacy Stream worker.
+  - **v3 proactive keep-alive** — каждые `GO2RTC_PROACTIVE_REFRESH_INTERVAL=25 мин`
+    PATCH go2rtc с fresh operator URL **до** TTL hit (только для streams с
+    активными consumers — не нагружаем сеть впустую).
+  - **ROOT CAUSE (v3.2 fix, 2026-05-30):** `_go2rtc_upsert_stream` исторически
+    использовал PUT-first. Эмпирически на go2rtc API: **PUT** на existing
+    stream = DESTROY+RECREATE producer (consumers=0), **PATCH** = idempotent
+    update (producer survives). Переключение порядка → PATCH-first решает
+    catastrophic disruption WebRTC peers при каждом refresh.
+  - **Прод-верификация v3.2 (2026-05-30 02:58→04:18):** 4 successful proactive
+    cycles, peaceful (bytes_recv растут непрерывно, consumers сохраняются).
+    Timestamp discontinuity (DTS jump между producers) — только 1 раз на
+    cold-start, после стабилизации pipeline transitions проходят smoothly.
+  - 20 unit-тестов (`tests/test_camera_auto_recovery.py`).
+- **Severity:** **P2 (UX, by-design)**: видео останавливается через ~30 мин
+  непрерывного просмотра. **Оригинальное приложение «Мой Дом» ведёт себя
+  идентично** (зависает примерно через те же полчаса) — это архитектурный
+  лимит бэкенда оператора, исходящего из того, что лайв не смотрят так долго.
+  Помогает ручное переоткрытие карточки (= reopen в приложении).
+- **Area:** HA Stream lifecycle / go2rtc producer / operator forpost session.
+- **Symptom (user-reported 2026-05-27):** «долго открытое видео перестаёт
+  воспроизводиться» — frozen / чёрный экран.
+- **Evidence (`...2026-05-27T14-58-18.200Z.log`):**
+  - Camera Подъезд (5593590): **16×** `Error demuxing stream while finding
+    first packet (Operation timed out, rtsp://127.0.0.1:8554/eg_5593590)`
+    непрерывно **20:34:30 → 20:54:23** (~20 мин) — **без единого** `Fetching
+    camera 5593590 stream URL` в этом окне (refresh не происходит).
+  - go2rtc producer: `error=EOF url=ffmpeg:elektronny_gorod_..._camera_<id>`
+    (апстрим оператора закончил поток) + `i/o timeout
+    url=rtsp://127.0.0.1:8554/eg_<id>` (consumers не получают пакетов).
+  - **Чистый TTL** (по последнему раунду обновления, без загрязнения
+    многократными reload): PUT **21:25:14** → first error **21:55:19** =
+    **30:05** для 5593590/5593592/5595471 (минтились вместе → умерли вместе).
+  - HAR (`session_MyHome_25-05.har`): `data.URL` =
+    `https://forpost-N.novotelecom.ru:18081/rtsp/a<NNNNNN>/<token>/d=1` —
+    **expiry в URL отсутствует**, TTL чисто серверный; сессия `a<NNNNNN>`
+    минтится заново на каждый `/video`.
+- **Root cause (causal chain):**
+  1. `Camera.stream_source()` вызывается HA **один раз** при старте Stream
+     worker'а → тянет operator URL (forpost session TTL ~30 мин) → PUT go2rtc.
+  2. Worker держит соединение постоянно (preload / continuous consume).
+  3. Через ~30 мин forpost закрывает сессию → go2rtc ffmpeg producer ловит
+     EOF → авто-restart на **тот же** (уже мёртвый) URL → reconnect storm.
+  4. `_ensure_go2rtc_stream` (единственный refresh source) вызывается **только**
+     из `stream_source()`; HA повторно его не зовёт → URL не обновляется.
+  5. HA Stream worker → «finding first packet timed out» → retry-backoff
+     навсегда. Видео встало до ручного переоткрытия (fresh `stream_source()`).
+- **Связь:** это и есть root cause, который искали [A-66](project-audit.md)
+  и informal A-69/A-70 (PR #44-46, #52-53 — закрыты без устойчивого фикса).
+  A-66 `Stream.update_source()` помогает **только** когда `stream_source()`
+  повторно вызван; в long-open сценарии он не вызывается. [A-68](project-audit.md)
+  dedup ортогонален.
+- **TTL не читается клиентом и не нужен точно.** В URL нет expiry-поля; точное
+  значение (~30 мин) не влияет на решение — это известный лимит бэкенда,
+  воспроизводимый и в оригинальном приложении. Поэтому **active diagnostic
+  patch (измерение TTL) не делается** — измерять нечего, мы уже знаем поведение.
+- **Решение = design tradeoff (ADR-0009).** Конфликт с принципом
+  [mirror-app-behavior]: интеграция воспроизводит приложение, а приложение
+  **намеренно** даёт зависнуть. Рассмотренные варианты:
+  - **Вариант 0 — pure mirror:** ничего не «чинить». Отклонён (HA-сценарии
+    долгого просмотра ломаются сильнее, чем в мобильном приложении).
+  - ✅ **Вариант 1 — auto-recovery (мягкая deviation) — ВЫБРАН:** при детекте
+    stall (`stream.available → False`) автоматически дёрнуть свежий
+    `stream_source()` — это **те же API-вызовы**, что делает приложение при
+    reopen, просто автоматически. Не выдумывает новых эндпоинтов. См.
+    [ADR-0009](../decisions/0009-camera-stream-auto-recovery.md).
+  - **Вариант 2 — proactive keep-alive (полная deviation):** фоновый refresh
+    каждые `T < TTL`. Отклонён как primary (паттерн, которого в приложении нет;
+    лишние HTTP). Возможное будущее расширение для WebRTC-only.
+- **Secondary:** [api.py:query_camera_stream](../../custom_components/elektronny_gorod/api.py#L343)
+  `except Exception: return None` глотает бизнес-ошибку `Error != null` при
+  HTTP 200 (см. api-reference §video) — маскирует диагностику истечения.
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
@@ -783,7 +868,8 @@ Quality gates:
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
-| A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR TBD — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
+| A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR #51 — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
+| ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
 | A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
 | A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |

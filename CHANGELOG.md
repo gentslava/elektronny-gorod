@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Camera: auto-recovery стрима при истечении operator session** ([A-71](docs/audit/project-audit.md) / [ADR-0009](docs/decisions/0009-camera-stream-auto-recovery.md)). Долго открытое видео переставало воспроизводиться через ~30 мин: operator forpost live-stream имеет серверный TTL ~30 мин, потом backend закрывает сессию → go2rtc producer ловит `EOF`, HA Stream worker ретраит мёртвый `self.source` и **никогда** не перевызывает `stream_source()` → видео заморожено до ручного reopen. (Оригинальное приложение «Мой Дом» зависает идентично — это by-design лимит бэкенда.) **Fix** — auto-recovery, **три пути**: (1) **event-driven** — оборачиваем HA Stream update-callback, при `stream.available → False` throttled re-fetch свежего URL; покрывает камеры с legacy HA Stream worker (домофоны). (2) **go2rtc producer-health poll** — `GET /api/streams?src=eg_<id>` каждые 30с, `bytes_recv` заморожен при `consumers>0` → stall → recovery; покрывает go2rtc/WebRTC-only камеры. (3) **proactive keep-alive** каждые ~25 мин для streams с активными consumers — PATCH go2rtc с fresh URL **до** TTL hit. **ROOT CAUSE найден через прод-эксперимент с go2rtc API**: `PUT` на existing stream = `DESTROY+RECREATE` (producer killed, consumers=0); `PATCH` = `UPDATE config only` (producer survives). `_go2rtc_upsert_stream` использовал PUT-first → каждый refresh убивал producer. Замена на **PATCH-first** (PUT как fallback для старых go2rtc) делает proactive refresh peaceful: текущий producer продолжает работать со старым URL до natural EOF, затем go2rtc применит новый. 20 unit-тестов (`tests/test_camera_auto_recovery.py`), прод-верификация 4 успешных proactive cycles за час.
+
 ## [3.2.0] - 2026-05-27
 
 ### Changed (Camera resilience)
