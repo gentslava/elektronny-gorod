@@ -68,7 +68,9 @@
           "go2rtc_base_url": "go2rtc API URL",
           "go2rtc_rtsp_host": "RTSP host",
           "go2rtc_username": "Имя пользователя go2rtc",
-          "go2rtc_password": "Пароль go2rtc"
+          "go2rtc_password": "Пароль go2rtc",
+          "go2rtc_refresh_interval": "Интервал обновления RTSP, минуты",
+          "go2rtc_publish_hidden": "Публиковать скрытые камеры в RTSP"
         }
       }
     }
@@ -82,7 +84,9 @@
           "use_go2rtc": "Использовать go2rtc",
           "go2rtc_base_url": "go2rtc API URL",
           "go2rtc_username": "Имя пользователя go2rtc",
-          "go2rtc_password": "Пароль go2rtc"
+          "go2rtc_password": "Пароль go2rtc",
+          "go2rtc_refresh_interval": "Интервал обновления RTSP, минуты",
+          "go2rtc_publish_hidden": "Публиковать скрытые камеры в RTSP"
         }
       }
     },
@@ -102,6 +106,9 @@
       },
       "days_to_block": {
         "name": "Дней до блокировки"
+      },
+      "go2rtc_rtsp_urls": {
+        "name": "go2rtc RTSP ссылки"
       }
     },
     "binary_sensor": {

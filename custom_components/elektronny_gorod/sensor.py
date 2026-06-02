@@ -18,13 +18,21 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTime
+from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LOGGER
+from .const import (
+    CONF_GO2RTC_PUBLISH_HIDDEN,
+    CONF_GO2RTC_RTSP_HOST,
+    CONF_USE_GO2RTC,
+    DEFAULT_GO2RTC_PUBLISH_HIDDEN,
+    DOMAIN,
+    GO2RTC_RTSP_PORT,
+    LOGGER,
+)
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
 
@@ -42,7 +50,85 @@ async def async_setup_entry(
         place_id = balance_info["place_id"]
         entities.append(ElektronnyGorodBalanceSensor(coordinator, place_id))
         entities.append(ElektronnyGorodDaysToBlockSensor(coordinator, place_id))
+    entities.append(ElektronnyGorodRtspUrlsSensor(coordinator, entry))
     async_add_entities(entities)
+
+
+class ElektronnyGorodRtspUrlsSensor(
+    CoordinatorEntity[ElektronnyGorodUpdateCoordinator], SensorEntity
+):
+    """Diagnostic sensor with go2rtc RTSP URLs for all published cameras."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "go2rtc_rtsp_urls"
+    _attr_icon = "mdi:cctv"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        coordinator: ElektronnyGorodUpdateCoordinator,
+        entry: ConfigEntry,
+    ) -> None:
+        super().__init__(coordinator)
+        self._entry = entry
+        self._attr_unique_id = f"{DOMAIN}_{entry.entry_id}_go2rtc_rtsp_urls"
+
+    @property
+    def _enabled(self) -> bool:
+        if CONF_USE_GO2RTC in self._entry.options:
+            return bool(self._entry.options.get(CONF_USE_GO2RTC))
+        return bool(self._entry.data.get(CONF_USE_GO2RTC, False))
+
+    @property
+    def _publish_hidden(self) -> bool:
+        return bool(
+            self._entry.options.get(
+                CONF_GO2RTC_PUBLISH_HIDDEN,
+                self._entry.data.get(
+                    CONF_GO2RTC_PUBLISH_HIDDEN,
+                    DEFAULT_GO2RTC_PUBLISH_HIDDEN,
+                ),
+            )
+        )
+
+    @property
+    def _rtsp_host(self) -> str | None:
+        return self._entry.options.get(CONF_GO2RTC_RTSP_HOST) or self._entry.data.get(
+            CONF_GO2RTC_RTSP_HOST
+        )
+
+    def _camera_urls(self) -> dict[str, str]:
+        if not self._enabled or not self._rtsp_host:
+            return {}
+
+        urls: dict[str, str] = {}
+        for camera in (self.coordinator.data or {}).get("cameras") or []:
+            if camera.get("hidden") and not self._publish_hidden:
+                continue
+            camera_id = str(camera.get("id") or "")
+            if not camera_id:
+                continue
+            name = str(camera.get("name") or camera_id)
+            urls[name] = f"rtsp://{self._rtsp_host}:{GO2RTC_RTSP_PORT}/eg_{camera_id}"
+        return urls
+
+    @property
+    def native_value(self) -> int:
+        """Return number of published RTSP URLs."""
+        return len(self._camera_urls())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return RTSP URLs in copy-friendly forms."""
+        urls = self._camera_urls()
+        return {
+            "urls": urls,
+            "url_list": list(urls.values()),
+        }
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self.async_write_ha_state()
 
 
 class ElektronnyGorodBalanceSensor(

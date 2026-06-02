@@ -6,7 +6,7 @@ import base64
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
-from aiohttp import ClientError, ClientSession
+from aiohttp import ClientError, ClientSession, ClientTimeout
 from yarl import URL
 
 from .const import GO2RTC_RTSP_PORT, LOGGER
@@ -23,6 +23,56 @@ class Go2RtcValidationResult:
     ok: bool
     error: str = ""
     rtsp_host: str | None = None
+
+
+def build_go2rtc_src(source_url: str) -> str:
+    """Build go2rtc source for an operator stream URL.
+
+    Do not use `ffmpeg:` here: many go2rtc installations restrict external
+    binaries with `allow_paths`, which breaks RTSP publishing for NVR clients.
+    """
+    return source_url
+
+
+def build_basic_auth_headers(
+    username: str | None,
+    password: str | None,
+) -> dict[str, str]:
+    """Build go2rtc Basic auth headers if credentials are configured."""
+    if not username or not password:
+        return {}
+    userpass = f"{username}:{password}"
+    b64 = base64.b64encode(userpass.encode()).decode()
+    return {"Authorization": f"Basic {b64}"}
+
+
+async def upsert_go2rtc_stream(
+    session: ClientSession,
+    base_url: str,
+    stream_name: str,
+    src: str,
+    headers: dict | None = None,
+) -> None:
+    """Create or update a go2rtc stream without leaking source URLs in errors."""
+    qs = urlencode({"name": stream_name, "src": src})
+    url = f"{base_url}/api/streams?{qs}"
+    timeout = ClientTimeout(total=10)
+
+    try:
+        async with session.patch(
+            url, headers=headers or {}, timeout=timeout
+        ) as resp:
+            if resp.status in (200, 201, 204):
+                return
+    except ClientError:
+        pass
+
+    try:
+        async with session.put(url, headers=headers or {}, timeout=timeout) as resp:
+            if resp.status >= 400:
+                raise RuntimeError(f"go2rtc PUT failed: HTTP {resp.status}")
+    except ClientError as exc:
+        raise RuntimeError(f"go2rtc PUT failed: {type(exc).__name__}") from None
 
 
 def normalize_base_url(value: str | None) -> str:
@@ -83,11 +133,7 @@ async def validate_go2rtc(base_url: str, session: ClientSession, username: str |
     if not rtsp_host:
         return Go2RtcValidationResult(False, "go2rtc_invalid_url", None)
 
-    headers = {}
-    if username and password:
-        userpass = f"{username}:{password}"
-        b64 = base64.b64encode(userpass.encode()).decode()
-        headers["Authorization"] = f"Basic {b64}"
+    headers = build_basic_auth_headers(username, password)
 
     # 1) ping /api
     try:
