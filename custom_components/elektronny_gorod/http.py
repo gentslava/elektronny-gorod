@@ -110,6 +110,8 @@ class HTTP:
             response = await session.get(url, headers=headers)
         elif method == "POST":
             response = await session.post(url, data=data, headers=headers)
+        elif method == "DELETE":
+            response = await session.delete(url, headers=headers)
 
         if binary:
             return await response.read()
@@ -130,3 +132,7 @@ class HTTP:
     ) -> ClientResponse | bytes:
         """Handle POST requests."""
         return await self.__request(endpoint, method="POST", data=data, binary=binary)
+
+    async def delete(self, endpoint: str) -> ClientResponse | bytes:
+        """Handle DELETE requests."""
+        return await self.__request(endpoint, method="DELETE", data=None, binary=False)
