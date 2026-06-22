@@ -26,10 +26,11 @@
 
 1. **SIP-стек — в интеграции** (go2rtc не умеет SIP: нет пакета `sip`,
    [issue #1750](https://github.com/AlexxIT/go2rtc/issues/1750) open). База —
-   **`voip-utils`** (SIP-клиент из HA core, Apache-2.0, уже UAS), дописываем
-   G.711/REGISTER/STUN из доказанного `probe`. Без тяжёлых нативных deps → работает
-   в HA Container. Готового end-to-end решения нет (3 research-прохода) — наш `probe`
-   уже закрыл SIP-gap на Python.
+   **ручной `asyncio`-модуль на основе `probe`** (спайк [research-spike.md](research-spike.md)
+   D1 показал: `voip-utils` не подходит под Kazoo — схлопывает multi-`Via`/`Record-Route`,
+   хардкодит Opus, нет REGISTER/Digest). Из `voip-utils` берём лишь `SipEndpoint`.
+   Без тяжёлых нативных deps → работает в HA Container. Готового end-to-end решения
+   нет (3 research-прохода) — наш `probe` уже закрыл SIP-gap на Python.
 2. **Целевая трубка — браузер HA через go2rtc** (вариант A: `exec`-backchannel +
    готовая карта `custom:webrtc-camera` AlexxIT/WebRTC). go2rtc как транспорт.
    ⚠️ uplink через `exec`-backchannel — известный риск go2rtc, PoC до Slice 2.
