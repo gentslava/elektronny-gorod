@@ -1,11 +1,14 @@
 [English](/README.en_EN.md) | [Русский](/README.md)
 
 <p>
+  <a href="https://hacs.xyz"><img src="https://img.shields.io/badge/HACS-Custom-41BDF5" alt="HACS Custom"/></a>
+  <img src="https://img.shields.io/github/v/release/gentslava/elektronny-gorod?label=release&color=blue" alt="Release"/>
   <img src="https://img.shields.io/badge/Home%20Assistant-2024.10%2B-blue?logo=home-assistant" alt="Home Assistant"/>
+  <img src="https://img.shields.io/github/license/gentslava/elektronny-gorod?color=green" alt="License"/>
   <img src="https://img.shields.io/badge/Custom%20Integration-orange" alt="Custom Integration"/>
   <img src="https://img.shields.io/badge/Elektronny%20Gorod-API-green" alt="Elektronny Gorod API"/>
   <img src="https://img.shields.io/badge/Dom.ru-API-red" alt="Dom.ru API"/>
-  <img src="https://img.shields.io/badge/Intercoms,%20Cameras,%20Locks-lightgrey" alt="Devices"/>
+  <img src="https://img.shields.io/badge/Intercoms,%20Cameras,%20Locks,%20Doorbell-lightgrey" alt="Devices"/>
   <img src="https://img.shields.io/badge/Русский%20язык-yes-blue" alt="Russian language"/>
 </p>
 
@@ -35,6 +38,17 @@
 Добавьте в Home Assistant свои **домофоны, камеры и замки**: смотрите видео и слушайте звук, открывайте двери и — **в реальном времени** — получайте **события звонка в домофон** (FCM push) для уведомлений и автоматизаций.
 
 > 🔔 **Новое:** теперь интеграция ловит **звонок в домофон** и отдаёт его как `event`-сущность — можно слать пуш с кадром камеры и кнопкой «Открыть дверь». См. раздел [Событие звонка в домофон](#-событие-звонка-в-домофон-fcm-push).
+
+## Содержание
+
+- [Установка](#установка)
+- [Конфигурация](#конфигурация)
+- [Возможности](#возможности)
+- [Подключение камер через go2rtc](#подключение-камер-через-go2rtc)
+- [🔔 Событие звонка в домофон (FCM push)](#-событие-звонка-в-домофон-fcm-push)
+- [Пример автоматизации: баланс](#пример-автоматизации-баланс)
+- [Проблемы и вклад](#проблемы-и-вклад)
+- [Лицензия](#лицензия)
 
 ## Установка
 

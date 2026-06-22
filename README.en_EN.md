@@ -1,11 +1,14 @@
 [English](/README.en_EN.md) | [Русский](/README.md)
 
 <p>
+  <a href="https://hacs.xyz"><img src="https://img.shields.io/badge/HACS-Custom-41BDF5" alt="HACS Custom"/></a>
+  <img src="https://img.shields.io/github/v/release/gentslava/elektronny-gorod?label=release&color=blue" alt="Release"/>
   <img src="https://img.shields.io/badge/Home%20Assistant-2024.10%2B-blue?logo=home-assistant" alt="Home Assistant"/>
+  <img src="https://img.shields.io/github/license/gentslava/elektronny-gorod?color=green" alt="License"/>
   <img src="https://img.shields.io/badge/Custom%20Integration-orange" alt="Custom Integration"/>
   <img src="https://img.shields.io/badge/Elektronny%20Gorod-API-green" alt="Elektronny Gorod API"/>
   <img src="https://img.shields.io/badge/Dom.ru-API-red" alt="Dom.ru API"/>
-  <img src="https://img.shields.io/badge/Intercoms,%20Cameras,%20Locks-lightgrey" alt="Devices"/>
+  <img src="https://img.shields.io/badge/Intercoms,%20Cameras,%20Locks,%20Doorbell-lightgrey" alt="Devices"/>
   <img src="https://img.shields.io/badge/English-yes-blue" alt="English language"/>
 </p>
 
@@ -35,6 +38,17 @@ This is a custom integration for Home Assistant that allows you to integrate wit
 Add your **intercoms, cameras and locks** to Home Assistant: watch video and hear audio, open doors and — **in real time** — receive **doorbell call events** (FCM push) for notifications and automations.
 
 > 🔔 **New:** the integration now catches **doorbell calls** and exposes them as an `event` entity — send a push with a camera snapshot and an "Open door" button. See [Doorbell call event](#-doorbell-call-event-fcm-push).
+
+## Contents
+
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Features](#features)
+- [Camera connection via go2rtc](#camera-connection-via-go2rtc)
+- [🔔 Doorbell call event (FCM push)](#-doorbell-call-event-fcm-push)
+- [Automation example: balance](#automation-example-balance)
+- [Issues and Contributions](#issues-and-contributions)
+- [License](#license)
 
 ## Installation
 
