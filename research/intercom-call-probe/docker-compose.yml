@@ -45,3 +45,18 @@ services:
     <<: *probe
     image: intercom-probe
     command: ["probe_sip.py", "2"]
+
+  # SIP media-проба: отвечает на вызов + шлёт аудио-трек (audio/) в RTP-uplink.
+  # INTERCOM_AC выбирает домофон. audio/ — volume (трек G.711, не в образе).
+  media:
+    <<: *probe
+    image: intercom-probe
+    command: ["probe_sip_media.py"]
+    environment:
+      # accessControlId домофона — PII, НЕ хардкодим. Передавать из shell при запуске:
+      #   INTERCOM_AC=<ac> docker compose up media     (sudo: добавить -E или env в команду)
+      - INTERCOM_AC=${INTERCOM_AC:-0}
+    volumes:
+      - ./session.json:/app/session.json:ro
+      - ./audio:/app/audio:ro
+      - ./logs:/app/logs

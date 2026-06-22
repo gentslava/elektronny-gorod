@@ -3,5 +3,6 @@ session.json
 firebase_config.json
 fcm_credentials.json
 logs/
+audio/
 .venv/
 __pycache__/
