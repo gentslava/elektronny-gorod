@@ -55,6 +55,10 @@ AREA_INTERCOM: Final = "Домофоны"
 AREA_INDOOR_CAM: Final = "Камеры дома"
 AREA_PUBLIC_CAM: Final = "Городские камеры"
 
+# Realtime doorbell-call signal: fcm.py (sender) → event.py (entity listener).
+# Shared cross-module → в const.py (см. constants-locality.md).
+SIGNAL_DOORBELL: Final = f"{DOMAIN}_doorbell"
+
 APP_VERSION: Final = {
     "name": "9.7.0",
     "code": "90700000"

@@ -29,6 +29,7 @@ from .user_agent import UserAgent
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.CAMERA,
+    Platform.EVENT,
     Platform.LOCK,
     Platform.SENSOR,
     Platform.SWITCH,

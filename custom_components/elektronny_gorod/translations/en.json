@@ -109,6 +109,11 @@
         "name": "Account blocked"
       }
     },
+    "event": {
+      "doorbell": {
+        "name": "Doorbell call"
+      }
+    },
     "lock": {
       "lock": {
         "name": "Lock"
