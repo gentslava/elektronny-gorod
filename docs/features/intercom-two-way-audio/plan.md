@@ -406,10 +406,16 @@ Bite-sized задачи финализируются **после Task 1** (фо
   (из `probe_sip_media.py:377-399`). Тест: 200 OK эхо-ит оба Via и оба Record-Route
   дословно + добавляет To-tag; BYE адресован remote Contact с Route из Record-Route.
 
-### Slice 0-network — следующий слайс (часть ждёт D2)
-- `sip/protocol.py` (`asyncio.DatagramProtocol`): REGISTER lifecycle, приём INVITE/BYE,
-  RTP-сокет, STUN-discover, latching. `SipManager` фасад (`async_answer`/`async_hangup`).
-- Стратегия transient-register — по D2 (⏳ замер тайминга, живой звонок).
+### Slice 0-network — следующий слайс (модель **REGISTER-on-answer**, доказано pcap)
+> См. [call-answer-model.md](call-answer-model.md). Held-регистрация — отвергнута.
+- `sip/protocol.py` (`asyncio.DatagramProtocol`): **НЕ держим регистрацию**. По сервису
+  `answer` (в окне `CallInvalidated` ~30с) → `REGISTER` (Expires=30, проприет. push-params:
+  `app-id=com.novotelecom.domophone;pn-type=google;pn-tok=<fcm>`) → приём `INVITE` →
+  `200 OK` **мгновенно** (локальный SDP, G.711, `a=rtcp:<sep>`) → **сразу** RTP uplink +
+  keepalive (активировать latching) → downlink. `SipManager` фасад (`async_answer`/`async_hangup`).
+- **НЕ нужны:** STUN (локальный SDP + FreeSWITCH latching), held-регистрация,
+  183/early-media/session-timers (реверс: приложение их не использует).
+- Видео при ответе — go2rtc (отдельно), как «подгрузка видео» в приложении.
 
 ### Slice 1 — downlink (прослушка), Фаза B
 - FCM `CALL_INCOMING` (из `fcm.py`) → `SipManager.async_answer()` по сервису/кнопке.
