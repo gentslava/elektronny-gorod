@@ -203,6 +203,8 @@ Feel free to contribute to the project by forking the repository and creating pu
 
 ## Credits
 
+❤️ **Thank you to all the donors** who supported the integration with a donation — your support motivates further development.
+
 Apple device types https://gist.github.com/adamawolf/3048717
 
 [go2rtc](https://github.com/AlexxIT/go2rtc) — project for streaming video and audio
