@@ -59,6 +59,20 @@ AREA_PUBLIC_CAM: Final = "Городские камеры"
 # Shared cross-module → в const.py (см. constants-locality.md).
 SIGNAL_DOORBELL: Final = f"{DOMAIN}_doorbell"
 
+# Persisted FCM-credentials (firebase-messaging) — в entry.data, чтобы FCM-токен
+# был стабилен между рестартами (как access_token/refresh_token).
+CONF_FCM_CREDENTIALS: Final = "fcm_credentials"
+
+# Firebase/FCM конфиг приложения «Мой Дом / NTK» (project ntk-myhome).
+# Публичные идентификаторы из APK (как BASE_API_URL) — НЕ секреты: Firebase
+# API key дизайнерски публичен (защита — package+SHA1 restriction). Нужны для
+# серверной регистрации устройства в FCM. См. ADR-0011, mirror-app-behavior.
+FCM_PROJECT_ID: Final = "ntk-myhome"
+FCM_APP_ID: Final = "1:369367231553:android:323a999f9f228a40"
+FCM_SENDER_ID: Final = "369367231553"
+FCM_API_KEY: Final = "AIzaSyB_26K8ZB7iu7qZBpBf5c4NLgvTC3Yrgpk"
+FCM_BUNDLE_ID: Final = "ru.inetra.intercom"
+
 APP_VERSION: Final = {
     "name": "9.7.0",
     "code": "90700000"

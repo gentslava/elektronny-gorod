@@ -24,6 +24,7 @@ from .const import (
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
+from .fcm import DoorbellFcmListener
 from .user_agent import UserAgent
 
 PLATFORMS: list[Platform] = [
@@ -55,6 +56,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Realtime событие вызова домофона — FCM-listener в фоне. Хрупкий флоу
+    # (приватные API Google) под graceful degradation в fcm.py; background-task —
+    # чтобы медленный checkin/register не блокировал setup. См. ADR-0011.
+    fcm_listener = DoorbellFcmListener(hass, entry, coordinator.api)
+    entry.async_create_background_task(
+        hass, fcm_listener.async_start(), name=f"{DOMAIN}_fcm_listener"
+    )
+    entry.async_on_unload(fcm_listener.async_stop)
 
     # One-time migration: legacy state (disabled_by на entities/devices от
     # старых версий integration) → None. Применяется один раз per entry.

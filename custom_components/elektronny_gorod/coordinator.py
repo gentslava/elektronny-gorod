@@ -87,6 +87,11 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Hook для HA persistent notifications (placeholder)."""
         return
 
+    @property
+    def api(self) -> ElektronnyGorodAPI:
+        """Read-only доступ к API-обёртке (для FCM push-registration в fcm.py)."""
+        return self._api
+
     # ------------------------------------------------------------------ #
     # Public service methods (вызываются entity-слоем)                   #
     # ------------------------------------------------------------------ #
