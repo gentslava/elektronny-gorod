@@ -91,7 +91,9 @@ class HTTP:
         # из прошлых запросов не утекал в pre-auth endpoints).
         headers: dict[str, str] = dict(self._headers)
         headers["user-agent"] = str(self.user_agent)
-        if method == "POST":
+        # content-type для тела (POST всегда; DELETE с телом — мирроринг
+        # subscriberNotifications-отписки, см. api.unregister_push_device).
+        if method == "POST" or (method == "DELETE" and data is not None):
             headers["content-type"] = "application/json; charset=UTF-8"
         # Bearer НЕ шлём на pre-auth endpoints (/auth/*) — иначе backend видит
         # expired Bearer и отдаёт 401 даже на login, блокируя reauth flow.
@@ -111,7 +113,7 @@ class HTTP:
         elif method == "POST":
             response = await session.post(url, data=data, headers=headers)
         elif method == "DELETE":
-            response = await session.delete(url, headers=headers)
+            response = await session.delete(url, data=data, headers=headers)
 
         if binary:
             return await response.read()
@@ -133,6 +135,8 @@ class HTTP:
         """Handle POST requests."""
         return await self.__request(endpoint, method="POST", data=data, binary=binary)
 
-    async def delete(self, endpoint: str) -> ClientResponse | bytes:
-        """Handle DELETE requests."""
-        return await self.__request(endpoint, method="DELETE", data=None, binary=False)
+    async def delete(
+        self, endpoint: str, data: object | None = None
+    ) -> ClientResponse | bytes:
+        """Handle DELETE requests (опц. тело — мирроринг отписки)."""
+        return await self.__request(endpoint, method="DELETE", data=data, binary=False)

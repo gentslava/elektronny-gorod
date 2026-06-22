@@ -396,16 +396,19 @@ class ElektronnyGorodAPI:
         payload = {"name": "accessControlOpen"}
         await self.http.post(api_url, json.dumps(payload))
 
-    def _push_body(self, fcm_token: str) -> dict[str, Any]:
-        """Тело привязки push-токена — зеркало приложения (FINDINGS §FCM)."""
+    def _push_body(self, fcm_token: str | None = None) -> dict[str, Any]:
+        """Тело device-регистрации — зеркало приложения (FINDINGS §FCM).
+
+        С `fcm_token` (POST register) включает `pushToken`; без него
+        (DELETE unregister) — то же тело без `pushToken`, ровно как приложение.
+        """
         ua = self.http.user_agent
-        return {
+        body: dict[str, Any] = {
             "appVersionCode": int(ua.app_version["code"]),
             "installationId": ua.uuid,
             "appId": 2,
             "appVersion": ua.app_version["name"],
             "platform": "google",
-            "pushToken": fcm_token,
             "isDevelop": False,
             "deviceManufacturer": ua.phone_manufacturer,
             "deviceModelName": ua.phone_model,
@@ -413,6 +416,9 @@ class ElektronnyGorodAPI:
             "deviceId": _device_id(ua.uuid),
             "deviceType": "MOBILE_APPLICATION",
         }
+        if fcm_token is not None:
+            body["pushToken"] = fcm_token
+        return body
 
     async def register_push_device(self, fcm_token: str) -> bool:
         """Привязать FCM push-токен у оператора.
@@ -431,9 +437,13 @@ class ElektronnyGorodAPI:
             return False
 
     async def unregister_push_device(self) -> bool:
-        """Отписать устройство от push (DELETE subscriberNotifications)."""
+        """Отписать устройство от push (DELETE subscriberNotifications).
+
+        Тело — зеркало приложения: то же device-тело, что у POST, но без
+        `pushToken` (наблюдалось в HAR: приложение шлёт DELETE с телом).
+        """
         try:
-            await self.http.delete(_SUBSCRIBER_NOTIFICATIONS)
+            await self.http.delete(_SUBSCRIBER_NOTIFICATIONS, json.dumps(self._push_body()))
             return True
         except Exception:
             return False

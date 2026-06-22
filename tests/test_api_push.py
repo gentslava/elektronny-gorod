@@ -68,8 +68,13 @@ async def test_register_returns_false_on_http_error(api, fake_session):
     assert await api.register_push_device("X") is False
 
 
-async def test_unregister_sends_delete(api, fake_session):
+async def test_unregister_sends_delete_with_body_no_token(api, fake_session):
     ok = await api.unregister_push_device()
     assert ok is True
     fake_session.delete.assert_awaited_once()
     assert _SUBSCRIBER_NOTIFICATIONS in fake_session.delete.await_args.args[0]
+    # DELETE-тело — зеркало приложения: device-поля БЕЗ pushToken.
+    body = json.loads(fake_session.delete.await_args.kwargs["data"])
+    assert "pushToken" not in body
+    assert body["deviceType"] == "MOBILE_APPLICATION"
+    assert "installationId" in body and "deviceId" in body
