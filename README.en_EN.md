@@ -10,6 +10,7 @@
   <img src="https://img.shields.io/badge/Dom.ru-API-red" alt="Dom.ru API"/>
   <img src="https://img.shields.io/badge/Intercoms,%20Cameras,%20Locks,%20Doorbell-lightgrey" alt="Devices"/>
   <img src="https://img.shields.io/badge/English-yes-blue" alt="English language"/>
+  <a href="https://boosty.to/gentslava"><img src="https://img.shields.io/badge/Boosty-Support-FF6F31" alt="Support on Boosty"/></a>
 </p>
 
 # Home Assistant Elektronny Gorod & Dom.ru Integration
@@ -204,6 +205,8 @@ Feel free to contribute to the project by forking the repository and creating pu
 ## Credits
 
 ❤️ **Thank you to all the donors** who supported the integration with a donation — your support motivates further development.
+
+Support development: [![Boosty](https://img.shields.io/badge/Boosty-Support%20the%20project-FF6F31)](https://boosty.to/gentslava)
 
 Apple device types https://gist.github.com/adamawolf/3048717
 

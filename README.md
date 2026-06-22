@@ -10,6 +10,7 @@
   <img src="https://img.shields.io/badge/Dom.ru-API-red" alt="Dom.ru API"/>
   <img src="https://img.shields.io/badge/Intercoms,%20Cameras,%20Locks,%20Doorbell-lightgrey" alt="Devices"/>
   <img src="https://img.shields.io/badge/Русский%20язык-yes-blue" alt="Russian language"/>
+  <a href="https://boosty.to/gentslava"><img src="https://img.shields.io/badge/Boosty-Поддержать-FF6F31" alt="Поддержать на Boosty"/></a>
 </p>
 
 # Интеграция Home Assistant с Электронным Городом и Дом.ру
@@ -204,6 +205,8 @@ automation:
 ## Благодарности
 
 ❤️ **Спасибо всем донатерам**, поддержавшим интеграцию рублём — ваша поддержка мотивирует развивать проект дальше.
+
+Поддержать разработку: [![Boosty](https://img.shields.io/badge/Boosty-Поддержать%20проект-FF6F31)](https://boosty.to/gentslava)
 
 Типы устройств Apple https://gist.github.com/adamawolf/3048717
 
