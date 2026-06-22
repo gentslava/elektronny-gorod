@@ -33,7 +33,7 @@ async def test_call_incoming_dispatches_ring(hass: HomeAssistant):
     got = _capture(hass)
     listener._on_notification({"data": {
         "PushType": "CALL_INCOMING", "PlaceId": "P1", "AccessControlId": "AC1",
-        "GateName": "Подъезд 1", "Apartment": "143", "Call-ID": "C1", "AllowOpen": "true",
+        "GateName": "Подъезд 1", "Apartment": "57", "Call-ID": "C1", "AllowOpen": "true",
     }}, "pid")
     await hass.async_block_till_done()
     assert len(got) == 1

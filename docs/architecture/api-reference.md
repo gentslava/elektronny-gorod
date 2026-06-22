@@ -972,11 +972,11 @@ Response shape (Spring Pageable):
 {
   "content": [
     {
-      "id":              "5030018599",                                     // event_id
+      "id":              "<EVENT_ID>",                                     // event_id
       "placeId":         <PLACE_ID>,
       "eventTypeName":   "accessControlCallAccepted",                      // 🎯 тип события
-      "timestamp":       "1779431589",                                     // unix seconds (string)
-      "message":         "Вызов с домофона Семьи Шамшиных 20  (п2)",       // локализованный
+      "timestamp":       "<UNIX_TS>",                                      // unix seconds (string)
+      "message":         "Вызов с домофона <gate name>",                   // локализованный
       "source": {
         "type": "accessControl",                                           // 🎯 тип источника
         "id":   <AC_ID>                                                      // ac_id / camera_id и т.д.
@@ -1260,6 +1260,12 @@ Data-payload (структура, плейсхолдеры):
   }
 }
 ```
+
+⚠️ `Apartment` / `Sender` у **калиток** (общих на комплекс) приходят
+**gate-кодированными** с префиксом корпуса/секции (подтверждено сырым
+FCM-захватом в `research/intercom-call-probe/`); у подъездов — уже чистый номер.
+Канонический номер квартиры жильца берётся из `place.address.apartment`
+(subscriber-places), **не** из `Apartment`/`Sender` пуша.
 
 Таксономия `PushType` (наблюдалось):
 

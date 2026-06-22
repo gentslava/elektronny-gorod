@@ -140,13 +140,33 @@ class ElektronnyGorodDoorbellEvent(
         if event_type not in self._attr_event_types:
             LOGGER.debug("Doorbell: неизвестный event_type %s — пропуск", event_type)
             return
-        attributes = payload.get("attributes") or {}
+        attributes = dict(payload.get("attributes") or {})
+        # Apartment/Sender в пуше у калиток gate-кодированы префиксом корпуса/секции;
+        # канонический номер квартиры жильца — в place.address оператора
+        # (coordinator.data["places"]). Подъезд шлёт уже чистый номер.
+        canonical_apartment = self._resident_apartment()
+        if canonical_apartment:
+            attributes["apartment"] = canonical_apartment
         self._trigger_event(event_type, attributes)
         self.async_write_ha_state()
         if event_type == EVENT_RING:
             self._schedule_auto_end(attributes)
         else:  # реальный `ended` — снять авто-таймер, чтобы не было дубля
             self._cancel_auto_end()
+
+    def _resident_apartment(self) -> str | None:
+        """Канонический номер квартиры жильца из place.address оператора.
+
+        Место истины — `apartment` в subscriber-places (coordinator.data["places"]),
+        а не gate-кодированный `Apartment`/`Sender` из FCM-пуша.
+        """
+        for sp in (self.coordinator.data or {}).get("places") or []:
+            place = sp.get("place") or {}
+            if str(place.get("id")) == str(self._place_id):
+                address = place.get("address")
+                if isinstance(address, dict):
+                    return address.get("apartment")
+        return None
 
     @callback
     def _schedule_auto_end(self, ring_attributes: dict[str, Any]) -> None:

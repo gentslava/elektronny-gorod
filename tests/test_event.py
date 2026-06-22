@@ -46,7 +46,7 @@ def mock_api():
         inst.http.user_agent = AsyncMock()
         inst.query_places = AsyncMock(return_value=[{
             "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
-            "place": {"id": "P1", "address": "addr"},
+            "place": {"id": "P1", "address": {"apartment": "57", "house": "20"}},
         }])
         inst.query_balance = AsyncMock(return_value={})
         inst.query_access_controls = AsyncMock(return_value=[{
@@ -109,7 +109,7 @@ async def test_ring_event_fires(hass: HomeAssistant, mock_api):
     entity_id = await _setup(hass)
     async_dispatcher_send(hass, SIGNAL_DOORBELL, {
         "event_type": "ring", "place_id": "P1", "access_control_id": "AC1",
-        "attributes": {"gate_name": "Подъезд 1", "apartment": "143",
+        "attributes": {"gate_name": "Подъезд 1", "apartment": "57",
                        "call_id": "C1", "allow_open": "true"},
     })
     await hass.async_block_till_done()
@@ -207,6 +207,21 @@ async def test_real_ended_cancels_auto_end(hass: HomeAssistant, mock_api):
     assert state.attributes["reason"] == "answered_elsewhere"
 
 
+async def test_apartment_fallback_keeps_push_value(hass: HomeAssistant, mock_api):
+    """Нет канонической квартиры (place.address не dict) → остаётся номер из пуша."""
+    entity_id = await _setup(hass)
+    coordinator = next(iter(hass.data[DOMAIN].values()))
+    coordinator.data["places"][0]["place"]["address"] = "addr-string"
+    async_dispatcher_send(hass, SIGNAL_DOORBELL, {
+        "event_type": "ring", "place_id": "P1", "access_control_id": "AC1",
+        "attributes": {"apartment": "0009777", "call_id": "C2"},
+    })
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).attributes["apartment"] == "0009777"
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=40))
+    await hass.async_block_till_done()
+
+
 async def test_auto_end_call_invalidated_in_past(hass: HomeAssistant, mock_api):
     """call_invalidated уже в прошлом → delay clamp до 1с, авто-end почти сразу."""
     entity_id = await _setup(hass)
@@ -221,6 +236,22 @@ async def test_auto_end_call_invalidated_in_past(hass: HomeAssistant, mock_api):
     state = hass.states.get(entity_id)
     assert state.attributes["event_type"] == "ended"
     assert state.attributes["reason"] == "timeout"
+
+
+async def test_apartment_canonical_from_place_address(hass: HomeAssistant, mock_api):
+    """Push шлёт gate-кодированную квартиру (с префиксом секции) — event подставляет
+    каноническую из place.address оператора, не сырое значение пуша.
+    """
+    entity_id = await _setup(hass)
+    async_dispatcher_send(hass, SIGNAL_DOORBELL, {
+        "event_type": "ring", "place_id": "P1", "access_control_id": "AC1",
+        "attributes": {"apartment": "0009057", "call_id": "C1"},
+    })
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).attributes["apartment"] == "57"
+    # снять взведённый авто-end-таймер (нет call_invalidated → fallback 35с)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=40))
+    await hass.async_block_till_done()
 
 
 async def test_auto_end_fallback_on_invalid_call_invalidated(hass: HomeAssistant, mock_api):
