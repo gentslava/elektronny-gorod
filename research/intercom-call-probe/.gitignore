@@ -6,3 +6,6 @@ logs/
 audio/
 .venv/
 __pycache__/
+captures/
+*.pcap
+*.pcapng

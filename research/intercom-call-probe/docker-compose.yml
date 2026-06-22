@@ -71,9 +71,19 @@ services:
     environment:
       - INTERCOM_AC=${INTERCOM_AC:-0}
       - PUSH_PARAMS=${PUSH_PARAMS:-0}
+      - PREBIND=${PREBIND:-0}
+      - ANSWER=${ANSWER:-0}
+      - ANSWER_DELAY=${ANSWER_DELAY:-3}
+      - TALK_SEC=${TALK_SEC:-0}
+      - RE_REG=${RE_REG:-0}
+      - RING_KEEPALIVE=${RING_KEEPALIVE:-1}
+      - EARLY_MEDIA=${EARLY_MEDIA:-0}
+      - MIRROR_APP=${MIRROR_APP:-0}
+      - RTP_EARLY=${RTP_EARLY:-0}
       - REG_LISTEN_SEC=${REG_LISTEN_SEC:-20}
     volumes:
       - ./session.json:/app/session.json:ro
       - ./firebase_config.json:/app/firebase_config.json:ro
       - ./fcm_credentials.json:/app/fcm_credentials.json
+      - ./audio:/app/audio:ro
       - ./logs:/app/logs

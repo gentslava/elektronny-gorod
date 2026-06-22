@@ -13,7 +13,8 @@
 | [`prd.md`](prd.md) → см. источник | PRD-источник: [`research/intercom-call-probe/PRD-two-way-audio.md`](../../../research/intercom-call-probe/PRD-two-way-audio.md) |
 | [`research.md`](research.md) → см. источник | технические доказательства: [`research/intercom-call-probe/FINDINGS.md`](../../../research/intercom-call-probe/FINDINGS.md) |
 | [`plan.md`](plan.md) | implementation plan: Slice 0 (спайк + G.711/STUN, TDD) + roadmap Slice 1–3 |
-| `research-spike.md` | (будет, Task 1) результаты спайка: voip-utils API, тайминг, audioop |
+| [`research-spike.md`](research-spike.md) | результаты спайка: voip-utils, тайминг, audioop |
+| [`call-answer-model.md`](call-answer-model.md) | 🔑 **модель приёма вызова** (pcap-доказано): REGISTER-on-answer, latching, окно 30с |
 
 ## Краткая суть
 
