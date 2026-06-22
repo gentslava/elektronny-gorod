@@ -47,6 +47,21 @@ def mock_firebase_messaging() -> Generator[MagicMock, None, None]:
         yield client
 
 
+@pytest.fixture(autouse=True)
+def mock_remove_entry_api() -> Generator[MagicMock, None, None]:
+    """async_remove_entry строит реальный ElektronnyGorodAPI для отвязки push-токена.
+
+    В HA-test-харнессе это создаёт реальную aiohttp-сессию → висячий aiodns-поток,
+    который `verify_cleanup` ловит на min-HA (тот же класс проблемы, что fix c9ffc94).
+    Мокаем API в namespace `__init__` (единственный потребитель — async_remove_entry),
+    чтобы удаление entry не делало реальный HTTP. Реальный unregister/DELETE покрыт
+    отдельно в test_api_push.py (там — fake session).
+    """
+    with patch("custom_components.elektronny_gorod.ElektronnyGorodAPI") as mock_cls:
+        mock_cls.return_value.unregister_push_device = AsyncMock(return_value=True)
+        yield mock_cls
+
+
 @pytest.fixture
 def mock_setup_entry() -> Generator[AsyncMock, None, None]:
     """Override async_setup_entry for config-flow only tests.
