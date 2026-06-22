@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-05-25
+Last reviewed: 2026-06-22
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -201,14 +201,24 @@ Quality gates:
 
 **Quality gates passed:** `READY_FOR_RELEASE` + Silver IQS.
 
-## Итерация 4 — Real-time events: research-фаза + ADR (≈ research-фаза, неопределённо)
+## Итерация 4 — Real-time events ✅ doorbell-вызов реализован (FCM)
 
-**Цель research-фазы:** определить **лучший** канал доставки событий
-домофона в HA (звонок → автоматизация). Решение должно опираться на
-факты, не на предположения. ADR — **после** research, не до.
+**Результат research-фазы:** канал доставки события «вызов с домофона»
+определён **экспериментально** (`research/intercom-call-probe/FINDINGS.md` —
+live-проверка 3 каналов на прод-аккаунте) — это **FCM data-push**. Решение
+зафиксировано в **[ADR-0011](decisions/0011-doorbell-fcm-channel.md)** (заменил
+гипотетический ADR-0009-event-delivery для этого use-case). Реализовано:
+`event`-сущность `EventDeviceClass.DOORBELL` + `fcm.py` (`DoorbellFcmListener`)
++ push-регистрация в `api.py` (см. [audit A-54 / A-58](audit/project-audit.md),
+🟢 resolved-in-branch `feat/doorbell-fcm-event`). Известный риск «серой зоны»
+приватных API Google — [A-80](audit/project-audit.md), под graceful degradation.
 
 **Принцип:** строго следуем [ADR-0006](decisions/0006-mirror-app-behavior.md)
-— никаких выводов без HAR/APK evidence.
+— никаких выводов без HAR/APK evidence. Канал вызова доказан экспериментом.
+
+**Двусторонний звук (разговор по домофону)** — будущая фича: SIP-медиа
+(доказано рабочим в эксперименте, но heavy: PJSIP/baresip/aiortc, STUN,
+RTP-latching). PRD — `research/intercom-call-probe/PRD-two-way-audio.md`.
 
 ### Что НЕ решено (открытые research-вопросы)
 
@@ -229,39 +239,36 @@ Quality gates:
 - **Sub-second latency** — если research подтвердит технически
   возможным — это **существенно** лучше polling (15-30s).
 
-### Research tasks (до любого implementation)
+### Research tasks — ✅ выполнены экспериментом `intercom-call-probe`
 
-- [ ] **R-1 APK Firebase config extraction**: распаковать
-  `research/apk/myhome-9.7.0-original.apks` → найти
-  `assets/google-services.json` или эквивалент. Зафиксировать
-  `project_id`, `sender_id`, `app_id`, `api_key`. **Не** публиковать
-  в git (приватная инфо оператора, может triggers ToS issue).
-- [ ] **R-2 FCM mimicry feasibility**: исследовать open-source
-  Python библиотеки (`firebase_messaging`, `aiogoogle` GCM, etc.) —
-  можно ли зарегистрировать HA как receiver для arbitrary FCM project?
-  Поискать аналогичные HACS-интеграции (Eufy Security, Olarm Pro,
-  Tuya, Hikvision push).
-- [ ] **R-3 Test push delivery**: на тестовом аккаунте — register
-  HA's FCM token через `POST /rest/v1/subscriberNotifications` с
-  payload-эмуляцией приложения. Тригернуть звонок в домофон от
-  внешнего источника. Проверить — придёт ли push на HA сторону.
-- [ ] **R-4 Legal review**: mimicry приложения может нарушать ToS
-  оператора. Оценить риск. Если высокий — не идти этим путём,
-  fallback на polling.
-- [ ] **R-5 Backup plan**: parallel research на polling
-  `/rest/v1/events/search` (что уже было предложено в ADR-0009).
-  Latency 15-30s, простая реализация. Использовать как **fallback**
-  если R-2/R-3 не получится, или как **safe default** для пользователей,
-  которые не хотят push-mimicry.
+- [x] **R-1 APK Firebase config extraction**: публичный Firebase-конфиг
+  приложения извлечён (project / app_id / sender / api_key / package —
+  значения в [`const.py`](../custom_components/elektronny_gorod/const.py) `FCM_*`).
+  Это **не секреты** (одинаковы у всех пользователей, защита — package + SHA-1
+  restriction) → лежат в `const.py`, как `BASE_API_URL` (см. ADR-0011 §Decision).
+- [x] **R-2 FCM mimicry feasibility**: подтверждено рабочим — `firebase-messaging`
+  (checkin → register → MTalk-сокет) принимает push **без Android-устройства**.
+- [x] **R-3 Test push delivery**: на прод-аккаунте — 3 реальных звонка приняты
+  без сбоев, payload `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` (sub-second).
+- [x] **R-4 Legal review**: «серая зона» (приватные API Google + ToS) —
+  принято как known risk с graceful degradation (A-80, ADR-0011 §Consequences).
+- [x] **R-5 Backup plan (polling)**: `/rest/v1/events/search` остаётся
+  возможным fallback/backfill, но для realtime-вызова **не нужен** — FCM
+  sub-second лучше polling 15-30s.
 
-### Только после research
+### Реализовано
 
-- [ ] **ADR-0009 (rewrite)** — Event delivery strategy. Документ
-  **после** R-1..R-5. Возможные исходы: «push-mimicry primary, polling
-  fallback» / «polling-only» / «hybrid auto-detect».
-- [ ] **A-58** — implementation выбранного решения (form depends on ADR).
-- [ ] **A-50** Camera events — поглощается общим event-stream
-  (независимо от ADR-0009 outcome).
+- [x] **ADR-0011** — Realtime-канал события вызова: приём FCM in-HA (accepted).
+- [x] **A-58 / A-54** — `event`-сущность + `fcm.py` + push-регистрация
+  (🟢 resolved-in-branch `feat/doorbell-fcm-event`; → RESOLVED после merge).
+- [ ] **A-50** Camera events (motion-история) — отдельный event-stream,
+  не покрыт doorbell-фичей.
+
+### Будущие фичи (вне scope v1)
+
+- [ ] **Двусторонний звук** (разговор по домофону) — SIP-медиа, доказано
+  рабочим, но heavy (отдельный SIP-стек). PRD — `research/intercom-call-probe/PRD-two-way-audio.md`.
+- [ ] **Дом.ру-вариант** события вызова — Huawei Push / HMS (другой канал).
 
 ### Не блокирующие основной scope
 
@@ -322,8 +329,9 @@ Tests
 | 0006 | Mirror application behavior | accepted |
 | 0007 | Stateful emulator baseline | accepted |
 | 0008 | Shared aiohttp ClientSession | Итерация 2 |
-| 0009 | Event delivery strategy (push-mimicry / polling / hybrid) | **required** after R-1..R-5 research, перед A-58 (Итерация 4) |
-| 0010 | Visibility sync strategy (hidden_by, two-way) | опц., Итерация 3-4 (post-factum для PR #35) |
+| 0009 | Camera stream auto-recovery (operator session TTL) | accepted (3.3.0) |
+| 0010 | AIDD state-management + reconciliation findings↔git | accepted (3.3.0) |
+| 0011 | Realtime-канал события вызова: приём FCM in-HA | accepted (Итерация 4) |
 
 ## Risks
 

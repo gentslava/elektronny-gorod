@@ -1,6 +1,6 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-06-22
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -62,6 +62,8 @@ elektronny-gorod/
 │   ├── sensor.py                  ← Sensor (balance + days-to-block) platform
 │   ├── binary_sensor.py           ← account_blocked platform
 │   ├── switch.py                  ← DND switches platform
+│   ├── event.py                   ← doorbell call event platform (ADR-0011)
+│   ├── fcm.py                     ← FCM listener для события вызова (ADR-0011)
 │   ├── go2rtc.py                  ← go2rtc валидация / upsert
 │   ├── entity_migration.py        ← стабильные unique_id + registry migration
 │   ├── diagnostics.py             ← redact-нутая diagnostics-выгрузка (S-08)
@@ -113,8 +115,8 @@ elektronny-gorod/
 
 | Файл | Назначение | Evidence |
 |---|---|---|
-| [`__init__.py`](../../custom_components/elektronny_gorod/__init__.py) | `async_setup_entry`, `async_unload_entry`, `async_migrate_entry` (v1→2→3) | 32-94 |
-| [`PLATFORMS`](../../custom_components/elektronny_gorod/__init__.py#L25-L29) | CAMERA, LOCK, SENSOR | 25-29 |
+| [`__init__.py`](../../custom_components/elektronny_gorod/__init__.py) | `async_setup_entry` (включая старт `DoorbellFcmListener` — ADR-0011), `async_unload_entry`, `async_migrate_entry` (v1→2→3) | — |
+| [`PLATFORMS`](../../custom_components/elektronny_gorod/__init__.py) | BINARY_SENSOR, CAMERA, EVENT, LOCK, SENSOR, SWITCH | — |
 
 ### Config flow
 
@@ -128,7 +130,7 @@ elektronny-gorod/
 | Файл | Назначение | Особенности |
 |---|---|---|
 | [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) | `DataUpdateCoordinator` | `update_interval=5min`, `_async_update_data` → `{places, balances, cameras, locks}` (ADR-0002) |
-| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance | использует shared `HTTP` (ADR-0008) |
+| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, push-registration (`register_push_device` / `unregister_push_device` — привязка FCM-токена у оператора, ADR-0011) | использует shared `HTTP` (ADR-0008) |
 | [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
 
 ### Платформы (entity)
@@ -140,12 +142,14 @@ elektronny-gorod/
 | [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | (1) `balance` — `device_class=MONETARY` + long-term statistics. (2) `days_to_block` (A-57) — `device_class=DURATION` + `unit=d` |
 | [`switch.py`](../../custom_components/elektronny_gorod/switch.py) | `switch` | Do Not Disturb (mirror «Мой Дом» → Настройки → Уведомления). 3 entity per place: master `dnd_root` + 2 dependent (`dnd_intercom_calls`, `dnd_management_company_calls`). Dependent `_attr_available = root.status` — HA нативно красит серым при master OFF |
 | [`binary_sensor.py`](../../custom_components/elektronny_gorod/binary_sensor.py) | `binary_sensor` | `blocked` (A-57): `device_class=PROBLEM`, `True` когда `blocked=True` в `/finance`. Реюзает balance device через identifier `(DOMAIN, place_{id})` |
+| [`event.py`](../../custom_components/elektronny_gorod/event.py) | `event` | Doorbell call (ADR-0011): `device_class=DOORBELL`, типы `ring`/`ended`. Одна сущность на домофон `(place_id, access_control_id)`, дедуп по AC (min entrance), device общий с lock/intercom-camera. Ловит `SIGNAL_DOORBELL` из `fcm.py` через dispatcher, стреляет `_trigger_event` с атрибутами (gate/apartment/call_id/allow_open/…). Открытие двери — существующий `lock`, видео — go2rtc |
 
 ### Внешние интеграции
 
 | Файл | Назначение |
 |---|---|
 | [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | validate_go2rtc (GET /api + PUT /api/streams + cleanup), upsert stream, derive_rtsp_host |
+| [`fcm.py`](../../custom_components/elektronny_gorod/fcm.py) | `DoorbellFcmListener` (ADR-0011): эмуляция регистрации Android-устройства в FCM (`firebase-messaging`, Firebase-конфиг приложения в `const.py:FCM_*`) → привязка токена у оператора (`api.register_push_device`) → MTalk-сокет. Парсит `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → `SIGNAL_DOORBELL`. Весь флоу под graceful degradation (приватные API Google) — сбой не валит setup. FCM-creds персистятся в `entry.data` |
 
 ### Diagnostics / безопасность
 
@@ -182,6 +186,9 @@ elektronny-gorod/
 | [`tests/test_http.py`](../../tests/test_http.py) | Bearer skip на pre-auth, no-leak между запросами, PII redact в error log |
 | [`tests/test_visibility.py`](../../tests/test_visibility.py) | hidden_by sync (first_add, USER override, un-hide, re-add) |
 | [`tests/test_visibility_real.py`](../../tests/test_visibility_real.py) | production-replica (реальные HAR-данные) + migration v2 |
+| [`tests/test_event.py`](../../tests/test_event.py) | doorbell `event`-сущность (ADR-0011): дедуп по AC, фильтр SIGNAL по `(place_id, ac_id)`, `_trigger_event` на `ring`/`ended`, игнор чужого/неизвестного event_type |
+| [`tests/test_api_push.py`](../../tests/test_api_push.py) | `register_push_device` / `unregister_push_device`: тело-зеркало (POST с `pushToken` на `device-installations` + `subscriberNotifications`, DELETE без `pushToken`), graceful False на ошибке |
+| [`tests/test_fcm.py`](../../tests/test_fcm.py) | `DoorbellFcmListener`: парсинг `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → SIGNAL, graceful degradation при недоступной `firebase-messaging` / сбое start, персист FCM-creds в `entry.data` |
 | [`pytest.ini`](../../pytest.ini) | `asyncio_mode = auto`, `testpaths = tests` |
 
 ### CI / CD
@@ -201,11 +208,11 @@ elektronny-gorod/
 |---|---|
 | `https://myhome.proptech.ru` | основной API («Мой дом») |
 | `go2rtc HTTP API` | опционально, для камер с аудио |
+| FCM / Firebase (конфиг приложения в `const.py:FCM_*`) | realtime-канал события вызова домофона (ADR-0011); приём через приватные API Google под graceful degradation |
 
-**Python-зависимости** (всё подтянуто HA core, `manifest.json:requirements: []`):
-- `aiohttp`
-- `voluptuous`
-- `yarl`
+**Python-зависимости:**
+- из HA core (`aiohttp`, `voluptuous`, `yarl`);
+- `manifest.json:requirements` — `firebase-messaging>=0.4` (FCM-приём события вызова, ADR-0011; тянет protobuf / http_ece / cryptography).
 
 ## Maintenance rules
 
