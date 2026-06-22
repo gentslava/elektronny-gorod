@@ -123,9 +123,57 @@ URI у нас уже есть в probe). → плановый пункт «voip-
 forking-INVITE с медиа-SBC оператора не доходит. Для прода (HA в docker на сервере)
 это естественно выполнено; для разработки за VPN — нет.
 
+## D4 — Реверс APK приложения (Linphone) — 2026-06-23
+
+Декомпиляция APK `ru.inetra.intercom` / `com.ertelecom.smarthome` (myhome 9.7.0,
+`base.apk` + `split_config.arm64_v8a.apk`) через jadx. Полная картина приёма вызова —
+[call-answer-model.md](call-answer-model.md).
+
+**SIP-стек:** Linphone / Belledonne SDK **5.4.42** (нативный `liblinphone.so` +
+`libmediastreamer2.so`/`libortp.so`/`libbctoolbox.so`/`libsrtp2.so`). Java-обёртка
+`org.linphone.core.*` (245 классов); драйвер приложения — `y60/*` (контроллер,
+команды init/config/accept/hangup/iterate), `m9/c0` (Account/AuthInfo/AccountParams),
+`l60/*` (Redux side-effects: SipManager/CallRingtone). Других SIP-стеков (PJSIP/Sofia/
+JAIN/`android.net.sip`) в APK **нет**.
+
+**Что приложение делает на приёме вызова (из кода):**
+- Голый `currentCall.accept()` **по нажатию** пользователя (Redux side-effect) — НЕ авто.
+- Авто-`180 Ringing` **ВЫКЛЮЧЕН** (`setAutoSendRingingEnabled(false)`).
+- Авто-iterate выключен — ручной `core.iterate()` каждые **20мс** (Timer).
+- **НЕТ** `183 Session Progress`/early-media, **НЕТ** session timers (RFC 4028),
+  **НЕТ** periodic re-INVITE/UPDATE, **НЕТ** PRACK/100rel-required.
+
+**REGISTER:**
+- **Expires=30** (короткий) + re-REGISTER + iterate 20мс (держит свежесть).
+- Contact push-params **проприетарные (НЕ RFC 8599)**:
+  `app-id=<id>;pn-type=google;pn-tok=<FCM_TOKEN>` (`setContactUriParameters`).
+- Встроенный Linphone RFC8599-push **выключен** (`setPushNotificationEnabled(false)`).
+- SIP-креды (login/password/realm) минтятся REST-ом оператора (`SipDeviceRaw`).
+
+**Media/SDP:**
+- Только **UDP**; `MediaEncryption.None` (plain RTP, без SRTP несмотря на `libsrtp2`);
+  AVPF **Disabled**; ICE/STUN/UPnP/IPv6 — всё **выключено**.
+- Кодеки явно не задаются — дефолт Linphone (PCMU/PCMA/opus…); видео off (видео — go2rtc).
+- micGain/playbackGain +2dB.
+- SDP анонсирует **локальный адрес** → downlink через FreeSWITCH **RTP-latching**
+  (подтверждено pcap).
+
+**Кастомные заголовки бэкенда** (читает приложение): `Other-Leg-Call-ID` —
+маркер Kazoo/FreeSWITCH.
+
+**Ограничение реверса:** точные дефолты таймеров (progress/incoming/nortp) — в
+нативном `.so`, из Java не извлекаются. Но вся **конфигурация, которой приложение
+отличается от дефолта Linphone**, видна в Java — этого хватило для модели.
+
+🔑 **Главный вывод реверса:** приложение **не использует трюков** для удержания
+вызова (нет 183/timers/re-INVITE) — значит ключ в **порядке операций**
+(`REGISTER`-on-answer → мгновенный `200 OK`), что и подтвердил pcap
+([call-answer-model.md](call-answer-model.md)).
+
 ## Влияние на спеку/план
 
 - `design.md` §3.1 — переписан: primary = asyncio-модуль из probe; voip-utils —
   источник идей/`SipEndpoint`, не база; в manifest не добавляется.
+- `design.md` §6.1 — **REGISTER-on-answer** (pcap+реверс, см. call-answer-model.md).
 - `plan.md` Roadmap Slice 0-lifecycle — убрать «voip-utils в manifest»; SIP-стек
   строим из probe.
