@@ -384,13 +384,32 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 Bite-sized задачи финализируются **после Task 1** (форма зависит от исхода спайка).
 
-### Slice 0 (остаток) — SIP-UAS lifecycle
+### Slice 0-lifecycle — чистые юнит-тестируемые модули (без сети, без звонка)
 > D1 решён (спайк): база — `asyncio`-модуль из `probe`, НЕ `voip-utils`.
-- `sip/session.py` — состояние диалога (Call-ID, tags, **все** Via/Record-Route, remote contact) + BYE. 🔴 Хранить multi-Via/Record-Route списком (не dict — урок спайка).
-- `sip/protocol.py` — REGISTER (Digest MD5, из probe `digest_response`) + приём INVITE + 200 OK с **G.711** SDP-answer + эхо **всех** Via/Record-Route дословно (из probe `_answer`).
-- `sip/sdp.py` — parse/build SDP для G.711 (из probe `parse_sdp`); опц. `SipEndpoint` из voip-utils для URI.
-- `SipManager` (фасад: `async_answer()`, `async_hangup()`, state) — интегрируется в `__init__.py` lifecycle, стартует transient-register по D2 (⏳ ждёт замера тайминга).
-- Тесты: Digest golden-vector, SDP parse, диалог-state + эхо multi-header для BYE/200 OK.
+> Эти задачи извлекают из `probe` чистую логику в тестируемые функции. Сетевые
+> части (REGISTER-transport, RTP-loop, STUN-discover, transient-register по D2) —
+> следующий слайс (часть ждёт живого звонка).
+
+- **L1 — `sip/digest.py`:** `md5()`, `digest_response()` (RFC 2617 Digest MD5,
+  qop/non-qop), `build_authorization()` (заголовок). Из `probe_sip.py:52-64,162-172`.
+  Тест: golden-vector ha1/ha2/response для известных user/realm/pass/nonce.
+- **L2 — `sip/sdp.py`:** `parse_sdp()` (conn_ip, media-линии, rtpmap — из
+  `probe_sip_media.py:120-132`), `build_g711_answer(media_ip, port, pt, codec)`
+  (SDP 200 OK для G.711 — из `probe_sip_media.py:287-298`). Тест: parse реального
+  offer-а домофона (G.711+telephone-event), build даёт корректный `m=audio`/rtpmap.
+- **L3 — `sip/message.py`:** `parse_sip_headers()` — раскладывает raw SIP на
+  request-line + headers, 🔴 **сохраняя множественные `Via`/`Record-Route` списком**
+  (урок спайка: dict теряет). Тест: 2× `Via` + 2× `Record-Route` → оба сохранены.
+- **L4 — `sip/dialog.py`:** `DialogState` (callid, local/remote с тегами, target,
+  route[], addr — из INVITE), `build_200_ok(invite, sdp_body)` (эхо **всех**
+  Via/Record-Route + To-tag — из `probe_sip_media.py:255-310`), `build_bye(dialog)`
+  (из `probe_sip_media.py:377-399`). Тест: 200 OK эхо-ит оба Via и оба Record-Route
+  дословно + добавляет To-tag; BYE адресован remote Contact с Route из Record-Route.
+
+### Slice 0-network — следующий слайс (часть ждёт D2)
+- `sip/protocol.py` (`asyncio.DatagramProtocol`): REGISTER lifecycle, приём INVITE/BYE,
+  RTP-сокет, STUN-discover, latching. `SipManager` фасад (`async_answer`/`async_hangup`).
+- Стратегия transient-register — по D2 (⏳ замер тайминга, живой звонок).
 
 ### Slice 1 — downlink (прослушка), Фаза B
 - FCM `CALL_INCOMING` (из `fcm.py`) → `SipManager.async_answer()` по сервису/кнопке.
