@@ -17,17 +17,27 @@ from typing import Any
 
 from homeassistant.components.event import EventDeviceClass, EventEntity
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import AREA_INTERCOM, DOMAIN, LOGGER, SIGNAL_DOORBELL
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
 EVENT_RING = "ring"
 EVENT_ENDED = "ended"
+
+# Авто-`ended`: оператор присылает `ended` только при «принят на другом
+# устройстве». На сброс у домофона / истечение времени ответа end-пуша нет —
+# иначе статус навсегда завис бы на `ring`. Закрываем вызов сами ровно в момент
+# `call_invalidated` (операторское окно из payload, не угаданная константа).
+# Без margin: по прод-данным реальный `ended` прилетает за ~20с ДО call_invalidated
+# (и снимает таймер через _cancel_auto_end), так что буфер ничего не ловил.
+_AUTO_END_FALLBACK_SEC = 35.0  # если call_invalidated нет/невалиден (окно ~30с)
 
 
 async def async_setup_entry(
@@ -76,6 +86,8 @@ class ElektronnyGorodDoorbellEvent(
         self._access_control_id: str = lock_info["access_control_id"]
         self._entrance_id = lock_info.get("entrance_id")
         self._name: str = lock_info["name"]
+        self._auto_end_cancel: CALLBACK_TYPE | None = None
+        self._ring_attributes: dict[str, Any] = {}
 
         self._attr_unique_id = (
             f"{DOMAIN}_event_doorbell_{self._place_id}_{self._access_control_id}"
@@ -100,6 +112,7 @@ class ElektronnyGorodDoorbellEvent(
         self.async_on_remove(
             async_dispatcher_connect(self.hass, SIGNAL_DOORBELL, self._handle_doorbell)
         )
+        self.async_on_remove(self._cancel_auto_end)
         # EventEntity(RestoreEntity) сам восстанавливает последнее событие после
         # рестарта HA / reload. Если восстанавливать нечего (самый первый запуск) —
         # state=None («Неизвестно»). Ставим условный baseline `ended` = нет
@@ -127,5 +140,51 @@ class ElektronnyGorodDoorbellEvent(
         if event_type not in self._attr_event_types:
             LOGGER.debug("Doorbell: неизвестный event_type %s — пропуск", event_type)
             return
-        self._trigger_event(event_type, payload.get("attributes") or {})
+        attributes = payload.get("attributes") or {}
+        self._trigger_event(event_type, attributes)
         self.async_write_ha_state()
+        if event_type == EVENT_RING:
+            self._schedule_auto_end(attributes)
+        else:  # реальный `ended` — снять авто-таймер, чтобы не было дубля
+            self._cancel_auto_end()
+
+    @callback
+    def _schedule_auto_end(self, ring_attributes: dict[str, Any]) -> None:
+        """Взвести авто-`ended` к моменту `call_invalidated` из push.
+
+        Оператор шлёт `ended` только при «принят на другом устройстве». На сброс
+        у домофона / истечение времени ответа end-пуша нет — без этого статус
+        завис бы на `ring`. Берём операторское окно (`call_invalidated`), не
+        угадываем константу; при отсутствии/невалидности — fallback.
+        """
+        self._cancel_auto_end()
+        self._ring_attributes = ring_attributes
+        delay = _AUTO_END_FALLBACK_SEC
+        invalidated = ring_attributes.get("call_invalidated")
+        if invalidated:
+            parsed = dt_util.parse_datetime(invalidated)
+            if parsed is not None:
+                remaining = (parsed - dt_util.utcnow()).total_seconds()
+                delay = max(remaining, 1.0)
+        self._auto_end_cancel = async_call_later(self.hass, delay, self._auto_end_fire)
+
+    @callback
+    def _auto_end_fire(self, _now: Any) -> None:
+        """Сработал таймер: реального `ended` не пришло → закрываем вызов сами."""
+        self._auto_end_cancel = None
+        self._trigger_event(
+            EVENT_ENDED,
+            {
+                "reason": "timeout",
+                "call_id": self._ring_attributes.get("call_id"),
+                "gate_name": self._ring_attributes.get("gate_name"),
+            },
+        )
+        self.async_write_ha_state()
+
+    @callback
+    def _cancel_auto_end(self) -> None:
+        """Снять отложенный авто-`ended` (реальный конец / новый вызов / удаление)."""
+        if self._auto_end_cancel is not None:
+            self._auto_end_cancel()
+            self._auto_end_cancel = None

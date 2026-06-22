@@ -31,7 +31,8 @@ from .const import (
     SIGNAL_DOORBELL,
 )
 
-# PushType (FCM) → event_type сущности.
+# PushType (FCM) → event_type сущности. Таксономия `ended`/`reason` — в
+# docs/architecture/api-reference.md (раздел «Вызов домофона»).
 _PUSH_TYPE_EVENT = {
     "CALL_INCOMING": "ring",
     "CALL_END_ANSWERED_MOBILE": "ended",
@@ -111,6 +112,9 @@ class DoorbellFcmListener:
         push_type = data.get("PushType") or data.get("google.c.a.m_l")
         event_type = _PUSH_TYPE_EVENT.get(push_type)
         if not event_type:
+            # Не дропаем молча: если оператор шлёт end-пуш на сброс/таймаут
+            # неизвестным типом — увидим его здесь и замаппим в следующем слайсе.
+            LOGGER.debug("FCM: PushType %s не обрабатывается — пропуск", push_type)
             return
         attributes: dict[str, Any] = {
             "gate_name": data.get("GateName"),
