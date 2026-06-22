@@ -80,6 +80,7 @@ services:
       - EARLY_MEDIA=${EARLY_MEDIA:-0}
       - MIRROR_APP=${MIRROR_APP:-0}
       - RTP_EARLY=${RTP_EARLY:-0}
+      - PRE_DELAY=${PRE_DELAY:-0}
       - REG_LISTEN_SEC=${REG_LISTEN_SEC:-20}
     volumes:
       - ./session.json:/app/session.json:ro

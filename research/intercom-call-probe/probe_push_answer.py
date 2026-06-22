@@ -48,6 +48,7 @@ RING_KEEPALIVE = os.environ.get("RING_KEEPALIVE", "1") == "1"  # periodic 180 в
 EARLY_MEDIA = os.environ.get("EARLY_MEDIA") == "1"  # 183 Session Progress + SDP + ранний RTP
 MIRROR_APP = os.environ.get("MIRROR_APP") == "1"  # зеркало приложения: Expires=30, без STUN, проприет. push
 RTP_EARLY = os.environ.get("RTP_EARLY") == "1"  # ранний RTP (тишина) с INVITE — активирует latching до ответа
+PRE_DELAY = float(os.environ.get("PRE_DELAY", "0"))  # «раздумья» ДО REGISTER (модель REGISTER-on-answer)
 
 LOOP: asyncio.AbstractEventLoop | None = None
 STATE: dict = {}  # sess, intercom, creds, local_ip, ip, fcm_token, sender
@@ -160,8 +161,9 @@ class TransientSip(asyncio.DatagramProtocol):
     def _contact(self) -> str:
         base = f"sip:{self.login}@{self.local_ip}:{self._lport};transport=udp"
         if MIRROR_APP and STATE.get("fcm_token"):
-            # проприетарный формат приложения (реверс Linphone): app-id;pn-type;pn-tok
-            return f"<{base};app-id=2;pn-type=google;pn-tok={STATE['fcm_token']}>"
+            # точный формат приложения (pcap): app-id=com.novotelecom.domophone;pn-type;pn-tok
+            return (f"<{base};app-id=com.novotelecom.domophone;pn-type=google;"
+                    f"pn-tok={STATE['fcm_token']}>")
         if USE_PUSH_PARAMS and STATE.get("fcm_token"):
             # RFC 8599 push-параметры
             return f"<{base}>;pn-provider=fcm;pn-param={STATE.get('sender', '')};pn-prid={STATE['fcm_token']}"
@@ -181,7 +183,8 @@ class TransientSip(asyncio.DatagramProtocol):
             f"CSeq: {self.cseq} REGISTER",
             f"Contact: {self._contact()}",
             f"Expires: {self.expires}",
-            f"User-Agent: {self.ua}",
+            "Supported: replaces, outbound, gruu, path",  # как приложение (RFC 5626/5627)
+            f"User-Agent: {'Myhome/Myhome-android' if MIRROR_APP else self.ua}",
         ]
         if auth:
             lines.append(f"Authorization: {auth}")
@@ -458,19 +461,31 @@ class TransientSip(asyncio.DatagramProtocol):
 
 async def do_transient_answer(t0: float) -> None:
     sess, intercom, creds = STATE["sess"], STATE["intercom"], STATE["creds"]
-    mode = "С push-параметрами (RFC 8599)" if USE_PUSH_PARAMS else "БЕЗ push-параметров"
-    log(f"⚡ CALL_INCOMING → transient register [{mode}]")
+    if PRE_DELAY:
+        log(f"💭 «раздумья» {PRE_DELAY:.0f}с ДО REGISTER (модель REGISTER-on-answer)…")
+        await asyncio.sleep(PRE_DELAY)
+        log("📲 «ОТВЕТИТЬ» → REGISTER (должен триггернуть INVITE)")
+    mode = "MIRROR_APP" if MIRROR_APP else ("RFC8599" if USE_PUSH_PARAMS else "no-push")
+    log(f"⚡ REGISTER [{mode}], затем 200 OK мгновенно (ANSWER_DELAY={ANSWER_DELAY:.0f})")
     transport, proto = await LOOP.create_datagram_endpoint(
         lambda: TransientSip(creds, STATE["local_ip"], sess.user_agent, t0,
                              expires=(30 if MIRROR_APP else 120)),
         local_addr=("0.0.0.0", SIP_LOCAL_PORT), remote_addr=(STATE["ip"], SIP_PORT),
     )
-    listen = (ANSWER_DELAY + 90) if ANSWER else REG_LISTEN_SEC  # в ANSWER ждём весь разговор
+    # бюджет: раздумья + разговор + запас; закрываем РАНЬШЕ, как только разговор завершён
+    listen = PRE_DELAY + (TALK_SEC if TALK_SEC else 30) + 8
+    waited = 0.0
+    answered_once = False
     try:
-        await asyncio.sleep(listen)
+        while waited < listen:
+            await asyncio.sleep(0.5)
+            waited += 0.5
+            if proto.call_active:
+                answered_once = True
+            if answered_once and not proto.call_active:
+                break  # разговор завершён (BYE) — освобождаем сокет для след. звонка
         if proto.invite_mono is None:
-            log(f"  ❌ INVITE НЕ пришёл за {listen:.0f}с после transient-register [{mode}].")
-            log("     → Kazoo НЕ доставляет вызов на позднюю регистрацию в этом режиме.")
+            log(f"  ❌ INVITE НЕ пришёл за {listen:.0f}с после REGISTER [{mode}].")
     finally:
         if proto.call_active:
             proto.send_bye()
