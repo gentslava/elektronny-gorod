@@ -60,3 +60,20 @@ services:
       - ./session.json:/app/session.json:ro
       - ./audio:/app/audio:ro
       - ./logs:/app/logs
+
+  # push-to-register проба: НЕ держит SIP-регистрацию, поднимает её по FCM-пушу
+  # и проверяет, доставляет ли Kazoo INVITE на позднюю регистрацию (модель приложения).
+  # PUSH_PARAMS=1 — с RFC 8599 push-параметрами в Contact. Все ac/флаги — из shell-env.
+  push_answer:
+    <<: *probe
+    image: intercom-probe
+    command: ["probe_push_answer.py"]
+    environment:
+      - INTERCOM_AC=${INTERCOM_AC:-0}
+      - PUSH_PARAMS=${PUSH_PARAMS:-0}
+      - REG_LISTEN_SEC=${REG_LISTEN_SEC:-20}
+    volumes:
+      - ./session.json:/app/session.json:ro
+      - ./firebase_config.json:/app/firebase_config.json:ro
+      - ./fcm_credentials.json:/app/fcm_credentials.json
+      - ./logs:/app/logs
