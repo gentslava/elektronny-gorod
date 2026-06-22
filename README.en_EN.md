@@ -1,4 +1,4 @@
-[English](/README.md) | [Русский](/README.ru_RU.md)
+[English](/README.en_EN.md) | [Русский](/README.md)
 
 <p>
   <img src="https://img.shields.io/badge/Home%20Assistant-2024.10%2B-blue?logo=home-assistant" alt="Home Assistant"/>
@@ -32,17 +32,19 @@
 
 This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) and Dom.ru services. It implements the APIs of the My Home – Elektronny Gorod and Umnyy Dom.ru applications.
 
-Add your intercoms, cameras and locks to Home Assistant.
+Add your **intercoms, cameras and locks** to Home Assistant: watch video and hear audio, open doors and — **in real time** — receive **doorbell call events** (FCM push) for notifications and automations.
+
+> 🔔 **New:** the integration now catches **doorbell calls** and exposes them as an `event` entity — send a push with a camera snapshot and an "Open door" button. See [Doorbell call event](#-doorbell-call-event-fcm-push).
 
 ## Installation
 
 ### Manually
 
-Copy the `custom_components/electronic_city` directory to your Home Assistant `config/custom_components` directory.
+Copy the `custom_components/elektronny_gorod` directory to your Home Assistant `config/custom_components` directory.
 
 ```bash
 git clone https://github.com/gentslava/elektronny-gorod.git
-cp -r elektronny-gorod YOUR_HASS_CONFIG_DIR/custom_components/
+cp -r elektronny-gorod/custom_components/elektronny_gorod YOUR_HASS_CONFIG_DIR/custom_components/
 ```
 
 Restart Home Assistant.
@@ -70,7 +72,10 @@ or manually:
 - Add available intercoms, cameras and locks.
 - Get previews and streams from intercoms and cameras.
 - Manage the opening of locks in real time.
+- **Real-time doorbell call events** (FCM push) — an `event` entity for notifications and automations (show the camera, open the door).
 - View your account balance.
+
+Entity types created: `camera` (video/preview), `lock` (open the door), `event` (doorbell call), `sensor` (balance and more), `binary_sensor`, `switch`.
 
 > **New:** Now you can connect cameras via [go2rtc](https://github.com/AlexxIT/go2rtc) — this method allows you to get audio from cameras and provides faster and more stable video streaming.
 
@@ -92,7 +97,75 @@ If you already have cameras set up via the standard integration, just enable go2
 
 **Note:** For audio and low latency to work, make sure your go2rtc and Home Assistant versions are up to date.
 
-## Automation example
+## 🔔 Doorbell call event (FCM push)
+
+The integration receives **doorbell calls in real time** via FCM push — exactly like the mobile app, without cloud polling. For every intercom an `event` entity with device class `doorbell` is created:
+
+- **`event.<intercom>_doorbell_call`** — fires `ring` on an incoming call and `ended` when the call finishes (answered on another device or the answer window timed out).
+- Event attributes: `event_type` (`ring`/`ended`), `gate_name` (intercom), `apartment`, `call_id`, `allow_open`, `reason`.
+
+Build automations on top of it: a push with a camera snapshot and an "Open door" button, show the video, unlock the door.
+
+> The channel is private FCM reception (the `firebase-messaging` dependency is installed automatically). The whole FCM flow runs under graceful degradation: if it fails, the rest of the integration (cameras, locks, balance) keeps working.
+>
+> In the examples, replace `YOUR_INTERCOM` / `YOUR_PHONE` with your own entities (Developer Tools → States, filters `event.` / `notify.mobile_app`). The snapshot and action buttons require the **Home Assistant Companion** app (Android/iOS).
+
+### Example 1. Push on call
+
+```yaml
+automation:
+  - alias: "Doorbell: call notification"
+    mode: parallel
+    triggers:
+      - trigger: state
+        entity_id: event.YOUR_INTERCOM_doorbell_call
+    conditions:
+      - "{{ trigger.to_state.attributes.event_type == 'ring' }}"
+    actions:
+      - action: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🔔 Doorbell call"
+          message: "{{ trigger.to_state.attributes.gate_name }} · apt. {{ trigger.to_state.attributes.apartment }}"
+```
+
+### Example 2. Push with a camera snapshot and an "Open door" button
+
+```yaml
+automation:
+  # 1) Notification with a camera preview and an action button
+  - alias: "Doorbell: push with camera and open"
+    mode: parallel
+    triggers:
+      - trigger: state
+        entity_id: event.YOUR_INTERCOM_doorbell_call
+    conditions:
+      - "{{ trigger.to_state.attributes.event_type == 'ring' }}"
+    actions:
+      - action: notify.mobile_app_YOUR_PHONE
+        data:
+          title: "🔔 Doorbell call"
+          message: "{{ trigger.to_state.attributes.gate_name }}"
+          data:
+            image: "/api/camera_proxy/camera.YOUR_INTERCOM"
+            tag: "doorbell"
+            actions:
+              - action: "OPEN_DOOR"
+                title: "🔓 Open door"
+
+  # 2) Button handler: unlock the intercom door
+  - alias: "Doorbell: open door from push button"
+    triggers:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data:
+          action: "OPEN_DOOR"
+    actions:
+      - action: lock.unlock
+        target:
+          entity_id: lock.YOUR_INTERCOM
+```
+
+## Automation example: balance
 Here is an example of automation for low balance notification:
 
 ```yaml
