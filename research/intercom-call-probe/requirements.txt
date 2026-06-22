@@ -1,0 +1,4 @@
+# STOMP + SIP пробы
+aiohttp>=3.9
+# FCM проба (серверный приём пуша без Android-устройства)
+firebase-messaging>=0.4.0
