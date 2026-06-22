@@ -1,0 +1,68 @@
+"""SIP REGISTER build + Digest auth для модели REGISTER-on-answer.
+
+Мы НЕ держим регистрацию: REGISTER шлётся в момент «ответить» на вызов и триггерит
+`INVITE` от Kazoo (см. call-answer-model.md). Зеркалируем формат приложения:
+проприетарные push-params в Contact, Expires=30, `Supported: outbound/gruu/path`.
+"""
+from __future__ import annotations
+
+from .digest import build_authorization, digest_response
+
+# push-params приложения оператора (call-answer-model.md §4) — зеркалируем формат.
+PUSH_APP_ID = "com.novotelecom.domophone"
+_CRLF = "\r\n"
+REGISTER_EXPIRES = 30  # короткий, как приложение (свежесть регистрации)
+
+
+def build_contact(login: str, host: str, port: int, fcm_token: str) -> str:
+    """Contact с проприетарными push-params приложения (триггерит push-aware флоу)."""
+    return (
+        f"<sip:{login}@{host}:{port};transport=udp"
+        f";app-id={PUSH_APP_ID};pn-type=google;pn-tok={fcm_token}>"
+    )
+
+
+def build_register(
+    login: str,
+    realm: str,
+    host: str,
+    port: int,
+    call_id: str,
+    from_tag: str,
+    cseq: int,
+    contact: str,
+    branch: str,
+    user_agent: str,
+    expires: int = REGISTER_EXPIRES,
+    auth: str | None = None,
+) -> str:
+    """Сформировать REGISTER-запрос (с опц. Authorization после 401-challenge)."""
+    lines = [
+        f"REGISTER sip:{realm} SIP/2.0",
+        f"Via: SIP/2.0/UDP {host}:{port};branch={branch};rport",
+        "Max-Forwards: 70",
+        f"From: <sip:{login}@{realm}>;tag={from_tag}",
+        f"To: <sip:{login}@{realm}>",
+        f"Call-ID: {call_id}",
+        f"CSeq: {cseq} REGISTER",
+        f"Contact: {contact}",
+        f"Expires: {expires}",
+        "Supported: replaces, outbound, gruu, path",
+        f"User-Agent: {user_agent}",
+    ]
+    if auth:
+        lines.append(f"Authorization: {auth}")
+    lines += ["Content-Length: 0", "", ""]
+    return _CRLF.join(lines)
+
+
+def build_register_authorization(
+    login: str,
+    password: str,
+    realm: str,
+    nonce: str,
+    reg_uri: str,
+) -> str:
+    """Authorization для REGISTER из 401-challenge (Digest MD5 non-qop)."""
+    resp = digest_response(login, password, realm, nonce, "REGISTER", reg_uri)
+    return build_authorization(login, realm, nonce, reg_uri, resp)
