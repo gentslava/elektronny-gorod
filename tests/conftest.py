@@ -12,6 +12,12 @@ import pytest
 # успевает применится до реального импорта.
 sys.modules.setdefault("turbojpeg", MagicMock())
 
+# firebase-messaging — manifest-requirement интеграции, но в test-CI manifest-deps
+# не устанавливаются (как turbojpeg). Мок на уровне sys.modules — чтобы ленивый
+# импорт в fcm.py и `patch("firebase_messaging.*")` в фикстуре ниже работали без
+# реальной библиотеки. Если она установлена (local dev) — setdefault no-op.
+sys.modules.setdefault("firebase_messaging", MagicMock())
+
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
