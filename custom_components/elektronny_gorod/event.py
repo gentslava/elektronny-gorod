@@ -39,18 +39,21 @@ async def async_setup_entry(
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     locks = (coordinator.data or {}).get("locks") or []
 
-    # Дедуп по (place_id, access_control_id) — одна event-сущность на домофон.
-    # Первый matching lock даёт entrance_id/name для общего intercom-device.
-    seen: set[tuple[str, str]] = set()
-    entities: list[ElektronnyGorodDoorbellEvent] = []
+    # Дедуп по (place_id, access_control_id) — одна event-сущность на домофон
+    # (FCM-payload несёт AccessControlId, не entrance). При multi-entrance AC
+    # берём lock с min entrance_id → стабильный intercom-device между рестартами.
+    by_ac: dict[tuple[str, str], dict] = {}
     for lk in locks:
         key = (lk.get("place_id"), lk.get("access_control_id"))
-        if None in key or key in seen:
+        if None in key:
             continue
-        seen.add(key)
-        entities.append(ElektronnyGorodDoorbellEvent(coordinator, lk))
+        cur = by_ac.get(key)
+        if cur is None or str(lk.get("entrance_id") or "") < str(cur.get("entrance_id") or ""):
+            by_ac[key] = lk
 
-    async_add_entities(entities)
+    async_add_entities(
+        ElektronnyGorodDoorbellEvent(coordinator, lk) for lk in by_ac.values()
+    )
 
 
 class ElektronnyGorodDoorbellEvent(
@@ -105,7 +108,10 @@ class ElektronnyGorodDoorbellEvent(
         payload (от fcm.py): {"event_type": "ring"|"ended", "place_id",
         "access_control_id", "attributes": {...}}.
         """
-        if str(payload.get("access_control_id")) != str(self._access_control_id):
+        if (
+            str(payload.get("place_id")) != str(self._place_id)
+            or str(payload.get("access_control_id")) != str(self._access_control_id)
+        ):
             return
         event_type = payload.get("event_type")
         if event_type not in self._attr_event_types:

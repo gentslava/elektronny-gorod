@@ -124,3 +124,15 @@ async def test_other_ac_ignored(hass: HomeAssistant, mock_api):
     })
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == before
+
+
+async def test_other_place_same_ac_ignored(hass: HomeAssistant, mock_api):
+    """Тот же AC, но другой place — не стреляет (нет cross-place leak)."""
+    entity_id = await _setup(hass)
+    before = hass.states.get(entity_id).state
+    async_dispatcher_send(hass, SIGNAL_DOORBELL, {
+        "event_type": "ring", "place_id": "OTHER_PLACE", "access_control_id": "AC1",
+        "attributes": {},
+    })
+    await hass.async_block_till_done()
+    assert hass.states.get(entity_id).state == before

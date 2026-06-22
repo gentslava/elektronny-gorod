@@ -11,10 +11,13 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
+from .api import ElektronnyGorodAPI
 from .const import (
     DOMAIN,
     LOGGER,
+    CONF_ACCESS_TOKEN,
     CONF_OPERATOR_ID,
+    CONF_REFRESH_TOKEN,
     CONF_USER_AGENT,
     CONF_USE_GO2RTC,
     CONF_GO2RTC_BASE_URL,
@@ -363,3 +366,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """На удалении интеграции — отвязать FCM push-токен у оператора (best-effort).
+
+    Вызывается HA только при удалении entry (НЕ при reload/unload), поэтому
+    отвязка не происходит на каждый reload. Coordinator уже выгружен — строим
+    временный API из entry.data. Ошибки глушим (cleanup не должен мешать удалению).
+    """
+    try:
+        user_agent = UserAgent()
+        user_agent.from_json(json.loads(entry.data[CONF_USER_AGENT]))
+        api = ElektronnyGorodAPI(
+            hass,
+            user_agent,
+            access_token=entry.data.get(CONF_ACCESS_TOKEN),
+            refresh_token=entry.data.get(CONF_REFRESH_TOKEN),
+            operator=str(entry.data.get(CONF_OPERATOR_ID)),
+        )
+        await api.unregister_push_device()
+    except Exception:  # noqa: BLE001
+        LOGGER.debug("Push-токен не отвязан при удалении entry (best-effort)")

@@ -36,6 +36,8 @@ SENSITIVE_KEYS: frozenset[str] = frozenset({
     "confirm2",
     "hash1",
     "hash2",
+    "fcm_credentials",
+    "pushtoken",
 })
 
 
