@@ -95,11 +95,21 @@ class ElektronnyGorodDoorbellEvent(
         )
 
     async def async_added_to_hass(self) -> None:
-        """Подписка на realtime-сигнал вызова."""
+        """Подписка на realtime-сигнал вызова + baseline «нет вызова»."""
         await super().async_added_to_hass()
         self.async_on_remove(
             async_dispatcher_connect(self.hass, SIGNAL_DOORBELL, self._handle_doorbell)
         )
+        # EventEntity(RestoreEntity) сам восстанавливает последнее событие после
+        # рестарта HA / reload. Если восстанавливать нечего (самый первый запуск) —
+        # state=None («Неизвестно»). Ставим условный baseline `ended` = нет
+        # активного вызова, чтобы сущность не висела в Unknown. В момент первой
+        # установки реальный вызов крайне маловероятен, а настоящий `ring` его
+        # сразу перепишет. На рестартах baseline не трогаем (state уже восстановлен)
+        # — синтетическое событие стреляет максимум один раз, до появления автоматизаций.
+        if self.state is None:
+            self._trigger_event(EVENT_ENDED)
+            self.async_write_ha_state()
 
     @callback
     def _handle_doorbell(self, payload: dict[str, Any]) -> None:

@@ -88,6 +88,17 @@ async def test_doorbell_event_entity_created(hass: HomeAssistant, mock_api):
     assert hass.states.get(entity_id) is not None
 
 
+async def test_initial_state_baseline_no_call(hass: HomeAssistant, mock_api):
+    """Первый запуск (нечего восстанавливать) → baseline `ended` = «нет вызова».
+
+    Сущность не должна висеть в `unknown` — иначе пустая карточка «Неизвестно».
+    """
+    entity_id = await _setup(hass)
+    state = hass.states.get(entity_id)
+    assert state.state not in ("unknown", "unavailable")
+    assert state.attributes["event_type"] == "ended"
+
+
 async def test_ring_event_fires(hass: HomeAssistant, mock_api):
     """CALL_INCOMING-payload → event `ring` с атрибутами."""
     entity_id = await _setup(hass)

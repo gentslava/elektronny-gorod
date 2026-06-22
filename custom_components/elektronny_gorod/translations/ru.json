@@ -111,7 +111,15 @@
     },
     "event": {
       "doorbell": {
-        "name": "Вызов домофона"
+        "name": "Вызов домофона",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "ring": "Звонок",
+              "ended": "Завершён"
+            }
+          }
+        }
       }
     },
     "lock": {
