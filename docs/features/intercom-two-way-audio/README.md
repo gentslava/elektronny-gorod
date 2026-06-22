@@ -1,6 +1,6 @@
 # Feature: Two-way talk по домофону (SIP-аудио)
 
-- **Status:** DESIGN — спека согласована, план не написан.
+- **Status:** PLAN — спека согласована, план Slice 0 написан.
 - **Feature-id:** `intercom-two-way-audio`
 - **Branch:** `feat/intercom-two-way-audio` (ответвлена от `feat/doorbell-fcm-event` — зависит от FCM-канала).
 - **Owner:** Vyacheslav Scherbinin
@@ -12,8 +12,8 @@
 | [`design.md`](design.md) | дизайн-спека: целевая архитектура, фазирование, решения brainstorming |
 | [`prd.md`](prd.md) → см. источник | PRD-источник: [`research/intercom-call-probe/PRD-two-way-audio.md`](../../../research/intercom-call-probe/PRD-two-way-audio.md) |
 | [`research.md`](research.md) → см. источник | технические доказательства: [`research/intercom-call-probe/FINDINGS.md`](../../../research/intercom-call-probe/FINDINGS.md) |
-| `plan.md` | (будет) vertical slices |
-| `tasklist.md` | (будет) задачи |
+| [`plan.md`](plan.md) | implementation plan: Slice 0 (спайк + G.711/STUN, TDD) + roadmap Slice 1–3 |
+| `research-spike.md` | (будет, Task 1) результаты спайка: voip-utils API, тайминг, audioop |
 
 ## Краткая суть
 
