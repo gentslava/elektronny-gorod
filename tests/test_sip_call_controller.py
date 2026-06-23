@@ -142,7 +142,6 @@ async def test_answer_with_go2rtc_sets_up_bridge():
     )
     c.handle_signal(_ring())  # hold-таск закрыт (_hass) → answer идёт fallback-путём
 
-    upsert = AsyncMock()
     with patch(_MGR_PATH) as MgrCls, patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
         f"{_CC}.detect_lan_ip", return_value="1.2.3.4"
     ):
@@ -157,8 +156,7 @@ async def test_answer_with_go2rtc_sets_up_bridge():
     assert ok is True
     bridge.start.assert_awaited_once()
     assert mgr.async_answer.await_args.kwargs["on_downlink"] is bridge.feed_downlink
-    # upsert на accept больше НЕ происходит (его делает camera.intercom_call)
-    upsert.assert_not_awaited()
+    # upsert на accept не происходит — gw проверяется отсутствием патча upsert_audio_stream; реальная проверка в test_call_camera.py
 
 
 async def test_answer_without_go2rtc_uses_counter_sink(controller):
@@ -226,7 +224,7 @@ async def test_cancel_dismisses_screen():
     c._hass.bus.async_fire.assert_called_with(EVENT_SIP_CALL, {"active": False})
 
 
-async def test_active_call_media_returns_camera_and_bridge():
+def test_active_call_media_returns_camera_and_bridge():
     from custom_components.elektronny_gorod.sip.call_controller import (
         DoorbellCallController,
         Go2RtcConfig,
