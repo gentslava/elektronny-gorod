@@ -500,6 +500,9 @@ async def do_transient_answer(t0: float) -> None:
                 answered_once = True
             if answered_once and not proto.call_active:
                 break  # разговор завершён (BYE) — освобождаем сокет для след. звонка
+            if proto.invite_mono is None and waited >= 12:
+                log("  ⏱ INVITE не пришёл за 12с — освобождаю сокет (быстрый ретрай)")
+                break
         if proto.invite_mono is None:
             log(f"  ❌ INVITE НЕ пришёл за {listen:.0f}с после REGISTER [{mode}].")
     finally:
