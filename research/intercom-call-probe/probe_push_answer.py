@@ -56,6 +56,9 @@ _handled: set[str] = set()
 # PoC D-audio-2: если задан (probe_mic_uplink.py), при активном вызове источник
 # uplink-кадров = микрофон (callable(pt) -> bytes|None), иначе — трек/тишина как раньше.
 UPLINK_PROVIDER = None
+# анти-зомби: число идущих RTP-loop'ов. Не отвечаем на новый CALL_INCOMING пока идёт
+# разговор (иначе зомби-loop'ы накапливаются и воруют uplink-кадры друг у друга).
+_RTP_ACTIVE = 0
 
 
 def _ts() -> str:
@@ -386,8 +389,10 @@ class TransientSip(asyncio.DatagramProtocol):
     async def _rtp(self, door_ip, door_port, pt, early=False):
         """RTP-сессия. early=True → тишина с момента INVITE (активирует latching),
         после ответа (call_active) → аудио-трек. Считает downlink."""
+        global _RTP_ACTIVE
         if not door_ip:
             return
+        _RTP_ACTIVE += 1
         sock = STATE["rtp_sock"]
         sock.setblocking(False)
         loop = asyncio.get_running_loop()
@@ -447,6 +452,7 @@ class TransientSip(asyncio.DatagramProtocol):
         rtask.cancel()
         log(f"  ИТОГ: downlink {recv['count']} пакетов получено. Завершаю BYE.")
         self.send_bye()
+        _RTP_ACTIVE -= 1
 
     def send_bye(self):
         """In-dialog BYE — глушит сессию."""
@@ -546,6 +552,9 @@ def on_push(notification, persistent_id, *_):
     ac = str(data.get("AccessControlId") or "")
     if ac and ac != str(STATE["intercom"]["accessControlId"]):
         log(f"🔕 CALL_INCOMING для другого домофона (ac={ac}) — пропуск")
+        return
+    if _RTP_ACTIVE > 0:
+        log("🔁 идёт активный RTP-разговор — пропуск нового CALL_INCOMING (анти-зомби)")
         return
     log("🔔🔔🔔 CALL_INCOMING получен по FCM → поднимаю SIP по пушу")
     asyncio.run_coroutine_threadsafe(do_transient_answer(t0), LOOP)
