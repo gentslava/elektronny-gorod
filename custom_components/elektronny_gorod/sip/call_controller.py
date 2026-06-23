@@ -195,18 +195,29 @@ class DoorbellCallController:
             self.downlink_packets = 0
             self._cancel_hold_timeout()
 
-            if self._manager is not None and self._manager.holding:
-                ok = await self._manager.accept(on_downlink=on_downlink)  # быстрый путь
-            else:
-                # Fallback: held не поднялся → register-on-answer (приём не регрессирует).
-                manager = SipManager(
-                    fcm_token,
-                    on_ended=self._schedule_audio_cleanup,
-                    on_cancelled=self._on_ring_cancelled,
-                )
-                ok = await manager.async_answer(lambda: self._mint(call), on_downlink=on_downlink)
-                if ok:
-                    self._manager = manager
+            # accept/async_answer парсят SDP-offer из сети (untrusted). Если accept
+            # регрессирует и кинет — мост (ffmpeg + HTTP-сервер) обязан быть снят,
+            # иначе течёт (P1-1). Зеркалим teardown ниже на любом исходе.
+            try:
+                if self._manager is not None and self._manager.holding:
+                    ok = await self._manager.accept(on_downlink=on_downlink)  # быстрый путь
+                else:
+                    # Fallback: held не поднялся → register-on-answer (приём не регрессирует).
+                    manager = SipManager(
+                        fcm_token,
+                        on_ended=self._schedule_audio_cleanup,
+                        on_cancelled=self._on_ring_cancelled,
+                    )
+                    ok = await manager.async_answer(
+                        lambda: self._mint(call), on_downlink=on_downlink
+                    )
+                    if ok:
+                        self._manager = manager
+            except Exception:  # noqa: BLE001 — degrade: мост снять, экран живёт от FCM
+                LOGGER.warning("SIP answer: accept/register упал — снимаю мост (degrade)",
+                               exc_info=True)
+                await self._teardown_audio_bridge(bridge)
+                return False
 
             if ok:
                 self._bridge = bridge

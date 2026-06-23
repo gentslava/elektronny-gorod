@@ -12,17 +12,30 @@ _CRLF = "\r\n"
 
 
 def parse_sdp(body: str) -> dict[str, Any]:
-    """Грубый разбор SDP: connection IP, media-линии, rtpmap."""
+    """Грубый разбор SDP: connection IP, media-линии, rtpmap.
+
+    SDP-offer приходит из сети (INVITE body) — untrusted input. Битые строки
+    (нечисловой порт, усечённые `m=`/`c=`) **пропускаются**, а не валят разбор:
+    иначе ValueError/IndexError всплыл бы в accept() → утечка AudioBridge.
+    """
     info: dict[str, Any] = {"conn_ip": None, "media": [], "rtpmap": {}}
     for ln in body.replace("\r\n", "\n").split("\n"):
         if ln.startswith("c=IN IP4 "):
-            info["conn_ip"] = ln.split()[2]
+            parts = ln.split()
+            if len(parts) >= 3:
+                info["conn_ip"] = parts[2]
         elif ln.startswith("m="):
             parts = ln[2:].split()
+            if len(parts) < 3:
+                continue  # усечённая m=-строка (нет порта/proto) — пропускаем
+            try:
+                port = int(parts[1])
+            except ValueError:
+                continue  # нечисловой порт — битая m=-строка, пропускаем
             info["media"].append(
                 {
                     "type": parts[0],
-                    "port": int(parts[1]),
+                    "port": port,
                     "proto": parts[2],
                     "fmts": parts[3:],
                 }

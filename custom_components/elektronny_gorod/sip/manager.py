@@ -133,16 +133,20 @@ class SipManager:
                                 on_bye=self._on_remote_bye, on_cancel=self._on_remote_cancel),
             local_addr=("0.0.0.0", SIP_LOCAL_PORT), remote_addr=(registrar_ip, SIP_PORT),
         )
+        # Узкий except: единственный реальный исход wait_for здесь — timeout (протокол
+        # резолвит future только set_result, не set_exception); OSError — на случай
+        # сбоя datagram-транспорта. Программные ошибки (KeyError на creds и т.п.) НЕ
+        # глотаем — пусть всплывают в контроллер (P2-1).
         try:
             await asyncio.wait_for(sip.registered, timeout=REGISTER_TIMEOUT)
-        except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+        except (asyncio.TimeoutError, OSError):
             LOGGER.warning("SIP: REGISTER не подтверждён за %.0fs — отмена hold", REGISTER_TIMEOUT)
             sip.close()
             sip_transport.close()
             return False
         try:
             invite_msg, addr = await asyncio.wait_for(sip.invite, timeout=INVITE_TIMEOUT)
-        except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+        except (asyncio.TimeoutError, OSError):
             LOGGER.warning("SIP: INVITE не пришёл за %.0fs после REGISTER — отмена hold", INVITE_TIMEOUT)
             sip.close()
             sip_transport.close()
@@ -160,13 +164,21 @@ class SipManager:
             LOGGER.warning("SIP: accept без держимого вызова — игнор")
             return False
         loop = asyncio.get_running_loop()
+        # SDP-offer — untrusted network input (INVITE body). parse_sdp толерантен к
+        # битым строкам, но пустой fmts / отсутствие audio — валидный SDP без payload:
+        # degrade (release + False), а не краш → утечка моста в контроллере (P1-1).
         sdp = parse_sdp(held.invite_msg.body)
         audio = next((m for m in sdp["media"] if m["type"] == "audio"), None)
-        if not audio:
-            LOGGER.warning("SIP: нет audio в SDP-offer")
+        if not audio or not audio["fmts"]:
+            LOGGER.warning("SIP: нет audio/payload в SDP-offer — degrade")
             held.release()
             return False
-        pt = int(audio["fmts"][0])
+        try:
+            pt = int(audio["fmts"][0])
+        except ValueError:
+            LOGGER.warning("SIP: нечисловой payload-type в SDP-offer — degrade")
+            held.release()
+            return False
         codec = sdp["rtpmap"].get(str(pt), "PCMU/8000" if pt == 0 else "PCMA/8000")
         door_ip, door_port = sdp["conn_ip"], audio["port"]
 

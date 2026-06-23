@@ -171,6 +171,74 @@ async def test_answer_without_go2rtc_uses_counter_sink(controller):
     assert mgr.async_answer.await_args.kwargs["on_downlink"] == controller._count_downlink
 
 
+# ---- P1-1: bridge teardown при неуспешном/упавшем accept (нет утечки ffmpeg) ----
+def _go2rtc_controller():
+    from custom_components.elektronny_gorod.sip.call_controller import (
+        DoorbellCallController,
+        Go2RtcConfig,
+    )
+
+    api = MagicMock()
+    api.mint_sip_device = AsyncMock(
+        return_value={"login": "l", "password": "p", "realm": "r"}
+    )
+    return DoorbellCallController(
+        _hass(), api, lambda: "TOK", go2rtc=Go2RtcConfig("http://g:1984", {}, "127.0.0.1")
+    )
+
+
+async def test_answer_tears_down_bridge_when_accept_returns_false():
+    # accept держимого вернул False (malformed SDP degrade) → мост закрыт, не течёт.
+    c = _go2rtc_controller()
+    c.handle_signal(_ring())
+    held = MagicMock()
+    held.holding = True
+    held.in_call = False
+    held.accept = AsyncMock(return_value=False)
+    c._manager = held
+
+    with patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
+        f"{_CC}.detect_lan_ip", return_value="1.2.3.4"
+    ), patch(f"{_CC}.remove_audio_stream", new=AsyncMock()), patch(
+        f"{_CC}.async_get_clientsession"
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock()
+        bridge.stop = AsyncMock()
+        ok = await c.async_answer()
+
+    assert ok is False
+    bridge.stop.assert_awaited_once()  # мост закрыт на неуспешном accept
+    assert c._bridge is None  # не сохранён → не течёт
+
+
+async def test_answer_tears_down_bridge_when_accept_raises():
+    # accept бросил (untrusted-SDP краш не пойман на нижнем слое) → мост всё равно
+    # закрыт. Это страховка: даже если SipManager.accept регрессирует и кинет,
+    # контроллер не должен утечь ffmpeg + HTTP-сервер AudioBridge.
+    c = _go2rtc_controller()
+    c.handle_signal(_ring())
+    held = MagicMock()
+    held.holding = True
+    held.in_call = False
+    held.accept = AsyncMock(side_effect=ValueError("malformed SDP"))
+    c._manager = held
+
+    with patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
+        f"{_CC}.detect_lan_ip", return_value="1.2.3.4"
+    ), patch(f"{_CC}.remove_audio_stream", new=AsyncMock()), patch(
+        f"{_CC}.async_get_clientsession"
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock()
+        bridge.stop = AsyncMock()
+        ok = await c.async_answer()
+
+    assert ok is False
+    bridge.stop.assert_awaited_once()  # мост закрыт несмотря на исключение в accept
+    assert c._bridge is None
+
+
 async def test_hangup_tears_down_manager(controller):
     controller._manager = MagicMock()
     controller._manager.async_hangup = AsyncMock()
