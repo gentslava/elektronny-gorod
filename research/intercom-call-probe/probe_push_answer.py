@@ -53,6 +53,9 @@ PRE_DELAY = float(os.environ.get("PRE_DELAY", "0"))  # «раздумья» ДО
 LOOP: asyncio.AbstractEventLoop | None = None
 STATE: dict = {}  # sess, intercom, creds, local_ip, ip, fcm_token, sender
 _handled: set[str] = set()
+# PoC D-audio-2: если задан (probe_mic_uplink.py), при активном вызове источник
+# uplink-кадров = микрофон (callable(pt) -> bytes|None), иначе — трек/тишина как раньше.
+UPLINK_PROVIDER = None
 
 
 def _ts() -> str:
@@ -417,7 +420,12 @@ class TransientSip(asyncio.DatagramProtocol):
             if answered and not logged:
                 log("  🎵 ОТВЕТ — переключаю RTP на аудио-трек. СЛУШАЙ У ДВЕРИ.")
                 logged = True
-            frame = frames[talk_i % len(frames)] if (answered and frames) else silence
+            if answered and UPLINK_PROVIDER is not None:
+                frame = UPLINK_PROVIDER(pt) or silence  # PoC D-audio-2: микрофон
+            elif answered and frames:
+                frame = frames[talk_i % len(frames)]
+            else:
+                frame = silence
             hb = struct.pack("!BBHII", 0x80, pt | (0x80 if i == 0 else 0),
                              seq & 0xFFFF, tsv & 0xFFFFFFFF, ssrc)
             try:

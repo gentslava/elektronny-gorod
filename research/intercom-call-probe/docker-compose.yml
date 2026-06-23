@@ -88,3 +88,25 @@ services:
       - ./fcm_credentials.json:/app/fcm_credentials.json
       - ./audio:/app/audio:ro
       - ./logs:/app/logs
+
+  # PoC D-audio-2: uplink-микрофон (кандидат #1 WS-binary). Поднимает HTTP+WS на
+  # :8765 (host-net) — браузер getUserMedia → WS Int16 PCM → G.711 → uplink в живой
+  # звонок. Открыть http://localhost:8765/ на ХОСТЕ (localhost=secure→микрофон без
+  # HTTPS) ИЛИ публичный HTTPS-роут (traefik/Dokploy) для теста с телефона/4G.
+  mic:
+    <<: *probe
+    image: intercom-probe
+    command: ["probe_mic_uplink.py"]
+    environment:
+      - INTERCOM_AC=${INTERCOM_AC:-0}
+      - ANSWER=${ANSWER:-1}
+      - MIRROR_APP=${MIRROR_APP:-1}
+      - RTP_EARLY=${RTP_EARLY:-1}
+      - ANSWER_DELAY=${ANSWER_DELAY:-2}
+      - MIC_PT=${MIC_PT:-0}
+      - MIC_TOKEN=${MIC_TOKEN:-}  # задать при публичном (cloudflared) запуске — токен в ?k=
+    volumes:
+      - ./session.json:/app/session.json:ro
+      - ./firebase_config.json:/app/firebase_config.json:ro
+      - ./fcm_credentials.json:/app/fcm_credentials.json
+      - ./logs:/app/logs

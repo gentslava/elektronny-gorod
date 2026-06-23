@@ -1,0 +1,53 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mic uplink probe (D-audio-2)</title>
+<style>
+  body { font: 16px system-ui; margin: 2rem; }
+  button { font-size: 1.3rem; padding: .8rem 1.4rem; }
+  pre { background: #111; color: #0f0; padding: 1rem; white-space: pre-wrap; }
+</style>
+<h1>mic → домофон (PoC #1 WS-binary)</h1>
+<p>Локально: <code>http://localhost:8765/</code> на хосте (localhost = secure origin).
+  Публично (телефон/4G): <code>https://&lt;cloudflared-url&gt;/?k=&lt;токен&gt;</code> (HTTPS = secure origin).
+  Нажми «start mic», позвони в домофон — проба ответит, говори в микрофон, слушай у двери.</p>
+<button id="go">start mic</button>
+<pre id="log"></pre>
+<script>
+  const log = (m) => { document.getElementById('log').textContent += m + '\n'; };
+  document.getElementById('go').onclick = async () => {
+    try {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const k = new URLSearchParams(location.search).get('k') || '';
+      const wsUrl = `${proto}://${location.host}/ws` + (k ? '?k=' + encodeURIComponent(k) : '');
+      const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
+      await new Promise((res, rej) => { ws.onopen = res; ws.onerror = rej; });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
+      const ac = new AudioContext();
+      log('AudioContext.sampleRate = ' + ac.sampleRate);   // обычно 48000
+      ws.send(JSON.stringify({ type: 'start', sample_rate: ac.sampleRate }));
+      const src = ac.createMediaStreamSource(stream);
+      const node = ac.createScriptProcessor(2048, 1, 1);    // mono in
+      const mute = ac.createGain();                         // 0-gain: не плодим эхо на хосте
+      mute.gain.value = 0;
+      let sent = 0;
+      node.onaudioprocess = (e) => {
+        const f32 = e.inputBuffer.getChannelData(0);
+        const i16 = new Int16Array(f32.length);
+        for (let i = 0; i < f32.length; i++) {
+          const s = Math.max(-1, Math.min(1, f32[i]));
+          i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+        }
+        if (ws.readyState === 1) { ws.send(i16.buffer); sent += i16.length; }
+      };
+      src.connect(node); node.connect(mute); mute.connect(ac.destination);
+      log('микрофон стримится в пробу… (говори при активном вызове)');
+      setInterval(() => log('отправлено сэмплов: ' + sent), 2000);
+    } catch (err) {
+      log('ОШИБКА: ' + err + '\n(микрофон требует localhost или HTTPS)');
+    }
+  };
+</script>
