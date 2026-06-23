@@ -28,10 +28,10 @@ def test_ffmpeg_args_pcma_alaw() -> None:
     assert "mulaw" not in args
 
 
-def test_go2rtc_src_is_ffmpeg_http_opus() -> None:
+def test_go2rtc_src_is_ffmpeg_http_aac_and_opus() -> None:
     b = AudioBridge("192.168.1.100", 40020, payload_type=0)
-    # go2rtc REST-источник: тянет наш ffmpeg-HTTP, выводит opus в WebRTC.
-    assert b.go2rtc_src == "ffmpeg:http://192.168.1.100:40020#audio=opus"
+    # Два кодека (как камеры): AAC для мгновенного MSE + opus для WebRTC.
+    assert b.go2rtc_src == "ffmpeg:http://192.168.1.100:40020#audio=aac#audio=opus"
 
 
 def test_feed_downlink_noop_when_not_started() -> None:

@@ -65,8 +65,14 @@ class AudioBridge:
 
     @property
     def go2rtc_src(self) -> str:
-        """go2rtc REST-источник: тянет наш HTTP-мост, выводит opus в WebRTC."""
-        return f"ffmpeg:http://{self._host_ip}:{self._port}#audio=opus"
+        """go2rtc REST-источник: тянет наш HTTP-мост.
+
+        🔴 Два аудио-кодека (как у камер, camera.py:77): AAC — чтобы MSE-плеер играл
+        СРАЗУ (наш мост и так отдаёт AAC → copy, мгновенно); opus — для WebRTC. С
+        одним `#audio=opus` MSE не матчил кодек (`codecs not matched: audio:OPUS`) →
+        ~6с впустую → fallback в WebRTC (live: звук грузился 8-10с). go2rtc лениво
+        поднимает только нужный консьюмеру кодек."""
+        return f"ffmpeg:http://{self._host_ip}:{self._port}#audio=aac#audio=opus"
 
     def _ffmpeg_args(self) -> list[str]:
         """ffmpeg: G.711 (mulaw/alaw) из stdin → mpegts/aac в stdout (pipe:1)."""

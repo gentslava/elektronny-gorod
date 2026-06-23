@@ -28,7 +28,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
-from ..const import DOORBELL_CALL_WINDOW_FALLBACK_SEC, LOGGER
+from ..const import DOORBELL_CALL_WINDOW_FALLBACK_SEC, GO2RTC_RTSP_PORT, LOGGER
 from ..go2rtc import remove_audio_stream, upsert_audio_stream
 from .bridge import AudioBridge, detect_lan_ip
 from .manager import SipManager
@@ -37,9 +37,11 @@ from .manager import SipManager
 # POST не «съел» окно вызова (http.py без ClientTimeout, A-21).
 _MINT_TIMEOUT_SEC = 8.0
 
-# Аудио-мост downlink: фикс HTTP-порт ffmpeg-сервера + имя go2rtc-стрима.
+# Аудио-мост downlink: фикс HTTP-порт ffmpeg-сервера + имя go2rtc-стрима вызова.
 AUDIO_HTTP_PORT = 40020
-AUDIO_STREAM_NAME = "eg_intercom_talk"
+# Стрим вызова: видео камеры (RTSP) + аудио моста, склеенные go2rtc (B, ADR-0012).
+# Если камера не разрешилась — только аудио (fallback). Карточка экрана читает его.
+CALL_STREAM_NAME = "eg_intercom_call"
 # Домофон оператора шлёт PCMU(0) (live-доказано: «PT=0 PCMU»). Мост — под него.
 _DOWNLINK_PT = 0
 
@@ -56,10 +58,11 @@ _HOLD_MAX_SEC = 40
 
 @dataclass
 class Go2RtcConfig:
-    """go2rtc для аудио-моста: base_url + auth-заголовки (из entry)."""
+    """go2rtc для стрима вызова: base_url + auth-заголовки + RTSP-хост (из entry)."""
 
     base_url: str
     headers: dict
+    rtsp_host: str
 
 
 @dataclass
@@ -82,12 +85,15 @@ class DoorbellCallController:
         fcm_token_getter: Callable[[], str | None],
         on_downlink: Callable[[bytes], None] | None = None,
         go2rtc: Go2RtcConfig | None = None,
+        camera_resolver: Callable[[str], str | None] | None = None,
     ) -> None:
         self._hass = hass
         self._api = api
         self._fcm_token_getter = fcm_token_getter
         self._on_downlink = on_downlink or self._count_downlink
         self._go2rtc = go2rtc
+        # access_control_id → camera_id (для видео-источника стрима вызова, B).
+        self._camera_resolver = camera_resolver
         self._active: ActiveCall | None = None
         self._manager: SipManager | None = None
         self._bridge: AudioBridge | None = None
@@ -184,7 +190,7 @@ class DoorbellCallController:
                 LOGGER.warning("SIP answer: FCM-токен не готов — REGISTER невозможен")
                 return False
 
-            bridge, on_downlink = await self._setup_audio_bridge()
+            bridge, on_downlink = await self._setup_audio_bridge(call)
             self.downlink_packets = 0
             self._cancel_hold_timeout()
 
@@ -278,11 +284,27 @@ class DoorbellCallController:
             self._hold_timeout.cancel()
             self._hold_timeout = None
 
-    # ---- аудио-мост (downlink) ----
+    # ---- стрим вызова (видео камеры + аудио моста) ----
+    def _call_stream_srcs(self, call: ActiveCall, bridge: AudioBridge) -> list[str]:
+        """Источники go2rtc-стрима вызова: видео камеры (RTSP, если разрешилась) +
+        аудио моста. Видео тянем из уже существующего go2rtc-стрима камеры по RTSP —
+        НЕ из оператора (токен не трогаем) и НЕ трогая сам стрим камеры (camera.py)."""
+        srcs: list[str] = []
+        cam_id = (
+            self._camera_resolver(call.access_control_id)
+            if self._camera_resolver else None
+        )
+        if cam_id and self._go2rtc is not None:
+            srcs.append(
+                f"rtsp://{self._go2rtc.rtsp_host}:{GO2RTC_RTSP_PORT}/eg_{cam_id}#video=copy"
+            )
+        srcs.append(bridge.go2rtc_src)  # аудио всегда (fallback — только звук)
+        return srcs
+
     async def _setup_audio_bridge(
-        self,
+        self, call: ActiveCall,
     ) -> tuple[AudioBridge | None, Callable[[bytes], None]]:
-        """Поднять мост + go2rtc-стрим. Возвращает (bridge|None, on_downlink-sink)."""
+        """Поднять мост + go2rtc-стрим вызова. Возвращает (bridge|None, on_downlink)."""
         if self._go2rtc is None:
             return None, self._on_downlink  # go2rtc не настроен → счётчик (degrade)
         loop = asyncio.get_running_loop()
@@ -291,26 +313,26 @@ class DoorbellCallController:
         try:
             await bridge.start()
             await upsert_audio_stream(
-                self._go2rtc.base_url, AUDIO_STREAM_NAME, bridge.go2rtc_src,
+                self._go2rtc.base_url, CALL_STREAM_NAME, self._call_stream_srcs(call, bridge),
                 async_get_clientsession(self._hass), self._go2rtc.headers,
             )
         except Exception:  # noqa: BLE001 — degrade, не валим приём вызова
             LOGGER.warning(
-                "Аудио-мост/go2rtc не поднялись — звук в браузере недоступен (degrade)"
+                "Мост/go2rtc-стрим вызова не поднялись — медиа в браузере недоступно (degrade)"
             )
             await bridge.stop()
             return None, self._on_downlink
-        LOGGER.info("Аудио-мост поднят: go2rtc-стрим '%s'", AUDIO_STREAM_NAME)
+        LOGGER.info("Стрим вызова поднят: go2rtc '%s'", CALL_STREAM_NAME)
         return bridge, bridge.feed_downlink
 
     async def _teardown_audio_bridge(self, bridge: AudioBridge | None) -> None:
-        """Остановить мост + снять go2rtc-стрим (best-effort)."""
+        """Остановить мост + снять go2rtc-стрим вызова (best-effort)."""
         if bridge is None:
             return
         await bridge.stop()
         if self._go2rtc is not None:
             await remove_audio_stream(
-                self._go2rtc.base_url, AUDIO_STREAM_NAME,
+                self._go2rtc.base_url, CALL_STREAM_NAME,
                 async_get_clientsession(self._hass), self._go2rtc.headers,
             )
 

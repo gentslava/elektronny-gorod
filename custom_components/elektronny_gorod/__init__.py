@@ -87,6 +87,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sip_controller = DoorbellCallController(
         hass, coordinator.api, lambda: fcm_listener.fcm_token,
         go2rtc=_build_go2rtc_config(entry),
+        camera_resolver=lambda ac: _resolve_call_camera_id(coordinator, ac),
     )
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_DOORBELL, sip_controller.handle_signal)
@@ -125,7 +126,26 @@ def _build_go2rtc_config(entry: ConfigEntry) -> Go2RtcConfig | None:
         return None
     user = entry.options.get(CONF_GO2RTC_USERNAME) or entry.data.get(CONF_GO2RTC_USERNAME)
     pwd = entry.options.get(CONF_GO2RTC_PASSWORD) or entry.data.get(CONF_GO2RTC_PASSWORD)
-    return Go2RtcConfig(base_url=base, headers=go2rtc_auth_headers(user, pwd))
+    rtsp_host = (
+        entry.options.get(CONF_GO2RTC_RTSP_HOST)
+        or entry.data.get(CONF_GO2RTC_RTSP_HOST)
+        or DEFAULT_GO2RTC_RTSP_HOST
+    )
+    return Go2RtcConfig(
+        base_url=base, headers=go2rtc_auth_headers(user, pwd), rtsp_host=rtsp_host
+    )
+
+
+def _resolve_call_camera_id(coordinator: Any, access_control_id: str) -> str | None:
+    """access_control_id → camera_id домофона (intercom-камера) из coordinator.data.
+
+    Для видео-источника стрима вызова (B): берём go2rtc-стрим `eg_<camera_id>` той же
+    точки доступа. Первая intercom-камера с совпавшим access_control_id."""
+    ac = str(access_control_id or "")
+    for cam in (getattr(coordinator, "data", None) or {}).get("cameras", []):
+        if str(cam.get("access_control_id") or "") == ac and cam.get("source") == "intercom":
+            return str(cam.get("id") or "") or None
+    return None
 
 
 def _async_register_sip_services(hass: HomeAssistant) -> None:

@@ -164,15 +164,20 @@ def go2rtc_auth_headers(username: str | None, password: str | None) -> dict:
 
 
 async def upsert_audio_stream(
-    base_url: str, name: str, src: str, session: ClientSession, headers: dict | None = None
+    base_url: str, name: str, srcs: list[str], session: ClientSession,
+    headers: dict | None = None,
 ) -> None:
-    """Создать/обновить go2rtc аудио-стрим вызова (PATCH-first, PUT-fallback).
+    """Создать/обновить go2rtc стрим вызова (PATCH-first, PUT-fallback).
 
+    `srcs` — список источников go2rtc, которые go2rtc склеивает в один стрим:
+    - аудио-only: `[ffmpeg:http://<bridge>#audio=aac#audio=opus]` (мост; AAC→MSE, opus→WebRTC);
+    - видео+аудио (B): `[rtsp://<rtsp_host>:8554/eg_<camera>#video=copy, <мост>]` — видео
+      из RTSP уже существующего go2rtc-стрима камеры (не оператора → токен не трогаем).
     PATCH идемпотентен (не убивает producer); PUT — fallback на 4xx/5xx/ClientError.
-    `src` = `ffmpeg:http://<bridge>#audio=opus` (мост, D-audio-1). Креды НЕ логируем.
     """
     base_url = normalize_base_url(base_url)
-    url = f"{base_url}/api/streams?{urlencode({'name': name, 'src': src})}"
+    qs = urlencode([("name", name), *[("src", s) for s in srcs]])
+    url = f"{base_url}/api/streams?{qs}"
     h = headers or {}
     try:
         async with session.patch(url, headers=h, timeout=_AUDIO_STREAM_TIMEOUT) as resp:

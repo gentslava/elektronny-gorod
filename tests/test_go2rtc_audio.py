@@ -44,18 +44,30 @@ def _session(patch_status: int):
 async def test_upsert_audio_stream_patch_first():
     s = _session(200)
     await upsert_audio_stream(
-        "http://go2rtc:1984", "eg_intercom_talk", "ffmpeg:http://h:1/x#audio=opus", s, {}
+        "http://go2rtc:1984", "eg_intercom_call", ["ffmpeg:http://h:1/x#audio=opus"], s, {}
     )
     s.patch.assert_called_once()
     s.put.assert_not_called()
     url = s.patch.call_args.args[0]
-    assert "name=eg_intercom_talk" in url and "/api/streams" in url
+    assert "name=eg_intercom_call" in url and "/api/streams" in url
 
 
 async def test_upsert_audio_stream_put_fallback_on_patch_4xx():
     s = _session(404)
-    await upsert_audio_stream("http://go2rtc:1984", "eg_intercom_talk", "ffmpeg:x", s, {})
+    await upsert_audio_stream("http://go2rtc:1984", "eg_intercom_call", ["ffmpeg:x"], s, {})
     s.put.assert_called_once()
+
+
+async def test_upsert_audio_stream_multi_src_video_plus_audio():
+    # B: видео камеры (RTSP) + аудио моста → два src= в query (go2rtc склеивает).
+    s = _session(200)
+    await upsert_audio_stream(
+        "http://go2rtc:1984", "eg_intercom_call",
+        ["rtsp://127.0.0.1:8554/eg_5#video=copy", "ffmpeg:http://b:40020#audio=opus"], s, {},
+    )
+    url = s.patch.call_args.args[0]
+    assert url.count("src=") == 2
+    assert "rtsp" in url and "ffmpeg" in url
 
 
 def test_go2rtc_auth_headers():

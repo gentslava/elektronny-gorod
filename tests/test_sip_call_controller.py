@@ -138,7 +138,7 @@ async def test_answer_with_go2rtc_sets_up_bridge():
     api = MagicMock()
     api.mint_sip_device = AsyncMock(return_value={"login": "l", "password": "p", "realm": "r"})
     c = DoorbellCallController(
-        _hass(), api, lambda: "TOK", go2rtc=Go2RtcConfig("http://g:1984", {})
+        _hass(), api, lambda: "TOK", go2rtc=Go2RtcConfig("http://g:1984", {}, "127.0.0.1")
     )
     c.handle_signal(_ring())  # hold-таск закрыт (_hass) → answer идёт fallback-путём
 
@@ -226,3 +226,33 @@ async def test_cancel_dismisses_screen():
     c._on_ring_cancelled()
     assert c._manager is None
     c._hass.bus.async_fire.assert_called_with(EVENT_SIP_CALL, {"active": False})
+
+
+def test_call_stream_srcs_video_plus_audio_when_camera_resolved():
+    # B: камера разрешилась → видео RTSP камеры ПЕРЕД аудио моста (go2rtc склеит).
+    from custom_components.elektronny_gorod.sip.call_controller import Go2RtcConfig
+    c = DoorbellCallController(
+        _hass(), MagicMock(), lambda: "TOK",
+        go2rtc=Go2RtcConfig("http://g:1984", {}, "127.0.0.1"),
+        camera_resolver=lambda ac: "5593590" if ac == "AC" else None,
+    )
+    call = MagicMock(); call.access_control_id = "AC"
+    bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus"
+    srcs = c._call_stream_srcs(call, bridge)
+    assert srcs == [
+        "rtsp://127.0.0.1:8554/eg_5593590#video=copy",
+        "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus",
+    ]
+
+
+def test_call_stream_srcs_audio_only_when_no_camera():
+    # Камера не разрешилась → только аудио (fallback, экран покажет своё видео).
+    from custom_components.elektronny_gorod.sip.call_controller import Go2RtcConfig
+    c = DoorbellCallController(
+        _hass(), MagicMock(), lambda: "TOK",
+        go2rtc=Go2RtcConfig("http://g:1984", {}, "127.0.0.1"),
+        camera_resolver=lambda ac: None,
+    )
+    call = MagicMock(); call.access_control_id = "AC"
+    bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus"
+    assert c._call_stream_srcs(call, bridge) == ["ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus"]
