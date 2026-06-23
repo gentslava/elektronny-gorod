@@ -23,6 +23,29 @@
 **доказаны рабочими** (`probe_sip_media.py`, live 2026-06-22). Не хватает только
 интеграции медиа-пути в HA.
 
+## Использование: кнопка «Ответить» в уведомлении
+
+Интеграция даёт сервисы `elektronny_gorod.answer` / `elektronny_gorod.hangup` и
+`event`-сущность вызова. Кнопку ответа в push-уведомлении удобно подключить
+готовым **blueprint**-ом (idiomatic HA: интеграция = entity+сервисы, уведомление
+строит пользователь под свой телефон):
+
+[`blueprints/automation/elektronny_gorod/doorbell_two_way_answer.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_two_way_answer.yaml)
+
+При `ring` шлёт actionable-уведомление (Companion App) с кнопками **«Ответить»**
+(→ `answer`) и **«Сбросить»** (→ `hangup`); снимает его при ответе/завершении.
+
+**Установка:**
+1. Settings → Automations & Scenes → Blueprints → **Import Blueprint** → вставить
+   raw-URL файла выше (или скопировать в `config/blueprints/automation/`).
+2. Create Automation → выбрать blueprint → указать **сущность вызова домофона**
+   и **телефон** (устройство с Home Assistant Companion App).
+3. Требуется Companion App (actionable-уведомления). Ответить нужно в окне `~30с`
+   (`CallInvalidated`) — иначе домофон сбросит вызов сам.
+
+> Альтернатива без мобильного приложения: кнопка на Lovelace-дашборде, вызывающая
+> `elektronny_gorod.answer` (actionable push для этого не нужен).
+
 ## Ключевые решения (brainstorming 2026-06-22)
 
 1. **SIP-стек — в интеграции** (go2rtc не умеет SIP: нет пакета `sip`,
