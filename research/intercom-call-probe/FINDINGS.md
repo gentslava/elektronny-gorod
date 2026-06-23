@@ -165,6 +165,29 @@ G.711 → RTP, готово). Кандидаты — [uplink-mic-design.md](../.
 pure-Python. Продакшн — Phase C (WS-команда + Lovelace-карта + wiring `UplinkSink` +
 дрейф-фикс `rtp.py`). Проба/альтернативы #2/#3 — для будущего сравнения. См. ADR-0013.
 
+### Тестовая среда (offline, 2026-06-24) — `test_harness/`
+**Door-эмулятор** (`test_harness/door_emulator.py`) — мини-оператор+домофон со
+**строгим RTP-latching** по рецепту `app_call.pcap` (`test_harness/PCAP_RECIPE.md`):
+registrar (REGISTER→401→200) + caller (INVITE с SDP-offer домофона) + latching-media
+(ждёт первый uplink, проверяет symmetric src-порт==SDP-порт, защёлкивает, шлёт downlink
+ТОЛЬКО на защёлкнутый src) + BYE. Запуск: `./test_harness/run_loopback.sh`. Проба —
+оффлайн-режим (env `SIP_SERVER`/`TEST_LOGIN`/`TEST_REALM` → пропуск mint/FCM, фейк-креды).
+
+**Вердикт по пробе: КОД КОРРЕКТЕН.** Полный вызов localhost↔проба проходит (REGISTER→
+INVITE→200→ACK→RTP both ways→BYE), **symmetric OK, downlink=250+, two-way media работает**.
+Негативный контроль (uplink из чужого порта) → SYMMETRIC FAIL → downlink=0 (детектор
+настоящий). Uplink идёт из того же сокета (`RTP_LOCAL_PORT=40016`), что в SDP-answer;
+SDP-offer парсится верно; uplink после ACK; дрейф-пейсинг ок.
+
+**Следствие:** живой `downlink=0` — НЕ баг кода пробы, а **среда**: (а) Mac-Docker —
+тройной NAT (Contact/SDP = Docker-VM IP `192.168.65.3`); (б) home.server — конкуренция
+с прод-интеграцией за SIP-binding (тот же аккаунт → media-leg уходит проду) и/или
+NAT-ремаппинг uplink-порта. Латчинг реального FreeSWITCH защёлкивает фактический
+(post-NAT) source — строгий эмулятор СТРОЖЕ (ловит код-баги), реальный NAT — отдельный
+сценарий (TODO: NAT-sim режим эмулятора + competition-тест). **Код пробы менять не надо.**
+
+Эта же среда будет валидировать продакшн Phase C end-to-end.
+
 ## Архитектура (предварительно)
 - Сигнал вызова → **FCM-приём** (кандидат на sidecar-«push-bridge»: хрупкий
   приватный API Google, persistence creds, бинарный MTalk-сокет — по аналогии
