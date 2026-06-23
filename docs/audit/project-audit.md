@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-06-23 (A-82/A-83 tech-debt из рефактор-оценки camera.py/go2rtc.py + A-84 go2rtc config bloat P2 — найден пользователем; backlog, в go2rtc-консолидацию R7)
+Last reviewed: 2026-06-23 (A-81 расширен: downlink/AudioBridge/call_camera.py + register-on-ring ADR-0012; 13 sip/-модулей; A-82/A-83 tech-debt; A-84 go2rtc config bloat P2)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1059,31 +1059,30 @@ Quality gates:
 - **Watch:** при breakage приватного API — bump `firebase-messaging` (линия
   поддержки Lemoine → sdb9696 переживает изменения через обновление зависимости).
 
-### A-81. Приём вызова домофона по SIP (фундамент two-way audio)
+### A-81. Приём вызова домофона по SIP + показ экрана вызова (фундамент two-way audio)
 
 - **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-two-way-audio`)**.
   Feature-слайс (не bug-fix). После merge → RESOLVED.
 - **Severity:** P1 (real-time path для домофонных звонков — двусторонний звук).
-- **Area:** `sip/` (новый пакет, 11 модулей), `api.mint_sip_device`,
-  `services.yaml` (`answer` / `hangup`), `const.py:DOORBELL_CALL_WINDOW_FALLBACK_SEC`,
-  `_logging.py:SENSITIVE_KEYS` (+`realm`).
-- **Что доставлено:** приём активного вызова домофона и поднятие uplink-аудио к
-  панели. Модель **REGISTER-on-answer** — доказана захватом трафика реального
-  приложения (pcap, PCAPdroid) + 6 live-пробами
-  ([`call-answer-model.md`](../features/intercom-two-way-audio/call-answer-model.md)):
-  интеграция **не** держит постоянную SIP-регистрацию, по явному «ответить»
-  (в окне `CallInvalidated` ~30с) минтит SIP-креды → `REGISTER` (Expires=30,
-  проприет. push-params) → принимает форкнутый сервером `INVITE` → `200 OK`
-  немедленно (локальный SDP, G.711, без STUN/ICE/SRTP) → RTP-uplink +
-  STUN-keepalive → FreeSWITCH RTP-latching. Ответ строго привязан к `Call-ID`
-  из FCM `CALL_INCOMING`.
+- **Area:** `sip/` (новый пакет, 13 модулей включая `bridge.py`), `call_camera.py`
+  (новый), `api.mint_sip_device`, `services.yaml` (`answer` / `hangup`),
+  `const.py:DOORBELL_CALL_WINDOW_FALLBACK_SEC`, `_logging.py:SENSITIVE_KEYS` (+`realm`),
+  `go2rtc.py` (`upsert_audio_stream` / `remove_audio_stream`).
+- **Что доставлено:** приём активного вызова домофона + downlink-вывод звука +
+  показ экрана вызова. Модель **register-on-ring (ADR-0012, held-short-window)**:
+  по FCM `CALL_INCOMING` (до нажатия «Ответить») минтит SIP-креды →
+  `REGISTER` (Expires=30, проприет. push-params) → держит форкнутый сервером
+  `INVITE` (100 Trying); по нажатию «Ответить» → `200 OK` (локальный SDP,
+  G.711, без STUN/ICE/SRTP) → RTP-latching. SIP `CANCEL` (панель сбросила) →
+  `487` + мгновенный dismiss экрана. Подробности — в
+  [`call-answer-model.md`](../features/intercom-two-way-audio/call-answer-model.md)
+  + [ADR-0012](../decisions/0012-register-on-ring.md).
 - **Evidence:** pcap-тайминги (REGISTER → INVITE +90мс → 200 OK +80мс →
-  latching) + probe-матрица (held-стратегия рвалась forking → late answer → BYE;
-  REGISTER-on-answer воспроизводит приложение). Суть — в call-answer-model.md
-  §2/§5. Suite **234 passed** (`test_sip_*.py` + `test_api_sip.py` +
+  latching) + probe-матрица (6 live-проб подтвердили: held-стратегия рвалась
+  при форкинге; register-on-ring + held-short-window воспроизводит приложение
+  и даёт мгновенный CANCEL-dismiss). Суть — в call-answer-model.md §2/§5. Suite **234 passed** (`test_sip_*.py` + `test_api_sip.py` +
   `test_sip_call_controller.py`).
-- **Scope этого слайса:** приём вызова + RTP-uplink (latching), проверяемо логом.
-  **Downlink-вывод звука гостя в HA — следующий слайс** (отдельный finding/PR).
+- **Scope этого слайса:** приём вызова (register-on-ring/ADR-0012) + RTP-uplink (latching) + **downlink-вывод звука гостя** (`sip/bridge.py` `AudioBridge`) + **показ экрана вызова** (`call_camera.py` — camera-сущность с видео+звуком гостя через HA-native WebRTC). Uplink-микрофон (говорить гостю) — следующий слайс.
 - **Deferred (из code-review, by-design на этом слайсе):**
   1. **A-21 mitigation, не closure.** `mint_sip_device` латентно-критичен
      (REGISTER должен опередить INVITE) — обёрнут точечным
@@ -1216,7 +1215,7 @@ Quality gates:
 | A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR #51 — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
 | ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
 | 🟢 A-58 + 🟢 A-54 (doorbell event via FCM, pending merge `feat/doorbell-fcm-event`, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
-| 🟢 A-81 (приём вызова по SIP, REGISTER-on-answer, pending merge `feat/intercom-two-way-audio`) — закрывает практическую часть A-49 (`sipdevices` теперь используется) | Итерация 4 (two-way audio — фундамент: приём вызова + RTP-uplink; downlink — следующий слайс) |
+| 🟢 A-81 (register-on-ring ADR-0012 + downlink AudioBridge + call_camera.py, pending merge `feat/intercom-two-way-audio`) — закрывает практическую часть A-49 (`sipdevices` используется) | Итерация 4 (two-way audio: приём вызова + downlink-вывод + экран вызова; uplink — следующий слайс) |
 | 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) + 🔴 A-84 (go2rtc config bloat P2 — стрим дописывается, не мёржится; через DIAG + R7) | backlog (tech-debt из рефактор-оценки 2026-06-23 + A-84 найден пользователем; не блокирует two-way audio) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |

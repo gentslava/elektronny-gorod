@@ -1,6 +1,6 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-06-23 (A-81: SIP-стек two-way audio + services.yaml + sip/ тесты)
+Last reviewed: 2026-06-23 (A-81: call_camera.py + sip/bridge.py + test_sip_bridge/test_call_camera/test_go2rtc_audio; ADR-0012 register-on-ring)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -64,7 +64,7 @@ elektronny-gorod/
 │   ├── switch.py                  ← DND switches platform
 │   ├── event.py                   ← doorbell call event platform (ADR-0011)
 │   ├── fcm.py                     ← FCM listener для события вызова (ADR-0011)
-│   ├── sip/                       ← SIP-стек two-way audio (A-81, REGISTER-on-answer)
+│   ├── sip/                       ← SIP-стек two-way audio (A-81, register-on-ring ADR-0012)
 │   │   ├── __init__.py
 │   │   ├── audio.py               ← G.711 ↔ PCM
 │   │   ├── stun.py                ← STUN parse / keepalive
@@ -162,18 +162,20 @@ elektronny-gorod/
 
 | Файл | Назначение |
 |---|---|
-| [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | validate_go2rtc (GET /api + PUT /api/streams + cleanup), upsert stream, derive_rtsp_host |
+| [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | validate_go2rtc (GET /api + PUT /api/streams + cleanup), upsert stream, derive_rtsp_host; `upsert_audio_stream` / `remove_audio_stream` — аудио-стрим вызова (A-81) |
 | [`fcm.py`](../../custom_components/elektronny_gorod/fcm.py) | `DoorbellFcmListener` (ADR-0011): эмуляция регистрации Android-устройства в FCM (`firebase-messaging`, Firebase-конфиг приложения в `const.py:FCM_*`) → привязка токена у оператора (`api.register_push_device`) → MTalk-сокет. Парсит `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → `SIGNAL_DOORBELL`. Весь флоу под graceful degradation (приватные API Google) — сбой не валит setup. FCM-creds персистятся в `entry.data` |
 
-### SIP / two-way audio (приём вызова домофона)
+### SIP / two-way audio (приём вызова + показ экрана)
 
-Пакет `sip/` — фундамент двусторонней связи (A-81, [call-answer-model](../features/intercom-two-way-audio/call-answer-model.md)). Модель **REGISTER-on-answer**: SIP-регистрация **не** держится постоянно — минтится и шлётся в момент явного «ответить». Контроллер в `hass.data`, сервисы `answer` / `hangup`. Текущий слайс = приём вызова + RTP-uplink (latching); downlink-вывод звука — следующий слайс.
+Пакет `sip/` — фундамент двусторонней связи (A-81, [call-answer-model](../features/intercom-two-way-audio/call-answer-model.md)). Модель **register-on-ring (held-short-window, ADR-0012)**: на FCM `CALL_INCOMING` — сразу `mint → REGISTER → 100 Trying` (hold), по «Ответить» — `200 OK` на held-INVITE + RTP-latching. Сброс с панели приходит как SIP `CANCEL` → мгновенный dismiss экрана. Контроллер в `hass.data`, сервисы `answer` / `hangup`.
+
+Показ экрана вызова — `call_camera.py`: camera-сущность `camera.intercom_call` показывает активный вызов **видео + звук гостя** через HA-native WebRTC (go2rtc в LAN, 4G без экспозиции). `stream_source()` при активном вызове пересобирает go2rtc-стрим `eg_intercom_call` (СВЕЖИЙ video-RTSP домофона + аудио-мост). Вне вызова → `None`.
 
 | Файл | Назначение |
 |---|---|
-| [`sip/call_controller.py`](../../custom_components/elektronny_gorod/sip/call_controller.py) | HA-glue: трекинг активного FCM-вызова по `Call-ID`, `answer`/`hangup`, mint креды через `api.mint_sip_device` (точечный `asyncio.timeout(8с)` — A-21 mitigation), one concurrent call (фикс-порты, first-answer-wins) |
-| [`sip/manager.py`](../../custom_components/elektronny_gorod/sip/manager.py) | `SipManager` — фасад над protocol/dialog/rtp |
-| [`sip/protocol.py`](../../custom_components/elektronny_gorod/sip/protocol.py) | asyncio SIP-транспорт (UDP) |
+| [`sip/call_controller.py`](../../custom_components/elektronny_gorod/sip/call_controller.py) | HA-glue: трекинг активного FCM-вызова по `Call-ID`, `answer`/`hangup`, mint → hold → accept; lifecycle `AudioBridge`; `active_call_media()` → camera_id + bridge (узкий интерфейс для `call_camera.py`) |
+| [`sip/manager.py`](../../custom_components/elektronny_gorod/sip/manager.py) | `SipManager` — фасад: `register_and_hold`, `accept`, `async_hangup`, `on_downlink` |
+| [`sip/protocol.py`](../../custom_components/elektronny_gorod/sip/protocol.py) | asyncio SIP-транспорт (UDP); разделяет `CANCEL` → `487` + dismiss / `BYE` → on_bye |
 | [`sip/register.py`](../../custom_components/elektronny_gorod/sip/register.py) | REGISTER (Expires=30 + проприетарные push-params в Contact URI) |
 | [`sip/dialog.py`](../../custom_components/elektronny_gorod/sip/dialog.py) | `DialogState` + build 200 OK (эхо Via/Record-Route) + BYE |
 | [`sip/message.py`](../../custom_components/elektronny_gorod/sip/message.py) | SIP message parse (multi-Via / Record-Route) |
@@ -182,6 +184,8 @@ elektronny-gorod/
 | [`sip/digest.py`](../../custom_components/elektronny_gorod/sip/digest.py) | Digest MD5 non-qop (RFC 2617) |
 | [`sip/stun.py`](../../custom_components/elektronny_gorod/sip/stun.py) | STUN parse / keepalive (20B бинарь) |
 | [`sip/audio.py`](../../custom_components/elektronny_gorod/sip/audio.py) | G.711 PCMU/PCMA ↔ PCM |
+| [`sip/bridge.py`](../../custom_components/elektronny_gorod/sip/bridge.py) | `AudioBridge` — downlink G.711-кадры → ffmpeg → mpegts/aac → персистентный HTTP-сервер → go2rtc; keepalive-тишина; `detect_lan_ip()` |
+| [`call_camera.py`](../../custom_components/elektronny_gorod/call_camera.py) | `ElektronnyGorodCallCamera` — camera-сущность `camera.intercom_call`; `stream_source()` пересобирает `eg_intercom_call` при активном вызове; вне вызова → `None` |
 | [`services.yaml`](../../custom_components/elektronny_gorod/services.yaml) | сервисы `answer` / `hangup` |
 
 ### Diagnostics / безопасность
@@ -230,8 +234,11 @@ elektronny-gorod/
 | [`tests/test_sip_dialog.py`](../../tests/test_sip_dialog.py) | DialogState + 200 OK + BYE (A-81) |
 | [`tests/test_sip_register.py`](../../tests/test_sip_register.py) | REGISTER + проприетарные push-params (A-81) |
 | [`tests/test_sip_rtp.py`](../../tests/test_sip_rtp.py) | RTP G.711 latching (A-81) |
+| [`tests/test_sip_bridge.py`](../../tests/test_sip_bridge.py) | `AudioBridge`: RTP-packetize, go2rtc src-формат, keepalive-логика (A-81) |
 | [`tests/test_api_sip.py`](../../tests/test_api_sip.py) | `api.mint_sip_device` — тело-зеркало (`installationId`) → `{login, password, realm}` (A-81) |
-| [`tests/test_sip_call_controller.py`](../../tests/test_sip_call_controller.py) | `CallController`: трекинг по `Call-ID`, answer/hangup, mint timeout, one-concurrent-call guard (A-81) |
+| [`tests/test_sip_call_controller.py`](../../tests/test_sip_call_controller.py) | `CallController`: трекинг по `Call-ID`, answer/hangup, mint timeout, one-concurrent-call guard, `active_call_media` (A-81) |
+| [`tests/test_call_camera.py`](../../tests/test_call_camera.py) | `ElektronnyGorodCallCamera`: `stream_source` активный/нет вызова, рефреш go2rtc (A-81) |
+| [`tests/test_go2rtc_audio.py`](../../tests/test_go2rtc_audio.py) | `upsert_audio_stream` / `remove_audio_stream` — контракт с go2rtc REST (A-81) |
 | [`pytest.ini`](../../pytest.ini) | `asyncio_mode = auto`, `testpaths = tests` |
 
 ### CI / CD
@@ -255,7 +262,8 @@ elektronny-gorod/
 
 **Python-зависимости:**
 - из HA core (`aiohttp`, `voluptuous`, `yarl`);
-- `manifest.json:requirements` — `firebase-messaging>=0.4` (FCM-приём события вызова, ADR-0011; тянет protobuf / http_ece / cryptography).
+- `manifest.json:requirements` — `firebase-messaging>=0.4` (FCM-приём события вызова, ADR-0011; тянет protobuf / http_ece / cryptography);
+- `audioop-lts>=0.2.1` (только Python 3.13+) — `audioop` удалён из stdlib в PEP 594; нужен для `sip/audio.py` (G.711 транскод, A-81).
 
 ## Maintenance rules
 

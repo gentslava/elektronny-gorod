@@ -1,8 +1,8 @@
 # Feature: Two-way talk по домофону (SIP-аудио)
 
-- **Status:** PLAN — спека согласована, план Slice 0 написан.
+- **Status:** IN PROGRESS — Slice 0 (SIP-фундамент) + Slice 1 (downlink + экран вызова) реализованы; Slice 2 (uplink/микрофон) в работе.
 - **Feature-id:** `intercom-two-way-audio`
-- **Branch:** `feat/intercom-two-way-audio` (ответвлена от `feat/doorbell-fcm-event` — зависит от FCM-канала).
+- **Branch:** `feat/intercom-two-way-audio` (pending merge → master)
 - **Owner:** Vyacheslav Scherbinin
 
 ## Что внутри
@@ -10,18 +10,26 @@
 | Файл | Описание |
 |---|---|
 | [`design.md`](design.md) | дизайн-спека: целевая архитектура, фазирование, решения brainstorming |
-| [`prd.md`](prd.md) → см. источник | PRD-источник: [`research/intercom-call-probe/PRD-two-way-audio.md`](../../../research/intercom-call-probe/PRD-two-way-audio.md) |
-| [`research.md`](research.md) → см. источник | технические доказательства: [`research/intercom-call-probe/FINDINGS.md`](../../../research/intercom-call-probe/FINDINGS.md) |
-| [`plan.md`](plan.md) | implementation plan: Slice 0 (спайк + G.711/STUN, TDD) + roadmap Slice 1–3 |
-| [`research-spike.md`](research-spike.md) | результаты спайка: voip-utils, тайминг, audioop |
-| [`call-answer-model.md`](call-answer-model.md) | 🔑 **модель приёма вызова** (pcap-доказано): REGISTER-on-answer, latching, окно 30с |
+| [`call-answer-model.md`](call-answer-model.md) | 🔑 **модель приёма вызова** (pcap-доказано): register-on-ring, latching, окно 30с |
+| [`audio-bridge-design.md`](audio-bridge-design.md) | дизайн аудио-моста (downlink): `sip/bridge.py` → go2rtc → HA-native WebRTC |
+| [`call-screen-display-design.md`](call-screen-display-design.md) | дизайн экрана вызова: `call_camera.py` `camera.intercom_call` (видео+звук инлайн) |
+| [`research-spike.md`](research-spike.md) | результаты спайков: voip-utils D1, тайминг D2, audioop D3, реверс APK D4 |
+| [`plan.md`](plan.md) | Slice 0 (фундамент: G.711/STUN/SIP lifecycle) |
+| [`plan-audio-downlink.md`](plan-audio-downlink.md) | Slice 1 plan: downlink PoC + `sip/bridge.py` + go2rtc audio upsert |
+| [`plan-call-screen-display.md`](plan-call-screen-display.md) | Slice 1 plan: экран вызова через `call_camera.py` |
 
 ## Краткая суть
 
-После события вызова (FCM, фича `feat/doorbell-fcm-event`) — ответить на вызов из HA
-и **говорить с гостем у двери** (двусторонний звук), как приложение. SIP/RTP-медиа
-**доказаны рабочими** (`probe_sip_media.py`, live 2026-06-22). Не хватает только
-интеграции медиа-пути в HA.
+После события вызова (FCM, ADR-0011) — ответить на вызов из HA и **говорить с гостем
+у двери** (двусторонний звук), как приложение. SIP/RTP-медиа **доказаны рабочими**
+(`probe_sip_media.py`, live 2026-06-22).
+
+**Текущее состояние (ветка `feat/intercom-two-way-audio`):**
+- Приём вызова по SIP — **работает live** (register-on-ring, ADR-0012: FCM `ring` → mint → REGISTER → held-INVITE → по «Ответить» `200 OK` → RTP-latching).
+- Сброс с панели → SIP `CANCEL` → мгновенный dismiss экрана вызова в HA.
+- Звук гостя (downlink) — **выводится** через `AudioBridge` → go2rtc → HA-native WebRTC.
+- Экран вызова (`camera.intercom_call`) — видео домофона + звук гостя инлайн на дашборде, работает на 4G без экспозиции go2rtc.
+- Микрофон (uplink, говорить гостю) — **следующий слайс** (Slice 2).
 
 ## Использование: кнопка «Ответить» в уведомлении
 
@@ -71,13 +79,16 @@
 - FINDINGS: [`research/intercom-call-probe/FINDINGS.md`](../../../research/intercom-call-probe/FINDINGS.md)
 - Эталон: [`research/intercom-call-probe/probe_sip_media.py`](../../../research/intercom-call-probe/probe_sip_media.py)
 - Предшествующая фича: FCM-event ([ADR-0011](../../decisions/0011-doorbell-fcm-channel.md))
-- ADR (будет): `docs/decisions/0012-sip-two-way-audio.md`
+- ADR: [ADR-0012](../../decisions/0012-register-on-ring.md) — register-on-ring (held-short-window, CANCEL-dismiss)
+- Audit: [A-81](../../audit/project-audit.md) — finding + resolved-in-branch статус
 
-## Quality gates (целевой)
+## Quality gates
 
 - [x] SPEC_READY
-- [ ] PLAN_APPROVED
-- [ ] TESTS_PASS
-- [ ] SECURITY_OK (SIP-пароль не логировать — [`no-secret-logs.md`](../../../.claude/rules/no-secret-logs.md))
-- [ ] DOCS_UPDATED
-- [ ] READY_FOR_RELEASE
+- [x] PLAN_APPROVED (Slice 0–1)
+- [x] TESTS_PASS (suite 234+ passed: test_sip_*.py + test_call_camera.py + test_api_sip.py + test_go2rtc_audio.py)
+- [x] SECURITY_OK (SIP realm/login/password в SENSITIVE_KEYS; no-secret-logs соблюдён)
+- [x] DOCS_UPDATED (project-map, overview, audit A-81, roadmap, ADR-0012)
+- [ ] READY_FOR_RELEASE (pending merge + Slice 2 uplink)
+
+**Slice 2 (uplink/микрофон):** PoC go2rtc backchannel с G.711 → `AudioBridge` обратная ветка → `SipManager.uplink_provider`.

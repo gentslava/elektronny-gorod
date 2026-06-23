@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-06-22
+Last reviewed: 2026-06-23 (feat/intercom-two-way-audio: SIP приём + downlink + call_camera.py; ADR-0012; uplink — следующий слайс)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -264,10 +264,26 @@ RTP-latching). PRD — `research/intercom-call-probe/PRD-two-way-audio.md`.
 - [ ] **A-50** Camera events (motion-история) — отдельный event-stream,
   не покрыт doorbell-фичей.
 
+### Реализовано (feat/intercom-two-way-audio, pending merge)
+
+- [x] **A-81 приём вызова по SIP** — `sip/` пакет (13 модулей), сервисы `answer`/`hangup`,
+  модель **register-on-ring** (ADR-0012): mint → REGISTER → held-INVITE → 100 Trying →
+  по «Ответить» `200 OK` → RTP-latching. Сброс с панели → SIP `CANCEL` → мгновенный dismiss.
+- [x] **Downlink-аудио (слышать гостя)** — `sip/bridge.py` `AudioBridge`:
+  G.711-кадры → ffmpeg → mpegts/aac → HTTP-сервер → go2rtc → HA-native WebRTC.
+- [x] **Показ экрана вызова** — `call_camera.py` `ElektronnyGorodCallCamera`:
+  camera-сущность `camera.intercom_call` с видео домофона + звуком гостя инлайн через
+  HA-native WebRTC (4G ok, go2rtc в LAN). `stream_source()` собирает свежий `eg_intercom_call`.
+
+### Следующий слайс (uplink — говорить гостю)
+
+- [ ] **Uplink (микрофон)** — go2rtc WebRTC-backchannel → `AudioBridge` обратная ветка →
+  `SipManager.uplink_provider` (сейчас тишина) → RTP в домофон. Потребует PoC go2rtc backchannel
+  с G.711 (risk: design §6.5, открытые issues go2rtc #2084/#1932/#1899).
+
 ### Будущие фичи (вне scope v1)
 
-- [ ] **Двусторонний звук** (разговор по домофону) — SIP-медиа, доказано
-  рабочим, но heavy (отдельный SIP-стек). PRD — `research/intercom-call-probe/PRD-two-way-audio.md`.
+- [ ] **Двусторонний звук полный** (uplink реализован) — по результатам следующего слайса.
 - [ ] **Дом.ру-вариант** события вызова — Huawei Push / HMS (другой канал).
 
 ### Не блокирующие основной scope
@@ -332,6 +348,7 @@ Tests
 | 0009 | Camera stream auto-recovery (operator session TTL) | accepted (3.3.0) |
 | 0010 | AIDD state-management + reconciliation findings↔git | accepted (3.3.0) |
 | 0011 | Realtime-канал события вызова: приём FCM in-HA | accepted (Итерация 4) |
+| 0012 | Register-on-ring (held-short-window) для приёма вызова | accepted (feat/intercom-two-way-audio) |
 
 ## Risks
 

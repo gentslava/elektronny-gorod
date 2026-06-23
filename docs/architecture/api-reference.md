@@ -1,6 +1,6 @@
 Status: Active
 Owner: Reverse Engineer Agent + HA Expert Agent
-Last reviewed: 2026-06-23 (A-81: sipdevices теперь используется — mint_sip_device, REGISTER-on-answer)
+Last reviewed: 2026-06-23 (A-81: sipdevices теперь используется — mint_sip_device, register-on-ring ADR-0012)
 
 Source files:
 - `custom_components/elektronny_gorod/api.py` (текущая реализация)
@@ -718,10 +718,11 @@ Response shape:
   для одного и того же `ac_id` (idempotent — повторный POST не ротирует
   пароль). Это значит credentials можно кэшировать.
 
-Это реализовано в SIP-стеке `sip/` (A-81): по модели **REGISTER-on-answer**
-интеграция минтит эти credentials в момент «ответить», регистрируется
-`sip:<login>@<realm>` и принимает форкнутый сервером INVITE. Полная картина
-SIP-флоу (REGISTER → INVITE → 200 OK → RTP-latching, доказано pcap) — в
+Это реализовано в SIP-стеке `sip/` (A-81): по модели **register-on-ring (ADR-0012)**
+интеграция минтит эти credentials при FCM `CALL_INCOMING`, регистрируется
+`sip:<login>@<realm>` и принимает форкнутый сервером INVITE (100 Trying → held
+до нажатия «Ответить» → 200 OK). Полная картина
+SIP-флоу (FCM → REGISTER → INVITE → 200 OK → RTP-latching, доказано pcap) — в
 [`call-answer-model.md`](../features/intercom-two-way-audio/call-answer-model.md).
 SIP-трафик идёт вне HTTPS (UDP-транспорт), `realm` содержит acId →
 в `SENSITIVE_KEYS`. См. [audit A-49](../audit/project-audit.md) (исходный
