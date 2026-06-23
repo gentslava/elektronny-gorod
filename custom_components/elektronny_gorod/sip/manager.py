@@ -72,10 +72,14 @@ class SipManager:
         fcm_token: str,
         on_downlink: Callable[[bytes], None] | None = None,
         uplink_provider: Callable[[], bytes | None] | None = None,
+        on_ended: Callable[[], None] | None = None,
     ) -> None:
         self._fcm_token = fcm_token
         self._on_downlink = on_downlink
         self._uplink_provider = uplink_provider
+        # Вызывается при завершении вызова удалённой стороной (BYE) — чтобы
+        # caller (контроллер) снял аудио-мост/go2rtc-стрим, не только при hangup.
+        self._on_ended = on_ended
         self._active: ActiveCall | None = None
 
     @property
@@ -159,3 +163,5 @@ class SipManager:
         if active is not None:
             asyncio.get_running_loop().create_task(active.teardown(send_bye=False))
             LOGGER.info("SIP: вызов завершён удалённой стороной (BYE)")
+            if self._on_ended is not None:
+                self._on_ended()

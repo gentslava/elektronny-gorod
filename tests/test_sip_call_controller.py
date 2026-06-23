@@ -118,6 +118,55 @@ async def test_answer_refused_when_already_in_call(controller):
         controller._api.mint_sip_device.assert_not_called()
 
 
+_CC = "custom_components.elektronny_gorod.sip.call_controller"
+
+
+async def test_answer_with_go2rtc_sets_up_bridge():
+    from custom_components.elektronny_gorod.sip.call_controller import (
+        DoorbellCallController,
+        Go2RtcConfig,
+    )
+
+    api = MagicMock()
+    api.mint_sip_device = AsyncMock(return_value={"login": "l", "password": "p", "realm": "r"})
+    c = DoorbellCallController(
+        MagicMock(), api, lambda: "TOK", go2rtc=Go2RtcConfig("http://g:1984", {})
+    )
+    c.handle_signal(_ring())
+
+    upsert = AsyncMock()
+    with patch(_MGR_PATH) as MgrCls, patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
+        f"{_CC}.detect_lan_ip", return_value="1.2.3.4"
+    ), patch(f"{_CC}.upsert_audio_stream", new=upsert), patch(
+        f"{_CC}.async_get_clientsession", return_value=MagicMock()
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock()
+        bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=opus"
+        mgr = MgrCls.return_value
+        mgr.in_call = False
+        mgr.async_answer = AsyncMock(return_value=True)
+        ok = await c.async_answer()
+
+    assert ok is True
+    bridge.start.assert_awaited_once()  # ffmpeg поднят
+    upsert.assert_awaited_once()  # go2rtc-стрим создан
+    # on_downlink, отданный SipManager, — это feed_downlink моста (не счётчик).
+    assert MgrCls.call_args.kwargs["on_downlink"] is bridge.feed_downlink
+
+
+async def test_answer_without_go2rtc_uses_counter_sink(controller):
+    # go2rtc=None → мост не поднимается, on_downlink = счётчик (degrade).
+    controller.handle_signal(_ring())
+    with patch(_MGR_PATH) as MgrCls, patch(f"{_CC}.AudioBridge") as BridgeCls:
+        mgr = MgrCls.return_value
+        mgr.in_call = False
+        mgr.async_answer = AsyncMock(return_value=True)
+        await controller.async_answer()
+    BridgeCls.assert_not_called()
+    assert MgrCls.call_args.kwargs["on_downlink"] == controller._count_downlink
+
+
 async def test_hangup_tears_down_manager(controller):
     controller._manager = MagicMock()
     controller._manager.async_hangup = AsyncMock()

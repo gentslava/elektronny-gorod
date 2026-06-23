@@ -23,6 +23,8 @@ from .const import (
     CONF_USE_GO2RTC,
     CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_RTSP_HOST,
+    CONF_GO2RTC_USERNAME,
+    CONF_GO2RTC_PASSWORD,
     DEFAULT_GO2RTC_BASE_URL,
     DEFAULT_GO2RTC_RTSP_HOST,
     SIGNAL_DOORBELL,
@@ -30,7 +32,8 @@ from .const import (
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .fcm import DoorbellFcmListener
-from .sip.call_controller import DoorbellCallController
+from .go2rtc import go2rtc_auth_headers
+from .sip.call_controller import DoorbellCallController, Go2RtcConfig
 from .user_agent import UserAgent
 
 # Реестр SIP-контроллеров per-entry. Отдельный top-level key, чтобы не ломать
@@ -82,7 +85,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # активный FCM-вызов (SIGNAL_DOORBELL) и драйвит SipManager по сервису
     # `answer`/`hangup`. FCM-токен берёт у listener (push-params REGISTER).
     sip_controller = DoorbellCallController(
-        hass, coordinator.api, lambda: fcm_listener.fcm_token
+        hass, coordinator.api, lambda: fcm_listener.fcm_token,
+        go2rtc=_build_go2rtc_config(entry),
     )
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_DOORBELL, sip_controller.handle_signal)
@@ -111,6 +115,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     return True
+
+
+def _build_go2rtc_config(entry: ConfigEntry) -> Go2RtcConfig | None:
+    """go2rtc-конфиг для аудио-моста (downlink) из entry. None если go2rtc выключен."""
+    use = entry.options.get(CONF_USE_GO2RTC, entry.data.get(CONF_USE_GO2RTC))
+    base = entry.options.get(CONF_GO2RTC_BASE_URL) or entry.data.get(CONF_GO2RTC_BASE_URL)
+    if not use or not base:
+        return None
+    user = entry.options.get(CONF_GO2RTC_USERNAME) or entry.data.get(CONF_GO2RTC_USERNAME)
+    pwd = entry.options.get(CONF_GO2RTC_PASSWORD) or entry.data.get(CONF_GO2RTC_PASSWORD)
+    return Go2RtcConfig(base_url=base, headers=go2rtc_auth_headers(user, pwd))
 
 
 def _async_register_sip_services(hass: HomeAssistant) -> None:

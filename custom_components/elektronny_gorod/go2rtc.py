@@ -6,7 +6,7 @@ import base64
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
-from aiohttp import ClientError, ClientSession
+from aiohttp import ClientError, ClientSession, ClientTimeout
 from yarl import URL
 
 from .const import GO2RTC_RTSP_PORT, LOGGER
@@ -148,3 +148,48 @@ async def cleanup_go2rtc_stream(base_url: str, stream_name: str, session: Client
             LOGGER.debug("go2rtc cleanup failed: %s %s", resp.status, body)
     except ClientError as err:
         LOGGER.debug("go2rtc cleanup request failed: %s", err)
+
+
+# ── two-way audio: per-call аудио-стрим вызова (audio-bridge-design.md) ──
+# NB: консолидация go2rtc-клиента из camera.py (R1-R6) отложена — это свежие методы.
+_AUDIO_STREAM_TIMEOUT = ClientTimeout(total=10)
+
+
+def go2rtc_auth_headers(username: str | None, password: str | None) -> dict:
+    """Basic-auth header для go2rtc (пусто, если креды не заданы)."""
+    if not (username and password):
+        return {}
+    b64 = base64.b64encode(f"{username}:{password}".encode()).decode()
+    return {"Authorization": f"Basic {b64}"}
+
+
+async def upsert_audio_stream(
+    base_url: str, name: str, src: str, session: ClientSession, headers: dict | None = None
+) -> None:
+    """Создать/обновить go2rtc аудио-стрим вызова (PATCH-first, PUT-fallback).
+
+    PATCH идемпотентен (не убивает producer); PUT — fallback на 4xx/5xx/ClientError.
+    `src` = `ffmpeg:http://<bridge>#audio=opus` (мост, D-audio-1). Креды НЕ логируем.
+    """
+    base_url = normalize_base_url(base_url)
+    url = f"{base_url}/api/streams?{urlencode({'name': name, 'src': src})}"
+    h = headers or {}
+    try:
+        async with session.patch(url, headers=h, timeout=_AUDIO_STREAM_TIMEOUT) as resp:
+            if resp.status in (200, 201, 204):
+                return
+    except ClientError:
+        pass
+    try:
+        async with session.put(url, headers=h, timeout=_AUDIO_STREAM_TIMEOUT) as resp:
+            if resp.status not in (200, 201, 204):
+                raise RuntimeError(f"go2rtc audio PUT failed: HTTP {resp.status}") from None
+    except ClientError as exc:
+        raise RuntimeError(f"go2rtc audio PUT failed: {type(exc).__name__}") from None
+
+
+async def remove_audio_stream(
+    base_url: str, name: str, session: ClientSession, headers: dict | None = None
+) -> None:
+    """Снять аудио-стрим вызова (best-effort) — обёртка cleanup_go2rtc_stream."""
+    await cleanup_go2rtc_stream(base_url, name, session, headers)
