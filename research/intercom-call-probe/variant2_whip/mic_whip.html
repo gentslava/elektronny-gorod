@@ -1,0 +1,155 @@
+<!doctype html>
+<!-- ЭКСПЕРИМЕНТ, НЕ ПРОВЕРЕНО LIVE — scaffolding variant2 WHIP-pull -->
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>mic uplink variant2 (WHIP-pull)</title>
+<style>
+  body { font: 16px system-ui; margin: 2rem; max-width: 640px; }
+  button { font-size: 1.2rem; padding: .7rem 1.2rem; margin: .3rem; }
+  pre { background: #111; color: #0f0; padding: 1rem; white-space: pre-wrap; font-size: .85rem; max-height: 300px; overflow-y: auto; }
+  .warn { color: #f80; font-weight: bold; }
+  input { font-size: 1rem; width: 100%; box-sizing: border-box; padding: .4rem; margin: .2rem 0; }
+  label { font-size: .9rem; color: #555; }
+</style>
+<h1>mic → go2rtc WHIP-publish (variant #2)</h1>
+<p class="warn">⚠️ ЭКСПЕРИМЕНТ — НЕ ПРОВЕРЕНО LIVE. Scaffolding для сравнения с вариантом #1.</p>
+<p>Браузер публикует микрофон как WebRTC-producer в go2rtc через WHIP
+   (<code>POST /api/webrtc?dst=&lt;stream&gt;</code>). go2rtc раздаёт аудио по RTSP,
+   <code>probe_mic_whip.py</code> тянет RTSP → G.711 → uplink к домофону.</p>
+
+<h3>Параметры go2rtc</h3>
+<label>go2rtc URL (напр. http://home.server:1984 или https://…)</label>
+<input id="go2rtcUrl" type="url" placeholder="http://localhost:1984">
+<label>Имя стрима в go2rtc (GO2RTC_STREAM, должен существовать)</label>
+<input id="stream" type="text" placeholder="doorbell_front">
+<label>Bearer-токен go2rtc (оставь пустым если auth отключён)</label>
+<input id="token" type="password" placeholder="">
+
+<br><br>
+<button id="btnPublish" disabled>Publish mic to go2rtc (WHIP)</button>
+<button id="btnStop" disabled>Stop</button>
+<br><br>
+<pre id="log">ℹ️ Требования:
+- HTTPS или localhost (для getUserMedia)
+- go2rtc доступен из браузера (CORS, сеть)
+- Стрим GO2RTC_STREAM существует в go2rtc (иначе 404)
+- TURN-сервер настроен если 4G (иначе ICE не пройдёт)
+</pre>
+
+<script>
+  const log = (m) => {
+    const el = document.getElementById('log');
+    el.textContent += m + '\n';
+    el.scrollTop = el.scrollHeight;
+  };
+
+  let pc = null;
+  let stream = null;
+
+  document.getElementById('btnPublish').disabled = false;
+
+  document.getElementById('btnPublish').onclick = async () => {
+    document.getElementById('btnPublish').disabled = true;
+    document.getElementById('btnStop').disabled = false;
+
+    const go2rtcUrl = document.getElementById('go2rtcUrl').value.replace(/\/$/, '');
+    const streamName = document.getElementById('stream').value.trim();
+    const token = document.getElementById('token').value.trim();
+
+    if (!go2rtcUrl || !streamName) {
+      log('❌ Заполни go2rtc URL и имя стрима');
+      document.getElementById('btnPublish').disabled = false;
+      document.getElementById('btnStop').disabled = true;
+      return;
+    }
+
+    log(`→ go2rtcUrl=${go2rtcUrl}, stream=${streamName}`);
+
+    try {
+      // getUserMedia — требует HTTPS или localhost
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        video: false,
+      });
+      log('✅ getUserMedia ok — трек: ' + stream.getAudioTracks()[0]?.label);
+
+      // RTCPeerConnection — audio sendonly (WHIP-publisher)
+      // TURN: если 4G — нужен TURN, добавь iceServers ниже
+      pc = new RTCPeerConnection({
+        iceServers: [],
+        // Для 4G добавить TURN:
+        // iceServers: [{ urls: 'turn:your.turn.server:3478', username: '...', credential: '...' }],
+      });
+
+      stream.getAudioTracks().forEach(t => pc.addTrack(t, stream));
+
+      // Offer → SDP
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Ждём ICE gathering (simple, без trickle)
+      await new Promise(resolve => {
+        if (pc.iceGatheringState === 'complete') { resolve(); return; }
+        pc.addEventListener('icegatheringstatechange', () => {
+          if (pc.iceGatheringState === 'complete') resolve();
+        });
+        setTimeout(resolve, 5000);  // timeout 5s
+      });
+
+      log(`ICE gathering: ${pc.iceGatheringState}`);
+
+      const sdp = pc.localDescription.sdp;
+      log(`SDP offer (${sdp.length} chars), отправляю WHIP POST…`);
+
+      // WHIP-publish: POST /api/webrtc?dst=<stream>
+      // go2rtc добавляет браузер как producer к существующему стриму
+      const whipUrl = `${go2rtcUrl}/api/webrtc?dst=${encodeURIComponent(streamName)}`;
+      const headers = { 'Content-Type': 'application/sdp' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      log(`→ POST ${whipUrl}`);
+      const resp = await fetch(whipUrl, {
+        method: 'POST',
+        headers,
+        body: sdp,
+      });
+
+      if (!resp.ok) {
+        const body = await resp.text();
+        log(`❌ WHIP ответил ${resp.status}: ${body}`);
+        log('Возможные причины:');
+        log('  - Стрим не существует (создай в go2rtc.yaml или через Frigate)');
+        log('  - go2rtc URL недоступен из браузера (CORS, сеть, HTTPS)');
+        log('  - Неверный токен');
+        return;
+      }
+
+      const answerSdp = await resp.text();
+      log(`✅ WHIP ответил ${resp.status}, SDP answer (${answerSdp.length} chars)`);
+      await pc.setRemoteDescription({ type: 'answer', sdp: answerSdp });
+
+      log('✅ WebRTC соединение установлено — браузер публикует микрофон в go2rtc');
+      log(`→ go2rtc теперь раздаёт аудио по RTSP: rtsp://<go2rtc>:8554/${streamName}`);
+      log('→ probe_mic_whip.py тянет RTSP → G.711 → uplink домофону');
+      log('📞 Теперь позвони в домофон — проба ответит');
+
+      pc.addEventListener('connectionstatechange', () => {
+        log(`ICE connectionState: ${pc.connectionState}`);
+      });
+
+    } catch (err) {
+      log('❌ ОШИБКА: ' + err);
+      if (err.name === 'NotAllowedError') log('  → Нет разрешения на микрофон (HTTPS/localhost?)');
+      document.getElementById('btnPublish').disabled = false;
+      document.getElementById('btnStop').disabled = true;
+    }
+  };
+
+  document.getElementById('btnStop').onclick = () => {
+    if (pc) { pc.close(); pc = null; }
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    log('⏹ WebRTC остановлен');
+    document.getElementById('btnPublish').disabled = false;
+    document.getElementById('btnStop').disabled = true;
+  };
+</script>
