@@ -32,6 +32,13 @@ class UplinkSink:
         """int16 mono PCM @ sample_rate → resample 8к → G.711 → накопитель G.711-байт → кадры 160B в буфер."""
         if not pcm:
             return
+        if len(pcm) % _SAMPLE_WIDTH:
+            # 16-bit PCM выровнен по 2 байта; truncated/misaligned WS-кадр (нечётная
+            # длина) иначе бросил бы audioop.error. Дропаем висячий байт (defensive —
+            # WS-handler тоже ловит, но sink не должен полагаться на чистоту входа).
+            pcm = pcm[: len(pcm) - (len(pcm) % _SAMPLE_WIDTH)]
+            if not pcm:
+                return
         if sample_rate != _TARGET_RATE:
             pcm, self._ratecv_state = audioop.ratecv(
                 pcm, _SAMPLE_WIDTH, _CHANNELS, sample_rate, _TARGET_RATE, self._ratecv_state

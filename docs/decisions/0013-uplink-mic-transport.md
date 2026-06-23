@@ -43,8 +43,11 @@ HA: `connection.async_register_binary_handler`).
 ## Consequences
 
 **Phase C (продакшн, отдельный план):**
-- WS-команда `elektronny_gorod/intercom_uplink/start|stop` (`async_register_binary_handler`)
-  → очередь → `UplinkSink` → `SipManager.uplink_provider`.
+- WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`)
+  → `controller.feed_uplink` → `UplinkSink` → `SipManager.uplink_provider`. Stop —
+  закрытие вкладки/unsubscribe (HA снимает binary-handler автоматически); явная
+  `stop`-команда — polish следующего слайса (handler-слоты idle-копятся при многократном
+  toggle в одной сессии, не утечка данных).
 - Lovelace-карта: `getUserMedia` + AudioWorklet → Int16 PCM по `hass.connection.socket`
   (копия `audio-recorder.ts`); регистрация JS-ресурса.
 - Wiring `UplinkSink` в `DoorbellCallController` (создать на answer, `uplink_provider` ←

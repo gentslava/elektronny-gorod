@@ -97,6 +97,23 @@ def test_overflow_drops_oldest():
     assert drained[0] == b"\xff" * 160          # старейшие (тишина) частично сброшены, но FIFO
 
 
+def test_feed_odd_length_pcm_drops_dangling_byte():
+    # Нечётная длина (truncated/misaligned WS-кадр) → висячий байт дропается,
+    # audioop.error НЕ бросается. После — нормальный feed работает.
+    sink = UplinkSink(_PCMU)
+    sink.feed(b"\x00\x00\x00", 8000)  # 1 сэмпл + висячий байт
+    assert sink.next_frame() is None  # <160B, без исключения
+    sink.feed(b"\x00\x00" * 160, 8000)  # добиваем кадр
+    assert sink.next_frame() == b"\xff" * 160
+
+
+def test_feed_single_byte_pcm_no_crash():
+    # Один байт (всё, что осталось после truncation) → дроп, без падения.
+    sink = UplinkSink(_PCMU)
+    sink.feed(b"\x7f", 8000)
+    assert sink.next_frame() is None
+
+
 def test_clear_resets_buffer_and_state():
     sink = UplinkSink(_PCMU)
     sink.feed(b"\x00\x00" * 160, 8000)

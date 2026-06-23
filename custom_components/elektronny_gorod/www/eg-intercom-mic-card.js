@@ -118,6 +118,10 @@ class EgIntercomMicCard extends HTMLElement {
     }
     this._ctx = null;
     this._active = false;
+    if (this._wUrl) {
+      try { URL.revokeObjectURL(this._wUrl); } catch (_) {}
+      this._wUrl = null; // следующий _start пересоздаст ворклет-URL
+    }
     if (this._btn) {
       this._btn.classList.remove("active");
       this._btn.textContent = "🎤 Говорить";
