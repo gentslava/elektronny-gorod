@@ -69,6 +69,17 @@ custom_components/elektronny_gorod/
 ├── sensor.py              # Balance sensor + days-to-block
 ├── binary_sensor.py       # account_blocked
 ├── switch.py              # DND switches (intercom / management calls)
+├── event.py               # doorbell call event (ADR-0011)
+├── fcm.py                 # FCM listener для события вызова (ADR-0011)
+├── sip/                   # SIP-стек two-way audio, REGISTER-on-answer (A-81)
+│   ├── call_controller.py # HA-glue: трекинг FCM-вызова + answer/hangup
+│   ├── manager.py         # SipManager (фасад)
+│   ├── protocol.py        # asyncio SIP-транспорт (UDP)
+│   ├── register.py        # REGISTER + push-params
+│   ├── dialog.py          # DialogState + 200 OK + BYE
+│   ├── message.py / sdp.py / rtp.py / digest.py / stun.py / audio.py
+│   └── __init__.py
+├── services.yaml          # сервисы answer / hangup (A-81)
 ├── go2rtc.py              # validate_go2rtc + cleanup
 ├── diagnostics.py         # redact-нутая diagnostics-выгрузка (TO_REDACT)
 ├── entity_migration.py    # стабильные unique_id + registry migration

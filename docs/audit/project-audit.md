@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-06-22 (A-80 added; A-54/A-58 reassessed → doorbell FCM event, ADR-0011)
+Last reviewed: 2026-06-23 (A-81 added → SIP two-way audio фундамент, REGISTER-on-answer, pending merge)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1059,6 +1059,51 @@ Quality gates:
 - **Watch:** при breakage приватного API — bump `firebase-messaging` (линия
   поддержки Lemoine → sdb9696 переживает изменения через обновление зависимости).
 
+### A-81. Приём вызова домофона по SIP (фундамент two-way audio)
+
+- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-two-way-audio`)**.
+  Feature-слайс (не bug-fix). После merge → RESOLVED.
+- **Severity:** P1 (real-time path для домофонных звонков — двусторонний звук).
+- **Area:** `sip/` (новый пакет, 11 модулей), `api.mint_sip_device`,
+  `services.yaml` (`answer` / `hangup`), `const.py:DOORBELL_CALL_WINDOW_FALLBACK_SEC`,
+  `_logging.py:SENSITIVE_KEYS` (+`realm`).
+- **Что доставлено:** приём активного вызова домофона и поднятие uplink-аудио к
+  панели. Модель **REGISTER-on-answer** — доказана захватом трафика реального
+  приложения (pcap, PCAPdroid) + 6 live-пробами
+  ([`call-answer-model.md`](../features/intercom-two-way-audio/call-answer-model.md)):
+  интеграция **не** держит постоянную SIP-регистрацию, по явному «ответить»
+  (в окне `CallInvalidated` ~30с) минтит SIP-креды → `REGISTER` (Expires=30,
+  проприет. push-params) → принимает форкнутый сервером `INVITE` → `200 OK`
+  немедленно (локальный SDP, G.711, без STUN/ICE/SRTP) → RTP-uplink +
+  STUN-keepalive → FreeSWITCH RTP-latching. Ответ строго привязан к `Call-ID`
+  из FCM `CALL_INCOMING`.
+- **Evidence:** pcap-тайминги (REGISTER → INVITE +90мс → 200 OK +80мс →
+  latching) + probe-матрица (held-стратегия рвалась forking → late answer → BYE;
+  REGISTER-on-answer воспроизводит приложение). Суть — в call-answer-model.md
+  §2/§5. Suite **234 passed** (`test_sip_*.py` + `test_api_sip.py` +
+  `test_sip_call_controller.py`).
+- **Scope этого слайса:** приём вызова + RTP-uplink (latching), проверяемо логом.
+  **Downlink-вывод звука гостя в HA — следующий слайс** (отдельный finding/PR).
+- **Deferred (из code-review, by-design на этом слайсе):**
+  1. **A-21 mitigation, не closure.** `mint_sip_device` латентно-критичен
+     (REGISTER должен опередить INVITE) — обёрнут точечным
+     `asyncio.timeout(8с)` в `call_controller.py` (`_MINT_TIMEOUT_SEC`).
+     Это **точечный** митигатор, **глобальный** `ClientTimeout` на shared
+     `HTTP`/`api.py` остаётся открытым в [A-21](#a-21-нет-timeoutretrybackoff).
+  2. **Single concurrent call (by-design ограничение слайса).** Фиксированные
+     порты SIP/RTP + модель **first-answer-wins** → один активный разговор
+     одновременно. Guard в `call_controller.py` (два concurrent answer создали
+     бы 2 `SipManager` на фикс-портах). Снятие ограничения (динамические порты /
+     пул) — будущий слайс, не блокер.
+- **Связанные findings:** [A-49](#a-49-sip-credentials-endpoint-не-используется)
+  (`sipdevices` endpoint — теперь используется), [A-58](#a-58-real-time-event-delivery-polling-vs-fcm-push--research-pending)
+  / [A-54](#a-54-fcm-канал-и-subscribernotifications--реализован-как-канал-события-вызова)
+  (FCM-канал вызова — триггер для answer), [A-80](#a-80-fcm-приём-вызова--серая-зона-приватных-api-google--новая-зависимость)
+  (та же mirror-app серая зона + push-params).
+- **Контракт безопасности:** SIP `realm` (`{ac_id}.intercom.{operator}.ru` —
+  содержит acId, парный к SIP-паролю) добавлен в `SENSITIVE_KEYS`; SIP
+  login/password не логируются (no-secret-logs rule).
+
 
 ## Maintenance rules (повтор)
 
@@ -1077,7 +1122,8 @@ Quality gates:
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
 | A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR #51 — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
 | ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
-| 🟢 A-58 + 🟢 A-54 (doorbell event via FCM, pending merge `feat/doorbell-fcm-event`, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-49 (P3 future — SIP/two-way audio), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
+| 🟢 A-58 + 🟢 A-54 (doorbell event via FCM, pending merge `feat/doorbell-fcm-event`, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
+| 🟢 A-81 (приём вызова по SIP, REGISTER-on-answer, pending merge `feat/intercom-two-way-audio`) — закрывает практическую часть A-49 (`sipdevices` теперь используется) | Итерация 4 (two-way audio — фундамент: приём вызова + RTP-uplink; downlink — следующий слайс) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 

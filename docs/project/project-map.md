@@ -1,6 +1,6 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-06-22
+Last reviewed: 2026-06-23 (A-81: SIP-стек two-way audio + services.yaml + sip/ тесты)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -64,6 +64,20 @@ elektronny-gorod/
 │   ├── switch.py                  ← DND switches platform
 │   ├── event.py                   ← doorbell call event platform (ADR-0011)
 │   ├── fcm.py                     ← FCM listener для события вызова (ADR-0011)
+│   ├── sip/                       ← SIP-стек two-way audio (A-81, REGISTER-on-answer)
+│   │   ├── __init__.py
+│   │   ├── audio.py               ← G.711 ↔ PCM
+│   │   ├── stun.py                ← STUN parse / keepalive
+│   │   ├── digest.py              ← Digest MD5 (RFC 2617)
+│   │   ├── sdp.py                 ← parse offer + build G.711 answer
+│   │   ├── message.py             ← SIP parse (multi-Via / Record-Route)
+│   │   ├── dialog.py              ← DialogState + 200 OK + BYE
+│   │   ├── register.py            ← REGISTER + проприетарные push-params
+│   │   ├── rtp.py                 ← RTP G.711 latching
+│   │   ├── protocol.py            ← asyncio SIP-транспорт
+│   │   ├── manager.py             ← SipManager (фасад)
+│   │   └── call_controller.py     ← HA-glue: трекинг FCM-вызова + answer/hangup
+│   ├── services.yaml              ← сервисы answer / hangup (A-81)
 │   ├── go2rtc.py                  ← go2rtc валидация / upsert
 │   ├── entity_migration.py        ← стабильные unique_id + registry migration
 │   ├── diagnostics.py             ← redact-нутая diagnostics-выгрузка (S-08)
@@ -130,7 +144,7 @@ elektronny-gorod/
 | Файл | Назначение | Особенности |
 |---|---|---|
 | [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) | `DataUpdateCoordinator` | `update_interval=5min`, `_async_update_data` → `{places, balances, cameras, locks}` (ADR-0002) |
-| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, push-registration (`register_push_device` / `unregister_push_device` — привязка FCM-токена у оператора, ADR-0011) | использует shared `HTTP` (ADR-0008) |
+| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, push-registration (`register_push_device` / `unregister_push_device` — привязка FCM-токена у оператора, ADR-0011), `mint_sip_device` (SIP-креды `{login, password, realm}` для приёма вызова, A-81) | использует shared `HTTP` (ADR-0008) |
 | [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
 
 ### Платформы (entity)
@@ -150,6 +164,25 @@ elektronny-gorod/
 |---|---|
 | [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | validate_go2rtc (GET /api + PUT /api/streams + cleanup), upsert stream, derive_rtsp_host |
 | [`fcm.py`](../../custom_components/elektronny_gorod/fcm.py) | `DoorbellFcmListener` (ADR-0011): эмуляция регистрации Android-устройства в FCM (`firebase-messaging`, Firebase-конфиг приложения в `const.py:FCM_*`) → привязка токена у оператора (`api.register_push_device`) → MTalk-сокет. Парсит `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → `SIGNAL_DOORBELL`. Весь флоу под graceful degradation (приватные API Google) — сбой не валит setup. FCM-creds персистятся в `entry.data` |
+
+### SIP / two-way audio (приём вызова домофона)
+
+Пакет `sip/` — фундамент двусторонней связи (A-81, [call-answer-model](../features/intercom-two-way-audio/call-answer-model.md)). Модель **REGISTER-on-answer**: SIP-регистрация **не** держится постоянно — минтится и шлётся в момент явного «ответить». Контроллер в `hass.data`, сервисы `answer` / `hangup`. Текущий слайс = приём вызова + RTP-uplink (latching); downlink-вывод звука — следующий слайс.
+
+| Файл | Назначение |
+|---|---|
+| [`sip/call_controller.py`](../../custom_components/elektronny_gorod/sip/call_controller.py) | HA-glue: трекинг активного FCM-вызова по `Call-ID`, `answer`/`hangup`, mint креды через `api.mint_sip_device` (точечный `asyncio.timeout(8с)` — A-21 mitigation), one concurrent call (фикс-порты, first-answer-wins) |
+| [`sip/manager.py`](../../custom_components/elektronny_gorod/sip/manager.py) | `SipManager` — фасад над protocol/dialog/rtp |
+| [`sip/protocol.py`](../../custom_components/elektronny_gorod/sip/protocol.py) | asyncio SIP-транспорт (UDP) |
+| [`sip/register.py`](../../custom_components/elektronny_gorod/sip/register.py) | REGISTER (Expires=30 + проприетарные push-params в Contact URI) |
+| [`sip/dialog.py`](../../custom_components/elektronny_gorod/sip/dialog.py) | `DialogState` + build 200 OK (эхо Via/Record-Route) + BYE |
+| [`sip/message.py`](../../custom_components/elektronny_gorod/sip/message.py) | SIP message parse (multi-Via / Record-Route) |
+| [`sip/sdp.py`](../../custom_components/elektronny_gorod/sip/sdp.py) | parse INVITE-offer + build G.711 answer (локальный адрес, без STUN/ICE) |
+| [`sip/rtp.py`](../../custom_components/elektronny_gorod/sip/rtp.py) | RTP G.711 latching (uplink-first → downlink) |
+| [`sip/digest.py`](../../custom_components/elektronny_gorod/sip/digest.py) | Digest MD5 non-qop (RFC 2617) |
+| [`sip/stun.py`](../../custom_components/elektronny_gorod/sip/stun.py) | STUN parse / keepalive (20B бинарь) |
+| [`sip/audio.py`](../../custom_components/elektronny_gorod/sip/audio.py) | G.711 PCMU/PCMA ↔ PCM |
+| [`services.yaml`](../../custom_components/elektronny_gorod/services.yaml) | сервисы `answer` / `hangup` |
 
 ### Diagnostics / безопасность
 
@@ -189,6 +222,16 @@ elektronny-gorod/
 | [`tests/test_event.py`](../../tests/test_event.py) | doorbell `event`-сущность (ADR-0011): дедуп по AC, фильтр SIGNAL по `(place_id, ac_id)`, `_trigger_event` на `ring`/`ended`, игнор чужого/неизвестного event_type |
 | [`tests/test_api_push.py`](../../tests/test_api_push.py) | `register_push_device` / `unregister_push_device`: тело-зеркало (POST с `pushToken` на `device-installations` + `subscriberNotifications`, DELETE без `pushToken`), graceful False на ошибке |
 | [`tests/test_fcm.py`](../../tests/test_fcm.py) | `DoorbellFcmListener`: парсинг `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → SIGNAL, graceful degradation при недоступной `firebase-messaging` / сбое start, персист FCM-creds в `entry.data` |
+| [`tests/test_sip_audio.py`](../../tests/test_sip_audio.py) | G.711 PCMU/PCMA ↔ PCM (A-81) |
+| [`tests/test_sip_stun.py`](../../tests/test_sip_stun.py) | STUN parse / keepalive (A-81) |
+| [`tests/test_sip_digest.py`](../../tests/test_sip_digest.py) | Digest MD5 non-qop golden vectors (A-81) |
+| [`tests/test_sip_sdp.py`](../../tests/test_sip_sdp.py) | parse INVITE-offer + build G.711 answer (A-81) |
+| [`tests/test_sip_message.py`](../../tests/test_sip_message.py) | SIP parse с multi-Via / Record-Route (A-81) |
+| [`tests/test_sip_dialog.py`](../../tests/test_sip_dialog.py) | DialogState + 200 OK + BYE (A-81) |
+| [`tests/test_sip_register.py`](../../tests/test_sip_register.py) | REGISTER + проприетарные push-params (A-81) |
+| [`tests/test_sip_rtp.py`](../../tests/test_sip_rtp.py) | RTP G.711 latching (A-81) |
+| [`tests/test_api_sip.py`](../../tests/test_api_sip.py) | `api.mint_sip_device` — тело-зеркало (`installationId`) → `{login, password, realm}` (A-81) |
+| [`tests/test_sip_call_controller.py`](../../tests/test_sip_call_controller.py) | `CallController`: трекинг по `Call-ID`, answer/hangup, mint timeout, one-concurrent-call guard (A-81) |
 | [`pytest.ini`](../../pytest.ini) | `asyncio_mode = auto`, `testpaths = tests` |
 
 ### CI / CD
