@@ -4,12 +4,9 @@
 Opus — поэтому транскод наш слой (design.md §3.1). `audioop` удалён из stdlib в
 Python 3.13 (PEP 594) → зависимость `audioop-lts` (manifest) возвращает модуль.
 
-STAGED FOR UPLINK SLICE (Slice 2 — микрофон): на текущем слайсе downlink-транскод
-делает ffmpeg в bridge.py, поэтому `g711_to_pcm`/`pcm_to_g711` ещё не вызываются в
-рантайме (импортирует только тест). `pcm_to_g711` — uplink-примитив (микрофон →
-G.711 → RTP в домофон), подключается в Slice 2. Модуль и manifest-зависимость
-`audioop-lts` сохранены намеренно как фундамент следующего слайса (решение
-зафиксировано в code-review P1-2). См. call-screen-display-design.md §«микрофон».
+`pcm_to_g711` используется в рантайме `sip/uplink.py` (uplink-микрофон → G.711 →
+RTP). `g711_to_pcm` (downlink G.711→PCM) — резерв; downlink-транскод сейчас делает
+ffmpeg в `bridge.py`, прямой вызов появится при оптимизации одинарного транскода.
 """
 from __future__ import annotations
 
