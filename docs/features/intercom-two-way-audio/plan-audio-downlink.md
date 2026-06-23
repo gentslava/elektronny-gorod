@@ -23,7 +23,8 @@ two-way — вне scope (Slice 2).
 | Файл | Ответственность | Статус |
 |---|---|---|
 | `research/intercom-call-probe/probe_audio_bridge.py` | PoC A(exec) vs B(RTP): подать тестовый G.711 в go2rtc, открыть в браузере | создаётся (Task 1) |
-| `custom_components/elektronny_gorod/go2rtc.py` | `+ upsert_audio_stream()` / `remove_audio_stream()` (REST, реюз PATCH→PUT + `cleanup_go2rtc_stream`) | модифицируется (Task 2) |
+| `custom_components/elektronny_gorod/go2rtc.py` | **консолидация go2rtc-клиента** (принять upsert/src/auth/url из camera.py) + `upsert_audio_stream`/`remove_audio_stream` + ClientTimeout/redact (A-72/S-17/S-18) | модифицируется (Task 2) |
+| `custom_components/elektronny_gorod/camera.py` | убрать вынесенный go2rtc-клиент → импорт из go2rtc.py (P1 рефактор, поведение неизменно) | модифицируется (Task 2) |
 | `custom_components/elektronny_gorod/sip/bridge.py` | мост downlink: `feed_downlink(frame)` → go2rtc transport (RTP-packetize / exec-pipe) | создаётся (Task 3, transport финал post-PoC) |
 | `custom_components/elektronny_gorod/sip/manager.py` | прокинуть `on_downlink` в мост на answer; teardown на hangup | модифицируется (Task 4) |
 | `custom_components/elektronny_gorod/sip/call_controller.py` | lifecycle моста + go2rtc-стрима (create на answer, remove на hangup) | модифицируется (Task 4) |
@@ -107,16 +108,36 @@ git commit -m "research(two-way-audio): PoC аудио-моста downlink — A
 
 ---
 
-## Task 2: go2rtc audio-stream upsert/remove (`go2rtc.py`)
+## Task 2: Консолидация go2rtc-клиента → аудио-стрим методы (рефактор + feat)
 
-**Зачем:** мост публикует аудио-стрим вызова в go2rtc через REST. Реюз PATCH→PUT
-паттерна (как `camera._go2rtc_upsert_stream`), но отдельная функция в `go2rtc.py`
-(shared, не camera-private) + `remove` (реюз `cleanup_go2rtc_stream`). Нужна при
-любом исходе Task 1 (src-строка — параметр).
+**Зачем:** go2rtc REST-логика размазана — `_go2rtc_upsert_stream` + `_build_go2rtc_src`
++ auth-header в `camera.py`, а `validate_go2rtc`/`cleanup_go2rtc_stream` в `go2rtc.py`
+(**3 копии** auth-header + URL-builder). Аудио-upsert стал бы 4-й копией + ручным
+дублем security-guard S-A71-01 (token-leak — опасно). Поэтому **сначала консолидируем
+go2rtc-клиент в `go2rtc.py`** (P1 рефактор-оценки 2026-06-23), потом строим аудио-методы
+поверх. Заодно — A-72 (`ClientTimeout`) + S-17/S-18 (redact body) в `go2rtc.py`.
+
+⚠️ **Plan Mode + ask-first** (трогает `camera.py` hot path `stream_source`). Рефактор →
+не diagnose-before-fix, но **зелёный `pytest` до и после обязателен** (поведение неизменно).
 
 **Files:**
-- Modify: `custom_components/elektronny_gorod/go2rtc.py`
-- Test: `tests/test_go2rtc_audio.py`
+- Modify: `custom_components/elektronny_gorod/go2rtc.py` (принять upsert/src/auth/url + аудио-методы)
+- Modify: `custom_components/elektronny_gorod/camera.py:75-134,332-339` (убрать вынесенное → импорт из go2rtc)
+- Modify: `tests/test_go2rtc_upsert.py:26` (import camera → go2rtc)
+- Test: `tests/test_go2rtc_audio.py` (новые аудио-методы)
+
+### Рефактор-преамбула (P1, ДО аудио-методов) — отдельный commit
+
+- [ ] **R1: Зелёный baseline** — `PYTHONPATH=. .venv/bin/pytest tests/ -q` (рефактор поведение не меняет; точка отсчёта, особенно `test_go2rtc_upsert` 8 кейсов).
+- [ ] **R2: Вынести в `go2rtc.py` дословно** — `_build_go2rtc_src` (camera.py:75-77), `_go2rtc_upsert_stream` (camera.py:80-134; **token-leak guard `from None` сохранить дословно** — S-A71-01). Выделить общие `_go2rtc_auth_header(username, password)` (источник camera.py:332-339 + go2rtc.py:86-90) и `_streams_url(base_url, **params)`. `validate_go2rtc`/`cleanup` перевести на них.
+- [ ] **R3: `camera.py`** — удалить вынесенное, `from .go2rtc import _build_go2rtc_src, _go2rtc_upsert_stream`; `_go2rtc_auth_headers` → общий `_go2rtc_auth_header`. Обновить `tests/test_go2rtc_upsert.py:26` import (camera → go2rtc).
+- [ ] **R4: A-72/S-17/S-18** — `_GO2RTC_TIMEOUT = ClientTimeout(total=10)` на все go2rtc-запросы (validate GET/PUT, cleanup DELETE); в логах только `resp.status`, без сырого `body`.
+- [ ] **R5: Зелёный после рефактора** — `pytest tests/ -q` (вкл. `test_go2rtc_upsert` с новым import) — поведение неизменно.
+- [ ] **R6: Commit рефактора** — `refactor(go2rtc): консолидация go2rtc-клиента в go2rtc.py (+ ClientTimeout, redact); закрывает A-72/S-17/S-18`.
+
+### Аудио-методы (feat, поверх консолидированного клиента)
+
+`upsert_audio_stream` ниже **реюзает `_streams_url`/`_GO2RTC_TIMEOUT`** из R2/R4 (не свой URL/timeout — DRY).
 
 - [ ] **Step 1: Падающий тест**
 

@@ -60,6 +60,15 @@ go2rtc и карта уже есть — новое только тонкий **
 `next_uplink_frame()`, без знания SIP-деталей — тестируемо и переносимо (референс
 для будущего go2rtc-порта на Go).
 
+> **Примечание (P1-консолидация):** `go2rtc.py` становится **единым go2rtc-клиентом** —
+> upsert/src/auth/url-логика консолидируется из `camera.py` (вынос
+> `_go2rtc_upsert_stream` / `_build_go2rtc_src` + единые `_go2rtc_auth_header` /
+> `_streams_url`; см. [plan-audio-downlink.md Task 2](plan-audio-downlink.md)).
+> Аудио-методы (`upsert_audio_stream` / `remove_audio_stream`) строятся **поверх**
+> этого клиента — без дублирования auth/url/security-guard. Дальнейший вынос
+> go2rtc-transport из `camera.py` — backlog A-82 (см.
+> [project-audit.md](../../audit/project-audit.md)).
+
 ## 5. Поток данных
 
 - **Downlink:** домофон RTP → `SipManager.on_downlink` (G.711 PCMU) →

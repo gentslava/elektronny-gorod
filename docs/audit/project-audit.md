@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-06-23 (A-81 added → SIP two-way audio фундамент, REGISTER-on-answer, pending merge)
+Last reviewed: 2026-06-23 (A-82/A-83 added → tech-debt из рефактор-оценки camera.py/go2rtc.py; backlog, не блокируют two-way audio)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1104,6 +1104,71 @@ Quality gates:
   содержит acId, парный к SIP-паролю) добавлен в `SENSITIVE_KEYS`; SIP
   login/password не логируются (no-secret-logs rule).
 
+## Findings из рефактор-оценки camera.py / go2rtc.py (2026-06-23)
+
+> Источник — code-reviewer-оценка `camera.py` (773 строки, god-class на
+> 5 ответственностей, накоплен за 3 итерации A-71 v1/v2/v3) + `go2rtc.py`
+> на тех-долг (2026-06-23). Главный вывод: go2rtc REST-логика размазана между
+> модулями (upsert/src в `camera.py`, validate/cleanup в `go2rtc.py`, 3 копии
+> auth-header). Оба finding-а ниже — **тех-долг (maintainability), не bug** —
+> low-priority backlog, **не блокируют** аудио-фичу (two-way audio).
+>
+> **Связь с планом:** консолидация go2rtc-клиента в `go2rtc.py` (вынос
+> `_go2rtc_upsert_stream` / `_build_go2rtc_src` из `camera.py` + единые
+> `_go2rtc_auth_header` / `_streams_url`) — **P1**, уже включена в
+> [`plan-audio-downlink.md` Task 2 (рефактор-преамбула)](../features/intercom-two-way-audio/plan-audio-downlink.md).
+> Тем же проходом запланировано закрытие **A-72** (`ClientTimeout` в `go2rtc.py`)
+> и **S-17/S-18** (redact body в `go2rtc.py`) — см.
+> [`security.md#S-17`](security.md) и `summary.md` (риски). Статус A-72/S-17/S-18
+> здесь **не** меняется на resolved (ещё не в master) — cross-ref на план.
+> Findings A-82/A-83 ниже — то, что остаётся в backlog **после** P1-консолидации.
+
+### A-82. go2rtc-transport в `ElektronnyGorodCamera` не вынесен в go2rtc-клиент
+
+- **Status:** 🔴 **OPEN / backlog (low-priority, tech-debt)**.
+- **Severity:** **P3 (maintainability)** — не bug, поведение корректно.
+- **Area:** `camera.py` (god-class на 5 ответственностей), `go2rtc.py`.
+- **Evidence:** даже после P1-консолидации go2rtc-клиента (план Task 2)
+  в `ElektronnyGorodCamera` остаётся go2rtc-transport: `_rtsp_url`,
+  `_fetch_go2rtc_stream_info`, auth/url helpers — логически часть go2rtc-клиента,
+  а не camera-entity.
+- **Motivation:** вынос этой группы в go2rtc-клиент снизит god-class
+  `camera.py` ещё на ~120 строк и завершит концентрацию go2rtc-REST в одном
+  модуле (`go2rtc.py`), начатую P1-консолидацией. Чистая граница
+  «camera-entity ↔ go2rtc-клиент» упрощает будущий аудио-мост (он строится
+  поверх того же клиента — см. `audio-bridge-design.md` §4).
+- **Risk / объём:** риск **средний** (трогает `stream_source` hot path,
+  go2rtc producer lifecycle), объём **M**. Делать **после** P1-консолидации
+  (план Task 2), отдельным проходом — не смешивать с аудио-слайсом.
+- **Recommended first step:** зелёный `pytest` baseline → вынести
+  `_rtsp_url` / `_fetch_go2rtc_stream_info` + auth/url helpers в `go2rtc.py`
+  дословно (поведение неизменно) → обновить импорты в `camera.py` и тестах →
+  зелёный после.
+
+### A-83. Auto-recovery state machine (A-71) не выделена в отдельный helper
+
+- **Status:** 🔴 **OPEN / backlog (low-priority, tech-debt)**.
+- **Severity:** **P3 (maintainability)** — не bug; код работает в проде
+  (ADR-0009, прод-верификация v3.2).
+- **Area:** `camera.py:519-773` (auto-recovery — третья крупная ответственность
+  god-class).
+- **Evidence:** A-71 auto-recovery (v1 event-driven + v2 go2rtc producer-health
+  poll + v3 proactive keep-alive) живёт прямо в `ElektronnyGorodCamera`:
+  `_on_stream_state_change`, `_maybe_schedule_stream_recovery`,
+  `_async_recover_stream`, `_async_poll_go2rtc_health`, `_async_proactive_refresh`
+  (`camera.py:519-773`).
+- **Motivation:** выделение в отдельный `_StreamRecovery` helper изолировало бы
+  ~250 строк state machine от entity-логики (snapshot/stream/coordinator) —
+  крупнейший вклад в god-class.
+- **Risk / объём:** 🔴 **ВЫСОКИЙ риск.** Это **deterministic-tuned** код
+  (тайминги `STREAM_RECOVERY_COOLDOWN` / `GO2RTC_HEALTH_POLL_INTERVAL` /
+  `GO2RTC_PROACTIVE_REFRESH_INTERVAL` подобраны эмпирически, ADR-0009,
+  PATCH-first ROOT CAUSE v3.2), работает в проде. Рефакторинг ломает auth
+  молча, как и любая правка hot-path lifecycle. Объём **L**.
+- **Recommended first step:** **НЕ делать спекулятивно.** Только через
+  **отдельный ADR** (supersede/extend ADR-0009) + **DIAG-baseline** (снять
+  прод-метрику recovery-циклов до рефактора, чтобы доказать поведенческую
+  эквивалентность после). Без этого — оставить как есть. low-priority backlog.
 
 ## Maintenance rules (повтор)
 
@@ -1124,6 +1189,7 @@ Quality gates:
 | ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
 | 🟢 A-58 + 🟢 A-54 (doorbell event via FCM, pending merge `feat/doorbell-fcm-event`, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
 | 🟢 A-81 (приём вызова по SIP, REGISTER-on-answer, pending merge `feat/intercom-two-way-audio`) — закрывает практическую часть A-49 (`sipdevices` теперь используется) | Итерация 4 (two-way audio — фундамент: приём вызова + RTP-uplink; downlink — следующий слайс) |
+| 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) | backlog (tech-debt из рефактор-оценки 2026-06-23; не блокирует two-way audio) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 
