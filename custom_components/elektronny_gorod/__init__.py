@@ -7,9 +7,10 @@ from typing import Any
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 
 from .api import ElektronnyGorodAPI
 from .const import (
@@ -24,11 +25,19 @@ from .const import (
     CONF_GO2RTC_RTSP_HOST,
     DEFAULT_GO2RTC_BASE_URL,
     DEFAULT_GO2RTC_RTSP_HOST,
+    SIGNAL_DOORBELL,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .fcm import DoorbellFcmListener
+from .sip.call_controller import DoorbellCallController
 from .user_agent import UserAgent
+
+# Реестр SIP-контроллеров per-entry. Отдельный top-level key, чтобы не ломать
+# `hass.data[DOMAIN][entry_id] = coordinator` (его читают event/camera/lock).
+_SIP_DATA = f"{DOMAIN}_sip"
+SERVICE_ANSWER = "answer"
+SERVICE_HANGUP = "hangup"
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -69,6 +78,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry.async_on_unload(fcm_listener.async_stop)
 
+    # Two-way audio: контроллер приёма вызова (REGISTER-on-answer). Трекает
+    # активный FCM-вызов (SIGNAL_DOORBELL) и драйвит SipManager по сервису
+    # `answer`/`hangup`. FCM-токен берёт у listener (push-params REGISTER).
+    sip_controller = DoorbellCallController(
+        hass, coordinator.api, lambda: fcm_listener.fcm_token
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(hass, SIGNAL_DOORBELL, sip_controller.handle_signal)
+    )
+    hass.data.setdefault(_SIP_DATA, {})[entry.entry_id] = sip_controller
+    _async_register_sip_services(hass)
+
     # One-time migration: legacy state (disabled_by на entities/devices от
     # старых версий integration) → None. Применяется один раз per entry.
     migration_changed = _migrate_legacy_disabled_state(hass, entry)
@@ -90,6 +111,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         )
 
     return True
+
+
+def _async_register_sip_services(hass: HomeAssistant) -> None:
+    """Зарегистрировать сервисы `answer`/`hangup` (один раз на интеграцию).
+
+    Сервисы без target: действуют на текущий звонящий домофон — резолвят
+    контроллер с активным вызовом (`current_call`). Это mirror UX приложения
+    («Ответить» на входящий), без необходимости указывать устройство.
+    """
+    if hass.services.has_service(DOMAIN, SERVICE_ANSWER):
+        return
+
+    async def _answer(_call: ServiceCall) -> None:
+        for controller in list(hass.data.get(_SIP_DATA, {}).values()):
+            if controller.current_call() is not None:
+                await controller.async_answer()
+                return
+        LOGGER.warning("Сервис answer: нет активного вызова домофона — нечего отвечать")
+
+    async def _hangup(_call: ServiceCall) -> None:
+        for controller in list(hass.data.get(_SIP_DATA, {}).values()):
+            await controller.async_hangup()
+
+    hass.services.async_register(DOMAIN, SERVICE_ANSWER, _answer)
+    hass.services.async_register(DOMAIN, SERVICE_HANGUP, _hangup)
 
 
 _MIGRATION_FLAG_KEY = "visibility_migration_v2"
@@ -362,6 +408,16 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     HA-core вызовет их автоматически независимо от исхода platform unload
     (см. audit A-16).
     """
+    # Two-way audio: завершить активный разговор (BYE) и снять контроллер.
+    # Сервисы answer/hangup — глобальные: убираем, когда выгружен последний entry.
+    sip_controller = hass.data.get(_SIP_DATA, {}).pop(entry.entry_id, None)
+    if sip_controller is not None:
+        await sip_controller.async_hangup()
+    if not hass.data.get(_SIP_DATA):
+        for service in (SERVICE_ANSWER, SERVICE_HANGUP):
+            if hass.services.has_service(DOMAIN, service):
+                hass.services.async_remove(DOMAIN, service)
+
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id)
 

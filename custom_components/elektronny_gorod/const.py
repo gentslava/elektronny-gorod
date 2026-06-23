@@ -59,6 +59,12 @@ AREA_PUBLIC_CAM: Final = "Городские камеры"
 # Shared cross-module → в const.py (см. constants-locality.md).
 SIGNAL_DOORBELL: Final = f"{DOMAIN}_doorbell"
 
+# Окно ответа на вызов, если payload `CallInvalidated` отсутствует/невалиден
+# (домофон сам сбрасывает на ~30-й секунде). Shared cross-module: event.py
+# (авто-`ended`) + sip/call_controller.py (guard answer) — единый источник
+# «времени на ответ», иначе значения разъедутся (constants-locality.md).
+DOORBELL_CALL_WINDOW_FALLBACK_SEC: Final = 35.0
+
 # Persisted FCM-credentials (firebase-messaging) — в entry.data, чтобы FCM-токен
 # был стабилен между рестартами (как access_token/refresh_token).
 CONF_FCM_CREDENTIALS: Final = "fcm_credentials"

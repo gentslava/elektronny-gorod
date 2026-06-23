@@ -1,0 +1,7 @@
+# Сервисы two-way audio (приём вызова домофона, REGISTER-on-answer).
+# См. docs/features/intercom-two-way-audio/. Без полей/target: действуют на
+# текущий звонящий домофон (контроллер резолвит активный вызов).
+
+answer:
+
+hangup:

@@ -49,6 +49,9 @@ class DoorbellFcmListener:
         self._entry = entry
         self._api = api
         self._client: Any = None
+        # FCM push-токен (после checkin_or_register). Нужен SIP-ответу для
+        # push-params REGISTER (pn-tok=...) — см. sip/call_controller.py.
+        self.fcm_token: str | None = None
 
     async def async_start(self) -> None:
         """checkin/register → привязка токена у оператора → start MTalk-сокет."""
@@ -76,6 +79,7 @@ class DoorbellFcmListener:
                 self._on_credentials_updated,
             )
             fcm_token = await self._client.checkin_or_register()
+            self.fcm_token = fcm_token
             if not await self._api.register_push_device(fcm_token):
                 LOGGER.warning(
                     "FCM: привязка push-токена у оператора не удалась — пуши могут не прийти"

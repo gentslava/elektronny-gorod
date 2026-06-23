@@ -38,6 +38,7 @@ SENSITIVE_KEYS: frozenset[str] = frozenset({
     "hash2",
     "fcm_credentials",
     "pushtoken",
+    "realm",  # SIP realm минта sipdevices — содержит acId (PII), парный к SIP password
 })
 
 

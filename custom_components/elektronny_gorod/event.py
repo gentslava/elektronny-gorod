@@ -25,7 +25,13 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
-from .const import AREA_INTERCOM, DOMAIN, LOGGER, SIGNAL_DOORBELL
+from .const import (
+    AREA_INTERCOM,
+    DOMAIN,
+    DOORBELL_CALL_WINDOW_FALLBACK_SEC,
+    LOGGER,
+    SIGNAL_DOORBELL,
+)
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
 EVENT_RING = "ring"
@@ -37,7 +43,8 @@ EVENT_ENDED = "ended"
 # `call_invalidated` (операторское окно из payload, не угаданная константа).
 # Без margin: по прод-данным реальный `ended` прилетает за ~20с ДО call_invalidated
 # (и снимает таймер через _cancel_auto_end), так что буфер ничего не ловил.
-_AUTO_END_FALLBACK_SEC = 35.0  # если call_invalidated нет/невалиден (окно ~30с)
+# Fallback-окно (нет/невалиден call_invalidated) — shared с sip/call_controller.py.
+_AUTO_END_FALLBACK_SEC = DOORBELL_CALL_WINDOW_FALLBACK_SEC
 
 
 async def async_setup_entry(
