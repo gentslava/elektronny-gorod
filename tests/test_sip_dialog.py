@@ -7,7 +7,9 @@ Record-Route.
 from __future__ import annotations
 
 from custom_components.elektronny_gorod.sip.dialog import (
+    build_100_trying,
     build_200_ok,
+    build_487,
     build_bye,
     extract_dialog,
 )
@@ -57,6 +59,29 @@ def test_extract_dialog_fields() -> None:
     assert d.local == "<sip:000@realm>;tag=mytag"  # To + наш tag
     assert d.target == "sip:panel@2.2.2.2:5060"  # Contact URI без <>
     assert d.route == ["<sip:1.1.1.1;lr>", "<sip:2.2.2.2;lr>"]
+
+
+def test_build_100_trying_echoes_via_without_to_tag() -> None:
+    t = build_100_trying(parse_sip(_INVITE))
+    assert t.startswith("SIP/2.0 100 Trying\r\n")
+    # оба Via дословно (отклик маршрутизируется назад по Via)
+    assert "v: SIP/2.0/UDP 1.1.1.1;branch=z1" in t
+    assert "Via: SIP/2.0/UDP 2.2.2.2;branch=z2" in t
+    assert "CSeq: 1 INVITE" in t
+    # провизорный 100 — To БЕЗ нашего tag
+    assert "\r\nt: <sip:000@realm>\r\n" in t
+    assert "Content-Length: 0" in t
+
+
+def test_build_487_is_final_with_to_tag() -> None:
+    r = build_487(parse_sip(_INVITE), local_tag="mytag")
+    assert r.startswith("SIP/2.0 487 Request Terminated\r\n")
+    assert "v: SIP/2.0/UDP 1.1.1.1;branch=z1" in r
+    assert "Via: SIP/2.0/UDP 2.2.2.2;branch=z2" in r
+    # 487 — финальный отклик на INVITE → наш To-tag обязателен
+    assert "t: <sip:000@realm>;tag=mytag" in r
+    assert "CSeq: 1 INVITE" in r
+    assert "Content-Length: 0" in r
 
 
 def test_build_bye_targets_remote_contact_with_route() -> None:

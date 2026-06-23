@@ -14,7 +14,35 @@ from .message import SipMessage
 
 # Заголовки, которые 200 OK эхо-ит из INVITE дословно (порядок прихода сохраняется).
 _ECHO_HEADERS = ("via", "record-route", "from", "to", "call-id", "cseq")
+# Отклики на INVITE (100/487) эхо-ят минимум для маршрутизации ответа назад.
+_RESP_ECHO_HEADERS = ("via", "from", "to", "call-id", "cseq")
 _CRLF = "\r\n"
+
+
+def _build_invite_response(invite: SipMessage, status_line: str, local_tag: str | None) -> str:
+    """Отклик на INVITE-транзакцию: эхо Via/From/To/Call-ID/CSeq, без тела.
+
+    `local_tag` задаётся для финальных откликов (487) — добавляет наш To-tag;
+    для провизорных (100 Trying) — None (tag не добавляем)."""
+    lines = [status_line]
+    for hn, raw in invite.header_lines:
+        if hn not in _RESP_ECHO_HEADERS:
+            continue
+        if hn == "to" and local_tag and ";tag=" not in raw.lower():
+            raw = f"{raw};tag={local_tag}"
+        lines.append(raw)
+    lines += ["Content-Length: 0", "", ""]
+    return _CRLF.join(lines)
+
+
+def build_100_trying(invite: SipMessage) -> str:
+    """100 Trying — провизорный отклик «держим вызов» (held-short-window, ADR-0012)."""
+    return _build_invite_response(invite, "SIP/2.0 100 Trying", None)
+
+
+def build_487(invite: SipMessage, local_tag: str) -> str:
+    """487 Request Terminated — финальный отклик на held-INVITE при приёме CANCEL."""
+    return _build_invite_response(invite, "SIP/2.0 487 Request Terminated", local_tag)
 
 
 @dataclass

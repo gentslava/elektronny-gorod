@@ -12,10 +12,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from custom_components.elektronny_gorod.sip.call_controller import (
+    EVENT_SIP_CALL,
     DoorbellCallController,
 )
 
 _MGR_PATH = "custom_components.elektronny_gorod.sip.call_controller.SipManager"
+
+
+def _hass() -> MagicMock:
+    """hass-мок: async_create_task закрывает корутину (hold-таск не виснет в unit)."""
+    hass = MagicMock()
+    hass.async_create_task = lambda coro, *a, **k: coro.close()
+    return hass
 
 
 def _ring(call_id="c1", place="P", ac="A", invalidated=None) -> dict:
@@ -45,7 +53,7 @@ def controller() -> DoorbellCallController:
     api.mint_sip_device = AsyncMock(
         return_value={"login": "l", "password": "p", "realm": "r"}
     )
-    return DoorbellCallController(MagicMock(), api, lambda: "FCMTOK")
+    return DoorbellCallController(_hass(), api, lambda: "FCMTOK")
 
 
 def test_ring_tracked_then_ended_cleared(controller):
@@ -80,7 +88,7 @@ async def test_answer_refused_without_active_call(controller):
 async def test_answer_refused_without_fcm_token():
     api = MagicMock()
     api.mint_sip_device = AsyncMock()
-    c = DoorbellCallController(MagicMock(), api, lambda: None)
+    c = DoorbellCallController(_hass(), api, lambda: None)
     c.handle_signal(_ring())
     assert await c.async_answer() is False
     api.mint_sip_device.assert_not_called()
@@ -130,9 +138,9 @@ async def test_answer_with_go2rtc_sets_up_bridge():
     api = MagicMock()
     api.mint_sip_device = AsyncMock(return_value={"login": "l", "password": "p", "realm": "r"})
     c = DoorbellCallController(
-        MagicMock(), api, lambda: "TOK", go2rtc=Go2RtcConfig("http://g:1984", {})
+        _hass(), api, lambda: "TOK", go2rtc=Go2RtcConfig("http://g:1984", {})
     )
-    c.handle_signal(_ring())
+    c.handle_signal(_ring())  # hold-таск закрыт (_hass) → answer идёт fallback-путём
 
     upsert = AsyncMock()
     with patch(_MGR_PATH) as MgrCls, patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
@@ -151,8 +159,8 @@ async def test_answer_with_go2rtc_sets_up_bridge():
     assert ok is True
     bridge.start.assert_awaited_once()  # ffmpeg поднят
     upsert.assert_awaited_once()  # go2rtc-стрим создан
-    # on_downlink, отданный SipManager, — это feed_downlink моста (не счётчик).
-    assert MgrCls.call_args.kwargs["on_downlink"] is bridge.feed_downlink
+    # on_downlink отдан в accept/async_answer — это feed_downlink моста (не счётчик).
+    assert mgr.async_answer.await_args.kwargs["on_downlink"] is bridge.feed_downlink
 
 
 async def test_answer_without_go2rtc_uses_counter_sink(controller):
@@ -164,7 +172,7 @@ async def test_answer_without_go2rtc_uses_counter_sink(controller):
         mgr.async_answer = AsyncMock(return_value=True)
         await controller.async_answer()
     BridgeCls.assert_not_called()
-    assert MgrCls.call_args.kwargs["on_downlink"] == controller._count_downlink
+    assert mgr.async_answer.await_args.kwargs["on_downlink"] == controller._count_downlink
 
 
 async def test_hangup_tears_down_manager(controller):
@@ -174,3 +182,47 @@ async def test_hangup_tears_down_manager(controller):
     await controller.async_hangup()
     mgr.async_hangup.assert_awaited_once()
     assert controller._manager is None
+
+
+# ---- register-on-ring (ADR-0012) ----
+async def test_ring_holds_via_register_and_hold():
+    # ring → _async_hold_current регистрирует и держит INVITE (mint привязан к вызову).
+    api = MagicMock()
+    api.mint_sip_device = AsyncMock(return_value={"login": "l", "password": "p", "realm": "r"})
+    c = DoorbellCallController(_hass(), api, lambda: "TOK")
+    c.handle_signal(_ring(place="PLACE", ac="AC"))
+    with patch(_MGR_PATH) as MgrCls:
+        mgr = MgrCls.return_value
+        mgr.register_and_hold = AsyncMock(return_value=True)
+        await c._async_hold_current()
+    mgr.register_and_hold.assert_awaited_once()
+    assert c._manager is mgr  # держим менеджер
+    mint_factory = mgr.register_and_hold.await_args.args[0]
+    await mint_factory()
+    api.mint_sip_device.assert_awaited_once_with("PLACE", "AC")
+
+
+async def test_answer_accepts_held_invite_without_reregister():
+    # Держим INVITE → answer вызывает accept (быстрый путь), не async_answer.
+    api = MagicMock()
+    api.mint_sip_device = AsyncMock(return_value={"login": "l", "password": "p", "realm": "r"})
+    c = DoorbellCallController(_hass(), api, lambda: "TOK")
+    c.handle_signal(_ring())
+    held = MagicMock()
+    held.holding = True
+    held.in_call = False
+    held.accept = AsyncMock(return_value=True)
+    c._manager = held  # имитируем поднятый hold
+    ok = await c.async_answer()
+    assert ok is True
+    held.accept.assert_awaited_once()  # accept держимого INVITE
+    held.async_answer.assert_not_called()  # без повторного register-on-answer
+
+
+async def test_cancel_dismisses_screen():
+    # _on_ring_cancelled → EVENT_SIP_CALL active=false (чистит хелпер) + снят менеджер.
+    c = DoorbellCallController(_hass(), MagicMock(), lambda: "TOK")
+    c._manager = MagicMock()
+    c._on_ring_cancelled()
+    assert c._manager is None
+    c._hass.bus.async_fire.assert_called_with(EVENT_SIP_CALL, {"active": False})

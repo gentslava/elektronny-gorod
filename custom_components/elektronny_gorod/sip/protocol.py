@@ -14,7 +14,14 @@ import uuid
 from collections.abc import Callable
 
 from ..const import LOGGER
-from .dialog import DialogState, build_200_ok, build_bye, extract_dialog
+from .dialog import (
+    DialogState,
+    build_100_trying,
+    build_200_ok,
+    build_487,
+    build_bye,
+    extract_dialog,
+)
 from .message import parse_sip
 from .register import build_contact, build_register, build_register_authorization
 from .sdp import build_g711_answer
@@ -30,6 +37,7 @@ class SipProtocol(asyncio.DatagramProtocol):
         fcm_token: str,
         user_agent: str,
         on_bye: Callable[[], None] | None = None,
+        on_cancel: Callable[[], None] | None = None,
     ) -> None:
         self.login = creds["login"]
         self.password = creds["password"]
@@ -38,6 +46,7 @@ class SipProtocol(asyncio.DatagramProtocol):
         self.fcm_token = fcm_token
         self.ua = user_agent
         self.on_bye = on_bye
+        self.on_cancel = on_cancel
         self.transport: asyncio.DatagramTransport | None = None
         self._lport = 0
         self.call_id = f"{uuid.uuid4()}@{local_ip}"
@@ -47,6 +56,9 @@ class SipProtocol(asyncio.DatagramProtocol):
         self.registered: asyncio.Future[bool] | None = None
         self.invite: asyncio.Future[tuple] | None = None
         self.dialog: DialogState | None = None
+        # Держимый INVITE (register-on-ring): для 100 Trying / 487 на CANCEL / accept.
+        self._invite_msg = None
+        self._invite_addr: tuple | None = None
 
     # ---- lifecycle ----
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
@@ -79,10 +91,16 @@ class SipProtocol(asyncio.DatagramProtocol):
             method = msg.start_line.split(" ", 1)[0]
             if method == "INVITE":
                 self._on_invite(msg, addr)
-            elif method in ("BYE", "CANCEL"):
+            elif method == "BYE":
                 self._respond_200(msg, addr)
                 if self.on_bye is not None:
                     self.on_bye()
+            elif method == "CANCEL":
+                # Отмена неотвеченного вызова: 200 на CANCEL + 487 на держимый INVITE.
+                self._respond_200(msg, addr)
+                self._send_487()
+                if self.on_cancel is not None:
+                    self.on_cancel()
             elif method in ("OPTIONS", "NOTIFY", "INFO"):
                 self._respond_200(msg, addr)
         except Exception:  # noqa: BLE001 — не валим сокет на битом пакете
@@ -122,8 +140,24 @@ class SipProtocol(asyncio.DatagramProtocol):
 
     def _on_invite(self, msg, addr: tuple) -> None:
         LOGGER.debug("SIP: INVITE получен от %s:%s", addr[0], addr[1])
+        self._invite_msg = msg
+        self._invite_addr = addr
         if self.invite is not None and not self.invite.done():
             self.invite.set_result((msg, addr))
+
+    def send_trying(self) -> None:
+        """100 Trying на держимый INVITE (register-on-ring) — без авто-ответа."""
+        if self.transport is None or self._invite_msg is None:
+            return
+        self.transport.sendto(build_100_trying(self._invite_msg).encode(), self._invite_addr)
+
+    def _send_487(self) -> None:
+        """487 Request Terminated на держимый INVITE при приёме CANCEL."""
+        if self.transport is None or self._invite_msg is None:
+            return
+        self.transport.sendto(
+            build_487(self._invite_msg, self.local_tag).encode(), self._invite_addr
+        )
 
     def answer(self, invite_msg, addr: tuple, media_ip: str, media_port: int,
                payload_type: int, codec: str) -> None:

@@ -1,20 +1,20 @@
-"""DoorbellCallController — HA-glue приёма вызова домофона (REGISTER-on-answer).
+"""DoorbellCallController — HA-glue приёма вызова домофона (register-on-ring, ADR-0012).
 
-Связывает три части:
-- FCM `SIGNAL_DOORBELL` (ring/ended) → трекинг **активного** вызова и окна
-  `CallInvalidated` (зеркало event.py);
-- сервис `answer` → mint SIP-кред (api.mint_sip_device) → `SipManager.async_answer`
-  (доказанный REGISTER → INVITE → 200 OK → RTP-latching);
-- сервис `hangup` → `SipManager.async_hangup` (BYE).
+Связывает части:
+- FCM `SIGNAL_DOORBELL` (ring/ended) → трекинг активного вызова + окно `CallInvalidated`;
+  на `ring` сразу **держим** SIP (`SipManager.register_and_hold`: REGISTER → forked
+  INVITE → `100 Trying`) — зеркало приложения, чтобы получать `CANCEL` и быстро отвечать;
+- сервис `answer` → `SipManager.accept` (200 OK на держимый INVITE) → RTP-latching;
+  если held не поднялся — fallback на `async_answer` (register-on-answer);
+- приём `CANCEL` (сброс с панели / ответ на др. устройстве) → `on_cancelled` →
+  мгновенный dismiss экрана (через EVENT_SIP_CALL active=false, чистит хелпер);
+- сервис `hangup` → `SipManager.async_hangup` (BYE / release held).
 
-🔴 Call-ID binding (call-answer-model.md §6.5): отвечаем **только** на активный
-незавершённый вызов в окне `CallInvalidated`. Иначе запоздалый REGISTER поймал бы
-INVITE *следующего* вызова → ложный «ответ сразу». Один активный ответ-флоу.
+🔴 Call-ID binding (call-answer-model.md §6.5): держим/отвечаем только на активный
+вызов в окне `CallInvalidated`. Один held/активный вызов за раз (фикс-порты).
 
-Downlink-вывод звука гостя (Slice 1, D-audio-1): если go2rtc настроен — поднимаем
-`AudioBridge` (ffmpeg G.711→mpegts/aac HTTP) + per-call go2rtc-стрим
-`ffmpeg:http://<bridge>`, `on_downlink` кормит мост → Advanced Camera Card. Если
-go2rtc нет/не поднялся — degrade на счётчик кадров (вызов на уровне SIP живёт).
+Downlink-вывод звука гостя: на `accept` поднимаем `AudioBridge` + go2rtc-стрим,
+`on_downlink` кормит мост → карта. go2rtc нет/не поднялся — degrade на счётчик кадров.
 """
 from __future__ import annotations
 
@@ -33,25 +33,25 @@ from ..go2rtc import remove_audio_stream, upsert_audio_stream
 from .bridge import AudioBridge, detect_lan_ip
 from .manager import SipManager
 
-# mint SIP-кредов — на критическом пути ответа (окно CallInvalidated ~30с).
-# Жёсткий таймаут, чтобы зависший POST не «съел» окно (http.py без ClientTimeout,
-# A-21) → иначе INVITE прилетит для следующего вызова (ложный «ответ сразу»).
+# mint SIP-кредов — на критическом пути hold/ответа. Жёсткий таймаут, чтобы зависший
+# POST не «съел» окно вызова (http.py без ClientTimeout, A-21).
 _MINT_TIMEOUT_SEC = 8.0
 
-# Аудио-мост downlink (D-audio-1): фикс HTTP-порт ffmpeg-сервера + имя go2rtc-стрима.
+# Аудио-мост downlink: фикс HTTP-порт ffmpeg-сервера + имя go2rtc-стрима.
 AUDIO_HTTP_PORT = 40020
 AUDIO_STREAM_NAME = "eg_intercom_talk"
 # Домофон оператора шлёт PCMU(0) (live-доказано: «PT=0 PCMU»). Мост — под него.
 _DOWNLINK_PT = 0
 
-# Событие шины: состояние SIP-разговора (start/end). UI ведёт экран по нему, а не
-# по FCM-событию `ended` (то срабатывает по окну вызова ~30с, разговор живёт дольше).
+# Событие шины: состояние SIP-разговора (start/end). UI ведёт экран по нему. На end
+# (BYE/CANCEL/hangup) — active=false → input_boolean off + чистка хелпера (dismiss).
 EVENT_SIP_CALL = "elektronny_gorod_sip_call"
 
-# Страховка: макс. длительность разговора. Если пользователь не сбросил и `BYE`
-# от домофона не пришёл (линия залипла бы «Занято», UI завис бы в «разговоре») —
-# авто-hangup освобождает линию и шлёт событие конца. Длиннее обычного разговора.
+# Страховка: макс. длительность отвеченного разговора (нет BYE/сброса) → авто-hangup.
 _MAX_CALL_SEC = 120
+# Страховка: макс. время держания неотвеченного вызова (нет CANCEL/ответа) → release,
+# чтобы освободить фикс-порт SIP для следующего вызова. Чуть больше окна вызова (~30с).
+_HOLD_MAX_SEC = 40
 
 
 @dataclass
@@ -64,7 +64,7 @@ class Go2RtcConfig:
 
 @dataclass
 class ActiveCall:
-    """Активный FCM-вызов, на который допустим `answer` (в окне CallInvalidated)."""
+    """Активный FCM-вызов, на который допустим hold/answer (в окне CallInvalidated)."""
 
     call_id: str | None
     place_id: str
@@ -73,7 +73,7 @@ class ActiveCall:
 
 
 class DoorbellCallController:
-    """Трекинг активного вызова + answer/hangup через SipManager (один на entry)."""
+    """Трекинг вызова + register-on-ring hold/accept через SipManager (один на entry)."""
 
     def __init__(
         self,
@@ -92,29 +92,38 @@ class DoorbellCallController:
         self._manager: SipManager | None = None
         self._bridge: AudioBridge | None = None
         self._call_timeout: asyncio.TimerHandle | None = None
-        # Сериализует answer: защита от двойного нажатия/параллельного сервиса —
-        # без него два concurrent answer создали бы 2 SipManager на фикс-портах.
+        self._hold_timeout: asyncio.TimerHandle | None = None
+        # Сериализует hold/answer: без него параллельные register создали бы 2 SipManager
+        # на фикс-портах. Hold и accept проходят под одним локом.
         self._answer_lock = asyncio.Lock()
         self.downlink_packets = 0
 
     # ---- трекинг активного вызова (из SIGNAL_DOORBELL) ----
     @callback
     def handle_signal(self, payload: dict[str, Any]) -> None:
-        """SIGNAL_DOORBELL callback: `ring` → запомнить вызов, `ended` → снять."""
+        """SIGNAL_DOORBELL: `ring` → запомнить + держать SIP; `ended` → снять."""
         event_type = payload.get("event_type")
         attrs = payload.get("attributes") or {}
         if event_type == "ring":
+            if self._manager is not None:
+                # Уже держим/в разговоре (фикс-порты) — игнор параллельного ring.
+                LOGGER.info("SIP: уже держим/в разговоре — игнор параллельного ring")
+                return
             self._active = ActiveCall(
                 call_id=attrs.get("call_id"),
                 place_id=str(payload.get("place_id") or ""),
                 access_control_id=str(payload.get("access_control_id") or ""),
                 deadline=self._compute_deadline(attrs.get("call_invalidated")),
             )
+            # register-on-ring: держим SIP сразу (зеркало приложения, ADR-0012).
+            self._hass.async_create_task(self._async_hold_current())
         elif event_type == "ended" and self._active is not None:
-            # Снять активный только если это тот же вызов (или end без call_id).
             cid = attrs.get("call_id")
             if cid is None or cid == self._active.call_id:
                 self._active = None
+                # CANCEL мог не прийти (ответ на др. устройстве) — снять держимый сами.
+                if self._manager is not None and self._manager.holding:
+                    self._hass.async_create_task(self._async_release_held())
 
     def _compute_deadline(self, invalidated: str | None) -> datetime:
         """Дедлайн ответа: операторское `call_invalidated` или fallback-окно."""
@@ -132,19 +141,40 @@ class DoorbellCallController:
             return None
         return self._active
 
+    # ---- register-on-ring: hold ----
+    async def _async_hold_current(self) -> None:
+        """На ring: mint → register_and_hold (держим INVITE). Degrade при ошибке."""
+        async with self._answer_lock:
+            if self._manager is not None:
+                return  # уже держим/в разговоре
+            call = self.current_call()
+            if call is None:
+                return
+            fcm_token = self._fcm_token_getter()
+            if not fcm_token:
+                LOGGER.warning("SIP hold: FCM-токен не готов — REGISTER невозможен (degrade)")
+                return
+            manager = SipManager(
+                fcm_token,
+                on_ended=self._schedule_audio_cleanup,
+                on_cancelled=self._on_ring_cancelled,
+            )
+            try:
+                held = await manager.register_and_hold(lambda: self._mint(call))
+            except Exception:  # noqa: BLE001 — degrade: экран живёт от FCM, dismiss по таймеру
+                LOGGER.warning("SIP hold: REGISTER/hold не удался — degrade", exc_info=True)
+                held = False
+            if held:
+                self._manager = manager
+                self._schedule_hold_timeout()
+
     # ---- сервисы answer / hangup ----
     async def async_answer(self) -> bool:
-        """Ответить на текущий вызов: mint → SipManager (REGISTER-on-answer).
-
-        Один concurrent-разговор (фикс-порты SIP/RTP, модель first-answer-wins):
-        `_answer_lock` сериализует, in_call-guard отклоняет повторный.
-        """
+        """Ответить: accept держимого INVITE, либо fallback register-on-answer."""
         async with self._answer_lock:
             call = self.current_call()
             if call is None:
-                LOGGER.warning(
-                    "SIP answer: нет активного вызова в окне CallInvalidated — игнор"
-                )
+                LOGGER.warning("SIP answer: нет активного вызова в окне — игнор")
                 return False
             if self._manager is not None and self._manager.in_call:
                 LOGGER.warning("SIP answer: уже идёт разговор — игнор")
@@ -154,25 +184,24 @@ class DoorbellCallController:
                 LOGGER.warning("SIP answer: FCM-токен не готов — REGISTER невозможен")
                 return False
 
-            # Аудио-мост (downlink → go2rtc). Если go2rtc нет/не поднялся —
-            # degrade на счётчик: вызов на уровне SIP всё равно отвечается.
             bridge, on_downlink = await self._setup_audio_bridge()
-
-            manager = SipManager(
-                fcm_token, on_downlink=on_downlink, on_ended=self._schedule_audio_cleanup
-            )
             self.downlink_packets = 0
+            self._cancel_hold_timeout()
 
-            async def _mint() -> dict[str, Any]:
-                # Жёсткий таймаут на mint — http.py без ClientTimeout (A-21).
-                async with asyncio.timeout(_MINT_TIMEOUT_SEC):
-                    return await self._api.mint_sip_device(
-                        call.place_id, call.access_control_id
-                    )
+            if self._manager is not None and self._manager.holding:
+                ok = await self._manager.accept(on_downlink=on_downlink)  # быстрый путь
+            else:
+                # Fallback: held не поднялся → register-on-answer (приём не регрессирует).
+                manager = SipManager(
+                    fcm_token,
+                    on_ended=self._schedule_audio_cleanup,
+                    on_cancelled=self._on_ring_cancelled,
+                )
+                ok = await manager.async_answer(lambda: self._mint(call), on_downlink=on_downlink)
+                if ok:
+                    self._manager = manager
 
-            ok = await manager.async_answer(_mint)
             if ok:
-                self._manager = manager
                 self._bridge = bridge
                 self._fire_call_state(True)
                 self._schedule_call_timeout()
@@ -181,8 +210,9 @@ class DoorbellCallController:
             return ok
 
     async def async_hangup(self) -> None:
-        """Завершить активный разговор (BYE) + снять аудио-мост/go2rtc-стрим."""
+        """Завершить разговор (BYE) / снять держимый (release) + снять аудио-мост."""
         self._cancel_call_timeout()
+        self._cancel_hold_timeout()
         manager, self._manager = self._manager, None
         bridge, self._bridge = self._bridge, None
         if manager is not None:
@@ -190,14 +220,37 @@ class DoorbellCallController:
             self._fire_call_state(False)
         await self._teardown_audio_bridge(bridge)
 
+    async def _async_release_held(self) -> None:
+        """FCM `ended` при держимом (CANCEL не пришёл) — снять held + dismiss."""
+        async with self._answer_lock:
+            if self._manager is None or not self._manager.holding:
+                return
+            self._cancel_hold_timeout()
+            manager, self._manager = self._manager, None
+            await manager.async_hangup()
+            self._fire_call_state(False)
+
+    async def _mint(self, call: ActiveCall) -> dict[str, Any]:
+        """mint SIP-device для вызова с жёстким таймаутом (http.py без ClientTimeout)."""
+        async with asyncio.timeout(_MINT_TIMEOUT_SEC):
+            return await self._api.mint_sip_device(call.place_id, call.access_control_id)
+
     @callback
     def _fire_call_state(self, active: bool) -> None:
-        """Сигнал шины о старте/конце SIP-разговора (для UI-состояния экрана)."""
+        """Сигнал шины о старте/конце SIP (UI: active=false → off + чистка хелпера)."""
         self._hass.bus.async_fire(EVENT_SIP_CALL, {"active": active})
 
     @callback
+    def _on_ring_cancelled(self) -> None:
+        """Держимый вызов отменён (CANCEL: сброс панели / ответ на др. устройстве) →
+        мгновенный dismiss экрана. Моста ещё нет (не отвечали) — только сигнал."""
+        self._cancel_hold_timeout()
+        self._manager = None
+        self._fire_call_state(False)
+
+    @callback
     def _schedule_call_timeout(self) -> None:
-        """Страховочный авто-hangup, если разговор не завершился сам (нет BYE/сброса)."""
+        """Страховочный авто-hangup отвеченного разговора (нет BYE/сброса)."""
         self._cancel_call_timeout()
         self._call_timeout = self._hass.loop.call_later(
             _MAX_CALL_SEC,
@@ -209,6 +262,21 @@ class DoorbellCallController:
         if self._call_timeout is not None:
             self._call_timeout.cancel()
             self._call_timeout = None
+
+    @callback
+    def _schedule_hold_timeout(self) -> None:
+        """Страховочный release держимого вызова (нет CANCEL/ответа) — освободить порт."""
+        self._cancel_hold_timeout()
+        self._hold_timeout = self._hass.loop.call_later(
+            _HOLD_MAX_SEC,
+            lambda: self._hass.async_create_task(self._async_release_held()),
+        )
+
+    @callback
+    def _cancel_hold_timeout(self) -> None:
+        if self._hold_timeout is not None:
+            self._hold_timeout.cancel()
+            self._hold_timeout = None
 
     # ---- аудио-мост (downlink) ----
     async def _setup_audio_bridge(
@@ -250,6 +318,7 @@ class DoorbellCallController:
     def _schedule_audio_cleanup(self) -> None:
         """on_ended от SipManager (remote BYE): снять мост + сигнал конца SIP."""
         self._cancel_call_timeout()
+        self._cancel_hold_timeout()
         self._manager = None
         bridge, self._bridge = self._bridge, None
         self._fire_call_state(False)
