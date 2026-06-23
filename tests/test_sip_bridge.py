@@ -1,9 +1,9 @@
 """Unit-тесты чистой логики аудио-моста (sip/bridge.py).
 
-Механизм (PoC D-audio-1, audio-bridge-design.md §6.1): мост поднимает ffmpeg-
-субпроцесс (G.711 stdin → mpegts/aac HTTP), go2rtc тянет `ffmpeg:http://`.
-Тестируем чистое: построение ffmpeg-аргументов (mulaw/alaw) + go2rtc-src.
-Субпроцесс/feed — сетевой слой, проверяется живым звонком (не юнит).
+Механизм (audio-bridge-design.md §6.1): мост поднимает ffmpeg-субпроцесс (G.711
+stdin → mpegts/aac в stdout), наш персистентный HTTP-сервер раздаёт поток, go2rtc
+тянет `ffmpeg:http://`. Тестируем чистое: построение ffmpeg-аргументов (mulaw/alaw)
++ go2rtc-src. Сервер/субпроцесс/feed — сетевой слой, проверяется живым звонком.
 """
 from __future__ import annotations
 
@@ -13,11 +13,11 @@ from custom_components.elektronny_gorod.sip.bridge import AudioBridge
 def test_ffmpeg_args_pcmu_mulaw() -> None:
     b = AudioBridge("192.168.1.100", 40020, payload_type=0)
     args = b._ffmpeg_args()
-    # PCMU(0) → вход mulaw, stdin pipe, mpegts HTTP-сервер на нашем порту.
+    # PCMU(0) → вход mulaw из stdin, выход mpegts/aac в stdout (раздаёт наш сервер).
     assert "mulaw" in args
     assert "pipe:0" in args
     assert "mpegts" in args
-    assert "http://0.0.0.0:40020" in args
+    assert "pipe:1" in args
     assert args[0] == "ffmpeg"
 
 

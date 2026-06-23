@@ -48,6 +48,11 @@ _DOWNLINK_PT = 0
 # по FCM-событию `ended` (то срабатывает по окну вызова ~30с, разговор живёт дольше).
 EVENT_SIP_CALL = "elektronny_gorod_sip_call"
 
+# Страховка: макс. длительность разговора. Если пользователь не сбросил и `BYE`
+# от домофона не пришёл (линия залипла бы «Занято», UI завис бы в «разговоре») —
+# авто-hangup освобождает линию и шлёт событие конца. Длиннее обычного разговора.
+_MAX_CALL_SEC = 120
+
 
 @dataclass
 class Go2RtcConfig:
@@ -86,6 +91,7 @@ class DoorbellCallController:
         self._active: ActiveCall | None = None
         self._manager: SipManager | None = None
         self._bridge: AudioBridge | None = None
+        self._call_timeout: asyncio.TimerHandle | None = None
         # Сериализует answer: защита от двойного нажатия/параллельного сервиса —
         # без него два concurrent answer создали бы 2 SipManager на фикс-портах.
         self._answer_lock = asyncio.Lock()
@@ -169,12 +175,14 @@ class DoorbellCallController:
                 self._manager = manager
                 self._bridge = bridge
                 self._fire_call_state(True)
+                self._schedule_call_timeout()
             else:
                 await self._teardown_audio_bridge(bridge)
             return ok
 
     async def async_hangup(self) -> None:
         """Завершить активный разговор (BYE) + снять аудио-мост/go2rtc-стрим."""
+        self._cancel_call_timeout()
         manager, self._manager = self._manager, None
         bridge, self._bridge = self._bridge, None
         if manager is not None:
@@ -186,6 +194,21 @@ class DoorbellCallController:
     def _fire_call_state(self, active: bool) -> None:
         """Сигнал шины о старте/конце SIP-разговора (для UI-состояния экрана)."""
         self._hass.bus.async_fire(EVENT_SIP_CALL, {"active": active})
+
+    @callback
+    def _schedule_call_timeout(self) -> None:
+        """Страховочный авто-hangup, если разговор не завершился сам (нет BYE/сброса)."""
+        self._cancel_call_timeout()
+        self._call_timeout = self._hass.loop.call_later(
+            _MAX_CALL_SEC,
+            lambda: self._hass.async_create_task(self.async_hangup()),
+        )
+
+    @callback
+    def _cancel_call_timeout(self) -> None:
+        if self._call_timeout is not None:
+            self._call_timeout.cancel()
+            self._call_timeout = None
 
     # ---- аудио-мост (downlink) ----
     async def _setup_audio_bridge(
@@ -226,6 +249,7 @@ class DoorbellCallController:
     @callback
     def _schedule_audio_cleanup(self) -> None:
         """on_ended от SipManager (remote BYE): снять мост + сигнал конца SIP."""
+        self._cancel_call_timeout()
         self._manager = None
         bridge, self._bridge = self._bridge, None
         self._fire_call_state(False)
