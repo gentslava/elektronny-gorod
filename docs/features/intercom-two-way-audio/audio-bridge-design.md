@@ -92,6 +92,36 @@ go2rtc и карта уже есть — новое только тонкий **
 go2rtc) — задокументировать альтернативный путь подачи uplink (отдельный RTP-сокет,
 который мост слушает, минуя exec-stdin) и решить в Slice 2.
 
+## 6.1 PoC-результаты (D-audio-1, прод 2026-06-23)
+
+Механизм downlink **валидирован на проде** (не теория):
+
+- **Целевой go2rtc — Frigate-овский (`1984`)** — тот же, что интеграция уже
+  использует для камер (создаёт там `ffmpeg:`-стримы через REST). Аудио туда же =
+  единый go2rtc видео+звук, без дубля. Standalone go2rtc — исторический, не трогаем.
+- 🔴 `exec:` через REST **заблокирован** (`insecure producer`) → exec отпадает
+  (иначе рестарт Frigate). RTSP-publish в go2rtc — не принимается.
+- ✅ `ffmpeg:<url>` через REST **разрешён** (камеры так и работают).
+- Frigate-go2rtc в bridge-сети контейнера → мост в HA (host-net) для него **не на
+  `127.0.0.1`**, а на **host-LAN-IP** (go2rtc уже ходит в LAN — eufy на .212).
+
+**Выбранный механизм (вместо A-exec / B-RTP): `ffmpeg:http`-источник.**
+Мост поднимает в HA **ffmpeg-субпроцесс** (муксинг отдаём ffmpeg, не хендроллим):
+`ffmpeg -f mulaw -ar 8000 -ac 1 -i pipe:0 -c:a aac -f mpegts -listen 1
+-multiple_requests 1 http://0.0.0.0:<port>`. SipManager `on_downlink` → пишет
+G.711-кадры в stdin ffmpeg. На answer REST-создаём go2rtc-стрим
+`src=ffmpeg:http://<host-lan-ip>:<port>#audio=opus`. go2rtc тянет, транскодит в
+Opus, отдаёт в WebRTC → Advanced Camera Card.
+
+**Доказано:** тон → ffmpeg-HTTP(host:9101) → go2rtc REST `ffmpeg:http://192.168.1.100:9101`
+→ `Audio: opus, 48000 Hz` сквозь go2rtc (ffprobe). Цепочка работает на go2rtc интеграции.
+
+**Качество/заметки:** двойной транскод G.711→AAC→Opus — для 8кГц-телефонии
+перцептивно прозрачен, выбран ради робастности (mpegts не несёт G.711). Опция
+оптимизации (одинарный транскод: ffmpeg→Opus/ogg passthrough) — если понадобится.
+Адрес `host-lan-ip` (go2rtc→HA) — авто-детект primary LAN IP моста (как
+`_outbound_ip` к публичному IP), не хардкод.
+
 ## 7. Жизненный цикл и обработка ошибок
 
 - Мост + go2rtc-стрим создаются на `answer`, сносятся на `hangup`/BYE (**один
