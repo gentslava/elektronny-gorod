@@ -5,8 +5,13 @@ stdin, отдаёт mpegts/aac по HTTP (`-listen 1`). go2rtc тянет `ffmpe
 (REST-источник, см. go2rtc.upsert_audio_stream), транскодит в Opus → WebRTC →
 Advanced Camera Card. Механизм валидирован на проде (PoC D-audio-1).
 
-Муксинг отдан ffmpeg (не хендроллим mpegts/RTSP в Python). Чистое (ffmpeg-аргументы,
-go2rtc-src) — юнит-тестируемо; субпроцесс/feed — сетевой слой, живой звонок.
+🔴 Тишина-keepalive: `ffmpeg -i pipe:0 -listen 1` открывает HTTP-listener только
+когда на stdin пошли данные. До latching (первого downlink-кадра) stdin пуст →
+listener закрыт → go2rtc ловит `Connection refused`. Поэтому мост шлёт тишину с
+самого старта и в паузах downlink — ffmpeg всегда имеет вход и держит listener.
+
+Муксинг отдан ffmpeg (не хендроллим протокол). Чистое (ffmpeg-args, go2rtc-src) —
+юнит-тестируемо; субпроцесс/feed — сетевой слой, живой звонок.
 """
 from __future__ import annotations
 
@@ -15,9 +20,8 @@ import socket
 
 from ..const import LOGGER
 
-# Порог write-буфера stdin ffmpeg: если go2rtc ещё не подключился (ffmpeg не
-# дренирует stdin) — дропаем кадры, не копим память. ~1с G.711 = 8000 байт.
-_MAX_WRITE_BUFFER = 16000
+_FRAME_BYTES = 160  # G.711 8кГц, 20мс
+_KEEPALIVE_GAP_SEC = 0.04  # нет реального кадра дольше → подкладываем тишину
 
 
 def detect_lan_ip() -> str:
@@ -41,6 +45,11 @@ class AudioBridge:
         self._port = port
         self._pt = payload_type
         self._proc: asyncio.subprocess.Process | None = None
+        # G.711 «тишина»: µ-law=0xFF, A-law=0xD5.
+        self._silence = bytes([0xFF if payload_type == 0 else 0xD5] * _FRAME_BYTES)
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._keepalive: asyncio.Task | None = None
+        self._last_write = 0.0
 
     @property
     def go2rtc_src(self) -> str:
@@ -59,32 +68,52 @@ class AudioBridge:
         ]
 
     async def start(self) -> None:
-        """Поднять ffmpeg-субпроцесс (HTTP-сервер ждёт подключения go2rtc)."""
+        """Поднять ffmpeg-субпроцесс + keepalive-тишину (listener открывается сразу)."""
         self._proc = await asyncio.create_subprocess_exec(
             *self._ffmpeg_args(),
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
+        self._loop = asyncio.get_running_loop()
+        self._last_write = 0.0  # → keepalive сразу прайм-тишиной откроет listener
+        self._keepalive = self._loop.create_task(self._keepalive_loop())
         LOGGER.info("AudioBridge: ffmpeg HTTP-сервер на :%s (src=%s)", self._port, self.go2rtc_src)
 
-    def feed_downlink(self, frame: bytes) -> None:
-        """Записать G.711-кадр гостя в stdin ffmpeg (drop при переполнении буфера)."""
+    def _write(self, frame: bytes) -> None:
         proc = self._proc
-        if proc is None or proc.stdin is None or proc.returncode is not None:
-            return
-        transport = proc.stdin.transport
-        # go2rtc ещё не подключился (нет consumer) → ffmpeg не дренирует stdin.
-        # Не копим: дропаем, пока пользователь не откроет карту.
-        if transport is not None and transport.get_write_buffer_size() > _MAX_WRITE_BUFFER:
+        if (
+            proc is None or proc.stdin is None
+            or proc.returncode is not None or proc.stdin.is_closing()
+        ):
             return
         try:
             proc.stdin.write(frame)
+            if self._loop is not None:
+                self._last_write = self._loop.time()
         except (BrokenPipeError, ConnectionResetError, RuntimeError):
             pass
 
+    def feed_downlink(self, frame: bytes) -> None:
+        """G.711-кадр гостя → stdin ffmpeg (немедленно, без буферизации)."""
+        self._write(frame)
+
+    async def _keepalive_loop(self) -> None:
+        """Тишина в паузах downlink (старт/до latching/между кадрами) — держит вход
+        ffmpeg непрерывным, чтобы HTTP-listener был открыт (иначе go2rtc refused)."""
+        try:
+            while self._proc is not None and self._proc.returncode is None:
+                if self._loop is not None and self._loop.time() - self._last_write > _KEEPALIVE_GAP_SEC:
+                    self._write(self._silence)
+                await asyncio.sleep(0.02)
+        except asyncio.CancelledError:
+            pass
+
     async def stop(self) -> None:
-        """Остановить ffmpeg-субпроцесс (закрыть stdin, terminate, kill по таймауту)."""
+        """Остановить keepalive + ffmpeg (закрыть stdin, terminate, kill по таймауту)."""
+        keepalive, self._keepalive = self._keepalive, None
+        if keepalive is not None:
+            keepalive.cancel()
         proc, self._proc = self._proc, None
         if proc is None:
             return
