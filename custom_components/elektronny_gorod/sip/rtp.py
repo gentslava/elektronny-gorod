@@ -17,6 +17,20 @@ PTIME_SEC = 0.02  # G.711 8kHz, 20ms кадр
 FRAME_BYTES = 160  # 8000 * 0.02
 
 
+def _pace_step(prev_deadline: float, now: float) -> tuple[float, float]:
+    """Дрейф-компенсированный пейсинг RTP-uplink.
+
+    Следующий дедлайн = `prev_deadline + PTIME` (ФИКСИРОВАННАЯ сетка, а не `now + PTIME`)
+    → per-iteration overhead не накапливается, средний такт ровно 20мс. Возвращает
+    `(next_deadline, sleep_sec)`, где `sleep_sec >= 0` (если отстали — 0, догоняем).
+
+    Раньше uplink был тишиной-keepalive, дрейф не мешал; с реальным микрофоном (Phase C)
+    наивный `sleep(PTIME)` копил overhead (~12% медленнее realtime → буфер саттурируется
+    → drop-кадры → заикания, доказано PoC D-audio-2)."""
+    next_deadline = prev_deadline + PTIME_SEC
+    return next_deadline, max(0.0, next_deadline - now)
+
+
 def build_rtp_packet(
     payload_type: int,
     seq: int,
@@ -92,6 +106,8 @@ class RtpSession(asyncio.DatagramProtocol):
         provider → тишина (keepalive). marker на первом пакете.
         """
         first = True
+        loop = asyncio.get_running_loop()
+        next_send = loop.time()  # дрейф-компенсация: целимся в абсолютные дедлайны
         while not stop.is_set() and self.transport is not None:
             frame = frame_provider() or self._silence
             pkt = build_rtp_packet(
@@ -104,4 +120,5 @@ class RtpSession(asyncio.DatagramProtocol):
             self._seq += 1
             self._ts += FRAME_BYTES
             first = False
-            await asyncio.sleep(PTIME_SEC)
+            next_send, sleep_sec = _pace_step(next_send, loop.time())
+            await asyncio.sleep(sleep_sec)
