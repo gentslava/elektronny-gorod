@@ -1,6 +1,7 @@
 """SIP Digest MD5 аутентификация (RFC 2617) для REGISTER к realm оператора.
 
-Из probe_sip.py. voip-utils Digest не реализует (design.md §3.1) — наш слой.
+REGISTER шлётся на FCM-ring (register-on-ring, ADR-0012) — challenge приходит на
+него же. Из probe_sip.py. voip-utils Digest не реализует (design.md §3.1) — наш слой.
 Поддержка qop=auth и legacy non-qop (Kazoo шлёт challenge с nonce/realm).
 """
 from __future__ import annotations

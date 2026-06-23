@@ -1,7 +1,8 @@
-"""SIP REGISTER build + Digest auth для модели REGISTER-on-answer.
+"""SIP REGISTER build + Digest auth для модели register-on-ring (ADR-0012).
 
-Мы НЕ держим регистрацию: REGISTER шлётся в момент «ответить» на вызов и триггерит
-`INVITE` от Kazoo (см. call-answer-model.md). Зеркалируем формат приложения:
+Мы НЕ держим долгую регистрацию: REGISTER шлётся в момент FCM-ring (а не «ответить»)
+и триггерит forked `INVITE` от Kazoo, который держим в `100 Trying` до ответа
+пользователя (см. call-answer-model.md, ADR-0012). Зеркалируем формат приложения:
 проприетарные push-params в Contact, Expires=30, `Supported: outbound/gruu/path`.
 """
 from __future__ import annotations
