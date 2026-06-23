@@ -134,6 +134,7 @@ go2rtc-клиент в `go2rtc.py`** (P1 рефактор-оценки 2026-06-2
 - [ ] **R4: A-72/S-17/S-18** — `_GO2RTC_TIMEOUT = ClientTimeout(total=10)` на все go2rtc-запросы (validate GET/PUT, cleanup DELETE); в логах только `resp.status`, без сырого `body`.
 - [ ] **R5: Зелёный после рефактора** — `pytest tests/ -q` (вкл. `test_go2rtc_upsert` с новым import) — поведение неизменно.
 - [ ] **R6: Commit рефактора** — `refactor(go2rtc): консолидация go2rtc-клиента в go2rtc.py (+ ClientTimeout, redact); закрывает A-72/S-17/S-18`.
+- [ ] **R7: go2rtc config bloat (A-84)** — найдено пользователем 2026-06-23: на каждое `stream_source()` стрим дописывается в `go2rtc_homekit.yml` новым `streams:`-блоком (не merge) → сотни дублей + протухшие operator-токены на диске + `cleanup failed: path not exist`. **Сначала DIAG** (controlled: повторить upsert с разным src на throwaway-стриме → какой write, PATCH/PUT, дописывает блок) → фикс: пропускать re-upsert если src не изменился / периодическая компакция конфига / go2rtc-side опция. Закрывает A-84. Объём M-L; через DIAG (не спекулятивно). Пользователь чистит текущий раздутый конфиг сам.
 
 ### Аудио-методы (feat, поверх консолидированного клиента)
 

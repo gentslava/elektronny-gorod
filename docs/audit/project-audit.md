@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-06-23 (A-82/A-83 added → tech-debt из рефактор-оценки camera.py/go2rtc.py; backlog, не блокируют two-way audio)
+Last reviewed: 2026-06-23 (A-82/A-83 tech-debt из рефактор-оценки camera.py/go2rtc.py + A-84 go2rtc config bloat P2 — найден пользователем; backlog, в go2rtc-консолидацию R7)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1170,6 +1170,34 @@ Quality gates:
   прод-метрику recovery-циклов до рефактора, чтобы доказать поведенческую
   эквивалентность после). Без этого — оставить как есть. low-priority backlog.
 
+### A-84. go2rtc config bloat — стрим дописывается, а не мёржится (unbounded)
+
+- **Status:** 🔴 **OPEN / backlog (совместить с go2rtc-консолидацией, см. план Task 2 R7).**
+- **Severity:** **P2 (real bug + security-smell)** — не косметика: конфиг растёт
+  безгранично, протухшие operator-токены копятся на диске.
+- **Area:** `camera.py:_go2rtc_upsert_stream` (+ `go2rtc.py:upsert_audio_stream` —
+  тот же механизм), go2rtc config-persist (`go2rtc_homekit.yml`).
+- **Evidence (прод, 2026-06-23, найдено пользователем):** в `go2rtc_homekit.yml`
+  **сотни** повторяющихся блоков `streams:`, каждый — одна камера со свежим
+  operator-RTSP вида `ffmpeg:https://forpost-NN.novotelecom.ru:18081/rtsp/<accId>/<TOKEN>/d=1#video=copy#audio=aac#audio=opus`
+  (TOKEN ротируется per-fetch). Симптом в логах: `go2rtc cleanup failed: 400
+  yaml: path not exist` (DELETE не находит стрим в дублирующемся YAML).
+- **Hypothesis (нужен DIAG):** на каждое `stream_source()` (открытие камеры)
+  интеграция получает у оператора **новый** ротируемый RTSP-URL → upsert'ит в
+  go2rtc; go2rtc 1.9.14 на API-write **дописывает новый `streams:`-блок** в
+  конфиг-файл (не merge в один map) → за время жизни интеграции — сотни блоков.
+  YAML дубль-ключи: функционально побеждает последний, но файл растёт безгранично.
+- **Impact:** (1) безграничный рост конфига; (2) протухшие **operator-токены на
+  диске** в plaintext (security-smell, ср. [`no-secret-logs.md`](../../.claude/rules/no-secret-logs.md));
+  (3) `cleanup failed: path not exist` на teardown стримов вызова.
+- **Risk / объём:** трогает `stream_source` hot path (proven, история A-71) →
+  **через DIAG + go2rtc-консолидацию** (план Task 2 / R1-R7). M-L.
+- **Recommended first step:** controlled-DIAG на throwaway-стриме — какой write
+  (PATCH vs PUT) дописывает блок (повторить upsert с разным src, посмотреть рост
+  конфига) → выбрать фикс: пропускать re-upsert если src не изменился, или
+  периодическая компакция конфига, или go2rtc-side опция → **сложить в
+  go2rtc-консолидацию (R7)**. Пользователь чистит текущий конфиг сам.
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
@@ -1189,7 +1217,7 @@ Quality gates:
 | ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
 | 🟢 A-58 + 🟢 A-54 (doorbell event via FCM, pending merge `feat/doorbell-fcm-event`, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
 | 🟢 A-81 (приём вызова по SIP, REGISTER-on-answer, pending merge `feat/intercom-two-way-audio`) — закрывает практическую часть A-49 (`sipdevices` теперь используется) | Итерация 4 (two-way audio — фундамент: приём вызова + RTP-uplink; downlink — следующий слайс) |
-| 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) | backlog (tech-debt из рефактор-оценки 2026-06-23; не блокирует two-way audio) |
+| 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) + 🔴 A-84 (go2rtc config bloat P2 — стрим дописывается, не мёржится; через DIAG + R7) | backlog (tech-debt из рефактор-оценки 2026-06-23 + A-84 найден пользователем; не блокирует two-way audio) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 
