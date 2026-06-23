@@ -99,9 +99,21 @@ class SipManager:
         )
         try:
             await asyncio.wait_for(sip.registered, timeout=REGISTER_TIMEOUT)
+        except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+            LOGGER.warning(
+                "SIP: REGISTER не подтверждён за %.0fs (нет 200 OK) — отмена ответа",
+                REGISTER_TIMEOUT,
+            )
+            sip.close()
+            sip_transport.close()
+            return False
+        try:
             invite_msg, addr = await asyncio.wait_for(sip.invite, timeout=INVITE_TIMEOUT)
         except (asyncio.TimeoutError, Exception):  # noqa: BLE001
-            LOGGER.warning("SIP: REGISTER/INVITE не дождались — отмена ответа")
+            LOGGER.warning(
+                "SIP: INVITE не пришёл за %.0fs после успешного REGISTER — отмена ответа",
+                INVITE_TIMEOUT,
+            )
             sip.close()
             sip_transport.close()
             return False

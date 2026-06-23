@@ -69,3 +69,21 @@ def test_register_authorization_from_challenge() -> None:
     assert 'realm="ac.intercom.op.ru"' in auth
     assert 'nonce="NONCE123"' in auth
     assert "algorithm=MD5" in auth
+    # non-qop challenge → без qop/cnonce/nc.
+    assert "qop=" not in auth
+    assert "cnonce=" not in auth
+
+
+def test_register_authorization_qop_auth_includes_cnonce_nc() -> None:
+    import re
+
+    # qop="auth" challenge (FreeSWITCH/Kamailio) → Authorization с qop/nc/cnonce,
+    # иначе сервер отвергает REGISTER (нет 200 → нет форка INVITE).
+    auth = build_register_authorization(
+        login="000", password="secret", realm="r",
+        nonce="NONCE123", reg_uri="sip:r", qop="auth",
+    )
+    assert "qop=auth" in auth
+    assert "nc=00000001" in auth
+    assert 'cnonce="' in auth
+    assert re.search(r'response="[0-9a-f]{32}"', auth) is not None

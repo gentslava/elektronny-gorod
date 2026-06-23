@@ -68,6 +68,7 @@ class SipProtocol(asyncio.DatagramProtocol):
             self.from_tag, self.cseq, contact, branch, self.ua, auth=auth,
         )
         self.transport.sendto(reg.encode())
+        LOGGER.debug("SIP: REGISTER отправлен (cseq=%s, auth=%s)", self.cseq, "да" if auth else "нет")
 
     def datagram_received(self, data: bytes, addr: tuple) -> None:
         try:
@@ -91,22 +92,36 @@ class SipProtocol(asyncio.DatagramProtocol):
     def _on_response(self, msg) -> None:
         if "REGISTER" not in (msg.first("cseq") or ""):
             return
-        code = msg.start_line.split(" ")[1] if len(msg.start_line.split(" ")) > 1 else ""
+        parts = msg.start_line.split(" ")
+        code = parts[1] if len(parts) > 1 else ""
         if code in ("401", "407"):
             wa = msg.first("www-authenticate") or msg.first("proxy-authenticate") or ""
             nonce = re.search(r'nonce="([^"]+)"', wa)
             if not nonce:
+                LOGGER.debug("SIP: %s на REGISTER без nonce — авторизация невозможна", code)
                 return
             realm_m = re.search(r'realm="([^"]+)"', wa)
             realm = realm_m.group(1) if realm_m else self.realm
+            qop_m = re.search(r'qop="?([^",]+)', wa)
+            qop = qop_m.group(1) if qop_m else None
+            algo_m = re.search(r"algorithm=([^\",\s]+)", wa)
+            LOGGER.debug(
+                "SIP: %s challenge — qop=%s algorithm=%s → отвечаем %s",
+                code, qop, algo_m.group(1) if algo_m else None,
+                "qop-digest" if qop else "non-qop",
+            )
             auth = build_register_authorization(
-                self.login, self.password, realm, nonce.group(1), f"sip:{self.realm}"
+                self.login, self.password, realm, nonce.group(1), f"sip:{self.realm}", qop=qop
             )
             self.send_register(auth)
         elif code == "200" and self.registered is not None and not self.registered.done():
+            LOGGER.debug("SIP: REGISTER 200 OK — зарегистрированы, ждём INVITE")
             self.registered.set_result(True)
+        else:
+            LOGGER.debug("SIP: ответ на REGISTER %s (не обработан)", code)
 
     def _on_invite(self, msg, addr: tuple) -> None:
+        LOGGER.debug("SIP: INVITE получен от %s:%s", addr[0], addr[1])
         if self.invite is not None and not self.invite.done():
             self.invite.set_result((msg, addr))
 

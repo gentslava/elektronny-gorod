@@ -6,6 +6,8 @@
 """
 from __future__ import annotations
 
+import uuid
+
 from .digest import build_authorization, digest_response
 
 # push-params приложения оператора (call-answer-model.md §4) — зеркалируем формат.
@@ -62,7 +64,18 @@ def build_register_authorization(
     realm: str,
     nonce: str,
     reg_uri: str,
+    qop: str | None = None,
 ) -> str:
-    """Authorization для REGISTER из 401-challenge (Digest MD5 non-qop)."""
-    resp = digest_response(login, password, realm, nonce, "REGISTER", reg_uri)
-    return build_authorization(login, realm, nonce, reg_uri, resp)
+    """Authorization для REGISTER из 401-challenge (Digest MD5, qop=auth или non-qop).
+
+    Регистратор оператора (FreeSWITCH/Kamailio) обычно шлёт challenge с
+    `qop="auth"` — тогда обязательны `cnonce`/`nc`, иначе сервер отвергает
+    REGISTER (нет 200 OK → нет форка INVITE на нашу регистрацию). Без qop —
+    legacy non-qop. cnonce рандомный, nc=00000001 (одна попытка на nonce).
+    """
+    cnonce = nc = None
+    if qop:
+        cnonce = uuid.uuid4().hex[:16]
+        nc = "00000001"
+    resp = digest_response(login, password, realm, nonce, "REGISTER", reg_uri, qop, cnonce, nc)
+    return build_authorization(login, realm, nonce, reg_uri, resp, qop, cnonce, nc)
