@@ -17,10 +17,12 @@ HA-WebSocket, что и весь UI (без go2rtc/TURN, 4G-friendly). Кома�
 """
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import voluptuous as vol
 from homeassistant.components import websocket_api
+from homeassistant.components.http import StaticPathConfig
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN, LOGGER, SIP_DATA as _SIP_DATA
@@ -110,3 +112,20 @@ def async_register_uplink_ws_command(hass: HomeAssistant) -> None:
         return
     websocket_api.async_register_command(hass, ws_intercom_uplink)
     hass.data[_WS_REGISTERED] = True
+
+
+# Lovelace-карта микрофона: раздаётся статикой; пользователь добавляет URL как
+# ресурс (Settings → Dashboards → Resources → JavaScript Module).
+CARD_URL = "/elektronny_gorod_static/eg-intercom-mic-card.js"
+_CARD_PATH = os.path.join(os.path.dirname(__file__), "www", "eg-intercom-mic-card.js")
+_CARD_REGISTERED = f"{DOMAIN}_uplink_card_registered"
+
+
+async def async_register_uplink_card(hass: HomeAssistant) -> None:
+    """Раздать Lovelace-карту микрофона статикой по `CARD_URL` (один раз)."""
+    if hass.data.get(_CARD_REGISTERED):
+        return
+    await hass.http.async_register_static_paths(
+        [StaticPathConfig(CARD_URL, _CARD_PATH, False)]
+    )
+    hass.data[_CARD_REGISTERED] = True

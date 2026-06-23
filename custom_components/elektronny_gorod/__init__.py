@@ -35,7 +35,7 @@ from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .fcm import DoorbellFcmListener
 from .go2rtc import go2rtc_auth_headers
 from .sip.call_controller import DoorbellCallController, Go2RtcConfig
-from .uplink_ws import async_register_uplink_ws_command
+from .uplink_ws import async_register_uplink_card, async_register_uplink_ws_command
 from .user_agent import UserAgent
 
 # Реестр SIP-контроллеров per-entry (`SIP_DATA` из const.py) — отдельный top-level
@@ -95,8 +95,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     hass.data.setdefault(_SIP_DATA, {})[entry.entry_id] = sip_controller
     _async_register_sip_services(hass)
-    # Phase C (ADR-0013): WS-команда uplink-микрофона (браузер → HA-WS → SIP).
+    # Phase C (ADR-0013): WS-команда uplink-микрофона (браузер → HA-WS → SIP)
+    # + раздача Lovelace-карты микрофона статикой.
     async_register_uplink_ws_command(hass)
+    await async_register_uplink_card(hass)
 
     # One-time migration: legacy state (disabled_by на entities/devices от
     # старых версий integration) → None. Применяется один раз per entry.
