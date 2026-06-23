@@ -40,18 +40,25 @@ import probe_push_answer as harness
 WS_PORT = 8765
 _TARGET_RATE = 8000
 _FRAME_BYTES = 160  # G.711 8кГц, 20мс
-_MAX_FRAMES = 50    # джиттер-буфер ~1с; переполнение → drop-oldest
+_MAX_FRAMES = int(os.environ.get("MIC_MAX_FRAMES", "50"))   # верхняя граница буфера (×20мс)
+_PREROLL = int(os.environ.get("MIC_PREROLL", "4"))          # пре-буфер до старта слива (×20мс=80мс) — гасит джиттер
 _HTML = os.path.join(os.path.dirname(__file__), "mic_ws_probe.html")
 
 
 class _Sink:
-    """Инлайн-зеркало UplinkSink: PCM@rate → 8к → G.711 → джиттер-буфер 160B/20мс."""
+    """Инлайн-зеркало UplinkSink + jitter-buffer pre-roll: PCM@rate → 8к → G.711 →
+    буфер 160B/20мс. Слив начинается только когда накоплено _PREROLL кадров (гасит
+    джиттер сети); underrun → re-prime. Счётчики underrun/overflow — в лог-диагностику."""
 
     def __init__(self, pt: int) -> None:
         self.pt = pt
         self._state = None  # persistent audioop.ratecv state
         self._accum = bytearray()
         self._frames: deque[bytes] = deque()
+        self._primed = False
+        self.fed = 0
+        self.underruns = 0
+        self.overflows = 0
 
     def feed(self, pcm: bytes, rate: int) -> None:
         if not pcm:
@@ -62,11 +69,21 @@ class _Sink:
         while len(self._accum) >= _FRAME_BYTES:
             if len(self._frames) >= _MAX_FRAMES:
                 self._frames.popleft()  # drop-oldest
+                self.overflows += 1
             self._frames.append(bytes(self._accum[:_FRAME_BYTES]))
+            self.fed += 1
             del self._accum[:_FRAME_BYTES]
 
     def next_frame(self) -> bytes | None:
-        return self._frames.popleft() if self._frames else None
+        if not self._primed:
+            if len(self._frames) < _PREROLL:
+                return None  # ждём пре-буфер
+            self._primed = True
+        if not self._frames:
+            self._primed = False  # underrun → копим заново
+            self.underruns += 1
+            return None
+        return self._frames.popleft()
 
 
 _BOX = {"pt": int(os.environ.get("MIC_PT", "0"))}
@@ -112,6 +129,22 @@ async def _html_handler(request: web.Request):
     return web.FileResponse(_HTML)
 
 
+async def _stats_loop() -> None:
+    """Диагностика джиттер-буфера в лог: глубина + underrun/overflow (для D-audio-2)."""
+    prev = (0, 0)
+    while True:
+        await asyncio.sleep(2)
+        s = _BOX["sink"]
+        if s.fed == 0:
+            continue
+        du, do = s.underruns - prev[0], s.overflows - prev[1]
+        prev = (s.underruns, s.overflows)
+        harness.log(
+            f"  📊 mic-буфер: depth={len(s._frames)} primed={s._primed} "
+            f"fed={s.fed} underruns={s.underruns}(+{du}) overflows={s.overflows}(+{do})"
+        )
+
+
 async def main() -> None:
     app = web.Application()
     app.router.add_get("/", _html_handler)
@@ -119,8 +152,12 @@ async def main() -> None:
     runner = web.AppRunner(app)
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", WS_PORT).start()
-    harness.log(f"=== mic-uplink probe: HTTP+WS на :{WS_PORT}. Открой http://localhost:{WS_PORT}/ ===")
+    harness.log(
+        f"=== mic-uplink probe: HTTP+WS на :{WS_PORT} (preroll={_PREROLL}×20мс, max={_MAX_FRAMES}). "
+        f"Открой http://localhost:{WS_PORT}/ ==="
+    )
     harness.UPLINK_PROVIDER = _uplink_provider  # uplink-кадры ← микрофон (вместо трека/тишины)
+    asyncio.get_running_loop().create_task(_stats_loop())
     await harness.main()  # FCM listen + SIP answer + RTP
 
 

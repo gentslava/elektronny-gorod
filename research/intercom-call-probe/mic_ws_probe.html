@@ -30,7 +30,7 @@
       log('AudioContext.sampleRate = ' + ac.sampleRate);   // обычно 48000
       ws.send(JSON.stringify({ type: 'start', sample_rate: ac.sampleRate }));
       const src = ac.createMediaStreamSource(stream);
-      const node = ac.createScriptProcessor(2048, 1, 1);    // mono in
+      const node = ac.createScriptProcessor(1024, 1, 1);    // mono in, ~21мс@48к (ближе к 20мс RTP)
       const mute = ac.createGain();                         // 0-gain: не плодим эхо на хосте
       mute.gain.value = 0;
       let sent = 0;
