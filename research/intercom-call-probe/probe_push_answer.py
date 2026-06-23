@@ -416,6 +416,7 @@ class TransientSip(asyncio.DatagramProtocol):
         i = 0
         talk_i = 0
         logged = False
+        next_send = loop.time()  # дрейф-компенсация пейсинга (overhead sleep не копится)
         while True:
             answered = self.call_active
             if not answered and (self._rtp_stop or not early):
@@ -448,7 +449,8 @@ class TransientSip(asyncio.DatagramProtocol):
             if i % 50 == 49:
                 tag = "" if answered else " (early-тишина)"
                 log(f"  RTP[+{(i + 1) // 50}s]: downlink={recv['count']}{tag}")
-            await asyncio.sleep(0.02)
+            next_send += 0.02  # целимся в абсолютное время кадра, а не +20мс от «сейчас»
+            await asyncio.sleep(max(0, next_send - loop.time()))
         rtask.cancel()
         log(f"  ИТОГ: downlink {recv['count']} пакетов получено. Завершаю BYE.")
         self.send_bye()
