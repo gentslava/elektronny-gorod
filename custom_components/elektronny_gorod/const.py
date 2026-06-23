@@ -59,6 +59,10 @@ AREA_PUBLIC_CAM: Final = "Городские камеры"
 # Shared cross-module → в const.py (см. constants-locality.md).
 SIGNAL_DOORBELL: Final = f"{DOMAIN}_doorbell"
 
+# Реестр SIP-контроллеров per-entry в hass.data: __init__ (setup/unload) пишет,
+# uplink_ws (WS-команда микрофона) читает. Shared cross-module → в const.py.
+SIP_DATA: Final = f"{DOMAIN}_sip"
+
 # Окно ответа на вызов, если payload `CallInvalidated` отсутствует/невалиден
 # (домофон сам сбрасывает на ~30-й секунде). Shared cross-module: event.py
 # (авто-`ended`) + sip/call_controller.py (guard answer) — единый источник

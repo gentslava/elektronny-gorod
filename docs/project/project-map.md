@@ -76,7 +76,10 @@ elektronny-gorod/
 │   │   ├── rtp.py                 ← RTP G.711 latching
 │   │   ├── protocol.py            ← asyncio SIP-транспорт
 │   │   ├── manager.py             ← SipManager (фасад)
-│   │   └── call_controller.py     ← HA-glue: трекинг FCM-вызова + answer/hangup
+│   │   ├── bridge.py              ← AudioBridge: G.711 → ffmpeg → mpegts/aac → HTTP
+│   │   ├── uplink.py              ← UplinkSink: микрофон-PCM → G.711-кадры (ADR-0013)
+│   │   └── call_controller.py     ← HA-glue: трекинг FCM-вызова + answer/hangup + UplinkSink
+│   ├── uplink_ws.py               ← WS-команда intercom_uplink: микрофон → SIP-uplink (ADR-0013)
 │   ├── services.yaml              ← сервисы answer / hangup (A-81)
 │   ├── go2rtc.py                  ← go2rtc валидация / upsert
 │   ├── entity_migration.py        ← стабильные unique_id + registry migration
@@ -236,7 +239,9 @@ elektronny-gorod/
 | [`tests/test_sip_rtp.py`](../../tests/test_sip_rtp.py) | RTP G.711 latching (A-81) |
 | [`tests/test_sip_bridge.py`](../../tests/test_sip_bridge.py) | `AudioBridge`: RTP-packetize, go2rtc src-формат, keepalive-логика (A-81) |
 | [`tests/test_api_sip.py`](../../tests/test_api_sip.py) | `api.mint_sip_device` — тело-зеркало (`installationId`) → `{login, password, realm}` (A-81) |
-| [`tests/test_sip_call_controller.py`](../../tests/test_sip_call_controller.py) | `CallController`: трекинг по `Call-ID`, answer/hangup, mint timeout, one-concurrent-call guard, `active_call_media` (A-81) |
+| [`tests/test_sip_call_controller.py`](../../tests/test_sip_call_controller.py) | `CallController`: трекинг по `Call-ID`, answer/hangup, mint timeout, one-concurrent-call guard, `active_call_media`, uplink-sink lifecycle (A-81, ADR-0013) |
+| [`tests/test_sip_uplink.py`](../../tests/test_sip_uplink.py) | `UplinkSink`: микрофон-PCM → resample 8к → G.711-кадры + джиттер-буфер (ADR-0013) |
+| [`tests/test_uplink_ws.py`](../../tests/test_uplink_ws.py) | WS-команда `intercom_uplink`: выбор контроллера, binary-handler → `feed_uplink`, no-active-call error, unsub-cleanup, sample_rate range (ADR-0013) |
 | [`tests/test_call_camera.py`](../../tests/test_call_camera.py) | `ElektronnyGorodCallCamera`: `stream_source` активный/нет вызова, рефреш go2rtc (A-81) |
 | [`tests/test_go2rtc_audio.py`](../../tests/test_go2rtc_audio.py) | `upsert_audio_stream` / `remove_audio_stream` — контракт с go2rtc REST (A-81) |
 | [`pytest.ini`](../../pytest.ini) | `asyncio_mode = auto`, `testpaths = tests` |

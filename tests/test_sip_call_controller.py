@@ -316,3 +316,136 @@ def test_active_call_media_returns_camera_and_bridge():
 def test_active_call_media_none_when_no_call():
     c = DoorbellCallController(_hass(), MagicMock(), lambda: "TOK")
     assert c.active_call_media() is None
+
+
+# ---- Phase C: uplink-микрофон wiring (ADR-0013, механизм #1) ----
+async def test_hold_passes_uplink_provider_to_manager():
+    # На hold SipManager получает uplink_provider=_pull_uplink (не тишина).
+    api = MagicMock()
+    api.mint_sip_device = AsyncMock(
+        return_value={"login": "l", "password": "p", "realm": "r"}
+    )
+    c = DoorbellCallController(_hass(), api, lambda: "TOK")
+    c.handle_signal(_ring())
+    with patch(_MGR_PATH) as MgrCls:
+        mgr = MgrCls.return_value
+        mgr.register_and_hold = AsyncMock(return_value=True)
+        await c._async_hold_current()
+    assert MgrCls.call_args.kwargs["uplink_provider"] == c._pull_uplink
+
+
+async def test_answer_fallback_passes_uplink_provider_to_manager(controller):
+    # Fallback register-on-answer тоже подводит uplink_provider к SipManager.
+    controller.handle_signal(_ring())
+    with patch(_MGR_PATH) as MgrCls:
+        mgr = MgrCls.return_value
+        mgr.in_call = False
+        mgr.holding = False
+        mgr.async_answer = AsyncMock(return_value=True)
+        await controller.async_answer()
+    assert MgrCls.call_args.kwargs["uplink_provider"] == controller._pull_uplink
+
+
+def test_pull_uplink_returns_none_without_sink(controller):
+    # Нет активного вызова (sink None) → провайдер отдаёт None (тишина-keepalive).
+    assert controller._uplink_sink is None
+    assert controller._pull_uplink() is None
+
+
+def test_pull_uplink_returns_next_frame_from_sink(controller):
+    sink = MagicMock()
+    sink.next_frame.return_value = b"\xff" * 160
+    controller._uplink_sink = sink
+    assert controller._pull_uplink() == b"\xff" * 160
+    sink.next_frame.assert_called_once()
+
+
+def test_feed_uplink_feeds_sink_when_active(controller):
+    sink = MagicMock()
+    controller._uplink_sink = sink
+    controller.feed_uplink(b"\x00\x01\x02\x03", 48000)
+    sink.feed.assert_called_once_with(b"\x00\x01\x02\x03", 48000)
+
+
+def test_feed_uplink_drops_when_no_sink(controller):
+    # Нет активного вызова → feed дропается без исключения.
+    assert controller._uplink_sink is None
+    controller.feed_uplink(b"\x00\x01", 48000)  # не должно бросить
+
+
+async def test_answer_creates_uplink_sink_with_downlink_pt():
+    # На answer (с go2rtc) создаётся UplinkSink с тем же PT, что и downlink-мост.
+    from custom_components.elektronny_gorod.sip.call_controller import (
+        DoorbellCallController,
+        Go2RtcConfig,
+        _DOWNLINK_PT,
+    )
+
+    api = MagicMock()
+    api.mint_sip_device = AsyncMock(
+        return_value={"login": "l", "password": "p", "realm": "r"}
+    )
+    c = DoorbellCallController(
+        _hass(), api, lambda: "TOK",
+        go2rtc=Go2RtcConfig("http://g:1984", {}, "127.0.0.1"),
+    )
+    c.handle_signal(_ring())
+    with patch(_MGR_PATH) as MgrCls, patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
+        f"{_CC}.detect_lan_ip", return_value="1.2.3.4"
+    ), patch(f"{_CC}.UplinkSink") as SinkCls:
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock()
+        mgr = MgrCls.return_value
+        mgr.in_call = False
+        mgr.holding = False
+        mgr.async_answer = AsyncMock(return_value=True)
+        ok = await c.async_answer()
+
+    assert ok is True
+    SinkCls.assert_called_once_with(_DOWNLINK_PT)
+    assert c._uplink_sink is SinkCls.return_value
+
+
+async def test_uplink_sink_cleared_on_hangup(controller):
+    controller._manager = MagicMock()
+    controller._manager.async_hangup = AsyncMock()
+    controller._uplink_sink = MagicMock()
+    await controller.async_hangup()
+    assert controller._uplink_sink is None
+
+
+async def test_uplink_sink_cleared_on_audio_cleanup(controller):
+    # on_ended от SipManager (remote BYE) тоже снимает sink.
+    controller._uplink_sink = MagicMock()
+    controller._schedule_audio_cleanup()
+    assert controller._uplink_sink is None
+
+
+async def test_uplink_sink_cleared_on_ring_cancelled(controller):
+    controller._uplink_sink = MagicMock()
+    controller._on_ring_cancelled()
+    assert controller._uplink_sink is None
+
+
+async def test_uplink_sink_cleared_when_accept_fails():
+    # accept вернул False → sink снят (не течёт в следующий вызов).
+    c = _go2rtc_controller()
+    c.handle_signal(_ring())
+    held = MagicMock()
+    held.holding = True
+    held.in_call = False
+    held.accept = AsyncMock(return_value=False)
+    c._manager = held
+
+    with patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
+        f"{_CC}.detect_lan_ip", return_value="1.2.3.4"
+    ), patch(f"{_CC}.remove_audio_stream", new=AsyncMock()), patch(
+        f"{_CC}.async_get_clientsession"
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock()
+        bridge.stop = AsyncMock()
+        ok = await c.async_answer()
+
+    assert ok is False
+    assert c._uplink_sink is None

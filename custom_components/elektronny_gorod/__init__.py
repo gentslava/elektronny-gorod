@@ -28,17 +28,18 @@ from .const import (
     DEFAULT_GO2RTC_BASE_URL,
     DEFAULT_GO2RTC_RTSP_HOST,
     SIGNAL_DOORBELL,
+    SIP_DATA as _SIP_DATA,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .fcm import DoorbellFcmListener
 from .go2rtc import go2rtc_auth_headers
 from .sip.call_controller import DoorbellCallController, Go2RtcConfig
+from .uplink_ws import async_register_uplink_ws_command
 from .user_agent import UserAgent
 
-# Реестр SIP-контроллеров per-entry. Отдельный top-level key, чтобы не ломать
-# `hass.data[DOMAIN][entry_id] = coordinator` (его читают event/camera/lock).
-_SIP_DATA = f"{DOMAIN}_sip"
+# Реестр SIP-контроллеров per-entry (`SIP_DATA` из const.py) — отдельный top-level
+# key, чтобы не ломать `hass.data[DOMAIN][entry_id] = coordinator` (event/camera/lock).
 SERVICE_ANSWER = "answer"
 SERVICE_HANGUP = "hangup"
 
@@ -94,6 +95,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     hass.data.setdefault(_SIP_DATA, {})[entry.entry_id] = sip_controller
     _async_register_sip_services(hass)
+    # Phase C (ADR-0013): WS-команда uplink-микрофона (браузер → HA-WS → SIP).
+    async_register_uplink_ws_command(hass)
 
     # One-time migration: legacy state (disabled_by на entities/devices от
     # старых версий integration) → None. Применяется один раз per entry.

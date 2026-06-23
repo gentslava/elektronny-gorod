@@ -33,6 +33,7 @@ from ..const import DOORBELL_CALL_WINDOW_FALLBACK_SEC, LOGGER
 from ..go2rtc import remove_audio_stream
 from .bridge import AudioBridge, detect_lan_ip
 from .manager import SipManager
+from .uplink import UplinkSink
 
 # mint SIP-кредов — на критическом пути hold/ответа. Жёсткий таймаут, чтобы зависший
 # POST не «съел» окно вызова (http.py без ClientTimeout, A-21).
@@ -98,6 +99,10 @@ class DoorbellCallController:
         self._active: ActiveCall | None = None
         self._manager: SipManager | None = None
         self._bridge: AudioBridge | None = None
+        # Uplink-микрофон (Phase C, ADR-0013): WS-транспорт кормит sink через
+        # feed_uplink; SipManager.uplink_provider (=_pull_uplink) тянет next_frame
+        # каждые 20мс. None вне активного вызова → uplink = тишина-keepalive.
+        self._uplink_sink: UplinkSink | None = None
         self._call_timeout: asyncio.TimerHandle | None = None
         self._hold_timeout: asyncio.TimerHandle | None = None
         # Сериализует hold/answer: без него параллельные register создали бы 2 SipManager
@@ -163,6 +168,7 @@ class DoorbellCallController:
                 return
             manager = SipManager(
                 fcm_token,
+                uplink_provider=self._pull_uplink,
                 on_ended=self._schedule_audio_cleanup,
                 on_cancelled=self._on_ring_cancelled,
             )
@@ -205,6 +211,7 @@ class DoorbellCallController:
                     # Fallback: held не поднялся → register-on-answer (приём не регрессирует).
                     manager = SipManager(
                         fcm_token,
+                        uplink_provider=self._pull_uplink,
                         on_ended=self._schedule_audio_cleanup,
                         on_cancelled=self._on_ring_cancelled,
                     )
@@ -216,6 +223,7 @@ class DoorbellCallController:
             except Exception:  # noqa: BLE001 — degrade: мост снять, экран живёт от FCM
                 LOGGER.warning("SIP answer: accept/register упал — снимаю мост (degrade)",
                                exc_info=True)
+                self._clear_uplink_sink()
                 await self._teardown_audio_bridge(bridge)
                 return False
 
@@ -224,6 +232,7 @@ class DoorbellCallController:
                 self._fire_call_state(True)
                 self._schedule_call_timeout()
             else:
+                self._clear_uplink_sink()
                 await self._teardown_audio_bridge(bridge)
             return ok
 
@@ -233,6 +242,7 @@ class DoorbellCallController:
         self._cancel_hold_timeout()
         manager, self._manager = self._manager, None
         bridge, self._bridge = self._bridge, None
+        self._clear_uplink_sink()
         if manager is not None:
             await manager.async_hangup()
             self._fire_call_state(False)
@@ -245,6 +255,7 @@ class DoorbellCallController:
                 return
             self._cancel_hold_timeout()
             manager, self._manager = self._manager, None
+            self._clear_uplink_sink()
             await manager.async_hangup()
             self._fire_call_state(False)
 
@@ -264,6 +275,7 @@ class DoorbellCallController:
         мгновенный dismiss экрана. Моста ещё нет (не отвечали) — только сигнал."""
         self._cancel_hold_timeout()
         self._manager = None
+        self._clear_uplink_sink()
         self._fire_call_state(False)
 
     @callback
@@ -323,6 +335,10 @@ class DoorbellCallController:
 
         go2rtc-стрим вызова НЕ создаётся здесь — это делает camera-сущность
         при открытии экрана (рефреш-на-открытии, ADR-0012 C)."""
+        # Uplink-микрофон: sink на тот же PT, что downlink-мост (домофон — PCMU).
+        # WS-транспорт начнёт кормить его через feed_uplink, как только карта
+        # включит микрофон; до этого uplink — тишина-keepalive (next_frame → None).
+        self._uplink_sink = UplinkSink(_DOWNLINK_PT)
         if self._go2rtc is None:
             return None, self._on_downlink  # go2rtc не настроен → счётчик (degrade)
         loop = asyncio.get_running_loop()
@@ -355,9 +371,35 @@ class DoorbellCallController:
         self._cancel_hold_timeout()
         self._manager = None
         bridge, self._bridge = self._bridge, None
+        self._clear_uplink_sink()
         self._fire_call_state(False)
         if bridge is not None:
             self._hass.async_create_task(self._teardown_audio_bridge(bridge))
+
+    # ---- uplink-микрофон (Phase C, ADR-0013) ----
+    @callback
+    def _pull_uplink(self) -> bytes | None:
+        """uplink_provider для SipManager: один G.711-кадр из sink, или None (тишина)."""
+        if self._uplink_sink is None:
+            return None
+        return self._uplink_sink.next_frame()
+
+    @callback
+    def _clear_uplink_sink(self) -> None:
+        """Снять uplink-sink на teardown вызова (clear буфера + None)."""
+        if self._uplink_sink is not None:
+            self._uplink_sink.clear()
+            self._uplink_sink = None
+
+    @callback
+    def feed_uplink(self, pcm: bytes, sample_rate: int) -> None:
+        """Кадр микрофона (int16 mono PCM @ sample_rate) → sink. Нет вызова → дроп.
+
+        Зовётся WS-транспортом (uplink_ws.ws_intercom_uplink). Если активного
+        вызова нет (sink None) — кадр дропается без ошибки (звонок мог уже
+        завершиться, пока браузер дослал буфер)."""
+        if self._uplink_sink is not None:
+            self._uplink_sink.feed(pcm, sample_rate)
 
     @callback
     def _count_downlink(self, payload: bytes) -> None:
