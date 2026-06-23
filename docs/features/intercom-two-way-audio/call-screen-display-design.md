@@ -45,8 +45,9 @@ SIP downlink (мост) ─┐
 
 ### Сущность `camera.intercom_call`
 
-- `Camera` + `CameraEntityFeature.STREAM`; `unique_id = {DOMAIN}_intercom_call`;
-  своё `device_info`.
+- `Camera` + `CameraEntityFeature.STREAM`; `unique_id = {DOMAIN}_{entry_id}_intercom_call`
+  (scoped к entry — multi-entry-safe); `_attr_name = None` (имя из `device_info`,
+  как `ElektronnyGorodCamera`). Реальный `entity_id` (single-entry): `camera.vyzov_domofona_intercom_call`.
 - `stream_source()`:
   - **активный вызов** → пересобрать `eg_intercom_call` со **свежим** operator-URL
     видео домофона + аудио-мост, upsert в go2rtc, вернуть
@@ -97,6 +98,18 @@ camera + HA-native two-way чище, чем two-way хаком в карточк
    если 1–2 не дадут инлайн).
 
 Сущность (Архитектура) твёрдая в любом случае; меняется лишь карточка.
+
+### Результат (live-проверено 2026-06-23)
+
+✅ **Вариант 1 сработал:** `webrtc-camera` в режиме `entity: camera.vyzov_domofona_intercom_call`
+(`muted: false`) даёт **видео+звук инлайн на 4G**, без экспозиции go2rtc, без EOF (рефреш-
+на-открытии). Дашборд: ringing → `picture-entity` (видео домофона), in-call → одна
+`webrtc-camera`-карточка. `advanced-camera-card` (вариант 2) не понадобился.
+
+⚠️ **Авто-unmute:** звук стартует выключенным — **политика автоплея браузера** блокирует
+автозапуск со звуком (`muted: false` выставлен, но браузер глушит до взаимодействия).
+Надёжно: один тап по плееру (браузер запоминает на сессию). Полный авто-звук политикой
+браузера не гарантируется.
 
 ## Что решает по болям
 
