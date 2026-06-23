@@ -26,14 +26,17 @@
 ## Использование: кнопка «Ответить» в уведомлении
 
 Интеграция даёт сервисы `elektronny_gorod.answer` / `elektronny_gorod.hangup` и
-`event`-сущность вызова. Кнопку ответа в push-уведомлении удобно подключить
-готовым **blueprint**-ом (idiomatic HA: интеграция = entity+сервисы, уведомление
-строит пользователь под свой телефон):
+`event`-сущность вызова. Кнопки в push-уведомлении удобно подключить готовым
+**blueprint**-ом (idiomatic HA: интеграция = entity+сервисы, уведомление строит
+пользователь под свой телефон). Два варианта:
 
-[`blueprints/automation/elektronny_gorod/doorbell_two_way_answer.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_two_way_answer.yaml)
+| Blueprint | Кнопки | Когда |
+|---|---|---|
+| [`doorbell_two_way_answer.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_two_way_answer.yaml) | Ответить / Сбросить | минимальный — только аудио-ответ |
+| [`doorbell_video_call.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_video_call.yaml) | **+ снимок камеры + Открыть дверь** | полный видеодомофонный UX |
 
-При `ring` шлёт actionable-уведомление (Companion App) с кнопками **«Ответить»**
-(→ `answer`) и **«Сбросить»** (→ `hangup`); снимает его при ответе/завершении.
+Оба при `ring` шлют actionable-уведомление (Companion App) high-priority и снимают
+его при действии/завершении. «Открыть дверь» — `lock.unlock` (accessControlOpen).
 
 **Установка:**
 1. Settings → Automations & Scenes → Blueprints → **Import Blueprint** → вставить
