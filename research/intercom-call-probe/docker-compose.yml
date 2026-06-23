@@ -1,0 +1,47 @@
+# Изолированные probe-сервисы (по контейнеру на канал).
+# network_mode: host — обязателен для SIP (входящий UDP-INVITE мимо docker-NAT).
+#
+# Перед запуском: на хосте создать session.json (login.py или валидный токен)
+# и firebase_config.json. Затем: docker compose up --build -d
+#
+# SIP — по одному сервису на домофон (у каждого свой realm). Кол-во sipN =
+# числу домофонов в session.json.intercoms. Логи: ./logs/{stomp,fcm,sip_*}.log
+
+x-probe: &probe
+  build: .
+  network_mode: host
+  restart: unless-stopped
+  volumes:
+    - ./session.json:/app/session.json:ro
+    - ./logs:/app/logs
+
+services:
+  stomp:
+    <<: *probe
+    image: intercom-probe
+    command: probe_stomp.py
+
+  fcm:
+    <<: *probe
+    image: intercom-probe
+    command: probe_fcm.py
+    volumes:
+      - ./session.json:/app/session.json:ro
+      - ./firebase_config.json:/app/firebase_config.json:ro
+      - ./fcm_credentials.json:/app/fcm_credentials.json
+      - ./logs:/app/logs
+
+  sip0:
+    <<: *probe
+    image: intercom-probe
+    command: ["probe_sip.py", "0"]
+
+  sip1:
+    <<: *probe
+    image: intercom-probe
+    command: ["probe_sip.py", "1"]
+
+  sip2:
+    <<: *probe
+    image: intercom-probe
+    command: ["probe_sip.py", "2"]

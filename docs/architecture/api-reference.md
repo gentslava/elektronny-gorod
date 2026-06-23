@@ -1,5 +1,6 @@
 Status: Active
 Owner: Reverse Engineer Agent + HA Expert Agent
+Last reviewed: 2026-06-22
 
 Source files:
 - `custom_components/elektronny_gorod/api.py` (текущая реализация)
@@ -7,6 +8,7 @@ Source files:
 - `custom_components/elektronny_gorod/const.py` (BASE_API_URL, APP_VERSION)
 - `custom_components/elektronny_gorod/user_agent.py` (формат UA)
 - `custom_components/elektronny_gorod/helpers.py` (auth hashing)
+- `custom_components/elektronny_gorod/fcm.py` (FCM-приём события вызова)
 
 Related docs:
 - `../decisions/0006-mirror-app-behavior.md`
@@ -372,7 +374,10 @@ Response shape (с реальными значениями оператора Д
 - Имя поля `erid` — вероятно, отсылка к российскому требованию рекламной маркировки (ERID), но используется здесь как identifier provider config.
 - `appId: 2` для «Мой Дом» (для других приложений значение может отличаться).
 
-**У нас не реализован.** Возможно, на самом деле и не нужно (значения статичны), но при миграции бэкенда — поможет. См. [audit A-51](../audit/project-audit.md).
+**Частично используется:** интеграция шлёт этот POST в рамках привязки
+push-токена (см. [Push-регистрация (FCM)](#push-регистрация-fcm), ADR-0011), но
+**не** для динамического discovery URLs из ответа — `BASE_API_URL` пока
+hardcoded. Динамический discovery поможет при миграции бэкенда. См. [audit A-51](../audit/project-audit.md).
 
 ### `GET /rest/v1/subscribers/profiles`
 
@@ -967,11 +972,11 @@ Response shape (Spring Pageable):
 {
   "content": [
     {
-      "id":              "5030018599",                                     // event_id
+      "id":              "<EVENT_ID>",                                     // event_id
       "placeId":         <PLACE_ID>,
       "eventTypeName":   "accessControlCallAccepted",                      // 🎯 тип события
-      "timestamp":       "1779431589",                                     // unix seconds (string)
-      "message":         "Вызов с домофона Семьи Шамшиных 20  (п2)",       // локализованный
+      "timestamp":       "<UNIX_TS>",                                      // unix seconds (string)
+      "message":         "Вызов с домофона <gate name>",                   // локализованный
       "source": {
         "type": "accessControl",                                           // 🎯 тип источника
         "id":   <AC_ID>                                                      // ac_id / camera_id и т.д.
@@ -1070,19 +1075,28 @@ Response: `101 Switching Protocols`. Дальше — STOMP frames over WebSocke
 
 См. [audit A-49](../audit/project-audit.md). SIP-трафик идёт вне HTTP — для исследования нужен отдельный capture (Wireshark / `mitmproxy` с TCP mode).
 
-### 3. FCM push (через `subscriberNotifications`)
+### 3. FCM push (через `subscriberNotifications`) — ✅ подтверждён как канал вызова
 
-В `POST /rest/v1/subscriberNotifications` отправляется `pushToken` (FCM). Это означает, что есть **secondary push-канал** через серверы Google. Какие события идут именно через FCM (а не WS) — неизвестно. Возможно — фоновая wake-up нотификация, после которой приложение само ходит за деталями по REST.
+🟢 **Разрешено экспериментом** (`research/intercom-call-probe/FINDINGS.md`,
+ADR-0011): событие «вызов с домофона» приходит **именно по FCM**
+(`CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE`), латентность ~0.5–1 c, богатый
+payload (gate / place / apartment / call-id / allow_open). `pushToken`
+регистрируется через `subscriberNotifications` + `device-installations`, сам
+data-message идёт через серверы Google. Структура payload и таксономия —
+[Push-регистрация (FCM)](#push-регистрация-fcm). Реализовано в интеграции
+([`fcm.py`](../../custom_components/elektronny_gorod/fcm.py) + `event` entity).
 
 ### Резюме
 
-| Канал | Handshake | Содержимое | Что требуется для capture |
-|---|---|---|---|
-| WebSocket / STOMP | ✅ | ❌ | non-standard WS body capture со сценарием активного события |
-| SIP | ⚠️ только endpoint выдачи credentials | ❌ — другой транспорт | отдельный non-HTTP capture |
-| FCM | ⚠️ только регистрация push token | ❌ | APK reverse engineering для FCM credentials |
+| Канал | Несёт событие вызова | Уровень | Латентность | Статус |
+|---|---|---|---|---|
+| **FCM** | ✅ да (`CALL_INCOMING` / `CALL_END_…`) | аккаунт (все домофоны разом) | ~0.5–1 c | **реализован** (ADR-0011) |
+| SIP | ✅ да (`INVITE`) | per-домофон | ~0.5 c | медиа-канал разговора, future (PRD-two-way-audio) |
+| WebSocket / STOMP | ❌ нет (только `availableFeatures`) | аккаунт | — | не несёт вызов; backend feature-flag null для ЭГ ([A-47](../audit/project-audit.md)) |
 
-**Вывод:** spec для real-time фичи строить только после capture хотя бы одного активного события (звонок в домофон). См. [audit A-47](../audit/project-audit.md).
+**Вывод:** FCM — основной и достаточный канал сигнала вызова. SIP ценен только
+как медиа-канал (разговор) — отдельная будущая фича. STOMP `/events` не несёт
+событие вызова.
 
 ## Post-push pattern (что приложение делает после FCM-push о звонке)
 
@@ -1157,44 +1171,129 @@ post-push поведение приложения **через polling**:
 частый polling endpoint `/events/search?page=0`, либо WS-канал. См.
 [audit A-47](../audit/project-audit.md).
 
-## Notifications
+## Push-регистрация (FCM)
+
+Канал доставки события «вызов с домофона» — **FCM data-push**, а не
+эти REST-эндпоинты. REST лишь **регистрирует** push-токен у оператора;
+сам пуш приходит через серверы Google (вне HTTPS, см. ниже). Реализовано
+в интеграции — [`api.py:register_push_device` / `unregister_push_device`](../../custom_components/elektronny_gorod/api.py),
+приём FCM — [`fcm.py`](../../custom_components/elektronny_gorod/fcm.py). Решение
+зафиксировано в [ADR-0011](../decisions/0011-doorbell-fcm-channel.md).
+
+🔴 **Все значения (`pushToken`, `installationId`, `deviceId`, `appId`,
+`apiKey`/`senderId` Firebase, account/place) — placeholders.**
+
+### `POST /api/mh-customer-device/mobile/public/v1/customers/device-installations`
+
+🎯 **Регистрация device-installation** (тот же эндпоинт, что и bootstrap, см.
+выше — приложение шлёт его и для bind push-токена). При регистрации push
+тело включает `pushToken`.
 
 ### `POST /rest/v1/subscriberNotifications`
 
-Подписка/регистрация уведомлений.
+Привязка push-токена у оператора. Приложение шлёт **тот же body-shape**, что и
+на `device-installations`. Оба POST идут с одинаковым телом (зеркало приложения).
 
-Request body shape:
+Request body shape (оба POST):
 ```json
 {
   "appVersionCode": "number",
-  "installationId": "string",
-  "appId": "number",
+  "installationId": "string",       // тот же UUID, что и в UA (per-install)
+  "appId": "number",                // 2 для «Мой Дом»
   "appVersion": "string",
-  "platform": "string",           // "android"
-  "pushToken": "string",          // 🎯 FCM push token
+  "platform": "string",             // "google" (не "android")
   "isDevelop": "boolean",
   "deviceManufacturer": "string",
   "deviceModelName": "string",
   "osVersion": "string",
-  "deviceId": "string",
-  "deviceType": "string"
+  "deviceId": "string",             // стабильный hex, производный от installationId
+  "deviceType": "string",           // "MOBILE_APPLICATION"
+  "pushToken": "string"             // 🎯 FCM push token (<sender>:<opaque>)
 }
 ```
 
-Response: 200 (тело отсутствует). **У нас не реализован** — потенциально нужно, если хотим использовать FCM-канал (но требует реверса APK для FCM project_id / sender_id).
+Response: 200 (тело отсутствует).
 
 ### `DELETE /rest/v1/subscriberNotifications`
 
-Request body — **тот же shape, что POST** (см. выше): `appVersionCode,
-installationId, appId, appVersion, platform, isDevelop, deviceManufacturer,
-deviceModelName, osVersion, deviceId, deviceType`.
+Request body — **тот же shape, что POST, но без `pushToken`** (наблюдалось в
+HAR: приложение шлёт DELETE с телом device-регистрации без поля токена).
 
 Response: 200.
 
-🎯 **Назначение:** unregister push token. Вызывается приложением при **logout
-или uninstall**. Для нашей integration важно при **disabling
-config_entry** — корректно отписать push token, чтобы пользователь не
-продолжал получать уведомления на телефон от HA-сессии.
+🎯 **Назначение:** unregister push token. Приложение вызывает при **logout /
+uninstall**. Интеграция вызывает при **unload / disabling config_entry** —
+чтобы корректно отписать токен и не получать уведомления от мёртвой HA-сессии.
+
+### FCM data-push: событие вызова (вне HTTPS)
+
+Само событие вызова приходит **по FCM** (Firebase data-message), не через REST
+выше. Чтобы принять его без Android-устройства, интеграция эмулирует
+регистрацию FCM-клиента приложения (`firebase-messaging`: checkin → register →
+MTalk-сокет) с публичным Firebase-конфигом приложения (`project_id`, `app_id`,
+`sender_id`, `api_key`, `bundle_id` — общие для всех пользователей, не секреты;
+см. [ADR-0011](../decisions/0011-doorbell-fcm-channel.md)). Per-device FCM-токен
+и FCM-creds генерятся в рантайме, в этом документе — placeholders.
+
+🟢 Эмпирически (`research/intercom-call-probe/FINDINGS.md`) подтверждено, что
+вызов несёт **именно FCM**, а не STOMP `/events` (только `availableFeatures`)
+и не SIP (медиа-канал самого разговора).
+
+Data-payload (структура, плейсхолдеры):
+```jsonc
+{
+  "from": "<senderId>",
+  "fcmOptions": { "analyticsLabel": "<PushType>" },
+  "data": {
+    "PushType":         "<CALL_INCOMING | CALL_END_ANSWERED_MOBILE>",
+    "PushTitle":        "<локализованный заголовок>",
+    "PlaceId":          "<place_id>",
+    "AccessControlId":  "<ac_id>",            // какой домофон
+    "GateName":         "<имя двери>",
+    "Apartment":        "<квартира>",
+    "Sender":           "<apartment>@<ac_id>.intercom.<...>",
+    "Call-ID":          "<call_id>",          // связывает start ↔ end
+    "CallStarted":      "<ISO8601>",
+    "CallInvalidated":  "<ISO8601>",          // окно ~30 c; авто-сброс по нему
+    "AllowOpen":        "<true|false>",       // можно открыть дверь из события
+    "IsSystem":         "<true|false>"
+  }
+}
+```
+
+⚠️ `Apartment` / `Sender` у **калиток** (общих на комплекс) приходят
+**gate-кодированными** с префиксом корпуса/секции (подтверждено сырым
+FCM-захватом в `research/intercom-call-probe/`); у подъездов — уже чистый номер.
+Канонический номер квартиры жильца берётся из `place.address.apartment`
+(subscriber-places), **не** из `Apartment`/`Sender` пуша.
+
+Таксономия `PushType` (наблюдалось):
+
+| `PushType` | Когда | event-тип в HA |
+|---|---|---|
+| `CALL_INCOMING` | начало вызова | `ring` |
+| `CALL_END_ANSWERED_MOBILE` | вызов **отвечен на другом устройстве** пользователя (тот же `Call-ID`) | `ended` (`reason: answered_elsewhere`) |
+
+⚠️ `CALL_END_ANSWERED_MOBILE` означает ровно **«ответили на другом устройстве»** —
+это **не** отказ/отклонение со стороны оператора и **не** фантомное событие. Других
+end-пушей оператор не шлёт: сброс с панели / истечение времени ответа / открытие
+двери **отдельного пуша не дают** — вызов завершается молча по `CallInvalidated`
+(окно ~30 c).
+
+Поэтому event-сущность сама закрывает «зависший» вызов по таймеру. Атрибут
+`reason` у `ended` различает три случая:
+
+| `reason` | Что значит | Источник |
+|---|---|---|
+| `answered_elsewhere` | ответили на другом устройстве | реальный пуш `CALL_END_ANSWERED_MOBILE` |
+| `timeout` | никто не ответил, окно истекло | синтетический — таймер по `CallInvalidated` ([`event.py`](../../custom_components/elektronny_gorod/event.py)) |
+| _(отсутствует)_ | нет активного вызова, idle | стартовый baseline при первом запуске |
+
+**Открытие двери из события:** `AllowOpen: "true"` → существующий
+`POST /rest/v1/places/{place_id}/accesscontrols/{ac_id}/actions`
+с телом `{"name": "accessControlOpen"}` (см. раздел Access controls). Видео —
+go2rtc по `externalCameraId`. Полный цикл «звонок → FCM-пуш → программное
+открытие» проверен вживую.
 
 ## Next reading
 

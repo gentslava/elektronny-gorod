@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-05-27 (A-67/A-68 added)
+Last reviewed: 2026-06-22 (A-80 added; A-54/A-58 reassessed → doorbell FCM event, ADR-0011)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -404,12 +404,22 @@ Quality gates:
 - **Impact:** наша интеграция хардкодит один оператор. Если пользователь имеет аккаунты у разных операторов — не поддерживаем.
 - **Recommended fix:** не приоритет; в текущей модели один config entry = один оператор.
 
-### A-54. FCM-канал и `subscriberNotifications` — за пределами проекта
+### A-54. FCM-канал и `subscriberNotifications` — реализован как канал события вызова
 
-- **Severity:** P3 (документирование, не реализация)
-- **Evidence:** `POST /rest/v1/subscriberNotifications` отправляет `pushToken` (FCM) и метаданные устройства.
-- **Impact:** требует APK reverse engineering для FCM project_id, sender_id, server_key. Юридически серая зона. **Не делать** в рамках HA-интеграции, если есть альтернативы через WS/SIP.
-- **Status:** оставляем как known endpoint в `api-reference.md`. Реализация не планируется.
+- **Status:** 🟢 **resolved-in-branch (pending merge `feat/doorbell-fcm-event`)**.
+  Переоценено: FCM-канал больше не «за пределами проекта». Эксперимент
+  (`research/intercom-call-probe/FINDINGS.md`) доказал, что событие «вызов с
+  домофона» приходит **именно по FCM** — реализовано (ADR-0011): `fcm.py`
+  (`DoorbellFcmListener`, `firebase-messaging`, project `ntk-myhome`) +
+  `api.register_push_device` / `unregister_push_device` (привязка токена через
+  `subscriberNotifications` + `device-installations`) + `event`-сущность.
+  Публичный Firebase-конфиг (не секрет) — в `const.py`; per-device creds — в
+  `entry.data`. Весь флоу под graceful degradation. После merge → RESOLVED.
+- **Severity:** P3 → стала feature (P1 real-time path).
+- **Evidence:** `POST /rest/v1/subscriberNotifications` + `device-installations`
+  отправляют `pushToken` (FCM); FCM data-push несёт `CALL_INCOMING` /
+  `CALL_END_ANSWERED_MOBILE`. См. [`api-reference.md` §Push-регистрация (FCM)](../architecture/api-reference.md).
+- **Известный риск / техдолг:** см. A-80 («серая зона» приватных API Google).
 
 ### A-55. Unread response body в `request_sms_code`
 
@@ -470,13 +480,20 @@ Quality gates:
      внутри APK (`google-services.json`). Технически возможно зарегистрировать
      HA как FCM-receiver того же project. Latency sub-second. См. R-1..R-5
      в roadmap Итерации 4.
-- **Status:** **research pending**. До завершения R-1..R-5 (APK Firebase
-  extraction + feasibility test + legal review) — не принимать ADR-0009
-  и не начинать implementation. Polling — safe fallback если push-mimicry
-  не получится.
-- **ADR:** **ADR-0009** будет написан **после** research как accepted
-  выбор одного из вариантов (push primary / polling primary / hybrid).
-  См. roadmap Итерация 4.
+- **Status:** 🟢 **resolved-in-branch (pending merge `feat/doorbell-fcm-event`)**
+  для **события вызова домофона** — выбран и реализован **FCM-канал** (push
+  primary), не polling. Research R-1..R-5 фактически выполнен экспериментом
+  `research/intercom-call-probe/` (live-проверка 3 каналов на прод-аккаунте):
+  доказано, что вызов несёт FCM, латентность sub-second. Решение —
+  **[ADR-0011](../decisions/0011-doorbell-fcm-channel.md)** (заменил
+  гипотетический ADR-0009-event-delivery для этого use-case). Реализация —
+  `fcm.py` + `event`-сущность + `api.register_push_device`. Polling
+  `/events/search` остаётся возможным fallback/backfill, но для realtime-вызова
+  больше не нужен. После merge → RESOLVED.
+- **Каверзы:** канал опирается на приватные API Google — долгосрочных гарантий
+  нет (см. A-80). Поэтому весь FCM-флоу под graceful degradation.
+- **Scope:** v1 — только NTK/myhome (`myhome.proptech.ru`). Дом.ру (HMS/Huawei
+  Push) и двусторонний звук (SIP) — отдельные будущие фичи.
 
 ### A-59. Video archive retention не учитывается при формировании URL
 
@@ -1016,6 +1033,32 @@ Quality gates:
   транспортами (HTTP API + RTSP) — валидировать **каждый** транспорт
   отдельно. HTTP success ≠ RTSP success.
 
+### A-80. FCM-приём вызова — «серая зона» приватных API Google + новая зависимость
+
+- **Status:** 🟡 **KNOWN RISK / accepted tech-debt** (зафиксирован при
+  реализации события вызова, [ADR-0011](../decisions/0011-doorbell-fcm-channel.md)).
+  Не баг и не задача «исправить» — задокументированный риск с уже встроенным
+  митигатором (graceful degradation).
+- **Severity:** P2 (надёжность фичи, не блокер интеграции).
+- **Area:** `fcm.py` (`DoorbellFcmListener`), `manifest.json:requirements`.
+- **Risk 1 — приватные API Google.** Серверный приём FCM без Android-устройства
+  опирается на **недокументированные приватные API** (checkin / register /
+  MTalk). Google уже ломал их (20.06.2024 — «умерли» старые версии всех
+  библиотек). Долгосрочных гарантий нет: «работает, пока работает».
+- **Risk 2 — новая зависимость `firebase-messaging>=0.4`** (тянет protobuf /
+  http_ece / cryptography). Раньше `requirements` был пуст (всё из HA core) —
+  теперь интеграция имеет внешний pip-deps.
+- **Risk 3 — ToS.** Эмуляция клиента приложения формально не «официально
+  поддержана» (как и весь mirror-app-подход, ADR-0006).
+- **Mitigation (уже встроено):** весь FCM-флоу под `try/except` — при любом
+  сбое (Google сломал API / нет сети / протух токен) логируется warning,
+  остальная интеграция (polling-данные) работает, событие просто не стреляет,
+  `async_setup_entry` не падает. Логика изолирована в `fcm.py` за интерфейсом
+  `SIGNAL_DOORBELL` — замена механизма (другая библиотека / sidecar-bridge) не
+  задевает `event`-сущность.
+- **Watch:** при breakage приватного API — bump `firebase-messaging` (линия
+  поддержки Lemoine → sdb9696 переживает изменения через обновление зависимости).
+
 
 ## Maintenance rules (повтор)
 
@@ -1034,8 +1077,8 @@ Quality gates:
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
 | A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR #51 — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
 | ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
-| A-58 (research pending), A-47 (P3/skip), A-49 (P3 future), A-50 | Итерация 4 (real-time event detection — research-фаза, ADR-0009 после R-1..R-5) |
-| A-27..A-36, A-39..A-41, A-53, A-54 | по мере touch / документирование |
+| 🟢 A-58 + 🟢 A-54 (doorbell event via FCM, pending merge `feat/doorbell-fcm-event`, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-49 (P3 future — SIP/two-way audio), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
+| A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 
 ## Next reading

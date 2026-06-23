@@ -12,6 +12,12 @@ import pytest
 # успевает применится до реального импорта.
 sys.modules.setdefault("turbojpeg", MagicMock())
 
+# firebase-messaging — manifest-requirement интеграции, но в test-CI manifest-deps
+# не устанавливаются (как turbojpeg). Мок на уровне sys.modules — чтобы ленивый
+# импорт в fcm.py и `patch("firebase_messaging.*")` в фикстуре ниже работали без
+# реальной библиотеки. Если она установлена (local dev) — setdefault no-op.
+sys.modules.setdefault("firebase_messaging", MagicMock())
+
 
 @pytest.fixture(autouse=True)
 def auto_enable_custom_integrations(enable_custom_integrations):
@@ -21,6 +27,39 @@ def auto_enable_custom_integrations(enable_custom_integrations):
     без него HA откажется грузить интеграцию из `custom_components/`.
     """
     yield
+
+
+@pytest.fixture(autouse=True)
+def mock_firebase_messaging() -> Generator[MagicMock, None, None]:
+    """Не ходить в Google FCM в тестах — мок firebase-messaging (см. fcm.py).
+
+    FCM-listener стартует фоновой задачей в `async_setup_entry`; без этого мока
+    тесты делали бы реальный checkin/register к Google. Клиент мокаем: checkin
+    отдаёт тестовый токен, start/stop — no-op.
+    """
+    client = MagicMock()
+    client.checkin_or_register = AsyncMock(return_value="TEST_FCM_TOKEN")
+    client.start = AsyncMock()
+    client.stop = AsyncMock()
+    with patch("firebase_messaging.FcmPushClient", return_value=client), patch(
+        "firebase_messaging.FcmRegisterConfig"
+    ):
+        yield client
+
+
+@pytest.fixture(autouse=True)
+def mock_remove_entry_api() -> Generator[MagicMock, None, None]:
+    """async_remove_entry строит реальный ElektronnyGorodAPI для отвязки push-токена.
+
+    В HA-test-харнессе это создаёт реальную aiohttp-сессию → висячий aiodns-поток,
+    который `verify_cleanup` ловит на min-HA (тот же класс проблемы, что fix c9ffc94).
+    Мокаем API в namespace `__init__` (единственный потребитель — async_remove_entry),
+    чтобы удаление entry не делало реальный HTTP. Реальный unregister/DELETE покрыт
+    отдельно в test_api_push.py (там — fake session).
+    """
+    with patch("custom_components.elektronny_gorod.ElektronnyGorodAPI") as mock_cls:
+        mock_cls.return_value.unregister_push_device = AsyncMock(return_value=True)
+        yield mock_cls
 
 
 @pytest.fixture

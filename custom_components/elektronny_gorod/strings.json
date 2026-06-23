@@ -117,6 +117,19 @@
         "name": "Account blocked"
       }
     },
+    "event": {
+      "doorbell": {
+        "name": "Doorbell call",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "ring": "Ring",
+              "ended": "Ended"
+            }
+          }
+        }
+      }
+    },
     "lock": {
       "lock": {
         "name": "Lock"

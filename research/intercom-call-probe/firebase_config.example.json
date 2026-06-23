@@ -1,0 +1,8 @@
+{
+  "_comment": "Скопируй в firebase_config.json (gitignored). Значения — публичные идентификаторы Firebase-проекта приложения, извлечены из HAR (firebaseinstallations request: x-goog-api-key, X-Android-Package, appId).",
+  "project_id": "ntk-myhome",
+  "app_id": "1:369367231553:android:323a999f9f228a40",
+  "messaging_sender_id": "369367231553",
+  "api_key": "<PASTE_FROM_HAR>",
+  "bundle_id": "ru.inetra.intercom"
+}

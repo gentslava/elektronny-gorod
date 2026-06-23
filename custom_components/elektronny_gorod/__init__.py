@@ -11,10 +11,13 @@ from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
+from .api import ElektronnyGorodAPI
 from .const import (
     DOMAIN,
     LOGGER,
+    CONF_ACCESS_TOKEN,
     CONF_OPERATOR_ID,
+    CONF_REFRESH_TOKEN,
     CONF_USER_AGENT,
     CONF_USE_GO2RTC,
     CONF_GO2RTC_BASE_URL,
@@ -24,11 +27,13 @@ from .const import (
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
+from .fcm import DoorbellFcmListener
 from .user_agent import UserAgent
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.CAMERA,
+    Platform.EVENT,
     Platform.LOCK,
     Platform.SENSOR,
     Platform.SWITCH,
@@ -54,6 +59,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Realtime событие вызова домофона — FCM-listener в фоне. Хрупкий флоу
+    # (приватные API Google) под graceful degradation в fcm.py; background-task —
+    # чтобы медленный checkin/register не блокировал setup. См. ADR-0011.
+    fcm_listener = DoorbellFcmListener(hass, entry, coordinator.api)
+    entry.async_create_background_task(
+        hass, fcm_listener.async_start(), name=f"{DOMAIN}_fcm_listener"
+    )
+    entry.async_on_unload(fcm_listener.async_stop)
 
     # One-time migration: legacy state (disabled_by на entities/devices от
     # старых версий integration) → None. Применяется один раз per entry.
@@ -352,3 +366,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
 
     return unload_ok
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """На удалении интеграции — отвязать FCM push-токен у оператора (best-effort).
+
+    Вызывается HA только при удалении entry (НЕ при reload/unload), поэтому
+    отвязка не происходит на каждый reload. Coordinator уже выгружен — строим
+    временный API из entry.data. Ошибки глушим (cleanup не должен мешать удалению).
+    """
+    try:
+        user_agent = UserAgent()
+        user_agent.from_json(json.loads(entry.data[CONF_USER_AGENT]))
+        api = ElektronnyGorodAPI(
+            hass,
+            user_agent,
+            access_token=entry.data.get(CONF_ACCESS_TOKEN),
+            refresh_token=entry.data.get(CONF_REFRESH_TOKEN),
+            operator=str(entry.data.get(CONF_OPERATOR_ID)),
+        )
+        await api.unregister_push_device()
+    except Exception:  # noqa: BLE001
+        LOGGER.debug("Push-токен не отвязан при удалении entry (best-effort)")

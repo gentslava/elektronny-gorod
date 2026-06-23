@@ -1,0 +1,7 @@
+# Секреты и артефакты эксперимента — НЕ коммитить
+session.json
+firebase_config.json
+fcm_credentials.json
+logs/
+.venv/
+__pycache__/

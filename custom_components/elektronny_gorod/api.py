@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any
 
 from aiohttp import ClientResponse
@@ -11,6 +12,17 @@ from homeassistant.core import HomeAssistant
 
 from .http import HTTP
 from .user_agent import UserAgent
+
+# Эндпоинты привязки push-токена (зеркало приложения, см. FINDINGS §FCM).
+_DEVICE_INSTALLATIONS = (
+    "/api/mh-customer-device/mobile/public/v1/customers/device-installations"
+)
+_SUBSCRIBER_NOTIFICATIONS = "/rest/v1/subscriberNotifications"
+
+
+def _device_id(installation_id: str) -> str:
+    """Стабильный 16-hex deviceId, производный от installationId (UA.uuid)."""
+    return uuid.uuid5(uuid.NAMESPACE_DNS, f"eg-fcm-{installation_id}").hex[:16]
 
 
 class ElektronnyGorodAPI:
@@ -383,3 +395,55 @@ class ElektronnyGorodAPI:
 
         payload = {"name": "accessControlOpen"}
         await self.http.post(api_url, json.dumps(payload))
+
+    def _push_body(self, fcm_token: str | None = None) -> dict[str, Any]:
+        """Тело device-регистрации — зеркало приложения (FINDINGS §FCM).
+
+        С `fcm_token` (POST register) включает `pushToken`; без него
+        (DELETE unregister) — то же тело без `pushToken`, ровно как приложение.
+        """
+        ua = self.http.user_agent
+        body: dict[str, Any] = {
+            "appVersionCode": int(ua.app_version["code"]),
+            "installationId": ua.uuid,
+            "appId": 2,
+            "appVersion": ua.app_version["name"],
+            "platform": "google",
+            "isDevelop": False,
+            "deviceManufacturer": ua.phone_manufacturer,
+            "deviceModelName": ua.phone_model,
+            "osVersion": ua.android_ver,
+            "deviceId": _device_id(ua.uuid),
+            "deviceType": "MOBILE_APPLICATION",
+        }
+        if fcm_token is not None:
+            body["pushToken"] = fcm_token
+        return body
+
+    async def register_push_device(self, fcm_token: str) -> bool:
+        """Привязать FCM push-токен у оператора.
+
+        Шлёт тело-зеркало на device-installations + subscriberNotifications.
+        `http.post` бросает на не-2xx, поэтому успех = оба без исключения.
+        Возвращает True/False. `pushToken` в логи не пишется (http.py логирует
+        только размер тела, см. no-secret-logs).
+        """
+        body = json.dumps(self._push_body(fcm_token))
+        try:
+            for endpoint in (_DEVICE_INSTALLATIONS, _SUBSCRIBER_NOTIFICATIONS):
+                await self.http.post(endpoint, body)
+            return True
+        except Exception:
+            return False
+
+    async def unregister_push_device(self) -> bool:
+        """Отписать устройство от push (DELETE subscriberNotifications).
+
+        Тело — зеркало приложения: то же device-тело, что у POST, но без
+        `pushToken` (наблюдалось в HAR: приложение шлёт DELETE с телом).
+        """
+        try:
+            await self.http.delete(_SUBSCRIBER_NOTIFICATIONS, json.dumps(self._push_body()))
+            return True
+        except Exception:
+            return False
