@@ -49,6 +49,7 @@ EARLY_MEDIA = os.environ.get("EARLY_MEDIA") == "1"  # 183 Session Progress + SDP
 MIRROR_APP = os.environ.get("MIRROR_APP") == "1"  # зеркало приложения: Expires=30, без STUN, проприет. push
 RTP_EARLY = os.environ.get("RTP_EARLY") == "1"  # ранний RTP (тишина) с INVITE — активирует latching до ответа
 PRE_DELAY = float(os.environ.get("PRE_DELAY", "0"))  # «раздумья» ДО REGISTER (модель REGISTER-on-answer)
+PERSIST_REG = os.environ.get("PERSIST_REG") == "1"  # постоянная регистрация (софтфон) — надёжнее на NAT
 
 LOOP: asyncio.AbstractEventLoop | None = None
 STATE: dict = {}  # sess, intercom, creds, local_ip, ip, fcm_token, sender
@@ -270,6 +271,7 @@ class TransientSip(asyncio.DatagramProtocol):
             elif method in ("BYE", "CANCEL"):
                 self.call_active = False  # стоп аудио
                 self._rtp_stop = True  # остановить ранний RTP, если шёл до ответа
+                self.invite_mono = None  # PERSIST_REG: разрешить ответ на следующий вызов
                 reason = hdr(text, "Reason") or hdr(text, "X-KAZOO-DISPOSITION") or ""
                 dt_since_inv = (time.monotonic() - self.invite_mono) if self.invite_mono else float("nan")
                 via = hdr(text, "Via") or ""
@@ -512,6 +514,25 @@ async def do_transient_answer(t0: float) -> None:
         log("  transient-сокет закрыт (регистрация снята).")
 
 
+async def persistent_register() -> None:
+    """Постоянная регистрация (как софтфон): держим binding + NAT-pinhole открытыми,
+    рефреш каждые 60с, отвечаем на INVITE. Надёжнее register-on-push на многослойном
+    NAT (Mac/Docker), где транзиентный binding не успевает / pinhole закрывается.
+    Сброс invite_mono на BYE/CANCEL → отвечаем на каждый следующий вызов."""
+    sess, creds = STATE["sess"], STATE["creds"]
+    transport, proto = await LOOP.create_datagram_endpoint(
+        lambda: TransientSip(creds, STATE["local_ip"], sess.user_agent, time.monotonic(), expires=120),
+        local_addr=("0.0.0.0", SIP_LOCAL_PORT), remote_addr=(STATE["ip"], SIP_PORT),
+    )
+    log("🔁 PERSIST_REG: постоянная регистрация (рефреш 60с), отвечаю на INVITE. ЗВОНИ В ДОМОФОН.")
+    try:
+        while True:
+            await asyncio.sleep(60)
+            proto.send_register()  # рефреш binding + NAT-pinhole
+    finally:
+        transport.close()
+
+
 async def initial_prebind() -> None:
     """Предв. SIP push-binding (RFC 8599, модель приложения): REGISTER с pn-параметрами
     (длинный Expires), затем закрываем сокет — симулируем спящее push-устройство. Если
@@ -605,6 +626,10 @@ async def main() -> None:
                 log(f"ANSWER mode: STUN не ответил — fallback {media_ip}:{media_port}")
         STATE.update(rtp_sock=rtp_sock, media_ip=media_ip, media_port=media_port)
         log(f"ANSWER mode: ответ через {ANSWER_DELAY:.0f}с после INVITE → 200 OK + аудио-трек.")
+
+    if PERSIST_REG:
+        await persistent_register()  # вместо FCM-push-flow: софтфон-регистрация (надёжнее на NAT)
+        return
 
     fcm_config = FcmRegisterConfig(
         project_id=cfg["project_id"], app_id=cfg["app_id"], api_key=cfg["api_key"],

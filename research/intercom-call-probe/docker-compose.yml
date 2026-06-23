@@ -104,6 +104,7 @@ services:
       - RTP_EARLY=${RTP_EARLY:-1}
       - ANSWER_DELAY=${ANSWER_DELAY:-2}
       - TALK_SEC=${TALK_SEC:-30}  # лимит разговора → BYE по таймеру (анти-зомби RTP-loop)
+      - PERSIST_REG=${PERSIST_REG:-0}  # постоянная регистрация (софтфон) — надёжнее на NAT
       - MIC_PT=${MIC_PT:-0}
       - MIC_TOKEN=${MIC_TOKEN:-}  # задать при публичном (cloudflared) запуске — токен в ?k=
     volumes:
