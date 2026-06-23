@@ -145,8 +145,6 @@ async def test_answer_with_go2rtc_sets_up_bridge():
     upsert = AsyncMock()
     with patch(_MGR_PATH) as MgrCls, patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
         f"{_CC}.detect_lan_ip", return_value="1.2.3.4"
-    ), patch(f"{_CC}.upsert_audio_stream", new=upsert), patch(
-        f"{_CC}.async_get_clientsession", return_value=MagicMock()
     ):
         bridge = BridgeCls.return_value
         bridge.start = AsyncMock()
@@ -157,10 +155,10 @@ async def test_answer_with_go2rtc_sets_up_bridge():
         ok = await c.async_answer()
 
     assert ok is True
-    bridge.start.assert_awaited_once()  # ffmpeg поднят
-    upsert.assert_awaited_once()  # go2rtc-стрим создан
-    # on_downlink отдан в accept/async_answer — это feed_downlink моста (не счётчик).
+    bridge.start.assert_awaited_once()
     assert mgr.async_answer.await_args.kwargs["on_downlink"] is bridge.feed_downlink
+    # upsert на accept больше НЕ происходит (его делает camera.intercom_call)
+    upsert.assert_not_awaited()
 
 
 async def test_answer_without_go2rtc_uses_counter_sink(controller):
@@ -228,31 +226,27 @@ async def test_cancel_dismisses_screen():
     c._hass.bus.async_fire.assert_called_with(EVENT_SIP_CALL, {"active": False})
 
 
-def test_call_stream_srcs_video_plus_audio_when_camera_resolved():
-    # B: камера разрешилась → видео RTSP камеры ПЕРЕД аудио моста (go2rtc склеит).
-    from custom_components.elektronny_gorod.sip.call_controller import Go2RtcConfig
+async def test_active_call_media_returns_camera_and_bridge():
+    from custom_components.elektronny_gorod.sip.call_controller import (
+        DoorbellCallController,
+        Go2RtcConfig,
+    )
+
+    api = MagicMock()
+    api.mint_sip_device = AsyncMock(return_value={"login": "l", "password": "p", "realm": "r"})
     c = DoorbellCallController(
-        _hass(), MagicMock(), lambda: "TOK",
+        _hass(), api, lambda: "TOK",
         go2rtc=Go2RtcConfig("http://g:1984", {}, "127.0.0.1"),
         camera_resolver=lambda ac: "5593590" if ac == "AC" else None,
     )
-    call = MagicMock(); call.access_control_id = "AC"
-    bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus"
-    srcs = c._call_stream_srcs(call, bridge)
-    assert srcs == [
-        "rtsp://127.0.0.1:8554/eg_5593590#video=copy",
-        "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus",
-    ]
+    c.handle_signal(_ring(ac="AC"))
+    bridge = MagicMock()
+    c._manager = MagicMock(); c._manager.in_call = True
+    c._bridge = bridge
+    cam_id, br = c.active_call_media()
+    assert cam_id == "5593590" and br is bridge
 
 
-def test_call_stream_srcs_audio_only_when_no_camera():
-    # Камера не разрешилась → только аудио (fallback, экран покажет своё видео).
-    from custom_components.elektronny_gorod.sip.call_controller import Go2RtcConfig
-    c = DoorbellCallController(
-        _hass(), MagicMock(), lambda: "TOK",
-        go2rtc=Go2RtcConfig("http://g:1984", {}, "127.0.0.1"),
-        camera_resolver=lambda ac: None,
-    )
-    call = MagicMock(); call.access_control_id = "AC"
-    bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus"
-    assert c._call_stream_srcs(call, bridge) == ["ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus"]
+def test_active_call_media_none_when_no_call():
+    c = DoorbellCallController(_hass(), MagicMock(), lambda: "TOK")
+    assert c.active_call_media() is None
