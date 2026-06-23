@@ -44,6 +44,10 @@ AUDIO_STREAM_NAME = "eg_intercom_talk"
 # Домофон оператора шлёт PCMU(0) (live-доказано: «PT=0 PCMU»). Мост — под него.
 _DOWNLINK_PT = 0
 
+# Событие шины: состояние SIP-разговора (start/end). UI ведёт экран по нему, а не
+# по FCM-событию `ended` (то срабатывает по окну вызова ~30с, разговор живёт дольше).
+EVENT_SIP_CALL = "elektronny_gorod_sip_call"
+
 
 @dataclass
 class Go2RtcConfig:
@@ -164,6 +168,7 @@ class DoorbellCallController:
             if ok:
                 self._manager = manager
                 self._bridge = bridge
+                self._fire_call_state(True)
             else:
                 await self._teardown_audio_bridge(bridge)
             return ok
@@ -174,7 +179,13 @@ class DoorbellCallController:
         bridge, self._bridge = self._bridge, None
         if manager is not None:
             await manager.async_hangup()
+            self._fire_call_state(False)
         await self._teardown_audio_bridge(bridge)
+
+    @callback
+    def _fire_call_state(self, active: bool) -> None:
+        """Сигнал шины о старте/конце SIP-разговора (для UI-состояния экрана)."""
+        self._hass.bus.async_fire(EVENT_SIP_CALL, {"active": active})
 
     # ---- аудио-мост (downlink) ----
     async def _setup_audio_bridge(
@@ -214,8 +225,10 @@ class DoorbellCallController:
 
     @callback
     def _schedule_audio_cleanup(self) -> None:
-        """on_ended от SipManager (remote BYE): снять мост вне sync-callback."""
+        """on_ended от SipManager (remote BYE): снять мост + сигнал конца SIP."""
+        self._manager = None
         bridge, self._bridge = self._bridge, None
+        self._fire_call_state(False)
         if bridge is not None:
             self._hass.async_create_task(self._teardown_audio_bridge(bridge))
 
