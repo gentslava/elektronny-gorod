@@ -3,6 +3,13 @@
 Домофон оператора шлёт только G.711 (PCMU pt=0 / PCMA pt=8); voip-utils хардкодит
 Opus — поэтому транскод наш слой (design.md §3.1). `audioop` удалён из stdlib в
 Python 3.13 (PEP 594) → зависимость `audioop-lts` (manifest) возвращает модуль.
+
+STAGED FOR UPLINK SLICE (Slice 2 — микрофон): на текущем слайсе downlink-транскод
+делает ffmpeg в bridge.py, поэтому `g711_to_pcm`/`pcm_to_g711` ещё не вызываются в
+рантайме (импортирует только тест). `pcm_to_g711` — uplink-примитив (микрофон →
+G.711 → RTP в домофон), подключается в Slice 2. Модуль и manifest-зависимость
+`audioop-lts` сохранены намеренно как фундамент следующего слайса (решение
+зафиксировано в code-review P1-2). См. call-screen-display-design.md §«микрофон».
 """
 from __future__ import annotations
 
