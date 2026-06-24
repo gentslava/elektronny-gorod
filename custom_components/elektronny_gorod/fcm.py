@@ -13,11 +13,13 @@ degradation: при любом сбое логируем warning, интегра
 """
 from __future__ import annotations
 
+from datetime import timedelta
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.event import async_track_time_interval
 
 from .api import ElektronnyGorodAPI
 from .const import (
@@ -38,6 +40,13 @@ _PUSH_TYPE_EVENT = {
     "CALL_END_ANSWERED_MOBILE": "ended",
 }
 
+# Watchdog: интервал контроля живости FCM-сокета. С
+# abort_on_sequential_error_count=None библиотека не умирает от сетевых сбоев,
+# но watchdog ловит фатальную смерть клиента (или провал первичного checkin) и
+# поднимает заново — иначе пуши о вызове молча отвалятся (инцидент 2026-06-24:
+# сетевой блип → 3 ошибки подряд → receiver выключился, юзер не узнал).
+FCM_WATCHDOG_INTERVAL = timedelta(minutes=2)
+
 
 class DoorbellFcmListener:
     """Держит FCM-соединение и рассылает событие вызова через dispatcher."""
@@ -49,14 +58,34 @@ class DoorbellFcmListener:
         self._entry = entry
         self._api = api
         self._client: Any = None
+        # Watchdog: unsub периодического контроля живости + guard от
+        # перекрытия повторных переподнятий.
+        self._watchdog_unsub: Any = None
+        self._reconnecting = False
         # FCM push-токен (после checkin_or_register). Нужен SIP-ответу для
         # push-params REGISTER (pn-tok=...) — см. sip/call_controller.py.
         self.fcm_token: str | None = None
 
     async def async_start(self) -> None:
-        """checkin/register → привязка токена у оператора → start MTalk-сокет."""
+        """Первичный коннект + запуск watchdog'а (контроль живости сокета)."""
+        await self._async_connect()
+        if self._watchdog_unsub is None:
+            self._watchdog_unsub = async_track_time_interval(
+                self._hass, self._async_watchdog, FCM_WATCHDOG_INTERVAL
+            )
+
+    async def _async_connect(self) -> None:
+        """checkin/register → привязка токена у оператора → start MTalk-сокет.
+
+        `abort_on_sequential_error_count=None` — библиотека НЕ выключает receiver
+        после N подряд ошибок соединения (дефолт 3), а продолжает переподключаться.
+        """
         try:
-            from firebase_messaging import FcmPushClient, FcmRegisterConfig
+            from firebase_messaging import (
+                FcmPushClient,
+                FcmPushClientConfig,
+                FcmRegisterConfig,
+            )
         except Exception as err:  # noqa: BLE001
             LOGGER.warning(
                 "FCM: firebase-messaging недоступна (%s) — событие вызова отключено", err
@@ -64,7 +93,7 @@ class DoorbellFcmListener:
             return
 
         try:
-            config = FcmRegisterConfig(
+            register_config = FcmRegisterConfig(
                 project_id=FCM_PROJECT_ID,
                 app_id=FCM_APP_ID,
                 api_key=FCM_API_KEY,
@@ -74,9 +103,10 @@ class DoorbellFcmListener:
             credentials = self._entry.data.get(CONF_FCM_CREDENTIALS)
             self._client = FcmPushClient(
                 self._on_notification,
-                config,
+                register_config,
                 credentials,
                 self._on_credentials_updated,
+                config=FcmPushClientConfig(abort_on_sequential_error_count=None),
             )
             fcm_token = await self._client.checkin_or_register()
             self.fcm_token = fcm_token
@@ -92,14 +122,45 @@ class DoorbellFcmListener:
             )
             self._client = None
 
-    async def async_stop(self) -> None:
-        """Остановить MTalk-сокет (вызывается на unload entry)."""
+    async def _async_watchdog(self, _now: Any = None) -> None:
+        """Периодически: если push-receiver неактивен — переподнять listener.
+
+        Ловит фатальную смерть клиента и провал первичного checkin (client=None).
+        Guard `_reconnecting` — против перекрытия с предыдущим переподнятием.
+        """
+        if self._reconnecting:
+            return
+        client = self._client
+        if client is not None and client.is_started():
+            return
+        # is_started()==False = receiver мёртв ЛИБО ещё в фазе MCS-login.
+        # Интервал watchdog (2 мин) ≫ времени login (секунды) → к тику живой
+        # клиент уже STARTED; не-STARTED на тике = реально залип/умер →
+        # переподнимаем (grace-период не нужен и лишь задержал бы восстановление
+        # действительно зависшего login).
+        self._reconnecting = True
+        try:
+            LOGGER.warning("FCM: push-receiver неактивен — переподнимаю listener")
+            await self._async_disconnect()
+            await self._async_connect()
+        finally:
+            self._reconnecting = False
+
+    async def _async_disconnect(self) -> None:
+        """Остановить текущий MTalk-сокет (watchdog НЕ трогаем)."""
         client, self._client = self._client, None
         if client is not None:
             try:
                 await client.stop()
             except Exception:  # noqa: BLE001
                 pass
+
+    async def async_stop(self) -> None:
+        """Полная остановка на unload entry: отменить watchdog + закрыть сокет."""
+        if self._watchdog_unsub is not None:
+            self._watchdog_unsub()
+            self._watchdog_unsub = None
+        await self._async_disconnect()
 
     @callback
     def _on_credentials_updated(self, credentials: dict, *_: Any) -> None:

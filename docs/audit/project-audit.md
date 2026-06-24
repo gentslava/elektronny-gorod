@@ -1105,6 +1105,35 @@ Quality gates:
   содержит acId, парный к SIP-паролю) добавлен в `SENSITIVE_KEYS`; SIP
   login/password не логируются (no-secret-logs rule).
 
+### A-86. FCM push-receiver молча умирает → вызовы домофона пропадают (watchdog)
+
+- **Status:** 🟢 **resolved-in-branch (pending merge `fix/fcm-reconnect-watchdog`)**.
+  Bug-fix. Root cause подтверждён runtime-evidence (прод-лог 2026-06-24). После
+  merge → RESOLVED.
+- **Severity:** P1 (вызовы домофона молча перестают приходить — пропущенные
+  звонки, статус интеграции при этом `loaded`, юзер не узнаёт).
+- **Area:** `fcm.py` (`DoorbellFcmListener`: `_async_connect` / `_async_watchdog`
+  / `_async_disconnect` / `async_stop`).
+- **Симптом:** прод 2026-06-24 после сетевого блипа (работы с роутингом) —
+  `firebase_messaging.fcmpushclient: Shutting down push receiver due to 3
+  sequential errors of type ErrorType.CONNECTION`; далее FCM-сокет мёртв,
+  `CALL_INCOMING`-пуши не приходят, переподнятия нет.
+- **Root cause (confirmed):** `FcmPushClientConfig.abort_on_sequential_error_count`
+  по умолчанию `3` → библиотека выключает receiver навсегда после 3 ошибок
+  подряд. `async_start` был fire-and-forget — контроля живости нет → молчаливая
+  смерть.
+- **Fix:** (1) `FcmPushClientConfig(abort_on_sequential_error_count=None)` —
+  бесконечный reconnect внутри библиотеки; (2) watchdog
+  (`async_track_time_interval`, 2 мин) опрашивает `client.is_started()`, при
+  мёртвом receiver / провале первичного checkin (`client=None`) логирует warning
+  и переподнимает (`_async_connect`); guard `_reconnecting`; таймер отменяется на
+  unload. Видимость — лог-warning (по согласованию: отдельный sensor не нужен).
+- **Evidence:** прод-лог (20:47:22) + восстановление через `reload_config_entry`
+  (`FCM doorbell listener запущен`). 9 тестов `test_fcm.py` (abort=None, watchdog
+  reconnect / skip-healthy, idempotency, cleanup). Independent code-review —
+  approve (P0/P1 нет), контракт `firebase-messaging 0.4.5` верифицирован.
+- **Связь:** [ADR-0011](../decisions/0011-doorbell-fcm-channel.md) (FCM-канал вызова).
+
 ### A-85. Uplink-микрофон — говорить гостю (завершение two-way audio, ADR-0013)
 
 - **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-uplink-mic`)**.
