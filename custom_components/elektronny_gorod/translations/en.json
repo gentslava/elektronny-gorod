@@ -138,5 +138,15 @@
         "name": "Mute management company calls"
       }
     }
+  },
+  "services": {
+    "answer": {
+      "name": "Answer doorbell call",
+      "description": "Answer the currently ringing intercom call and start two-way audio."
+    },
+    "hangup": {
+      "name": "Hang up doorbell call",
+      "description": "End the active intercom call."
+    }
   }
 }

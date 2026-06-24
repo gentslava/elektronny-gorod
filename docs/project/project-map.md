@@ -1,6 +1,6 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-06-22
+Last reviewed: 2026-06-24 (A-85 uplink-микрофон ADR-0013: uplink_ws.py + sip/uplink.py + www/eg-intercom-mic-card.js + test_sip_uplink/test_uplink_ws/test_sip_manager; DoorbellCallController; 14 sip/-модулей)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -64,6 +64,25 @@ elektronny-gorod/
 │   ├── switch.py                  ← DND switches platform
 │   ├── event.py                   ← doorbell call event platform (ADR-0011)
 │   ├── fcm.py                     ← FCM listener для события вызова (ADR-0011)
+│   ├── sip/                       ← SIP-стек two-way audio, 14 модулей (A-81 + A-85 uplink; ADR-0012/0013)
+│   │   ├── __init__.py
+│   │   ├── audio.py               ← G.711 ↔ PCM
+│   │   ├── stun.py                ← STUN parse / keepalive
+│   │   ├── digest.py              ← Digest MD5 (RFC 2617)
+│   │   ├── sdp.py                 ← parse offer + build G.711 answer
+│   │   ├── message.py             ← SIP parse (multi-Via / Record-Route)
+│   │   ├── dialog.py              ← DialogState + 200 OK + BYE
+│   │   ├── register.py            ← REGISTER + проприетарные push-params
+│   │   ├── rtp.py                 ← RTP G.711 latching
+│   │   ├── protocol.py            ← asyncio SIP-транспорт
+│   │   ├── manager.py             ← SipManager (фасад)
+│   │   ├── bridge.py              ← AudioBridge: G.711 → ffmpeg → mpegts/aac → HTTP
+│   │   ├── uplink.py              ← UplinkSink: микрофон-PCM → G.711-кадры (ADR-0013)
+│   │   └── call_controller.py     ← DoorbellCallController: трекинг FCM-вызова + answer/hangup + UplinkSink
+│   ├── uplink_ws.py               ← WS-команда intercom_uplink: микрофон → SIP-uplink (ADR-0013)
+│   ├── www/                       ← static Lovelace-ресурсы (зарегистрированы из uplink_ws.py)
+│   │   └── eg-intercom-mic-card.js ← карта микрофона домофона: getUserMedia → HA-WS (ADR-0013)
+│   ├── services.yaml              ← сервисы answer / hangup (A-81)
 │   ├── go2rtc.py                  ← go2rtc валидация / upsert
 │   ├── entity_migration.py        ← стабильные unique_id + registry migration
 │   ├── diagnostics.py             ← redact-нутая diagnostics-выгрузка (S-08)
@@ -130,7 +149,7 @@ elektronny-gorod/
 | Файл | Назначение | Особенности |
 |---|---|---|
 | [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) | `DataUpdateCoordinator` | `update_interval=5min`, `_async_update_data` → `{places, balances, cameras, locks}` (ADR-0002) |
-| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, push-registration (`register_push_device` / `unregister_push_device` — привязка FCM-токена у оператора, ADR-0011) | использует shared `HTTP` (ADR-0008) |
+| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, push-registration (`register_push_device` / `unregister_push_device` — привязка FCM-токена у оператора, ADR-0011), `mint_sip_device` (SIP-креды `{login, password, realm}` для приёма вызова, A-81) | использует shared `HTTP` (ADR-0008) |
 | [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
 
 ### Платформы (entity)
@@ -148,8 +167,34 @@ elektronny-gorod/
 
 | Файл | Назначение |
 |---|---|
-| [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | validate_go2rtc (GET /api + PUT /api/streams + cleanup), upsert stream, derive_rtsp_host |
+| [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | validate_go2rtc (GET /api + PUT /api/streams + cleanup), upsert stream, derive_rtsp_host; `upsert_audio_stream` / `remove_audio_stream` — аудио-стрим вызова (A-81) |
 | [`fcm.py`](../../custom_components/elektronny_gorod/fcm.py) | `DoorbellFcmListener` (ADR-0011): эмуляция регистрации Android-устройства в FCM (`firebase-messaging`, Firebase-конфиг приложения в `const.py:FCM_*`) → привязка токена у оператора (`api.register_push_device`) → MTalk-сокет. Парсит `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → `SIGNAL_DOORBELL`. Весь флоу под graceful degradation (приватные API Google) — сбой не валит setup. FCM-creds персистятся в `entry.data` |
+
+### SIP / two-way audio (приём вызова + показ экрана)
+
+Пакет `sip/` — двусторонняя связь (A-81 приём + downlink, A-85 uplink-микрофон, [call-answer-model](../features/intercom-two-way-audio/call-answer-model.md)). Модель **register-on-ring (held-short-window, ADR-0012)**: на FCM `CALL_INCOMING` — сразу `mint → REGISTER → 100 Trying` (hold), по «Ответить» — `200 OK` на held-INVITE + RTP-latching. Сброс с панели приходит как SIP `CANCEL` → мгновенный dismiss экрана. `DoorbellCallController` в `hass.data`, сервисы `answer` / `hangup`. Микрофон (говорить гостю) — `uplink_ws.py` WS-команда `intercom_uplink` → `UplinkSink` → uplink-RTP (ADR-0013).
+
+Показ экрана вызова — `call_camera.py`: camera-сущность `camera.intercom_call` показывает активный вызов **видео + звук гостя** через HA-native WebRTC (go2rtc в LAN, 4G без экспозиции). `stream_source()` при активном вызове пересобирает go2rtc-стрим `eg_intercom_call` (СВЕЖИЙ video-RTSP домофона + аудио-мост). Вне вызова → `None`.
+
+| Файл | Назначение |
+|---|---|
+| [`sip/call_controller.py`](../../custom_components/elektronny_gorod/sip/call_controller.py) | `DoorbellCallController` — HA-glue: трекинг активного FCM-вызова по `Call-ID`, `answer`/`hangup`, mint → hold → accept; lifecycle `AudioBridge` + `UplinkSink`; `feed_uplink()` (микрофон из WS → sink, ADR-0013); `active_call_media()` → camera_id + bridge (узкий интерфейс для `call_camera.py`) |
+| [`sip/uplink.py`](../../custom_components/elektronny_gorod/sip/uplink.py) | `UplinkSink` — микрофон-PCM → resample 8к → G.711-кадры + джиттер-буфер; `next_frame()` для `SipManager.uplink_provider` (ADR-0013) |
+| [`sip/manager.py`](../../custom_components/elektronny_gorod/sip/manager.py) | `SipManager` — фасад: `register_and_hold`, `accept`, `async_hangup`, `on_downlink` |
+| [`sip/protocol.py`](../../custom_components/elektronny_gorod/sip/protocol.py) | asyncio SIP-транспорт (UDP); разделяет `CANCEL` → `487` + dismiss / `BYE` → on_bye |
+| [`sip/register.py`](../../custom_components/elektronny_gorod/sip/register.py) | REGISTER (Expires=30 + проприетарные push-params в Contact URI) |
+| [`sip/dialog.py`](../../custom_components/elektronny_gorod/sip/dialog.py) | `DialogState` + build 200 OK (эхо Via/Record-Route) + BYE |
+| [`sip/message.py`](../../custom_components/elektronny_gorod/sip/message.py) | SIP message parse (multi-Via / Record-Route) |
+| [`sip/sdp.py`](../../custom_components/elektronny_gorod/sip/sdp.py) | parse INVITE-offer + build G.711 answer (локальный адрес, без STUN/ICE) |
+| [`sip/rtp.py`](../../custom_components/elektronny_gorod/sip/rtp.py) | RTP G.711 latching (uplink-first → downlink) |
+| [`sip/digest.py`](../../custom_components/elektronny_gorod/sip/digest.py) | Digest MD5 non-qop (RFC 2617) |
+| [`sip/stun.py`](../../custom_components/elektronny_gorod/sip/stun.py) | STUN parse / keepalive (20B бинарь) |
+| [`sip/audio.py`](../../custom_components/elektronny_gorod/sip/audio.py) | G.711 PCMU/PCMA ↔ PCM |
+| [`sip/bridge.py`](../../custom_components/elektronny_gorod/sip/bridge.py) | `AudioBridge` — downlink G.711-кадры → ffmpeg → mpegts/aac → персистентный HTTP-сервер → go2rtc; keepalive-тишина; `detect_lan_ip()` |
+| [`call_camera.py`](../../custom_components/elektronny_gorod/call_camera.py) | `ElektronnyGorodCallCamera` — camera-сущность `camera.intercom_call`; `stream_source()` пересобирает `eg_intercom_call` при активном вызове; вне вызова → `None` |
+| [`uplink_ws.py`](../../custom_components/elektronny_gorod/uplink_ws.py) | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): микрофон из Lovelace-карты → `DoorbellCallController.feed_uplink`; static-регистрация JS-карты (`async_register_uplink_ws_command` / `async_register_uplink_card`, зовутся из `__init__.py`) (ADR-0013) |
+| [`www/eg-intercom-mic-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-mic-card.js) | Lovelace-карта микрофона домофона: `getUserMedia` + AudioWorklet → Int16 PCM по авторизованному HA-WebSocket (ADR-0013) |
+| [`services.yaml`](../../custom_components/elektronny_gorod/services.yaml) | сервисы `answer` / `hangup` |
 
 ### Diagnostics / безопасность
 
@@ -189,6 +234,22 @@ elektronny-gorod/
 | [`tests/test_event.py`](../../tests/test_event.py) | doorbell `event`-сущность (ADR-0011): дедуп по AC, фильтр SIGNAL по `(place_id, ac_id)`, `_trigger_event` на `ring`/`ended`, игнор чужого/неизвестного event_type |
 | [`tests/test_api_push.py`](../../tests/test_api_push.py) | `register_push_device` / `unregister_push_device`: тело-зеркало (POST с `pushToken` на `device-installations` + `subscriberNotifications`, DELETE без `pushToken`), graceful False на ошибке |
 | [`tests/test_fcm.py`](../../tests/test_fcm.py) | `DoorbellFcmListener`: парсинг `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → SIGNAL, graceful degradation при недоступной `firebase-messaging` / сбое start, персист FCM-creds в `entry.data` |
+| [`tests/test_sip_audio.py`](../../tests/test_sip_audio.py) | G.711 PCMU/PCMA ↔ PCM (A-81) |
+| [`tests/test_sip_stun.py`](../../tests/test_sip_stun.py) | STUN parse / keepalive (A-81) |
+| [`tests/test_sip_digest.py`](../../tests/test_sip_digest.py) | Digest MD5 non-qop golden vectors (A-81) |
+| [`tests/test_sip_sdp.py`](../../tests/test_sip_sdp.py) | parse INVITE-offer + build G.711 answer (A-81) |
+| [`tests/test_sip_message.py`](../../tests/test_sip_message.py) | SIP parse с multi-Via / Record-Route (A-81) |
+| [`tests/test_sip_dialog.py`](../../tests/test_sip_dialog.py) | DialogState + 200 OK + BYE (A-81) |
+| [`tests/test_sip_register.py`](../../tests/test_sip_register.py) | REGISTER + проприетарные push-params (A-81) |
+| [`tests/test_sip_rtp.py`](../../tests/test_sip_rtp.py) | RTP G.711 latching (A-81) |
+| [`tests/test_sip_bridge.py`](../../tests/test_sip_bridge.py) | `AudioBridge`: RTP-packetize, go2rtc src-формат, keepalive-логика (A-81) |
+| [`tests/test_api_sip.py`](../../tests/test_api_sip.py) | `api.mint_sip_device` — тело-зеркало (`installationId`) → `{login, password, realm}` (A-81) |
+| [`tests/test_sip_call_controller.py`](../../tests/test_sip_call_controller.py) | `DoorbellCallController`: трекинг по `Call-ID`, answer/hangup, mint timeout, one-concurrent-call guard, `active_call_media`, uplink-sink lifecycle + `feed_uplink` + `uplink_provider` (A-81, ADR-0013) |
+| [`tests/test_sip_manager.py`](../../tests/test_sip_manager.py) | `SipManager.accept()` degrade на malformed SDP из сети (P1-1): release held + return False, без ValueError/IndexError (A-81) |
+| [`tests/test_sip_uplink.py`](../../tests/test_sip_uplink.py) | `UplinkSink`: микрофон-PCM → resample 8к → G.711-кадры + джиттер-буфер (ADR-0013) |
+| [`tests/test_uplink_ws.py`](../../tests/test_uplink_ws.py) | WS-команда `intercom_uplink`: выбор контроллера, binary-handler → `feed_uplink`, no-active-call error, unsub-cleanup, sample_rate range (ADR-0013) |
+| [`tests/test_call_camera.py`](../../tests/test_call_camera.py) | `ElektronnyGorodCallCamera`: `stream_source` активный/нет вызова, рефреш go2rtc (A-81) |
+| [`tests/test_go2rtc_audio.py`](../../tests/test_go2rtc_audio.py) | `upsert_audio_stream` / `remove_audio_stream` — контракт с go2rtc REST (A-81) |
 | [`pytest.ini`](../../pytest.ini) | `asyncio_mode = auto`, `testpaths = tests` |
 
 ### CI / CD
@@ -212,7 +273,8 @@ elektronny-gorod/
 
 **Python-зависимости:**
 - из HA core (`aiohttp`, `voluptuous`, `yarl`);
-- `manifest.json:requirements` — `firebase-messaging>=0.4` (FCM-приём события вызова, ADR-0011; тянет protobuf / http_ece / cryptography).
+- `manifest.json:requirements` — `firebase-messaging>=0.4` (FCM-приём события вызова, ADR-0011; тянет protobuf / http_ece / cryptography);
+- `audioop-lts>=0.2.1` (только Python 3.13+) — `audioop` удалён из stdlib в PEP 594; нужен для `sip/audio.py` (G.711 транскод, A-81).
 
 ## Maintenance rules
 

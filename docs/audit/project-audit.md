@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-06-22 (A-80 added; A-54/A-58 reassessed → doorbell FCM event, ADR-0011)
+Last reviewed: 2026-06-24 (A-85 uplink-микрофон ADR-0013: HA WS-binary #1, live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref приведён к feat/intercom-uplink-mic; 14 sip/-модулей включая uplink.py)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1059,6 +1059,198 @@ Quality gates:
 - **Watch:** при breakage приватного API — bump `firebase-messaging` (линия
   поддержки Lemoine → sdb9696 переживает изменения через обновление зависимости).
 
+### A-81. Приём вызова домофона по SIP + показ экрана вызова (фундамент two-way audio)
+
+- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-uplink-mic`)**.
+  Feature-слайс (не bug-fix). PR #65 `feat/intercom-two-way-audio` складывается
+  в общую merge-ветку `feat/intercom-uplink-mic` (вся two-way-audio фича влитётся
+  оттуда). После merge → RESOLVED.
+- **Severity:** P1 (real-time path для домофонных звонков — двусторонний звук).
+- **Area:** `sip/` (новый пакет, 14 модулей включая `bridge.py` и `uplink.py`), `call_camera.py`
+  (новый), `api.mint_sip_device`, `services.yaml` (`answer` / `hangup`),
+  `const.py:DOORBELL_CALL_WINDOW_FALLBACK_SEC`, `_logging.py:SENSITIVE_KEYS` (+`realm`),
+  `go2rtc.py` (`upsert_audio_stream` / `remove_audio_stream`).
+- **Что доставлено:** приём активного вызова домофона + downlink-вывод звука +
+  показ экрана вызова. Модель **register-on-ring (ADR-0012, held-short-window)**:
+  по FCM `CALL_INCOMING` (до нажатия «Ответить») минтит SIP-креды →
+  `REGISTER` (Expires=30, проприет. push-params) → держит форкнутый сервером
+  `INVITE` (100 Trying); по нажатию «Ответить» → `200 OK` (локальный SDP,
+  G.711, без STUN/ICE/SRTP) → RTP-latching. SIP `CANCEL` (панель сбросила) →
+  `487` + мгновенный dismiss экрана. Подробности — в
+  [`call-answer-model.md`](../features/intercom-two-way-audio/call-answer-model.md)
+  + [ADR-0012](../decisions/0012-register-on-ring.md).
+- **Evidence:** pcap-тайминги (REGISTER → INVITE +90мс → 200 OK +80мс →
+  latching) + probe-матрица (6 live-проб подтвердили: held-стратегия рвалась
+  при форкинге; register-on-ring + held-short-window воспроизводит приложение
+  и даёт мгновенный CANCEL-dismiss). Суть — в call-answer-model.md §2/§5. Suite **234 passed** (`test_sip_*.py` + `test_api_sip.py` +
+  `test_sip_call_controller.py`).
+- **Scope этого слайса:** приём вызова (register-on-ring/ADR-0012) + RTP-uplink (latching) + **downlink-вывод звука гостя** (`sip/bridge.py` `AudioBridge`) + **показ экрана вызова** (`call_camera.py` — camera-сущность с видео+звуком гостя через HA-native WebRTC). Uplink-микрофон (говорить гостю) — следующий слайс.
+- **Deferred (из code-review, by-design на этом слайсе):**
+  1. **A-21 mitigation, не closure.** `mint_sip_device` латентно-критичен
+     (REGISTER должен опередить INVITE) — обёрнут точечным
+     `asyncio.timeout(8с)` в `call_controller.py` (`_MINT_TIMEOUT_SEC`).
+     Это **точечный** митигатор, **глобальный** `ClientTimeout` на shared
+     `HTTP`/`api.py` остаётся открытым в [A-21](#a-21-нет-timeoutretrybackoff).
+  2. **Single concurrent call (by-design ограничение слайса).** Фиксированные
+     порты SIP/RTP + модель **first-answer-wins** → один активный разговор
+     одновременно. Guard в `call_controller.py` (два concurrent answer создали
+     бы 2 `SipManager` на фикс-портах). Снятие ограничения (динамические порты /
+     пул) — будущий слайс, не блокер.
+- **Связанные findings:** [A-49](#a-49-sip-credentials-endpoint-не-используется)
+  (`sipdevices` endpoint — теперь используется), [A-58](#a-58-real-time-event-delivery-polling-vs-fcm-push--research-pending)
+  / [A-54](#a-54-fcm-канал-и-subscribernotifications--реализован-как-канал-события-вызова)
+  (FCM-канал вызова — триггер для answer), [A-80](#a-80-fcm-приём-вызова--серая-зона-приватных-api-google--новая-зависимость)
+  (та же mirror-app серая зона + push-params).
+- **Контракт безопасности:** SIP `realm` (`{ac_id}.intercom.{operator}.ru` —
+  содержит acId, парный к SIP-паролю) добавлен в `SENSITIVE_KEYS`; SIP
+  login/password не логируются (no-secret-logs rule).
+
+### A-85. Uplink-микрофон — говорить гостю (завершение two-way audio, ADR-0013)
+
+- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-uplink-mic`)**.
+  Feature-слайс (не bug-fix). LIVE-подтверждён в проде **2026-06-24** (микрофон
+  браузера дошёл до домофона, пользователь слышал себя у двери). После merge →
+  RESOLVED.
+- **Severity:** P1 (закрывает двусторонний звук — последний хоп over A-81 downlink).
+- **Area:** `uplink_ws.py` (новый — WS-команда + регистрация Lovelace-карты),
+  `sip/uplink.py` (`UplinkSink`: микрофон-PCM → resample 8к → G.711-кадры),
+  `sip/rtp.py` (дрейф-компенсированный пейсинг `run_uplink`),
+  `sip/call_controller.py` (`feed_uplink` + lifecycle `UplinkSink`,
+  `uplink_provider ← sink.next_frame`), `sip/manager.py` (`uplink_provider`),
+  `www/eg-intercom-mic-card.js` (Lovelace-карта `getUserMedia` → HA-WS).
+- **Что доставлено (механизм #1 — HA WebSocket binary-audio, ADR-0013):**
+  своя Lovelace-карта `getUserMedia` → Int16 PCM по авторизованному HA-WebSocket
+  (`elektronny_gorod/intercom_uplink`, `async_register_binary_handler`) →
+  `DoorbellCallController.feed_uplink` → `UplinkSink` → resample/G.711 →
+  `SipManager.uplink_provider` → дрейф-компенсированный RTP-uplink в домофон.
+  **Без go2rtc/TURN/новых зависимостей** (`audioop-lts` уже есть; pure-Python).
+- **Evidence:** loopback-самотест (синтетический тон через `UplinkSink`-логику →
+  RTP → декод) — дрейф пейсинга **3мс / 9с**, **0 провалов**, тон цел;
+  дрейф-фикс `rtp.py:run_uplink` устранил заикания (наивный `asyncio.sleep(0.02)`
+  копил ~12% дрейфа → саттурация буфера → drop-кадры). Подробности —
+  [ADR-0013](../decisions/0013-uplink-mic-transport.md) §Decision +
+  research FINDINGS §D-audio-variants.
+- **Отвергнутые варианты (эмпирически, не догадки):** #2 go2rtc WHIP-pull
+  (нужен стрим-таргет/yaml + TURN на 4G), #3 go2rtc exec-backchannel
+  (`exec:#backchannel=1` заблокирован через REST на Frigate-go2rtc + upstream-баги
+  + TURN), #4 aiortc (конфликт `av<17` vs HA `av==17.0.1`, нет колёс armv7l).
+  Пробы — `research/intercom-call-probe/` (scaffolding для будущего сравнения,
+  не в проде).
+- **Известные ограничения / accepted-risk:**
+  1. **S-UP-01 (accept-risk, документировано).** Uplink-команда доверяет **всем**
+     authenticated HA-юзерам — любой авторизованный HA-юзер может «говорить» в
+     активный вызов. Паттерн **зеркалит HA voice-assistant** (тот же
+     авторизованный WS, что весь UI); окно вызова эфемерно (~120с). Guard
+     **не добавляется** by-design — см. [`security.md#S-19`](security.md).
+  2. **P2-2 (multi-call selection недетерминирован).** При нескольких активных
+     контроллерах WS-команда выбирает контроллер недетерминированно (single
+     concurrent call — by-design ограничение слайса, см. A-81 deferred §2).
+  3. **Area-B P3-1 (LAN-exposure downlink-аудио).** `AudioBridge` биндит
+     `0.0.0.0:40020` для доступа go2rtc по LAN — эфемерно на время вызова,
+     by-design. См. [`security.md#S-19`](security.md).
+- **Deferred (polish, Slice 2b):** явная `stop`-команда (handler-слоты idle-копятся
+  при многократном toggle в одной сессии — митигирован card-side кэшем подписки,
+  не утечка данных, S-UP-02); hands-free (непрерывный поток, джиттер-буфер, UX
+  mic-toggle).
+- **Связанные findings:** [A-81](#a-81-приём-вызова-домофона-по-sip--показ-экрана-вызова-фундамент-two-way-audio)
+  (downlink + приём вызова — фундамент, поверх которого строится uplink),
+  [A-49](#a-49-sip-credentials-endpoint-не-используется) (`sipdevices`),
+  [A-80](#a-80-fcm-приём-вызова--серая-зона-приватных-api-google--новая-зависимость)
+  (mirror-app серая зона).
+
+## Findings из рефактор-оценки camera.py / go2rtc.py (2026-06-23)
+
+> Источник — code-reviewer-оценка `camera.py` (773 строки, god-class на
+> 5 ответственностей, накоплен за 3 итерации A-71 v1/v2/v3) + `go2rtc.py`
+> на тех-долг (2026-06-23). Главный вывод: go2rtc REST-логика размазана между
+> модулями (upsert/src в `camera.py`, validate/cleanup в `go2rtc.py`, 3 копии
+> auth-header). Оба finding-а ниже — **тех-долг (maintainability), не bug** —
+> low-priority backlog, **не блокируют** аудио-фичу (two-way audio).
+>
+> **Связь с планом:** консолидация go2rtc-клиента в `go2rtc.py` (вынос
+> `_go2rtc_upsert_stream` / `_build_go2rtc_src` из `camera.py` + единые
+> `_go2rtc_auth_header` / `_streams_url`) — **P1**, уже включена в
+> [`plan-audio-downlink.md` Task 2 (рефактор-преамбула)](../features/intercom-two-way-audio/plan-audio-downlink.md).
+> Тем же проходом запланировано закрытие **A-72** (`ClientTimeout` в `go2rtc.py`)
+> и **S-17/S-18** (redact body в `go2rtc.py`) — см.
+> [`security.md#S-17`](security.md) и `summary.md` (риски). Статус A-72/S-17/S-18
+> здесь **не** меняется на resolved (ещё не в master) — cross-ref на план.
+> Findings A-82/A-83 ниже — то, что остаётся в backlog **после** P1-консолидации.
+
+### A-82. go2rtc-transport в `ElektronnyGorodCamera` не вынесен в go2rtc-клиент
+
+- **Status:** 🔴 **OPEN / backlog (low-priority, tech-debt)**.
+- **Severity:** **P3 (maintainability)** — не bug, поведение корректно.
+- **Area:** `camera.py` (god-class на 5 ответственностей), `go2rtc.py`.
+- **Evidence:** даже после P1-консолидации go2rtc-клиента (план Task 2)
+  в `ElektronnyGorodCamera` остаётся go2rtc-transport: `_rtsp_url`,
+  `_fetch_go2rtc_stream_info`, auth/url helpers — логически часть go2rtc-клиента,
+  а не camera-entity.
+- **Motivation:** вынос этой группы в go2rtc-клиент снизит god-class
+  `camera.py` ещё на ~120 строк и завершит концентрацию go2rtc-REST в одном
+  модуле (`go2rtc.py`), начатую P1-консолидацией. Чистая граница
+  «camera-entity ↔ go2rtc-клиент» упрощает будущий аудио-мост (он строится
+  поверх того же клиента — см. `audio-bridge-design.md` §4).
+- **Risk / объём:** риск **средний** (трогает `stream_source` hot path,
+  go2rtc producer lifecycle), объём **M**. Делать **после** P1-консолидации
+  (план Task 2), отдельным проходом — не смешивать с аудио-слайсом.
+- **Recommended first step:** зелёный `pytest` baseline → вынести
+  `_rtsp_url` / `_fetch_go2rtc_stream_info` + auth/url helpers в `go2rtc.py`
+  дословно (поведение неизменно) → обновить импорты в `camera.py` и тестах →
+  зелёный после.
+
+### A-83. Auto-recovery state machine (A-71) не выделена в отдельный helper
+
+- **Status:** 🔴 **OPEN / backlog (low-priority, tech-debt)**.
+- **Severity:** **P3 (maintainability)** — не bug; код работает в проде
+  (ADR-0009, прод-верификация v3.2).
+- **Area:** `camera.py:519-773` (auto-recovery — третья крупная ответственность
+  god-class).
+- **Evidence:** A-71 auto-recovery (v1 event-driven + v2 go2rtc producer-health
+  poll + v3 proactive keep-alive) живёт прямо в `ElektronnyGorodCamera`:
+  `_on_stream_state_change`, `_maybe_schedule_stream_recovery`,
+  `_async_recover_stream`, `_async_poll_go2rtc_health`, `_async_proactive_refresh`
+  (`camera.py:519-773`).
+- **Motivation:** выделение в отдельный `_StreamRecovery` helper изолировало бы
+  ~250 строк state machine от entity-логики (snapshot/stream/coordinator) —
+  крупнейший вклад в god-class.
+- **Risk / объём:** 🔴 **ВЫСОКИЙ риск.** Это **deterministic-tuned** код
+  (тайминги `STREAM_RECOVERY_COOLDOWN` / `GO2RTC_HEALTH_POLL_INTERVAL` /
+  `GO2RTC_PROACTIVE_REFRESH_INTERVAL` подобраны эмпирически, ADR-0009,
+  PATCH-first ROOT CAUSE v3.2), работает в проде. Рефакторинг ломает auth
+  молча, как и любая правка hot-path lifecycle. Объём **L**.
+- **Recommended first step:** **НЕ делать спекулятивно.** Только через
+  **отдельный ADR** (supersede/extend ADR-0009) + **DIAG-baseline** (снять
+  прод-метрику recovery-циклов до рефактора, чтобы доказать поведенческую
+  эквивалентность после). Без этого — оставить как есть. low-priority backlog.
+
+### A-84. go2rtc config bloat — стрим дописывается, а не мёржится (unbounded)
+
+- **Status:** 🔴 **OPEN / backlog (совместить с go2rtc-консолидацией, см. план Task 2 R7).**
+- **Severity:** **P2 (real bug + security-smell)** — не косметика: конфиг растёт
+  безгранично, протухшие operator-токены копятся на диске.
+- **Area:** `camera.py:_go2rtc_upsert_stream` (+ `go2rtc.py:upsert_audio_stream` —
+  тот же механизм), go2rtc config-persist (`go2rtc_homekit.yml`).
+- **Evidence (прод, 2026-06-23, найдено пользователем):** в `go2rtc_homekit.yml`
+  **сотни** повторяющихся блоков `streams:`, каждый — одна камера со свежим
+  operator-RTSP вида `ffmpeg:https://forpost-NN.novotelecom.ru:18081/rtsp/<accId>/<TOKEN>/d=1#video=copy#audio=aac#audio=opus`
+  (TOKEN ротируется per-fetch). Симптом в логах: `go2rtc cleanup failed: 400
+  yaml: path not exist` (DELETE не находит стрим в дублирующемся YAML).
+- **Hypothesis (нужен DIAG):** на каждое `stream_source()` (открытие камеры)
+  интеграция получает у оператора **новый** ротируемый RTSP-URL → upsert'ит в
+  go2rtc; go2rtc 1.9.14 на API-write **дописывает новый `streams:`-блок** в
+  конфиг-файл (не merge в один map) → за время жизни интеграции — сотни блоков.
+  YAML дубль-ключи: функционально побеждает последний, но файл растёт безгранично.
+- **Impact:** (1) безграничный рост конфига; (2) протухшие **operator-токены на
+  диске** в plaintext (security-smell, ср. [`no-secret-logs.md`](../../.claude/rules/no-secret-logs.md));
+  (3) `cleanup failed: path not exist` на teardown стримов вызова.
+- **Risk / объём:** трогает `stream_source` hot path (proven, история A-71) →
+  **через DIAG + go2rtc-консолидацию** (план Task 2 / R1-R7). M-L.
+- **Recommended first step:** controlled-DIAG на throwaway-стриме — какой write
+  (PATCH vs PUT) дописывает блок (повторить upsert с разным src, посмотреть рост
+  конфига) → выбрать фикс: пропускать re-upsert если src не изменился, или
+  периодическая компакция конфига, или go2rtc-side опция → **сложить в
+  go2rtc-консолидацию (R7)**. Пользователь чистит текущий конфиг сам.
 
 ## Maintenance rules (повтор)
 
@@ -1077,7 +1269,10 @@ Quality gates:
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
 | A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR #51 — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
 | ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
-| 🟢 A-58 + 🟢 A-54 (doorbell event via FCM, pending merge `feat/doorbell-fcm-event`, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-49 (P3 future — SIP/two-way audio), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
+| 🟢 A-58 + 🟢 A-54 (doorbell event via FCM, pending merge `feat/doorbell-fcm-event`, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
+| 🟢 A-81 (register-on-ring ADR-0012 + downlink AudioBridge + call_camera.py, pending merge `feat/intercom-uplink-mic`) — закрывает практическую часть A-49 (`sipdevices` используется) | Итерация 4 (two-way audio: приём вызова + downlink-вывод + экран вызова) |
+| 🟢 A-85 (uplink-микрофон ADR-0013: HA WS-binary #1, дрейф-фикс rtp.py, Lovelace-карта; live-прод 2026-06-24, pending merge `feat/intercom-uplink-mic`) — завершает two-way audio (говорить гостю) | Итерация 4 (two-way audio: uplink-микрофон; #2/#3/#4 эмпирически отвергнуты) |
+| 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) + 🔴 A-84 (go2rtc config bloat P2 — стрим дописывается, не мёржится; через DIAG + R7) | backlog (tech-debt из рефактор-оценки 2026-06-23 + A-84 найден пользователем; не блокирует two-way audio) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 

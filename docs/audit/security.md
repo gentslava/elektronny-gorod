@@ -1,6 +1,6 @@
 Status: Active
 Owner: Security & Privacy Agent
-Last reviewed: 2026-05-30 (S-01..S-06 verified RESOLVED по коду; S-17/S-18 added)
+Last reviewed: 2026-06-24 (S-19 added: uplink AuthZ accepted-risk + AudioBridge LAN-exposure, ADR-0013/A-85)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -48,6 +48,7 @@ v3.2.0): grep всех `LOGGER.*` в чувствительных файлах +
 | S-09 | 🔴 OPEN P1 | нет `ClientTimeout` на основном operator API (`http.py:110,112`) |
 | S-16 | 🔴 OPEN P1 | go2rtc_password plaintext в entry.data (утечёт через S-08) |
 | S-17/S-18 | 🟡 OPEN P3 | сырое логирование body/err в go2rtc.py (не активная утечка) |
+| S-19 | 🟢 ACCEPTED-by-design | uplink AuthZ (любой auth HA-юзер) + AudioBridge `0.0.0.0:40020` LAN-exposure (ADR-0013/A-85) |
 
 ## P0 — критичные утечки (все RESOLVED)
 
@@ -214,6 +215,41 @@ v3.2.0): grep всех `LOGGER.*` в чувствительных файлах +
   текущем использовании. Unbounded body-логирование — фрагильно.
 - **Fix:** логировать только `resp.status`. НЕ блокер.
 
+### S-19. Uplink-микрофон: AuthZ + AudioBridge LAN-exposure (ADR-0013, A-85)
+
+- **Status:** 🟢 **ACCEPTED-by-design** (решение пользователя — accept-risk +
+  документировать; guard **не** добавляется). Связано с
+  [audit A-85](project-audit.md) + [ADR-0013](../decisions/0013-uplink-mic-transport.md).
+- **Severity:** low/medium.
+- **Файлы:** `uplink_ws.py` (WS-команда `elektronny_gorod/intercom_uplink`),
+  `sip/call_controller.py` (`feed_uplink`), `sip/bridge.py` (`AudioBridge`).
+
+**S-UP-01 — uplink AuthZ (accept-risk).** WS-команда `intercom_uplink` доверяет
+**любому authenticated HA-юзеру**: любой авторизованный пользователь HA может
+«говорить» (стримить микрофон) в активный вызов домофона.
+
+- **Обоснование принятия:** паттерн **зеркалит штатный HA voice-assistant**
+  (`connection.async_register_binary_handler` — тот же авторизованный WebSocket,
+  через который проходит весь UI). HA-модель доверия: authenticated = trusted.
+  Per-call AuthZ-разграничение поверх этого было бы **отклонением** от платформы,
+  не митигацией реальной угрозы.
+- **Окно атаки эфемерно:** uplink работает только при активном вызове (~120с),
+  вне вызова команда возвращает error (нет активного контроллера/sink).
+- **Mitigation:** ничего не добавляем (by-design). Документировано как
+  known-limitation в A-85. Если в будущем появится multi-tenant сценарий — тогда
+  пересмотр через новый ADR.
+
+**AudioBridge LAN-exposure (downlink-аудио).** `AudioBridge` (`sip/bridge.py`)
+поднимает HTTP-сервер на `0.0.0.0:40020` (mpegts/aac-аудио гостя) для доступа
+go2rtc по LAN.
+
+- **Severity:** low — bind на все интерфейсы, но: (1) **эфемерно** на время вызова
+  (teardown на hangup/BYE); (2) контент = аудио гостя у двери, не секрет/токен;
+  (3) bind `0.0.0.0` нужен, чтобы go2rtc (отдельный процесс/контейнер) дотянулся
+  по LAN-адресу хоста (`detect_lan_ip()`).
+- **Status:** accepted-by-design. Возможное hardening (bind на конкретный
+  LAN-IP вместо `0.0.0.0`) — polish-backlog, не блокер.
+
 ## CI / Secrets
 
 | Аспект | Статус |
@@ -233,7 +269,12 @@ v3.2.0): grep всех `LOGGER.*` в чувствительных файлах +
 
 ## Dependency vulnerabilities
 
-`manifest.json:requirements: []` — нет специфичных зависимостей. Используются версии `aiohttp`/`voluptuous`/`yarl`, поставляемые с HA core. CVE-risk управляется HA core.
+`manifest.json:requirements` больше не пуст: `firebase-messaging>=0.4` (FCM-вызов,
+ADR-0011 — тянет protobuf / http_ece / cryptography; «серая зона» приватных API
+Google задокументирована в [A-80](project-audit.md)) + `audioop-lts>=0.2.1`
+(G.711-транскод SIP, A-81; только Python 3.13+). Остальное — `aiohttp`/`voluptuous`/
+`yarl` из HA core. CVE-risk core-зависимостей управляется HA core; внешние pip-deps
+обновляются по линии поддержки upstream (см. A-80 §Watch).
 
 ## Сводный план
 

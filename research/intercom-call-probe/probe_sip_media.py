@@ -47,6 +47,21 @@ def gen_tone_g711(pt: int, freq: int = TONE_HZ, secs: float = 30.0) -> bytes:
     return audioop.lin2ulaw(bytes(pcm), 2) if pt == 0 else audioop.lin2alaw(bytes(pcm), 2)
 
 
+TRACK_DIR = os.path.join(os.path.dirname(__file__), "audio")
+
+
+def load_track_frames(pt: int) -> list[bytes] | None:
+    """Готовый G.711-трек (audio/track.ulaw для PCMU pt=0 / track.alaw для PCMA pt=8)
+    → 160-байт фреймы (20мс). None если файла нет (тогда fallback на тон)."""
+    name = "track.ulaw" if pt == 0 else "track.alaw"
+    path = os.path.join(TRACK_DIR, name)
+    if not os.path.exists(path):
+        return None
+    with open(path, "rb") as f:
+        data = f.read()
+    return [data[i:i + 160] for i in range(0, len(data) - 160 + 1, 160)]
+
+
 STUN_SERVERS = [("stun.cloudflare.com", 3478), ("stun.sipnet.ru", 3478),
                 ("stun.nextcloud.com", 443), ("stun.l.google.com", 19302)]
 
@@ -106,7 +121,9 @@ def log(line: str) -> None:
 
 
 async def mint(intercom: dict, sess: common.Session, install_id: str) -> dict:
-    async with aiohttp.ClientSession() as s:
+    async with aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+    ) as s:  # macOS: /etc/resolv.conf пуст → aiodns падает, ThreadedResolver работает
         api = common.Api(s, sess.user_agent, access_token=sess.access_token, operator=sess.operator_id)
         r = await api.post(
             f"/rest/v1/places/{intercom['placeId']}/accesscontrols/{intercom['accessControlId']}/sipdevices",
@@ -316,9 +333,14 @@ class MediaProto(asyncio.DatagramProtocol):
         sock = self.rtp_sock              # пред-созданный + STUN'нутый сокет
         sock.setblocking(False)
         loop = asyncio.get_running_loop()
-        tone = gen_tone_g711(pt)                 # слышимый тон уплинком
-        frames = [tone[i:i + 160] for i in range(0, len(tone) - 160, 160)]
-        log(f"  → уплинк: тон {TONE_HZ}Гц ({'µ-law' if pt==0 else 'A-law'}), {len(frames)} фреймов. СЛУШАЙ У ДВЕРИ.")
+        frames = load_track_frames(pt)
+        if frames:
+            tname = "track.ulaw" if pt == 0 else "track.alaw"
+            log(f"  → уплинк: АУДИО-ТРЕК audio/{tname} ({len(frames)} фреймов ≈{len(frames)*0.02:.1f}с), зацикленно. СЛУШАЙ У ДВЕРИ.")
+        else:
+            tone = gen_tone_g711(pt)             # fallback: тон, если трека нет
+            frames = [tone[i:i + 160] for i in range(0, len(tone) - 160, 160)]
+            log(f"  → уплинк: тон {TONE_HZ}Гц ({'µ-law' if pt==0 else 'A-law'}), {len(frames)} фреймов. СЛУШАЙ У ДВЕРИ.")
         ssrc = random.randint(0, 1 << 31)
         seq, tsv = 0, 0
         recv = {"count": 0, "pts": set(), "src": None}
@@ -335,20 +357,21 @@ class MediaProto(asyncio.DatagramProtocol):
 
         rtask = asyncio.ensure_future(receiver())
         log(f"  → шлю RTP({pt}) на {door_ip}:{door_port}, слушаю входящий на :{RTP_LOCAL_PORT}")
-        for i in range(len(frames)):  # ~30с тона при 20мс
-            if not self.call_active:           # BYE отправлен/получен → стоп тон
-                log("  тон остановлен (вызов завершён)")
-                break
+        i = 0
+        while self.call_active:  # зацикливаем трек/тон, пока вызов активен (BYE → стоп)
+            frame = frames[i % len(frames)]
             hdr_b = struct.pack("!BBHII", 0x80, pt | (0x80 if i == 0 else 0), seq & 0xFFFF, tsv & 0xFFFFFFFF, ssrc)
             try:
-                sock.sendto(hdr_b + frames[i], (door_ip, door_port))
+                sock.sendto(hdr_b + frame, (door_ip, door_port))
             except Exception:
                 pass
             seq += 1
             tsv += 160
+            i += 1
             if i % 50 == 49:  # раз в ~секунду
                 log(f"  RTP[+{(i+1)//50}s]: входящих пакетов={recv['count']} PT={recv['pts']} src={recv['src']}")
             await asyncio.sleep(0.02)
+        log("  уплинк остановлен (вызов завершён)")
         rtask.cancel()
         self.answered = False             # готов к следующему звонку (сокет не закрываем)
         log(f"  ИТОГ RTP: получено {recv['count']} пакетов, PT={recv['pts']}, от {recv['src']}")
@@ -359,7 +382,9 @@ class MediaProto(asyncio.DatagramProtocol):
         log(f"  ⏳ авто-открытие двери через {self.auto_open_sec} c…")
         await asyncio.sleep(self.auto_open_sec)
         try:
-            async with aiohttp.ClientSession() as s:
+            async with aiohttp.ClientSession(
+        connector=aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+    ) as s:  # macOS: /etc/resolv.conf пуст → aiodns падает, ThreadedResolver работает
                 api = common.Api(s, self.sess.user_agent, access_token=self.sess.access_token,
                                  operator=self.sess.operator_id)
                 r = await api.post(

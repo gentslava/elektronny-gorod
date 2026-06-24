@@ -1,0 +1,172 @@
+blueprint:
+  name: Электронный город — видеозвонок домофона (снимок + открыть дверь)
+  description: >
+    Полный видеодомофонный UX. При вызове (event-сущность стреляет `ring`)
+    присылает на телефон actionable-уведомление со **снимком с камеры домофона**
+    и кнопками:
+
+    • «Ответить» → `elektronny_gorod.answer` (двусторонний звук, REGISTER-on-answer)
+    • «Открыть дверь» → `lock.unlock` выбранного замка (accessControlOpen)
+    • «Сбросить» → `elektronny_gorod.hangup`
+
+    Уведомление high-priority (звонко-подобное) и снимается при действии/завершении.
+    Требует Home Assistant Companion App. Ответить нужно в окне ~30с (CallInvalidated).
+
+    Для аудио-only варианта (без снимка/открытия) — blueprint
+    `doorbell_two_way_answer.yaml`.
+  domain: automation
+  author: elektronny_gorod
+  input:
+    doorbell_event:
+      name: Сущность вызова домофона
+      description: >
+        `event`-сущность домофона (EventDeviceClass.DOORBELL). Стреляет `ring`.
+      selector:
+        entity:
+          filter:
+            - domain: event
+              integration: elektronny_gorod
+    camera_entity:
+      name: Камера домофона
+      description: Камера этого домофона — её снимок попадёт в уведомление.
+      selector:
+        entity:
+          filter:
+            - domain: camera
+              integration: elektronny_gorod
+    lock_entity:
+      name: Замок (дверь) домофона
+      description: >
+        Замок этого домофона — кнопка «Открыть дверь» вызовет на нём `lock.unlock`.
+      selector:
+        entity:
+          filter:
+            - domain: lock
+              integration: elektronny_gorod
+    notify_device:
+      name: Телефон для уведомления
+      description: Устройство с Home Assistant Companion App.
+      selector:
+        device:
+          integration: mobile_app
+
+mode: queued
+max: 10
+
+# !input в шаблон image нельзя напрямую — прокидываем через variables.
+variables:
+  camera_entity: !input camera_entity
+
+triggers:
+  - trigger: state
+    entity_id: !input doorbell_event
+    id: doorbell_state
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: EG_ANSWER
+    id: answer
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: EG_OPEN
+    id: open
+  - trigger: event
+    event_type: mobile_app_notification_action
+    event_data:
+      action: EG_HANGUP
+    id: hangup
+
+actions:
+  - choose:
+      # Входящий вызов → actionable-пуш со снимком камеры + 3 кнопки.
+      - conditions:
+          - condition: trigger
+            id: doorbell_state
+          - condition: template
+            value_template: "{{ trigger.to_state.attributes.event_type == 'ring' }}"
+        sequence:
+          - device_id: !input notify_device
+            domain: mobile_app
+            type: notify
+            title: "Вызов домофона"
+            message: >-
+              {{ trigger.to_state.attributes.gate_name or 'Кто-то у двери' }}
+              {%- if trigger.to_state.attributes.apartment %}
+              (кв. {{ trigger.to_state.attributes.apartment }})
+              {%- endif %}
+            data:
+              tag: eg_doorbell
+              persistent: true
+              # Снимок с камеры домофона (companion app аутентифицирован).
+              image: "/api/camera_proxy/{{ camera_entity }}"
+              # Android — высокий приоритет, отдельный канал (звонко-подобно).
+              channel: "Вызов домофона"
+              importance: high
+              priority: high
+              ttl: 0
+              # iOS — time-sensitive.
+              push:
+                interruption-level: time-sensitive
+              actions:
+                - action: EG_ANSWER
+                  title: "Ответить"
+                - action: EG_OPEN
+                  title: "Открыть дверь"
+                - action: EG_HANGUP
+                  title: "Сбросить"
+
+      # Вызов завершён/принят на другом устройстве → снять уведомление.
+      - conditions:
+          - condition: trigger
+            id: doorbell_state
+          - condition: template
+            value_template: "{{ trigger.to_state.attributes.event_type == 'ended' }}"
+        sequence:
+          - device_id: !input notify_device
+            domain: mobile_app
+            type: notify
+            message: "clear_notification"
+            data:
+              tag: eg_doorbell
+
+      # «Ответить» → принять вызов + снять уведомление.
+      - conditions:
+          - condition: trigger
+            id: answer
+        sequence:
+          - action: elektronny_gorod.answer
+          - device_id: !input notify_device
+            domain: mobile_app
+            type: notify
+            message: "clear_notification"
+            data:
+              tag: eg_doorbell
+
+      # «Открыть дверь» → unlock выбранного замка (accessControlOpen) + снять.
+      - conditions:
+          - condition: trigger
+            id: open
+        sequence:
+          - action: lock.unlock
+            target:
+              entity_id: !input lock_entity
+          - device_id: !input notify_device
+            domain: mobile_app
+            type: notify
+            message: "clear_notification"
+            data:
+              tag: eg_doorbell
+
+      # «Сбросить» → завершить вызов + снять уведомление.
+      - conditions:
+          - condition: trigger
+            id: hangup
+        sequence:
+          - action: elektronny_gorod.hangup
+          - device_id: !input notify_device
+            domain: mobile_app
+            type: notify
+            message: "clear_notification"
+            data:
+              tag: eg_doorbell

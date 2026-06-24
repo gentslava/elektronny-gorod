@@ -69,7 +69,20 @@ custom_components/elektronny_gorod/
 ├── sensor.py              # Balance sensor + days-to-block
 ├── binary_sensor.py       # account_blocked
 ├── switch.py              # DND switches (intercom / management calls)
-├── go2rtc.py              # validate_go2rtc + cleanup
+├── event.py               # doorbell call event (ADR-0011)
+├── fcm.py                 # FCM listener для события вызова (ADR-0011)
+├── sip/                   # SIP-стек two-way audio, register-on-ring (ADR-0012, A-81)
+│   ├── call_controller.py # HA-glue: трекинг вызова + answer/hangup + AudioBridge lifecycle
+│   ├── bridge.py          # AudioBridge: downlink G.711 → ffmpeg → mpegts/aac → go2rtc
+│   ├── manager.py         # SipManager (register_and_hold / accept / hangup)
+│   ├── protocol.py        # asyncio SIP-транспорт (UDP); CANCEL→487 / BYE→on_bye
+│   ├── register.py        # REGISTER + push-params
+│   ├── dialog.py          # DialogState + 200 OK + BYE
+│   ├── message.py / sdp.py / rtp.py / digest.py / stun.py / audio.py
+│   └── __init__.py
+├── call_camera.py         # camera.intercom_call: видео+звук гостя, HA-native WebRTC
+├── services.yaml          # сервисы answer / hangup (A-81)
+├── go2rtc.py              # validate_go2rtc + cleanup + upsert_audio_stream/remove_audio_stream
 ├── diagnostics.py         # redact-нутая diagnostics-выгрузка (TO_REDACT)
 ├── entity_migration.py    # стабильные unique_id + registry migration
 ├── helpers.py             # find, dedupe, hash_password (SHA1+MD5)

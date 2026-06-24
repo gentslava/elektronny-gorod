@@ -396,6 +396,29 @@ class ElektronnyGorodAPI:
         payload = {"name": "accessControlOpen"}
         await self.http.post(api_url, json.dumps(payload))
 
+    async def mint_sip_device(
+        self, place_id: str, access_control_id: str
+    ) -> dict[str, Any]:
+        """Mint SIP-устройство (login/password/realm) для приёма вызова домофона.
+
+        Зеркало приложения (call-answer-model.md §4): POST sipdevices с
+        `installationId` аккаунта (UA.uuid — та же identity, что у FCM-привязки)
+        → `{login, password, realm}`. Креды — секреты (no-secret-logs): caller
+        не логирует их; redaction покрыта SENSITIVE_KEYS. На не-2xx http.post
+        бросает ClientError — caller (call_controller) решает деградацию.
+        """
+        api_url = (
+            f"/rest/v1/places/{place_id}/accesscontrols/{access_control_id}/sipdevices"
+        )
+        body = json.dumps({"installationId": self.http.user_agent.uuid})
+        response = await self.http.post(api_url, body)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        payload = await response.json()
+        # `or {}` (не `if payload`): защищает и от `{"data": null}` — иначе
+        # None просочится в SipManager и упадёт TypeError на creds["realm"].
+        return (payload.get("data") if payload else {}) or {}
+
     def _push_body(self, fcm_token: str | None = None) -> dict[str, Any]:
         """Тело device-регистрации — зеркало приложения (FINDINGS §FCM).
 

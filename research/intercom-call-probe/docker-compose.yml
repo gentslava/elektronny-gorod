@@ -45,3 +45,70 @@ services:
     <<: *probe
     image: intercom-probe
     command: ["probe_sip.py", "2"]
+
+  # SIP media-проба: отвечает на вызов + шлёт аудио-трек (audio/) в RTP-uplink.
+  # INTERCOM_AC выбирает домофон. audio/ — volume (трек G.711, не в образе).
+  media:
+    <<: *probe
+    image: intercom-probe
+    command: ["probe_sip_media.py"]
+    environment:
+      # accessControlId домофона — PII, НЕ хардкодим. Передавать из shell при запуске:
+      #   INTERCOM_AC=<ac> docker compose up media     (sudo: добавить -E или env в команду)
+      - INTERCOM_AC=${INTERCOM_AC:-0}
+    volumes:
+      - ./session.json:/app/session.json:ro
+      - ./audio:/app/audio:ro
+      - ./logs:/app/logs
+
+  # push-to-register проба: НЕ держит SIP-регистрацию, поднимает её по FCM-пушу
+  # и проверяет, доставляет ли Kazoo INVITE на позднюю регистрацию (модель приложения).
+  # PUSH_PARAMS=1 — с RFC 8599 push-параметрами в Contact. Все ac/флаги — из shell-env.
+  push_answer:
+    <<: *probe
+    image: intercom-probe
+    command: ["probe_push_answer.py"]
+    environment:
+      - INTERCOM_AC=${INTERCOM_AC:-0}
+      - PUSH_PARAMS=${PUSH_PARAMS:-0}
+      - PREBIND=${PREBIND:-0}
+      - ANSWER=${ANSWER:-0}
+      - ANSWER_DELAY=${ANSWER_DELAY:-3}
+      - TALK_SEC=${TALK_SEC:-0}
+      - RE_REG=${RE_REG:-0}
+      - RING_KEEPALIVE=${RING_KEEPALIVE:-1}
+      - EARLY_MEDIA=${EARLY_MEDIA:-0}
+      - MIRROR_APP=${MIRROR_APP:-0}
+      - RTP_EARLY=${RTP_EARLY:-0}
+      - PRE_DELAY=${PRE_DELAY:-0}
+      - REG_LISTEN_SEC=${REG_LISTEN_SEC:-20}
+    volumes:
+      - ./session.json:/app/session.json:ro
+      - ./firebase_config.json:/app/firebase_config.json:ro
+      - ./fcm_credentials.json:/app/fcm_credentials.json
+      - ./audio:/app/audio:ro
+      - ./logs:/app/logs
+
+  # PoC D-audio-2: uplink-микрофон (кандидат #1 WS-binary). Поднимает HTTP+WS на
+  # :8765 (host-net) — браузер getUserMedia → WS Int16 PCM → G.711 → uplink в живой
+  # звонок. Открыть http://localhost:8765/ на ХОСТЕ (localhost=secure→микрофон без
+  # HTTPS) ИЛИ публичный HTTPS-роут (traefik/Dokploy) для теста с телефона/4G.
+  mic:
+    <<: *probe
+    image: intercom-probe
+    command: ["probe_mic_uplink.py"]
+    environment:
+      - INTERCOM_AC=${INTERCOM_AC:-0}
+      - ANSWER=${ANSWER:-1}
+      - MIRROR_APP=${MIRROR_APP:-1}
+      - RTP_EARLY=${RTP_EARLY:-1}
+      - ANSWER_DELAY=${ANSWER_DELAY:-2}
+      - TALK_SEC=${TALK_SEC:-30}  # лимит разговора → BYE по таймеру (анти-зомби RTP-loop)
+      - PERSIST_REG=${PERSIST_REG:-0}  # постоянная регистрация (софтфон) — надёжнее на NAT
+      - MIC_PT=${MIC_PT:-0}
+      - MIC_TOKEN=${MIC_TOKEN:-}  # задать при публичном (cloudflared) запуске — токен в ?k=
+    volumes:
+      - ./session.json:/app/session.json:ro
+      - ./firebase_config.json:/app/firebase_config.json:ro
+      - ./fcm_credentials.json:/app/fcm_credentials.json
+      - ./logs:/app/logs

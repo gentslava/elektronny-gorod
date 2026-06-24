@@ -40,7 +40,9 @@ from .const import (
     GO2RTC_RTSP_PORT,
     LOGGER,
 )
+from .call_camera import ElektronnyGorodCallCamera
 from .coordinator import ElektronnyGorodUpdateCoordinator
+from .go2rtc import go2rtc_auth_headers
 
 if TYPE_CHECKING:
     from homeassistant.components.stream import Stream
@@ -172,6 +174,39 @@ async def async_setup_entry(
         )
         for camera_info in cameras
     )
+
+    # Two-way audio: камера-сущность экрана вызова (рефреш-на-открытии, ADR-0012 C).
+    # Контроллер создаётся в __init__ ПОСЛЕ forward_entry_setups — резолвим лениво
+    # через _controller_getter, чтобы не зависеть от timing setup. Регистрируется
+    # всегда при наличии go2rtc-конфига, без проверки controller is not None.
+    if use_go2rtc and base_url and rtsp_host:
+        def _doorbell_lookup(camera_id: str):
+            """Найти camera-сущность домофона по unique_id в платформе camera."""
+            comp = hass.data.get("camera")
+            if comp is None:
+                return None
+            uid = f"{DOMAIN}_camera_{camera_id}"
+            for ent in comp.entities:
+                if getattr(ent, "unique_id", None) == uid:
+                    return ent
+            return None
+
+        entry_id = entry.entry_id
+
+        def _controller_getter():
+            # Контроллер создаётся в __init__ ПОСЛЕ forward_entry_setups — резолвим лениво.
+            return hass.data.get(f"{DOMAIN}_sip", {}).get(entry_id)
+
+        async_add_entities([
+            ElektronnyGorodCallCamera(
+                controller_getter=_controller_getter,
+                go2rtc_base_url=base_url,
+                go2rtc_headers=go2rtc_auth_headers(go2rtc_username, go2rtc_password),
+                rtsp_host=rtsp_host,
+                doorbell_lookup=_doorbell_lookup,
+                entry_id=entry_id,
+            )
+        ])
 
 
 class ElektronnyGorodCamera(
