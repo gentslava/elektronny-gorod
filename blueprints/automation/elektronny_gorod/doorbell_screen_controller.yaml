@@ -1,0 +1,99 @@
+blueprint:
+  name: Электронный город — контроллер экрана вызова (SIP-состояние + открыть дверь)
+  description: >
+    Глобальная часть «экрана вызова» — ОДИН инстанс на всю систему (не на дверь).
+    Дополняет per-door blueprint `doorbell_call_notify.yaml`.
+
+    Делает три вещи:
+    • SIP-разговор — событие интеграции `elektronny_gorod_sip_call` ведёт
+      input_boolean (`active: true` → on, `false` → off). На конце разговора также
+      чистит input_text активной двери (экран ведётся по SIP, а не по FCM-окну).
+    • Кнопка «Открыть дверь» из пуша — `mobile_app_notification_action` с action
+      `OPEN_<lock>` → `lock.unlock` соответствующего замка. Ограничено замками
+      интеграции «Электронный город» (`integration_entities('elektronny_gorod')`) —
+      push-кнопка не может открыть посторонние замки Home Assistant.
+    • Сброс при старте HA — input_boolean restore'ит состояние; после рестарта во
+      время вызова мог зависнуть ON → гасим и чистим экран.
+
+    Хелперы (общие с doorbell_call_notify) — examples/doorbell-screen-helpers.yaml.
+  domain: automation
+  author: elektronny_gorod
+  input:
+    active_lock_helper:
+      name: Хелпер активной двери (input_text)
+      description: Тот же input_text, что в doorbell_call_notify.
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+    sip_active_helper:
+      name: Хелпер SIP-разговора (input_boolean)
+      description: Тот же input_boolean, что в doorbell_call_notify.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+
+mode: queued
+max: 10
+
+triggers:
+  - trigger: event
+    event_type: elektronny_gorod_sip_call
+    id: sip
+  - trigger: event
+    event_type: mobile_app_notification_action
+    id: open
+  - trigger: homeassistant
+    event: start
+    id: start
+
+actions:
+  - choose:
+      # SIP-разговор начался/закончился → input_boolean (+ очистка экрана на конце).
+      - conditions:
+          - condition: trigger
+            id: sip
+        sequence:
+          - if:
+              - "{{ trigger.event.data.active }}"
+            then:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: !input sip_active_helper
+            else:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: !input sip_active_helper
+              - action: input_text.set_value
+                target:
+                  entity_id: !input active_lock_helper
+                data:
+                  value: ""
+
+      # Кнопка «Открыть дверь» из пуша (OPEN_<lock>) → unlock замка.
+      # Ограничено замками интеграции — посторонние lock.* по push-кнопке не открыть.
+      - conditions:
+          - condition: trigger
+            id: open
+          - >-
+            {{ (trigger.event.data.action | default('')).startswith('OPEN_lock.')
+               and trigger.event.data.action[5:] in integration_entities('elektronny_gorod') }}
+        sequence:
+          - action: lock.unlock
+            target:
+              entity_id: "{{ trigger.event.data.action[5:] }}"
+
+      # Старт HA → сброс зависшего состояния + очистка экрана.
+      - conditions:
+          - condition: trigger
+            id: start
+        sequence:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: !input sip_active_helper
+          - action: input_text.set_value
+            target:
+              entity_id: !input active_lock_helper
+            data:
+              value: ""

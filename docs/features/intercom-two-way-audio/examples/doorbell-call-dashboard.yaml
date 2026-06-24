@@ -1,0 +1,160 @@
+# Дашборд «Экран вызова домофона» — пример для одной двери.
+#
+# Как использовать: создайте новый дашборд (Настройки → Панели → Добавить панель),
+# откройте «Редактировать как YAML» (⋮ → Raw configuration editor) и вставьте этот
+# `views:`-блок. Путь дашборда настройте на `doorbell-call`, чтобы clickAction
+# пушей (`/doorbell-call/call`) открывал именно его.
+#
+# Зависимости:
+#   • хелперы input_text.eg_doorbell_active_lock + input_boolean.eg_doorbell_sip_active
+#     (examples/doorbell-screen-helpers.yaml) — их ведут blueprint-ы;
+#   • карта микрофона `custom:eg-intercom-mic-card` (раздаётся интеграцией, см. README);
+#   • PRO-TIP-вариант видео — карта `custom:advanced-camera-card` (HACS, опционально).
+#
+# Подставьте свои entity_id (placeholder'ы помечены ниже):
+#   lock.doorbell_gate              — замок двери
+#   camera.doorbell_gate            — обычная камера двери (предпросмотр до ответа)
+#   camera.doorbell_intercom_call   — сущность активного вызова интеграции
+#                                     (camera.<домофон>_intercom_call)
+#
+# Несколько дверей: скопируйте весь conditional-блок двери и поменяйте в копии три
+# значения — замок в условии, camera.doorbell_gate в picture-entity и lock в кнопках.
+
+views:
+  - title: Вызов
+    path: call
+    type: panel
+    cards:
+      - type: vertical-stack
+        cards:
+          # ───────────────────────── ДВЕРЬ 1 ─────────────────────────
+          # Блок показывается, когда звонит именно этот замок.
+          - type: conditional
+            conditions:
+              - entity: input_text.eg_doorbell_active_lock
+                state: lock.doorbell_gate   # ← замок ЭТОЙ двери
+            card:
+              type: vertical-stack
+              cards:
+                # RINGING (нет SIP-разговора) — предпросмотр камеры двери.
+                - type: conditional
+                  conditions:
+                    - entity: input_boolean.eg_doorbell_sip_active
+                      state: "off"
+                  card:
+                    type: picture-entity
+                    entity: camera.doorbell_gate   # ← камера ЭТОЙ двери
+                    camera_view: live
+                    name: Домофон
+                    show_state: false
+
+                # IN-CALL (идёт SIP-разговор) — видео + звук гостя.
+                #
+                # ДЕФОЛТ: picture-entity на сущности активного вызова.
+                # ⚠️  Инлайн picture-entity ГЛУШИТ звук — это политика автоплея
+                #     браузера, не интеграции: звук появится после одного тапа по
+                #     видео (или в фуллскрине). Браузер запоминает разрешение на
+                #     сессию.
+                # 🚀 PRO-TIP (звук сразу, без тапа): замените эту карту на
+                #     advanced-camera-card — см. закомментированный блок ниже.
+                - type: conditional
+                  conditions:
+                    - entity: input_boolean.eg_doorbell_sip_active
+                      state: "on"
+                  card:
+                    type: picture-entity
+                    entity: camera.doorbell_intercom_call   # ← сущность активного вызова
+                    camera_view: live
+                    name: Вызов
+                    show_state: false
+                  # ── PRO-TIP: advanced-camera-card (HACS) вместо picture-entity ──
+                  # Подтягивает поток из go2rtc по WebRTC/MSE и сразу включает звук
+                  # (auto_unmute) — быстрее грузится и не требует тапа.
+                  #   card:
+                  #     type: custom:advanced-camera-card
+                  #     cameras:
+                  #       - camera_entity: camera.doorbell_intercom_call
+                  #         live_provider: go2rtc
+                  #         go2rtc:
+                  #           url: http://127.0.0.1:1984
+                  #           stream: camera.doorbell_intercom_call
+                  #           modes:
+                  #             - webrtc
+                  #             - mse
+                  #     live:
+                  #       auto_unmute:
+                  #         - selected
+                  #         - visible
+                  #       controls:
+                  #         builtin: true
+
+                # IN-CALL — карта микрофона (говорить с гостем).
+                - type: conditional
+                  conditions:
+                    - entity: input_boolean.eg_doorbell_sip_active
+                      state: "on"
+                  card:
+                    type: custom:eg-intercom-mic-card
+
+                # RINGING — кнопки «Ответить» / «Открыть».
+                - type: conditional
+                  conditions:
+                    - entity: input_boolean.eg_doorbell_sip_active
+                      state: "off"
+                  card:
+                    type: horizontal-stack
+                    cards:
+                      - type: button
+                        name: Ответить
+                        icon: mdi:phone
+                        tap_action:
+                          action: call-service
+                          service: elektronny_gorod.answer
+                      - type: button
+                        name: Открыть
+                        icon: mdi:door-open
+                        tap_action:
+                          action: call-service
+                          service: lock.unlock
+                          target:
+                            entity_id: lock.doorbell_gate   # ← замок ЭТОЙ двери
+
+                # IN-CALL — кнопки «Сбросить» / «Открыть».
+                - type: conditional
+                  conditions:
+                    - entity: input_boolean.eg_doorbell_sip_active
+                      state: "on"
+                  card:
+                    type: horizontal-stack
+                    cards:
+                      - type: button
+                        name: Сбросить
+                        icon: mdi:phone-hangup
+                        tap_action:
+                          action: call-service
+                          service: elektronny_gorod.hangup
+                      - type: button
+                        name: Открыть
+                        icon: mdi:door-open
+                        tap_action:
+                          action: call-service
+                          service: lock.unlock
+                          target:
+                            entity_id: lock.doorbell_gate   # ← замок ЭТОЙ двери
+
+          # ──────────────── ДВЕРЬ 2, 3, … ────────────────
+          # Скопируйте сюда conditional-блок «ДВЕРЬ 1» и поменяйте замок/камеру.
+
+          # ──────────────── НЕТ АКТИВНОГО ВЫЗОВА ────────────────
+          # Показывается, когда input_text пуст (ни одна дверь не звонит).
+          - type: conditional
+            conditions:
+              - entity: input_text.eg_doorbell_active_lock
+                state: ""
+            card:
+              type: markdown
+              content: >
+                ## 🔔 Нет активного вызова
+
+
+                Экран покажет видео, звук и кнопки при звонке домофона.

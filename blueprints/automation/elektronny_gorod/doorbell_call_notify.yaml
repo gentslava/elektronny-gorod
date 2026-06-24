@@ -1,0 +1,182 @@
+blueprint:
+  name: Электронный город — вызов домофона на экран (пуш + экран вызова)
+  description: >
+    Канонический сценарий «экран вызова» для ОДНОЙ двери домофона.
+
+    При входящем вызове (event-сущность стреляет `ring`):
+    • выставляет активную дверь в input_text (его читает дашборд экрана вызова);
+    • шлёт actionable-пуш двухэтапно — №1 мгновенно (без картинки), №2 тем же
+      `tag` со снимком камеры (Companion грузит картинку ДО показа, поэтому снимок
+      идёт вторым шагом ~через 1-2с). Тап по пушу открывает экран `/doorbell-call/call`
+      в Home Assistant (видео + звук гостя + ответить/говорить — на экране). Кнопка
+      «Открыть дверь» (`OPEN_<lock>`) открывает замок, не открывая экран.
+
+    При завершении вызова (`ended`, если SIP-разговор не активен) — гасит экран
+    (чистит input_text) и снимает пуш (`clear_notification`).
+
+    Обработчик кнопки «Открыть», SIP-состояние и сброс при старте HA вынесены в
+    blueprint `doorbell_screen_controller.yaml` (один на всю систему).
+
+    Инстанцируйте этот blueprint по разу на каждую дверь. На несколько телефонов —
+    укажите notify-группу или создайте по инстансу на телефон. Требует Home Assistant
+    Companion App. Хелперы — examples/doorbell-screen-helpers.yaml.
+  domain: automation
+  author: elektronny_gorod
+  input:
+    doorbell_event:
+      name: Сущность вызова домофона
+      description: >
+        event-сущность этой двери (EventDeviceClass.DOORBELL) от интеграции
+        «Электронный город». Стреляет `ring` при вызове и `ended` при завершении.
+      selector:
+        entity:
+          filter:
+            - domain: event
+              integration: elektronny_gorod
+    camera_entity:
+      name: Камера домофона
+      description: Камера этой двери — её снимок попадёт в пуш.
+      selector:
+        entity:
+          filter:
+            - domain: camera
+              integration: elektronny_gorod
+    lock_entity:
+      name: Замок (дверь) домофона
+      description: Замок этой двери — кнопка «Открыть дверь» вызовет на нём unlock.
+      selector:
+        entity:
+          filter:
+            - domain: lock
+              integration: elektronny_gorod
+    active_lock_helper:
+      name: Хелпер активной двери (input_text)
+      description: >
+        Общий input_text, в который пишется активный замок. Дашборд экрана вызова
+        выбирает блок двери по его значению. Один на всю систему (см. хелперы).
+      selector:
+        entity:
+          filter:
+            - domain: input_text
+    sip_active_helper:
+      name: Хелпер SIP-разговора (input_boolean)
+      description: >
+        Общий input_boolean «идёт SIP-разговор». Условие: не гасить экран на `ended`,
+        пока активен разговор. Ведётся blueprint-ом doorbell_screen_controller.
+      selector:
+        entity:
+          filter:
+            - domain: input_boolean
+    notify_device:
+      name: Телефон для уведомления
+      description: >
+        Устройство с Home Assistant Companion App. Для нескольких телефонов —
+        notify-группа или отдельный инстанс blueprint на каждый.
+      selector:
+        device:
+          integration: mobile_app
+    dashboard_path:
+      name: Путь экрана вызова
+      description: clickAction по пушу открывает этот путь в Home Assistant.
+      default: /doorbell-call/call
+      selector:
+        text:
+
+# queued: ring и последующий ended одной двери обрабатываются по очереди
+# (исключаем гонку за общий input_text).
+mode: queued
+max: 10
+
+variables:
+  camera_entity: !input camera_entity
+  lock_entity: !input lock_entity
+  dashboard_path: !input dashboard_path
+  # Общий tag — связывает пуш и его снятие (clear_notification).
+  notification_tag: eg_doorbell_call
+
+triggers:
+  - trigger: state
+    entity_id: !input doorbell_event
+
+actions:
+  - choose:
+      # Входящий вызов → активная дверь + двухэтапный actionable-пуш.
+      - conditions:
+          - "{{ trigger.to_state.attributes.event_type | default('') == 'ring' }}"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input active_lock_helper
+            data:
+              value: "{{ lock_entity }}"
+          # №1 — мгновенно, без картинки.
+          - device_id: !input notify_device
+            domain: mobile_app
+            type: notify
+            continue_on_error: true
+            title: "🔔 Вызов домофона"
+            message: >-
+              {{ trigger.to_state.attributes.gate_name | default('Кто-то у двери') }}
+              {%- if trigger.to_state.attributes.apartment %} · кв. {{ trigger.to_state.attributes.apartment }}{%- endif %}
+            data:
+              tag: "{{ notification_tag }}"
+              persistent: true
+              clickAction: "{{ dashboard_path }}"
+              # Android — высокий приоритет, отдельный канал (звонко-подобно).
+              channel: "Вызов домофона"
+              importance: high
+              priority: high
+              ttl: 0
+              # iOS — time-sensitive (пробивает Focus/Не беспокоить).
+              push:
+                interruption-level: time-sensitive
+              actions:
+                - action: "OPEN_{{ lock_entity }}"
+                  title: "🔓 Открыть дверь"
+          # №2 — тем же tag со снимком камеры (обновляет уже пришедшее уведомление).
+          - device_id: !input notify_device
+            domain: mobile_app
+            type: notify
+            continue_on_error: true
+            title: "🔔 Вызов домофона"
+            message: >-
+              {{ trigger.to_state.attributes.gate_name | default('Кто-то у двери') }}
+              {%- if trigger.to_state.attributes.apartment %} · кв. {{ trigger.to_state.attributes.apartment }}{%- endif %}
+            data:
+              tag: "{{ notification_tag }}"
+              persistent: true
+              image: "/api/camera_proxy/{{ camera_entity }}"
+              clickAction: "{{ dashboard_path }}"
+              channel: "Вызов домофона"
+              importance: high
+              priority: high
+              # Второй пуш не звенит повторно (обновляет первый по tag).
+              alert_once: true
+              ttl: 0
+              push:
+                interruption-level: time-sensitive
+              actions:
+                - action: "OPEN_{{ lock_entity }}"
+                  title: "🔓 Открыть дверь"
+
+      # Завершение вызова (если SIP-разговор не активен) → погасить экран + снять пуш.
+      # from_state is not none — отсекаем baseline/restore `ended` на старте HA.
+      - conditions:
+          - "{{ trigger.from_state is not none and trigger.to_state.attributes.event_type | default('') == 'ended' }}"
+          - condition: state
+            entity_id: !input sip_active_helper
+            state: "off"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input active_lock_helper
+            data:
+              value: ""
+          # Companion: снять висящее уведомление по tag.
+          - device_id: !input notify_device
+            domain: mobile_app
+            type: notify
+            continue_on_error: true
+            message: "clear_notification"
+            data:
+              tag: "{{ notification_tag }}"
