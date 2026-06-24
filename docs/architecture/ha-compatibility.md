@@ -1,6 +1,6 @@
 Status: Active
 Owner: Home Assistant Expert Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-06-24 (requirements больше не пуст: firebase-messaging>=0.4 ADR-0011 + audioop-lts>=0.2.1 A-81/SIP)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
@@ -43,7 +43,7 @@ Quality gates:
 | `version` | см. `manifest.json` | semver, обновляется release workflow | ✅ |
 | `documentation` | wiki URL | действующая ссылка | ⚠️ контент wiki не подтверждён |
 | `issue_tracker` | issues URL | действующая ссылка | ✅ |
-| `requirements` | `[]` | все вне HA core | ✅ |
+| `requirements` | `firebase-messaging>=0.4`, `audioop-lts>=0.2.1` | все вне HA core, объявлены в manifest | ✅ — `firebase-messaging` для FCM-вызова (ADR-0011), `audioop-lts` для G.711-транскода SIP (A-81; только Python 3.13+, `audioop` удалён из stdlib PEP 594) |
 | `dependencies` | `[]` | HA-интеграции, нужные при старте | ✅ |
 | `iot_class` | `cloud_polling` | соответствие реальности | 🔴 **НЕТ polling в coordinator** |
 | `config_flow` | `true` | если есть UI flow | ✅ |

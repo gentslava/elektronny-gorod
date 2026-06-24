@@ -61,6 +61,19 @@ HA: `connection.async_register_binary_handler`).
 
 **Slice 2b (polish):** hands-free (непрерывный поток, джиттер-буфер, UX mic-toggle).
 
+**Известные ограничения (исходы review, A-85):**
+- **S-UP-01 (accept-risk).** Uplink-команда доверяет всем authenticated HA-юзерам
+  (любой авторизованный HA-юзер может говорить в активный вызов). Паттерн зеркалит
+  штатный HA voice-assistant; окно вызова эфемерно (~120с). Guard **не** добавляется
+  by-design — задокументировано как accepted-risk (см.
+  [`security.md#S-19`](../audit/security.md), [audit A-85](../audit/project-audit.md)).
+- **P2-2 (multi-call selection).** При нескольких активных контроллерах WS-команда
+  выбирает контроллер недетерминированно. Single concurrent call — by-design
+  ограничение слайса (A-81 deferred §2); снятие — будущий слайс с пулом портов.
+- **S-UP-02 (slot-leak handler).** Без явной `stop`-команды handler-слоты
+  idle-копятся при многократном toggle микрофона в одной сессии (не утечка данных).
+  Митигирован card-side кэшем подписки; явная `stop`-команда — polish Slice 2b.
+
 **Отвергнуто:** #2/#3 (go2rtc-зависимость, TURN, yaml/exec-блоки), #4 (конфликт `av`).
 Проба (`research/intercom-call-probe/probe_mic_uplink.py`) и альтернативы #2/#3 — для
 будущего сравнения, не в проде.

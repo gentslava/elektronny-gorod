@@ -1,6 +1,6 @@
 Status: Active
 Owner: Architecture Agent
-Last reviewed: 2026-06-23 (SIP two-way audio: sip/ пакет, call_camera.py, AudioBridge, ADR-0012)
+Last reviewed: 2026-06-24 (uplink-микрофон ADR-0013: uplink_ws.py, sip/uplink.py, дрейф-фикс rtp.py, Lovelace-карта; 14 sip/-модулей)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -16,6 +16,7 @@ Source files:
 - `custom_components/elektronny_gorod/sensor.py`
 - `custom_components/elektronny_gorod/switch.py`
 - `custom_components/elektronny_gorod/go2rtc.py`
+- `custom_components/elektronny_gorod/uplink_ws.py`
 - `custom_components/elektronny_gorod/sip/`
 
 Related docs:
@@ -131,6 +132,9 @@ async_setup_entry:
        - switch.async_setup_entry: data["dnd"]      → ElektronnyGorodDNDSwitch (×3 per place)
   8. _migrate_legacy_disabled_state (one-time per entry)
   9. _sync_visibility — `hidden` из `/settings/screens` → entity.hidden_by=INTEGRATION
+  10. async_register_uplink_ws_command(hass) — WS-команда intercom_uplink (ADR-0013)
+  11. await async_register_uplink_card(hass) — static-ресурс Lovelace-карты микрофона
+     (оба идемпотентны, регистрируются один раз на интеграцию — см. `__init__.py:~100`)
 ```
 
 ### Migration
@@ -179,7 +183,8 @@ async_unload_entry:
 | **Transport** | `http.py` | shared HA `ClientSession`, headers, conditional Bearer |
 | **Logging redaction** | `_logging.py` | `redact()` для headers/dict, `redact_path()` для auth URLs |
 | **External integration** | `go2rtc.py` | go2rtc-специфичный код (validate + upsert/cleanup); `upsert_audio_stream` / `remove_audio_stream` для аудио-стрима вызова |
-| **SIP subsystem** | `sip/` (13 модулей) | SIP-UAS: REGISTER-on-ring → held-INVITE → 200 OK → RTP-latching; AudioBridge (downlink → go2rtc); ADR-0012 |
+| **SIP subsystem** | `sip/` (14 модулей) | SIP-UAS: REGISTER-on-ring → held-INVITE → 200 OK → RTP-latching; AudioBridge (downlink → go2rtc); `uplink.py` `UplinkSink` (микрофон-PCM → G.711) + дрейф-компенсированный RTP-uplink (`rtp.py`); ADR-0012, ADR-0013 |
+| **Uplink transport** | `uplink_ws.py`, `www/eg-intercom-mic-card.js` | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): Int16-PCM микрофона из Lovelace-карты `getUserMedia` → `DoorbellCallController.feed_uplink` → `UplinkSink`; static-регистрация JS-карты (ADR-0013) |
 | **Call camera** | `call_camera.py` | camera-сущность активного вызова: `stream_source()` собирает свежий `eg_intercom_call` (видео + аудио-мост) → RTSP; вне вызова → `None` |
 | **FCM listener** | `fcm.py` | `DoorbellFcmListener` — FCM-триггер вызова → `SIGNAL_DOORBELL` → `DoorbellCallController.handle_signal` |
 | **Auth crypto** | `helpers.py`, `time.py`, `user_agent.py` | reverse-engineered hashing, эмуляция мобильного клиента |
@@ -302,6 +307,14 @@ HA service call lock.unlock
           → go2rtc: upsert_audio_stream(eg_intercom_call, [video_rtsp, http://bridge])
       → ElektronnyGorodCallCamera.stream_source() → eg_intercom_call → RTSP → HA-native WebRTC → браузер
 
+  Uplink (говорить гостю, ADR-0013):
+    Lovelace-карта getUserMedia → Int16 PCM по HA-WS elektronny_gorod/intercom_uplink
+      → uplink_ws.ws_intercom_uplink (async_register_binary_handler)
+        → DoorbellCallController.feed_uplink(pcm, rate)
+          → sip/uplink.py UplinkSink.feed() → resample 8к → G.711-кадры (джиттер-буфер)
+      → SipManager.uplink_provider (= UplinkSink.next_frame)
+        → sip/rtp.py run_uplink: дрейф-компенсированный пейсинг → RTP G.711 → домофон
+
   Сброс с панели → SIP CANCEL → sip/protocol.py → on_cancelled
     → EVENT_SIP_CALL active=false → dismiss экрана мгновенно
 
@@ -383,8 +396,9 @@ const + go2rtc ← config_flow, camera
 5. **Нет `ClientTimeout`** (A-21) — медленный backend может заморозить refresh-тик.
 6. **Лог-spam от временно сломанных камер** (A-65) — `camera.py:stream_source` логирует `WARNING "empty source stream url"` на каждый вызов. Под нагрузкой frigate/webrtc preview одна broken камера даёт десятки одинаковых WARNING. Кандидат на per-camera consecutive-fail throttle (1й WARNING, 2й+ DEBUG, reset на success).
 
-Добавлено с момента предыдущего ревью (2026-06-23):
-- ✅ **SIP two-way audio фундамент** (A-81, ADR-0012) — `sip/` пакет (13 модулей), `DoorbellCallController`, `AudioBridge`, `ElektronnyGorodCallCamera`. Приём вызова live + показ экрана вызова (видео + звук гостя) через HA-native WebRTC. Микрофон (uplink) — следующий слайс.
+Добавлено с момента предыдущего ревью (2026-06-24):
+- ✅ **Uplink-микрофон — two-way audio завершён** (A-85, ADR-0013) — `uplink_ws.py` (WS-команда `intercom_uplink` + Lovelace-карта `www/eg-intercom-mic-card.js`), `sip/uplink.py` `UplinkSink`, дрейф-компенсированный RTP-uplink (`sip/rtp.py`). Механизм #1 (HA WebSocket binary-audio) — без go2rtc/TURN/новых зависимостей. Live-прод 2026-06-24 (микрофон дошёл до домофона). #2/#3/#4 эмпирически отвергнуты.
+- ✅ **SIP two-way audio фундамент** (A-81, ADR-0012) — `sip/` пакет (14 модулей), `DoorbellCallController`, `AudioBridge`, `ElektronnyGorodCallCamera`. Приём вызова live + показ экрана вызова (видео + звук гостя) через HA-native WebRTC + downlink.
 - ✅ **FCM-событие вызова** (A-54/A-58, ADR-0011) — `fcm.py`, `event`-сущность DOORBELL, push-регистрация (resolved-in-branch `feat/doorbell-fcm-event`).
 
 Решённые с момента предыдущего ревью архитектуры:
@@ -416,6 +430,7 @@ const + go2rtc ← config_flow, camera
 | [ADR-0010](../decisions/0010-aidd-state-reconciliation.md) | AIDD state-management + reconciliation findings↔git | **accepted** |
 | [ADR-0011](../decisions/0011-doorbell-fcm-channel.md) | Realtime-канал события вызова: приём FCM in-HA | **accepted** |
 | [ADR-0012](../decisions/0012-register-on-ring.md) | Register-on-ring (held-short-window) для приёма вызова | **accepted** |
+| [ADR-0013](../decisions/0013-uplink-mic-transport.md) | Транспорт uplink-микрофона — HA WebSocket binary-audio (#1) | **accepted** |
 
 ## Next reading
 

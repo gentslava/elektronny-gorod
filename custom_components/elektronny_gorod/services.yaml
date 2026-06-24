@@ -1,4 +1,4 @@
-# Сервисы two-way audio (приём вызова домофона, REGISTER-on-answer).
+# Сервисы two-way audio (приём вызова домофона, register-on-ring, ADR-0012).
 # См. docs/features/intercom-two-way-audio/. Без полей/target: действуют на
 # текущий звонящий домофон (контроллер резолвит активный вызов).
 
