@@ -34,3 +34,14 @@ def test_unsupported_payload_type_raises() -> None:
         g711_to_pcm(b"\x00", 99)
     with pytest.raises(ValueError):
         pcm_to_g711(b"\x00\x00", 99)
+
+
+@pytest.mark.parametrize("pt", [PCMU_PAYLOAD_TYPE, PCMA_PAYLOAD_TYPE])
+def test_pcm_to_g711_odd_length_truncates_dangling_byte(pt: int) -> None:
+    # Defensive (Area A P2-1): нечётная длина PCM (truncated/misaligned кадр)
+    # не должна бросать audioop.error — висячий байт обрезается, кодируется
+    # чётная часть (1 G.711-байт на 2 байта PCM = 1 sample).
+    odd = pcm_to_g711(b"\x00\x00\x00", pt)
+    even = pcm_to_g711(b"\x00\x00", pt)
+    assert odd == even
+    assert len(odd) == 1

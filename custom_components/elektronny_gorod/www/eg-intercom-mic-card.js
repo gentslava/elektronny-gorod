@@ -77,12 +77,23 @@ class EgIntercomMicCard extends HTMLElement {
       const ac = new (window.AudioContext || window.webkitAudioContext)();
       const sampleRate = ac.sampleRate; // обычно 48000; сервер ресемплит до 8к
 
-      // WS-команда → регистрирует binary-handler на сервере, возвращает handler_id (1 байт).
-      const res = await this._hass.connection.sendMessagePromise({
-        type: "elektronny_gorod/intercom_uplink",
-        sample_rate: sampleRate,
-      });
-      const handlerId = res.handler_id;
+      // Slot-leak guard (S-UP-02): каждый sendMessagePromise регистрирует на
+      // сервере binary-handler, который живёт до закрытия вкладки. Раньше каждый
+      // toggle ON слал новую команду → после ~255 toggle «Too many binary
+      // handlers». Подписываемся ОДИН раз на вкладку и переиспользуем handler_id;
+      // toggle OFF/ON останавливает/запускает только локальный захват.
+      // Re-subscribe лишь если sample_rate сменился (редко — AC-rate стабилен).
+      let sub = this._uplinkSub;
+      if (!sub || sub.sampleRate !== sampleRate) {
+        // WS-команда → регистрирует binary-handler на сервере, возвращает handler_id (1 байт).
+        const res = await this._hass.connection.sendMessagePromise({
+          type: "elektronny_gorod/intercom_uplink",
+          sample_rate: sampleRate,
+        });
+        sub = { handlerId: res.handler_id, sampleRate };
+        this._uplinkSub = sub;
+      }
+      const handlerId = sub.handlerId;
       const socket = this._hass.connection.socket;
 
       await ac.audioWorklet.addModule(this._workletUrl());

@@ -237,16 +237,24 @@ class DoorbellCallController:
             return ok
 
     async def async_hangup(self) -> None:
-        """Завершить разговор (BYE) / снять держимый (release) + снять аудио-мост."""
-        self._cancel_call_timeout()
-        self._cancel_hold_timeout()
-        manager, self._manager = self._manager, None
-        bridge, self._bridge = self._bridge, None
-        self._clear_uplink_sink()
-        if manager is not None:
-            await manager.async_hangup()
-            self._fire_call_state(False)
-        await self._teardown_audio_bridge(bridge)
+        """Завершить разговор (BYE) / снять держимый (release) + снять аудио-мост.
+
+        Под `_answer_lock` — иначе гонка с `async_answer`: пока answer внутри
+        лока await-ит `_setup_audio_bridge` (`self._bridge` ещё None, ставится
+        ПОСЛЕ await'ов), параллельный hangup забрал бы teardown, не увидев
+        ещё-None мост → answer присвоил бы `self._bridge` → orphaned ffmpeg +
+        HTTP-listener :40020. Вызывается только из сервис-хендлеров/unload-таймера
+        (не из методов под локом) — self-deadlock'а нет."""
+        async with self._answer_lock:
+            self._cancel_call_timeout()
+            self._cancel_hold_timeout()
+            manager, self._manager = self._manager, None
+            bridge, self._bridge = self._bridge, None
+            self._clear_uplink_sink()
+            if manager is not None:
+                await manager.async_hangup()
+                self._fire_call_state(False)
+            await self._teardown_audio_bridge(bridge)
 
     async def _async_release_held(self) -> None:
         """FCM `ended` при держимом (CANCEL не пришёл) — снять held + dismiss."""

@@ -27,7 +27,14 @@ def g711_to_pcm(data: bytes, payload_type: int) -> bytes:
 
 
 def pcm_to_g711(pcm: bytes, payload_type: int) -> bytes:
-    """16-bit linear PCM -> G.711 байты (uplink: микрофон -> домофон)."""
+    """16-bit linear PCM -> G.711 байты (uplink: микрофон -> домофон).
+
+    Defensive: 16-bit PCM выровнен по 2 байта; нечётная длина (truncated/
+    misaligned кадр) иначе бросила бы audioop.error. Висячий байт обрезаем
+    (вызывающий uplink.py тоже ловит, но public-функция не должна полагаться
+    на чистоту входа)."""
+    if len(pcm) % _SAMPLE_WIDTH:
+        pcm = pcm[: len(pcm) - (len(pcm) % _SAMPLE_WIDTH)]
     if payload_type == PCMU_PAYLOAD_TYPE:
         return audioop.lin2ulaw(pcm, _SAMPLE_WIDTH)
     if payload_type == PCMA_PAYLOAD_TYPE:
