@@ -31,31 +31,25 @@
 - Экран вызова (`camera.intercom_call`) — видео домофона + звук гостя инлайн на дашборде, работает на 4G без экспозиции go2rtc.
 - Микрофон (uplink, говорить гостю) — **следующий слайс** (Slice 2).
 
-## Использование: кнопка «Ответить» в уведомлении
+## Использование: экран вызова `/doorbell-call/call`
 
-Интеграция даёт сервисы `elektronny_gorod.answer` / `elektronny_gorod.hangup` и
-`event`-сущность вызова. Кнопки в push-уведомлении удобно подключить готовым
-**blueprint**-ом (idiomatic HA: интеграция = entity+сервисы, уведомление строит
-пользователь под свой телефон). Два варианта:
+Интеграция даёт сервисы `elektronny_gorod.answer` / `elektronny_gorod.hangup`,
+`event`-сущность вызова и сущность активного вызова `camera.<...>_intercom_call`.
+Поверх них собирается **экран вызова**: пуш будит телефон и одним тапом открывает
+в HA экран с видео, звуком гостя и кнопками. Канон — прод-модель «лёгкий пуш →
+экран» (idiomatic HA: интеграция = entity+сервисы, UI строит пользователь).
 
-| Blueprint | Кнопки | Когда |
+| Blueprint | Роль | Сколько |
 |---|---|---|
-| [`doorbell_two_way_answer.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_two_way_answer.yaml) | Ответить / Сбросить | минимальный — только аудио-ответ |
-| [`doorbell_video_call.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_video_call.yaml) | **+ снимок камеры + Открыть дверь** | полный видеодомофонный UX |
+| [`doorbell_call_notify.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_call_notify.yaml) | пуш со снимком + активная дверь + «Открыть» из пуша | по 1× на дверь |
+| [`doorbell_screen_controller.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_screen_controller.yaml) | SIP-состояние + «Открыть» + сброс при старте | 1× на систему |
 
-Оба при `ring` шлют actionable-уведомление (Companion App) high-priority и снимают
-его при действии/завершении. «Открыть дверь» — `lock.unlock` (accessControlOpen).
+Полная пошаговая сборка (хелперы → blueprint-ы → дашборд → микрофон → pro-tip
+авто-звука), поток состояний и ограничения — в [`call-screen-setup.md`](call-screen-setup.md).
 
-**Установка:**
-1. Settings → Automations & Scenes → Blueprints → **Import Blueprint** → вставить
-   raw-URL файла выше (или скопировать в `config/blueprints/automation/`).
-2. Create Automation → выбрать blueprint → указать **сущность вызова домофона**
-   и **телефон** (устройство с Home Assistant Companion App).
-3. Требуется Companion App (actionable-уведомления). Ответить нужно в окне `~30с`
-   (`CallInvalidated`) — иначе домофон сбросит вызов сам.
-
-> Альтернатива без мобильного приложения: кнопка на Lovelace-дашборде, вызывающая
-> `elektronny_gorod.answer` (actionable push для этого не нужен).
+> Требуется Companion App (actionable-уведомления). Ответить нужно в окне `~30с`
+> (`CallInvalidated`) — иначе домофон сбросит вызов сам. Альтернатива без телефона:
+> кнопка на дашборде, вызывающая `elektronny_gorod.answer`.
 
 ## Ключевые решения (brainstorming 2026-06-22)
 

@@ -111,6 +111,21 @@ camera + HA-native two-way чище, чем two-way хаком в карточк
 Надёжно: один тап по плееру (браузер запоминает на сессию). Полный авто-звук политикой
 браузера не гарантируется.
 
+### Обновление (2026-06-25): прод на `advanced-camera-card`
+
+Сущность (Архитектура) и фундамент неизменны — поменялась **только карточка** in-call.
+В реальном проде in-call-плеер живёт на **`advanced-camera-card`** (`live_provider: go2rtc`,
+WebRTC/MSE, `auto_unmute: [selected, visible]`), а **`picture-entity`** осталась дефолтом
+для ringing-предпросмотра. Причина: инлайн `picture-entity` для in-call **глушит звук**
+(та же политика автоплея браузера) — `advanced-camera-card` встраивает плеер, который
+включает звук сразу (auto_unmute), без тапа. `webrtc-camera entity:` (вариант 1) рабочий,
+но `advanced-camera-card` оказался удобнее по авто-звуку.
+
+Канон для репозитория (blueprints + dashboard-пример, ветка `feat/doorbell-call-screen-sync`):
+**`picture-entity` — дефолт** примера (минимум зависимостей; звук по тапу), а
+**`advanced-camera-card` — pro-tip** (HACS) для авто-звука. Полная инструкция —
+[call-screen-setup.md](call-screen-setup.md).
+
 ## Что решает по болям
 
 | Боль | Решение |

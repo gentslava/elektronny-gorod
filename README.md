@@ -208,9 +208,14 @@ type: custom:eg-intercom-mic-card
 
 > Браузер отдаёт микрофон только на **HTTPS-origin** (или `localhost`). После добавления ресурса обновите страницу с очисткой кэша.
 
-### Ответ из уведомления
+### Экран вызова и пуш-уведомления
 
-Готовый blueprint `doorbell_two_way_answer` шлёт actionable-пуш с кнопками «Ответить» (→ `answer`) и «Сбросить» (→ `hangup`). Подробности, ограничения и установка карты — в [`docs/features/intercom-two-way-audio/uplink-card-install.md`](docs/features/intercom-two-way-audio/uplink-card-install.md).
+Готовые blueprint-ы собирают **экран вызова** `/doorbell-call/call`: пуш будит телефон и одним тапом открывает в Home Assistant экран с видео, звуком гостя и кнопками «Ответить» / «Говорить» / «Открыть» / «Сбросить».
+
+- `doorbell_call_notify` — пуш со снимком камеры + активная дверь (по разу на дверь);
+- `doorbell_screen_controller` — SIP-состояние, «Открыть дверь» из пуша, сброс при старте (один на систему).
+
+Пошаговая сборка (хелперы → blueprint-ы → дашборд → микрофон → pro-tip авто-звука) — в [`docs/features/intercom-two-way-audio/call-screen-setup.md`](docs/features/intercom-two-way-audio/call-screen-setup.md). Установка карты микрофона и ограничения — в [`docs/features/intercom-two-way-audio/uplink-card-install.md`](docs/features/intercom-two-way-audio/uplink-card-install.md).
 
 ## Пример автоматизации: баланс
 Вот пример автоматизации для уведомления о низком балансе:
