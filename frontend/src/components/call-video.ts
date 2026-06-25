@@ -126,19 +126,19 @@ export class EgCallVideo extends LitElement {
     :host {
       display: block;
       width: 100%;
+      height: 100%;
     }
     ha-camera-stream,
     #webrtc-host {
       display: block;
       width: 100%;
-      border-radius: 12px;
-      overflow: hidden;
+      height: 100%;
     }
+    /* реальный плеер заполняет область (object-fit самого видео — по потоку) */
     .frame {
-      aspect-ratio: 16 / 9;
       width: 100%;
+      height: 100%;
       background: var(--secondary-background-color);
-      border-radius: 12px;
       display: flex;
       flex-direction: column;
       align-items: center;

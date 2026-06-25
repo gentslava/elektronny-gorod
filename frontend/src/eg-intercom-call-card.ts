@@ -232,28 +232,34 @@ export class EgIntercomCallCard extends LitElement {
 
     return html`
       <ha-card class="phase-${phase}">
-        <header>
-          <span class="name" title=${this._intercomName}>${this._intercomName}</span>
-          <span class="status ${view.isError ? "err" : ""}">
-            ${view.busy ? html`<span class="dot" aria-hidden="true"></span>` : nothing}
-            <span>${STATUS_RU[phase] ?? ""}</span>
-            ${showTimer ? html`<span class="timer">${this._timerText()}</span>` : nothing}
-          </span>
-        </header>
+        <div class="media">
+          <header>
+            <span class="name" title=${this._intercomName}>${this._intercomName}</span>
+            <span class="status ${view.isError ? "err" : ""}">
+              ${view.busy ? html`<span class="dot" aria-hidden="true"></span>` : nothing}
+              <span>${STATUS_RU[phase] ?? ""}</span>
+              ${showTimer ? html`<span class="timer">${this._timerText()}</span>` : nothing}
+            </span>
+          </header>
 
-        <div class="stage">
-          ${cam
-            ? html`<eg-call-video .hass=${this.hass} .entity=${cam} .muted=${this._muted}></eg-call-video>`
-            : view.isError
-              ? html`<div class="frame err"><ha-icon icon="mdi:phone-alert"></ha-icon><span>Не удалось установить вызов</span></div>`
+          <div class="stage">
+            ${cam
+              ? html`<eg-call-video .hass=${this.hass} .entity=${cam} .muted=${this._muted}></eg-call-video>`
+              : view.isError
+                ? html`<div class="frame err"><ha-icon icon="mdi:phone-alert"></ha-icon><span>Не удалось установить вызов</span></div>`
+                : nothing}
+            ${view.busy
+              ? html`<div class="connecting" aria-hidden="true"><div class="spinner"></div></div>`
               : nothing}
-          ${view.busy
-            ? html`<div class="connecting" aria-hidden="true"><div class="spinner"></div></div>`
-            : nothing}
+          </div>
         </div>
 
-        ${view.showOpen ? this._renderOpen() : nothing}
-        ${this._renderActions(view)}
+        <div class="controls">
+          <div class="open-area">
+            ${view.showOpen ? this._renderOpen() : nothing}
+          </div>
+          ${this._renderActions(view)}
+        </div>
       </ha-card>
     `;
   }
@@ -337,12 +343,56 @@ export class EgIntercomCallCard extends LitElement {
   static override styles = css`
     :host {
       display: block;
+      height: 100%;
+      /* адаптив по собственной ширине карточки (телефон / планшет-ландшафт / десктоп) */
+      container-type: inline-size;
     }
     ha-card {
-      padding: 14px;
+      height: 100%;
+      box-sizing: border-box;
+      padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 14px;
+    }
+    .media {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      /* видео — реальные пропорции (16:9), не растягивается */
+      flex: none;
+    }
+    .controls {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      /* занимает оставшуюся высоту: «Открыть» по центру, кнопки действий — снизу */
+      flex: 1 1 auto;
+      min-height: 0;
+    }
+    .open-area {
+      flex: 1 1 auto;
+      display: flex;
+      align-items: center; /* «Открыть» вертикально по центру свободной области */
+    }
+    .open-area eg-open-control {
+      width: 100%;
+    }
+    /* широкий контейнер — планшет-ландшафт / десктоп: 2 колонки */
+    @container (min-width: 640px) {
+      ha-card {
+        flex-direction: row;
+        align-items: stretch; /* колонки одной высоты = высоте видео */
+        gap: 18px;
+      }
+      .media {
+        flex: 1.6 1 0;
+        justify-content: center;
+      }
+      .controls {
+        flex: 1 1 0;
+        max-width: 380px;
+      }
     }
     header {
       display: flex;
@@ -388,6 +438,16 @@ export class EgIntercomCallCard extends LitElement {
     }
     .stage {
       position: relative;
+      width: 100%;
+      /* реальные пропорции потока домофона (16:9) — без искажения/кропа */
+      aspect-ratio: 16 / 9;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--secondary-background-color);
+    }
+    .stage > eg-call-video {
+      position: absolute;
+      inset: 0;
     }
     .connecting {
       position: absolute;
@@ -421,9 +481,9 @@ export class EgIntercomCallCard extends LitElement {
       }
     }
     .frame {
-      aspect-ratio: 16 / 9;
+      position: absolute;
+      inset: 0;
       background: var(--secondary-background-color);
-      border-radius: 12px;
       display: flex;
       flex-direction: column;
       align-items: center;
