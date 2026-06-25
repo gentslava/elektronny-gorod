@@ -255,10 +255,11 @@ export class EgIntercomCallCard extends LitElement {
         </div>
 
         <div class="controls">
+          <div class="ctrl-spacer"></div>
           <div class="open-area">
             ${view.showOpen ? this._renderOpen() : nothing}
           </div>
-          ${this._renderActions(view)}
+          <div class="ctrl-bottom">${this._renderActions(view)}</div>
         </div>
       </ha-card>
     `;
@@ -350,33 +351,46 @@ export class EgIntercomCallCard extends LitElement {
     ha-card {
       height: 100%;
       box-sizing: border-box;
-      padding: 16px;
+      /* щедрые отступы от краёв экрана + безопасные зоны */
+      padding: max(20px, env(safe-area-inset-top))
+        max(20px, env(safe-area-inset-right))
+        max(20px, env(safe-area-inset-bottom))
+        max(20px, env(safe-area-inset-left));
       display: flex;
       flex-direction: column;
-      gap: 14px;
+      gap: 16px;
     }
     .media {
       display: flex;
       flex-direction: column;
+      justify-content: center; /* видео центрировано в своей зоне (равные отступы сверху/снизу) */
       gap: 12px;
-      /* видео — реальные пропорции (16:9), не растягивается */
-      flex: none;
+      min-height: 0;
+      flex: 1 1 0;
     }
     .controls {
       display: flex;
       flex-direction: column;
-      gap: 14px;
-      /* занимает оставшуюся высоту: «Открыть» по центру, кнопки действий — снизу */
       flex: 1 1 auto;
       min-height: 0;
     }
+    .ctrl-spacer {
+      flex: 1 1 0;
+      min-height: 12px;
+    }
     .open-area {
-      flex: 1 1 auto;
       display: flex;
-      align-items: center; /* «Открыть» вертикально по центру свободной области */
+      justify-content: center;
     }
     .open-area eg-open-control {
       width: 100%;
+    }
+    .ctrl-bottom {
+      flex: 1 1 0;
+      min-height: 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
     }
     /* широкий контейнер — планшет-ландшафт / десктоп: 2 колонки */
     @container (min-width: 640px) {
