@@ -114,18 +114,22 @@ def async_register_uplink_ws_command(hass: HomeAssistant) -> None:
     hass.data[_WS_REGISTERED] = True
 
 
-# Lovelace-карта микрофона: раздаётся статикой; пользователь добавляет URL как
-# ресурс (Settings → Dashboards → Resources → JavaScript Module).
-CARD_URL = "/elektronny_gorod_static/eg-intercom-mic-card.js"
-_CARD_PATH = os.path.join(os.path.dirname(__file__), "www", "eg-intercom-mic-card.js")
+# Lovelace-карты (микрофон, экран вызова) раздаются статикой из всей www/;
+# пользователь добавляет URL как ресурс (Settings → Dashboards → Resources →
+# JavaScript Module). Регистрируем директорию, а не отдельный файл, — чтобы
+# отдавались все карты (mic-card + call-card + будущие) без правок кода.
+STATIC_BASE = "/elektronny_gorod_static"
+_WWW_DIR = os.path.join(os.path.dirname(__file__), "www")
+CARD_URL = f"{STATIC_BASE}/eg-intercom-mic-card.js"  # mic-card (обратная совместимость)
+CALL_CARD_URL = f"{STATIC_BASE}/eg-intercom-call-card.js"  # экран вызова (Slice 3b)
 _CARD_REGISTERED = f"{DOMAIN}_uplink_card_registered"
 
 
 async def async_register_uplink_card(hass: HomeAssistant) -> None:
-    """Раздать Lovelace-карту микрофона статикой по `CARD_URL` (один раз)."""
+    """Раздать всю www/ статикой по STATIC_BASE (один раз) — mic-card + call-card."""
     if hass.data.get(_CARD_REGISTERED):
         return
     await hass.http.async_register_static_paths(
-        [StaticPathConfig(CARD_URL, _CARD_PATH, False)]
+        [StaticPathConfig(STATIC_BASE, _WWW_DIR, False)]
     )
     hass.data[_CARD_REGISTERED] = True
