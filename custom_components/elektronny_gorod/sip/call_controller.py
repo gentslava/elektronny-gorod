@@ -29,7 +29,16 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.util import dt as dt_util
 
-from ..const import DOORBELL_CALL_WINDOW_FALLBACK_SEC, LOGGER
+from ..const import (
+    CALL_STATE_ACTIVE,
+    CALL_STATE_CONNECTING,
+    CALL_STATE_ENDED,
+    CALL_STATE_ERROR,
+    CALL_STATE_RINGING,
+    DOORBELL_CALL_WINDOW_FALLBACK_SEC,
+    EVENT_CALL_STATE,
+    LOGGER,
+)
 from ..go2rtc import remove_audio_stream
 from .bridge import AudioBridge, detect_lan_ip
 from .manager import SipManager
@@ -109,6 +118,14 @@ class DoorbellCallController:
         # на фикс-портах. Hold и accept проходят под одним локом.
         self._answer_lock = asyncio.Lock()
         self.downlink_packets = 0
+        # Состояние вызова для sensor.*_call_state (EVENT_CALL_STATE). _last_* кешируют
+        # ids активного вызова — на `ended` self._active уже может быть None. _last_state
+        # дедуплицирует одинаковые подряд (несколько terminal-путей → один `ended`).
+        self._call_state: str | None = None
+        self._last_ac: str | None = None
+        self._last_place_id: str | None = None
+        self._last_call_id: str | None = None
+        self._call_started_at: str | None = None
 
     # ---- трекинг активного вызова (из SIGNAL_DOORBELL) ----
     @callback
@@ -127,11 +144,13 @@ class DoorbellCallController:
                 access_control_id=str(payload.get("access_control_id") or ""),
                 deadline=self._compute_deadline(attrs.get("call_invalidated")),
             )
+            self._emit_call_state(CALL_STATE_RINGING)
             # register-on-ring: держим SIP сразу (зеркало приложения, ADR-0012).
             self._hass.async_create_task(self._async_hold_current())
         elif event_type == "ended" and self._active is not None:
             cid = attrs.get("call_id")
             if cid is None or cid == self._active.call_id:
+                self._emit_call_state(CALL_STATE_ENDED)  # до сброса _active (читает ids)
                 self._active = None
                 # CANCEL мог не прийти (ответ на др. устройстве) — снять держимый сами.
                 if self._manager is not None and self._manager.holding:
@@ -197,6 +216,7 @@ class DoorbellCallController:
                 LOGGER.warning("SIP answer: FCM-токен не готов — REGISTER невозможен")
                 return False
 
+            self._emit_call_state(CALL_STATE_CONNECTING)
             bridge, on_downlink = await self._setup_audio_bridge(call)
             self.downlink_packets = 0
             self._cancel_hold_timeout()
@@ -223,15 +243,22 @@ class DoorbellCallController:
             except Exception:  # noqa: BLE001 — degrade: мост снять, экран живёт от FCM
                 LOGGER.warning("SIP answer: accept/register упал — снимаю мост (degrade)",
                                exc_info=True)
+                # Контракт `error` (review P2): терминальное состояние неудачного
+                # ответа. Естественно сбрасывается следующим `ended`/CANCEL/новым
+                # `ring`; карточка вызова (Slice 3b) сама гасит error по таймеру —
+                # авто-переход в `ended` намеренно отложен до появления потребителя.
+                self._emit_call_state(CALL_STATE_ERROR)
                 self._clear_uplink_sink()
                 await self._teardown_audio_bridge(bridge)
                 return False
 
             if ok:
                 self._bridge = bridge
+                self._emit_call_state(CALL_STATE_ACTIVE)
                 self._fire_call_state(True)
                 self._schedule_call_timeout()
             else:
+                self._emit_call_state(CALL_STATE_ERROR)
                 self._clear_uplink_sink()
                 await self._teardown_audio_bridge(bridge)
             return ok
@@ -253,6 +280,7 @@ class DoorbellCallController:
             self._clear_uplink_sink()
             if manager is not None:
                 await manager.async_hangup()
+                self._emit_call_state(CALL_STATE_ENDED)
                 self._fire_call_state(False)
             await self._teardown_audio_bridge(bridge)
 
@@ -265,6 +293,7 @@ class DoorbellCallController:
             manager, self._manager = self._manager, None
             self._clear_uplink_sink()
             await manager.async_hangup()
+            self._emit_call_state(CALL_STATE_ENDED)
             self._fire_call_state(False)
 
     async def _mint(self, call: ActiveCall) -> dict[str, Any]:
@@ -278,12 +307,44 @@ class DoorbellCallController:
         self._hass.bus.async_fire(EVENT_SIP_CALL, {"active": active})
 
     @callback
+    def _emit_call_state(self, state: str) -> None:
+        """Опубликовать фазу вызова на EVENT_CALL_STATE → sensor.*_call_state.
+
+        Параллельно EVENT_SIP_CALL (тот гоняет input_boolean dismiss). Bus-event,
+        а не dispatcher — консистентно с `_fire_call_state` и работает с MagicMock-hass
+        в юнит-тестах. Дедуп одинаковых подряд: несколько terminal-путей дают один `ended`.
+        """
+        if state == self._call_state:
+            return
+        call = self._active
+        if call is not None:
+            self._last_ac = call.access_control_id
+            self._last_place_id = call.place_id
+            self._last_call_id = call.call_id
+        if state == CALL_STATE_ACTIVE:
+            self._call_started_at = dt_util.utcnow().isoformat()
+        elif state in (CALL_STATE_ENDED, CALL_STATE_ERROR):
+            self._call_started_at = None
+        self._call_state = state
+        self._hass.bus.async_fire(
+            EVENT_CALL_STATE,
+            {
+                "place_id": self._last_place_id,
+                "access_control_id": self._last_ac,
+                "state": state,
+                "call_id": self._last_call_id,
+                "started_at": self._call_started_at,
+            },
+        )
+
+    @callback
     def _on_ring_cancelled(self) -> None:
         """Держимый вызов отменён (CANCEL: сброс панели / ответ на др. устройстве) →
         мгновенный dismiss экрана. Моста ещё нет (не отвечали) — только сигнал."""
         self._cancel_hold_timeout()
         self._manager = None
         self._clear_uplink_sink()
+        self._emit_call_state(CALL_STATE_ENDED)
         self._fire_call_state(False)
 
     @callback
@@ -380,6 +441,7 @@ class DoorbellCallController:
         self._manager = None
         bridge, self._bridge = self._bridge, None
         self._clear_uplink_sink()
+        self._emit_call_state(CALL_STATE_ENDED)
         self._fire_call_state(False)
         if bridge is not None:
             self._hass.async_create_task(self._teardown_audio_bridge(bridge))

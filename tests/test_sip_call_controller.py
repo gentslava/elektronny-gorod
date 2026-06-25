@@ -12,12 +12,37 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.elektronny_gorod.const import (
+    CALL_STATE_ACTIVE,
+    CALL_STATE_CONNECTING,
+    CALL_STATE_ENDED,
+    CALL_STATE_ERROR,
+    CALL_STATE_RINGING,
+    EVENT_CALL_STATE,
+)
 from custom_components.elektronny_gorod.sip.call_controller import (
     EVENT_SIP_CALL,
     DoorbellCallController,
 )
 
 _MGR_PATH = "custom_components.elektronny_gorod.sip.call_controller.SipManager"
+
+
+def _call_states(hass_mock) -> list[str]:
+    """Состояния, опубликованные на EVENT_CALL_STATE (через hass.bus.async_fire)."""
+    return [
+        call.args[1]["state"]
+        for call in hass_mock.bus.async_fire.call_args_list
+        if call.args and call.args[0] == EVENT_CALL_STATE
+    ]
+
+
+def _call_state_payloads(hass_mock) -> list[dict]:
+    return [
+        call.args[1]
+        for call in hass_mock.bus.async_fire.call_args_list
+        if call.args and call.args[0] == EVENT_CALL_STATE
+    ]
 
 
 def _hass() -> MagicMock:
@@ -508,3 +533,78 @@ async def test_uplink_sink_cleared_when_accept_fails():
 
     assert ok is False
     assert c._uplink_sink is None
+
+
+# ---- Slice 3a: публикация состояния вызова (EVENT_CALL_STATE) ----
+def test_call_state_ringing_emitted_on_ring():
+    c = DoorbellCallController(_hass(), MagicMock(), lambda: "TOK")
+    c.handle_signal(_ring(place="P", ac="A", call_id="c1"))
+    payloads = _call_state_payloads(c._hass)
+    assert payloads, "EVENT_CALL_STATE не опубликован на ring"
+    last = payloads[-1]
+    assert last["state"] == CALL_STATE_RINGING
+    assert last["access_control_id"] == "A"
+    assert last["place_id"] == "P"
+    assert last["call_id"] == "c1"
+
+
+def test_call_state_ended_emitted_on_fcm_ended():
+    c = DoorbellCallController(_hass(), MagicMock(), lambda: "TOK")
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    c.handle_signal(_ended(ac="A", call_id="c1"))
+    assert _call_states(c._hass)[-1] == CALL_STATE_ENDED
+
+
+async def test_call_state_connecting_then_active_on_answer(controller):
+    controller.handle_signal(_ring())
+    with patch(_MGR_PATH) as MgrCls:
+        mgr = MgrCls.return_value
+        mgr.in_call = False
+        mgr.holding = False
+        mgr.async_answer = AsyncMock(return_value=True)
+        ok = await controller.async_answer()
+    assert ok is True
+    states = _call_states(controller._hass)
+    assert CALL_STATE_CONNECTING in states
+    assert states[-1] == CALL_STATE_ACTIVE
+    active = [p for p in _call_state_payloads(controller._hass)
+              if p["state"] == CALL_STATE_ACTIVE][-1]
+    assert active["started_at"] is not None  # таймер длительности отсчитывается отсюда
+
+
+async def test_call_state_ended_on_hangup(controller):
+    controller.handle_signal(_ring())
+    controller._manager = MagicMock()
+    controller._manager.async_hangup = AsyncMock()
+    await controller.async_hangup()
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+
+
+async def test_call_state_error_emitted_when_accept_raises():
+    c = _go2rtc_controller()
+    c.handle_signal(_ring())
+    held = MagicMock()
+    held.holding = True
+    held.in_call = False
+    held.accept = AsyncMock(side_effect=ValueError("malformed SDP"))
+    c._manager = held
+    with patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
+        f"{_CC}.detect_lan_ip", return_value="1.2.3.4"
+    ), patch(f"{_CC}.remove_audio_stream", new=AsyncMock()), patch(
+        f"{_CC}.async_get_clientsession"
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock()
+        bridge.stop = AsyncMock()
+        ok = await c.async_answer()
+    assert ok is False
+    assert CALL_STATE_ERROR in _call_states(c._hass)
+
+
+def test_call_state_dedup_consecutive_ended():
+    # Несколько terminal-путей (ended FCM → release held) не плодят дубль ended.
+    c = DoorbellCallController(_hass(), MagicMock(), lambda: "TOK")
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    c.handle_signal(_ended(ac="A", call_id="c1"))
+    ended_count = _call_states(c._hass).count(CALL_STATE_ENDED)
+    assert ended_count == 1

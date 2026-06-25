@@ -69,6 +69,18 @@ SIP_DATA: Final = f"{DOMAIN}_sip"
 # «времени на ответ», иначе значения разъедутся (constants-locality.md).
 DOORBELL_CALL_WINDOW_FALLBACK_SEC: Final = 35.0
 
+# Bus-событие состояния вызова: sip/call_controller.py (sender) → sensor.*_call_state
+# (listener). Идёт ПАРАЛЛЕЛЬНО EVENT_SIP_CALL (тот гоняет input_boolean dismiss и не
+# трогается). Bus-event, а не dispatcher: консистентно с `_fire_call_state` и работает
+# с MagicMock-hass в юнит-тестах контроллера. Shared cross-module → в const.py.
+EVENT_CALL_STATE: Final = f"{DOMAIN}_call_state"
+CALL_STATE_IDLE: Final = "idle"
+CALL_STATE_RINGING: Final = "ringing"
+CALL_STATE_CONNECTING: Final = "connecting"
+CALL_STATE_ACTIVE: Final = "active"
+CALL_STATE_ENDED: Final = "ended"
+CALL_STATE_ERROR: Final = "error"
+
 # Persisted FCM-credentials (firebase-messaging) — в entry.data, чтобы FCM-токен
 # был стабилен между рестартами (как access_token/refresh_token).
 CONF_FCM_CREDENTIALS: Final = "fcm_credentials"
