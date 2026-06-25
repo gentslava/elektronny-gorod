@@ -47,14 +47,15 @@ var Re=Object.defineProperty;var Ue=Object.getOwnPropertyDescriptor;var p=(r,e,t
     .frame span {
       font-size: 0.85rem;
     }
-  `,p([f({attribute:!1})],A.prototype,"hass",2),p([f()],A.prototype,"entity",2),p([f({type:Boolean})],A.prototype,"muted",2),p([_()],A.prototype,"_provider",2),A=p([R("eg-call-video")],A);function Ee(r){return r<0?0:r>1?1:r}function Ge(r,e,t,i){let s=Math.max(1,t-i);return Ee((r-e-i/2)/s)}function Ze(r,e){return Ee(r/Math.max(1,e))}var Qe=.92,Ye=800,$=class extends y{constructor(){super(...arguments);this.mode="hold";this.disabled=!1;this.label="\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u0432\u0435\u0440\u044C";this.status="idle";this._progress=0;this._arming=!1;this._raf=0;this._holdStart=0;this._trackRect=null;this._holdTick=()=>{if(this._progress=Ze(performance.now()-this._holdStart,Ye),this._progress>=1){this._reset(),this._fireOpen();return}this._raf=requestAnimationFrame(this._holdTick)};this._onHoldDown=t=>{this.disabled||(t.target.setPointerCapture?.(t.pointerId),this._arming=!0,this._holdStart=performance.now(),this._raf=requestAnimationFrame(this._holdTick))};this._onHoldUp=()=>{this._progress<1&&this._reset()};this._onSlideDown=t=>{if(this.disabled)return;let i=t.currentTarget.closest(".track");this._trackRect=i?.getBoundingClientRect()??null,t.target.setPointerCapture?.(t.pointerId),this._arming=!0};this._onSlideMove=t=>{if(!this._arming||!this._trackRect)return;let i=56;this._progress=Ge(t.clientX,this._trackRect.left,this._trackRect.width,i)};this._onSlideUp=()=>{this._progress>=Qe?(this._reset(),this._fireOpen()):this._reset()};this._onTap=()=>{this.disabled||this._fireOpen()}}_fireOpen(){this.dispatchEvent(new CustomEvent("open",{bubbles:!0,composed:!0}))}_reset(){this._raf&&cancelAnimationFrame(this._raf),this._raf=0,this._arming=!1,this._progress=0,this._trackRect=null}render(){return this.mode==="tap"?this._renderTap():this.mode==="slide"?this._renderSlide():this._renderHold()}_caption(){return this.status==="opening"?"\u041E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u2026":this.status==="opened"?"\u041E\u0442\u043A\u0440\u044B\u0442\u043E":this.status==="error"?"\u041E\u0448\u0438\u0431\u043A\u0430":this.mode==="slide"?"\u0421\u0434\u0432\u0438\u043D\u044C\u0442\u0435, \u0447\u0442\u043E\u0431\u044B \u043E\u0442\u043A\u0440\u044B\u0442\u044C":this.mode==="hold"?"\u0423\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435, \u0447\u0442\u043E\u0431\u044B \u043E\u0442\u043A\u0440\u044B\u0442\u044C":this.label}_renderTap(){return d`
-      <button class="bar tap" ?disabled=${this.disabled} @click=${this._onTap}
+  `,p([f({attribute:!1})],A.prototype,"hass",2),p([f()],A.prototype,"entity",2),p([f({type:Boolean})],A.prototype,"muted",2),p([_()],A.prototype,"_provider",2),A=p([R("eg-call-video")],A);function Ee(r){return r<0?0:r>1?1:r}function Ge(r,e,t,i){let s=Math.max(1,t-i);return Ee((r-e-i/2)/s)}function Ze(r,e){return Ee(r/Math.max(1,e))}var Qe=.92,Ye=800,$=class extends y{constructor(){super(...arguments);this.mode="hold";this.disabled=!1;this.label="\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u0432\u0435\u0440\u044C";this.status="idle";this._progress=0;this._arming=!1;this._raf=0;this._holdStart=0;this._trackRect=null;this._holdTick=()=>{if(this._progress=Ze(performance.now()-this._holdStart,Ye),this._progress>=1){this._reset(),this._fireOpen();return}this._raf=requestAnimationFrame(this._holdTick)};this._onHoldDown=t=>{this.disabled||(t.target.setPointerCapture?.(t.pointerId),this._arming=!0,this._holdStart=performance.now(),this._raf=requestAnimationFrame(this._holdTick))};this._onHoldUp=()=>{this._progress<1&&this._reset()};this._onSlideDown=t=>{if(this.disabled)return;let i=t.currentTarget.closest(".track");this._trackRect=i?.getBoundingClientRect()??null,t.target.setPointerCapture?.(t.pointerId),this._arming=!0};this._onSlideMove=t=>{if(!this._arming||!this._trackRect)return;let i=56;this._progress=Ge(t.clientX,this._trackRect.left,this._trackRect.width,i)};this._onSlideUp=()=>{this._progress>=Qe?(this._reset(),this._fireOpen()):this._reset()};this._onTap=()=>{this.disabled||this._fireOpen()}}_fireOpen(){this.dispatchEvent(new CustomEvent("open",{bubbles:!0,composed:!0}))}_reset(){this._raf&&cancelAnimationFrame(this._raf),this._raf=0,this._arming=!1,this._progress=0,this._trackRect=null}render(){return this.mode==="tap"?this._renderTap():this.mode==="slide"?this._renderSlide():this._renderHold()}_caption(){return this.status==="opening"?"\u041E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u2026":this.status==="opened"?"\u041E\u0442\u043A\u0440\u044B\u0442\u043E":this.status==="error"?"\u041E\u0448\u0438\u0431\u043A\u0430":this.mode==="slide"?"\u0421\u0434\u0432\u0438\u043D\u044C\u0442\u0435, \u0447\u0442\u043E\u0431\u044B \u043E\u0442\u043A\u0440\u044B\u0442\u044C":this.mode==="hold"?"\u0423\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435, \u0447\u0442\u043E\u0431\u044B \u043E\u0442\u043A\u0440\u044B\u0442\u044C":this.label}_iconName(){return this.status==="opened"?"mdi:check-circle":this.status==="error"?"mdi:lock-alert":"mdi:key-variant"}_vp(){return this.status==="opened"||this.status==="error"?1:this._progress}_statusClass(){return this.status==="opened"?"st-opened":this.status==="error"?"st-error":this.status==="opening"?"st-opening":""}_renderTap(){return d`
+      <button class="bar tap ${this._statusClass()}" ?disabled=${this.disabled} @click=${this._onTap}
               aria-label=${this.label}>
-        <ha-icon icon="mdi:key-variant"></ha-icon><span>${this._caption()}</span>
+        <div class="fill" style="width:${this._vp()*100}%"></div>
+        <span class="bar-label"><ha-icon icon=${this._iconName()}></ha-icon>${this._caption()}</span>
       </button>
     `}_renderHold(){return d`
       <button
-        class="bar hold ${this._arming?"arming":""}"
+        class="bar hold ${this._arming?"arming":""} ${this._statusClass()}"
         ?disabled=${this.disabled}
         aria-label="${this.label} — удерживайте"
         @pointerdown=${this._onHoldDown}
@@ -62,27 +63,27 @@ var Re=Object.defineProperty;var Ue=Object.getOwnPropertyDescriptor;var p=(r,e,t
         @pointercancel=${this._onHoldUp}
         @pointerleave=${this._onHoldUp}
       >
-        <div class="fill" style="width:${this._progress*100}%"></div>
+        <div class="fill" style="width:${this._vp()*100}%"></div>
         <span class="bar-label">
-          <ha-icon icon="mdi:key-variant"></ha-icon>
+          <ha-icon icon=${this._iconName()}></ha-icon>
           ${this._arming?"\u0423\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435\u2026":this._caption()}
         </span>
       </button>
     `}_renderSlide(){return d`
-      <div class="track" aria-label="${this.label} — сдвиньте, чтобы открыть" role="slider"
-           aria-valuemin="0" aria-valuemax="100"
-           aria-valuenow=${Math.round(this._progress*100)}>
-        <div class="fill" style="width:${this._progress*100}%"></div>
+      <div class="track ${this._statusClass()}" aria-label="${this.label} — сдвиньте, чтобы открыть"
+           role="slider" aria-valuemin="0" aria-valuemax="100"
+           aria-valuenow=${Math.round(this._vp()*100)}>
+        <div class="fill" style="width:${this._vp()*100}%"></div>
         <span class="bar-label">${this._caption()}</span>
         <div
           class="knob ${this.disabled?"off":""}"
-          style="transform:translateX(calc(${this._progress} * (100% + var(--eg-track-w, 0px))))"
+          style="transform:translateX(calc(${this._vp()} * (100% + var(--eg-track-w, 0px))))"
           @pointerdown=${this._onSlideDown}
           @pointermove=${this._onSlideMove}
           @pointerup=${this._onSlideUp}
           @pointercancel=${this._onSlideUp}
         >
-          <ha-icon icon="mdi:key-variant"></ha-icon>
+          <ha-icon icon=${this._iconName()}></ha-icon>
         </div>
       </div>
     `}};$.styles=S`
@@ -152,6 +153,28 @@ var Re=Object.defineProperty;var Ue=Object.getOwnPropertyDescriptor;var p=(r,e,t
     ha-icon {
       --mdc-icon-size: 24px;
     }
+    /* «Открыто» — success (зелёный + галочка); «Ошибка» — error (красный). */
+    .st-opened .fill {
+      background: var(--success-color, #2e7d32);
+      opacity: 1;
+    }
+    .st-error .fill {
+      background: var(--error-color, #c62828);
+      opacity: 1;
+    }
+    .st-opened .bar-label,
+    .st-error .bar-label {
+      color: #fff;
+    }
+    .bar.st-opened ha-icon {
+      color: #fff;
+    }
+    .track.st-opened .knob {
+      background: var(--success-color, #2e7d32);
+    }
+    .track.st-error .knob {
+      background: var(--error-color, #c62828);
+    }
     @media (prefers-reduced-motion: reduce) {
       .fill {
         transition: none;
@@ -185,9 +208,7 @@ var Re=Object.defineProperty;var Ue=Object.getOwnPropertyDescriptor;var p=(r,e,t
 
         <div class="stage">
           ${s?d`<eg-call-video .hass=${this.hass} .entity=${s} .muted=${this._muted}></eg-call-video>`:i.isError?d`<div class="frame err"><ha-icon icon="mdi:phone-alert"></ha-icon><span>Не удалось установить вызов</span></div>`:l}
-          ${i.busy?d`<div class="connecting" role="status">
-                <div class="spinner" aria-hidden="true"></div><span>Соединение…</span>
-              </div>`:l}
+          ${i.busy?d`<div class="connecting" aria-hidden="true"><div class="spinner"></div></div>`:l}
         </div>
 
         ${i.showOpen?this._renderOpen():l}

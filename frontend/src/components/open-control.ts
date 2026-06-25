@@ -136,11 +136,30 @@ export class EgOpenControl extends LitElement {
     return this.label;
   }
 
+  private _iconName(): string {
+    if (this.status === "opened") return "mdi:check-circle";
+    if (this.status === "error") return "mdi:lock-alert";
+    return "mdi:key-variant";
+  }
+
+  /** Визуальный прогресс: при «открыто»/«ошибка» — заполнено целиком. */
+  private _vp(): number {
+    return this.status === "opened" || this.status === "error" ? 1 : this._progress;
+  }
+
+  private _statusClass(): string {
+    if (this.status === "opened") return "st-opened";
+    if (this.status === "error") return "st-error";
+    if (this.status === "opening") return "st-opening";
+    return "";
+  }
+
   private _renderTap(): TemplateResult {
     return html`
-      <button class="bar tap" ?disabled=${this.disabled} @click=${this._onTap}
+      <button class="bar tap ${this._statusClass()}" ?disabled=${this.disabled} @click=${this._onTap}
               aria-label=${this.label}>
-        <ha-icon icon="mdi:key-variant"></ha-icon><span>${this._caption()}</span>
+        <div class="fill" style="width:${this._vp() * 100}%"></div>
+        <span class="bar-label"><ha-icon icon=${this._iconName()}></ha-icon>${this._caption()}</span>
       </button>
     `;
   }
@@ -148,7 +167,7 @@ export class EgOpenControl extends LitElement {
   private _renderHold(): TemplateResult {
     return html`
       <button
-        class="bar hold ${this._arming ? "arming" : ""}"
+        class="bar hold ${this._arming ? "arming" : ""} ${this._statusClass()}"
         ?disabled=${this.disabled}
         aria-label="${this.label} — удерживайте"
         @pointerdown=${this._onHoldDown}
@@ -156,9 +175,9 @@ export class EgOpenControl extends LitElement {
         @pointercancel=${this._onHoldUp}
         @pointerleave=${this._onHoldUp}
       >
-        <div class="fill" style="width:${this._progress * 100}%"></div>
+        <div class="fill" style="width:${this._vp() * 100}%"></div>
         <span class="bar-label">
-          <ha-icon icon="mdi:key-variant"></ha-icon>
+          <ha-icon icon=${this._iconName()}></ha-icon>
           ${this._arming ? "Удерживайте…" : this._caption()}
         </span>
       </button>
@@ -167,20 +186,20 @@ export class EgOpenControl extends LitElement {
 
   private _renderSlide(): TemplateResult {
     return html`
-      <div class="track" aria-label="${this.label} — сдвиньте, чтобы открыть" role="slider"
-           aria-valuemin="0" aria-valuemax="100"
-           aria-valuenow=${Math.round(this._progress * 100)}>
-        <div class="fill" style="width:${this._progress * 100}%"></div>
+      <div class="track ${this._statusClass()}" aria-label="${this.label} — сдвиньте, чтобы открыть"
+           role="slider" aria-valuemin="0" aria-valuemax="100"
+           aria-valuenow=${Math.round(this._vp() * 100)}>
+        <div class="fill" style="width:${this._vp() * 100}%"></div>
         <span class="bar-label">${this._caption()}</span>
         <div
           class="knob ${this.disabled ? "off" : ""}"
-          style="transform:translateX(calc(${this._progress} * (100% + var(--eg-track-w, 0px))))"
+          style="transform:translateX(calc(${this._vp()} * (100% + var(--eg-track-w, 0px))))"
           @pointerdown=${this._onSlideDown}
           @pointermove=${this._onSlideMove}
           @pointerup=${this._onSlideUp}
           @pointercancel=${this._onSlideUp}
         >
-          <ha-icon icon="mdi:key-variant"></ha-icon>
+          <ha-icon icon=${this._iconName()}></ha-icon>
         </div>
       </div>
     `;
@@ -252,6 +271,28 @@ export class EgOpenControl extends LitElement {
     }
     ha-icon {
       --mdc-icon-size: 24px;
+    }
+    /* «Открыто» — success (зелёный + галочка); «Ошибка» — error (красный). */
+    .st-opened .fill {
+      background: var(--success-color, #2e7d32);
+      opacity: 1;
+    }
+    .st-error .fill {
+      background: var(--error-color, #c62828);
+      opacity: 1;
+    }
+    .st-opened .bar-label,
+    .st-error .bar-label {
+      color: #fff;
+    }
+    .bar.st-opened ha-icon {
+      color: #fff;
+    }
+    .track.st-opened .knob {
+      background: var(--success-color, #2e7d32);
+    }
+    .track.st-error .knob {
+      background: var(--error-color, #c62828);
     }
     @media (prefers-reduced-motion: reduce) {
       .fill {

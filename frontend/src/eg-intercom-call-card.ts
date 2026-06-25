@@ -248,9 +248,7 @@ export class EgIntercomCallCard extends LitElement {
               ? html`<div class="frame err"><ha-icon icon="mdi:phone-alert"></ha-icon><span>Не удалось установить вызов</span></div>`
               : nothing}
           ${view.busy
-            ? html`<div class="connecting" role="status">
-                <div class="spinner" aria-hidden="true"></div><span>Соединение…</span>
-              </div>`
+            ? html`<div class="connecting" aria-hidden="true"><div class="spinner"></div></div>`
             : nothing}
         </div>
 
