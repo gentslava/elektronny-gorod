@@ -1,0 +1,21 @@
+{
+  "name": "eg-intercom-call-card",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Lovelace-карточка экрана вызова домофона «Электронный город» (Lit+TS).",
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lit": "^3.2.1"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
