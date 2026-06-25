@@ -214,11 +214,10 @@ var Re=Object.defineProperty;var Ue=Object.getOwnPropertyDescriptor;var p=(r,e,t
         </div>
 
         <div class="controls">
-          <div class="ctrl-spacer"></div>
           <div class="open-area">
             ${i.showOpen?this._renderOpen():l}
           </div>
-          <div class="ctrl-bottom">${this._renderActions(i)}</div>
+          ${this._renderActions(i)}
         </div>
       </ha-card>
     `}_renderOpen(){return d`
@@ -276,52 +275,56 @@ var Re=Object.defineProperty;var Ue=Object.getOwnPropertyDescriptor;var p=(r,e,t
         max(20px, env(safe-area-inset-left));
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      /* телефон: равномерные промежутки вокруг видео; на низком экране схлопываются */
+      justify-content: space-evenly;
+      gap: 12px;
     }
     .media {
       display: flex;
       flex-direction: column;
-      justify-content: center; /* видео центрировано в своей зоне (равные отступы сверху/снизу) */
       gap: 12px;
-      min-height: 0;
-      flex: 1 1 0;
+      flex: none; /* видео фиксированной высоты (16:9 по ширине), не пляшет */
     }
+    .stage {
+      position: relative;
+      /* видео всегда полная ширина и 16:9 (не «окошко», не ужимается по высоте) */
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: 12px;
+      overflow: hidden;
+      background: var(--secondary-background-color);
+    }
+    .stage > eg-call-video {
+      position: absolute;
+      inset: 0;
+    }
+    /* телефон: open и actions — прямые flex-элементы карточки (равномерно вокруг видео) */
     .controls {
-      display: flex;
-      flex-direction: column;
-      flex: 1 1 auto;
-      min-height: 0;
-    }
-    .ctrl-spacer {
-      flex: 1 1 0;
-      min-height: 12px;
+      display: contents;
     }
     .open-area {
       display: flex;
       justify-content: center;
+      flex: none;
     }
     .open-area eg-open-control {
       width: 100%;
-    }
-    .ctrl-bottom {
-      flex: 1 1 0;
-      min-height: 12px;
-      display: flex;
-      flex-direction: column;
-      justify-content: flex-end;
     }
     /* широкий контейнер — планшет-ландшафт / десктоп: 2 колонки */
     @container (min-width: 640px) {
       ha-card {
         flex-direction: row;
-        align-items: stretch; /* колонки одной высоты = высоте видео */
+        align-items: center;
+        justify-content: flex-start;
         gap: 18px;
       }
       .media {
         flex: 1.6 1 0;
-        justify-content: center;
       }
       .controls {
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
         flex: 1 1 0;
         max-width: 380px;
       }
@@ -367,19 +370,6 @@ var Re=Object.defineProperty;var Ue=Object.getOwnPropertyDescriptor;var p=(r,e,t
       50% {
         opacity: 0.3;
       }
-    }
-    .stage {
-      position: relative;
-      width: 100%;
-      /* реальные пропорции потока домофона (16:9) — без искажения/кропа */
-      aspect-ratio: 16 / 9;
-      border-radius: 12px;
-      overflow: hidden;
-      background: var(--secondary-background-color);
-    }
-    .stage > eg-call-video {
-      position: absolute;
-      inset: 0;
     }
     .connecting {
       position: absolute;
