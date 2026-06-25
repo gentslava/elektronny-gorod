@@ -102,6 +102,17 @@
       },
       "days_to_block": {
         "name": "Дней до блокировки"
+      },
+      "call_state": {
+        "name": "Состояние вызова",
+        "state": {
+          "idle": "Нет вызова",
+          "ringing": "Входящий вызов",
+          "connecting": "Соединение",
+          "active": "Разговор",
+          "ended": "Завершён",
+          "error": "Ошибка"
+        }
       }
     },
     "binary_sensor": {
