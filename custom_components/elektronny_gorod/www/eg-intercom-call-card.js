@@ -1,73 +1,274 @@
 /* eg-intercom-call-card — собранный бандл. Источник: frontend/src/. Не редактировать вручную. */
-var xt=Object.defineProperty;var St=Object.getOwnPropertyDescriptor;var M=(r,t,e,s)=>{for(var i=s>1?void 0:s?St(t,e):t,o=r.length-1,n;o>=0;o--)(n=r[o])&&(i=(s?n(t,e,i):n(i))||i);return s&&i&&xt(t,e,i),i};var j=globalThis,z=j.ShadowRoot&&(j.ShadyCSS===void 0||j.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,W=Symbol(),it=new WeakMap,E=class{constructor(t,e,s){if(this._$cssResult$=!0,s!==W)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=t,this.t=e}get styleSheet(){let t=this.o,e=this.t;if(z&&t===void 0){let s=e!==void 0&&e.length===1;s&&(t=it.get(e)),t===void 0&&((this.o=t=new CSSStyleSheet).replaceSync(this.cssText),s&&it.set(e,t))}return t}toString(){return this.cssText}},rt=r=>new E(typeof r=="string"?r:r+"",void 0,W),I=(r,...t)=>{let e=r.length===1?r[0]:t.reduce((s,i,o)=>s+(n=>{if(n._$cssResult$===!0)return n.cssText;if(typeof n=="number")return n;throw Error("Value passed to 'css' function must be a 'css' function result: "+n+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(i)+r[o+1],r[0]);return new E(e,r,W)},ot=(r,t)=>{if(z)r.adoptedStyleSheets=t.map(e=>e instanceof CSSStyleSheet?e:e.styleSheet);else for(let e of t){let s=document.createElement("style"),i=j.litNonce;i!==void 0&&s.setAttribute("nonce",i),s.textContent=e.cssText,r.appendChild(s)}},K=z?r=>r:r=>r instanceof CSSStyleSheet?(t=>{let e="";for(let s of t.cssRules)e+=s.cssText;return rt(e)})(r):r;var{is:Et,defineProperty:Ct,getOwnPropertyDescriptor:Pt,getOwnPropertyNames:Ot,getOwnPropertySymbols:Rt,getPrototypeOf:Ut}=Object,L=globalThis,nt=L.trustedTypes,kt=nt?nt.emptyScript:"",Tt=L.reactiveElementPolyfillSupport,C=(r,t)=>r,P={toAttribute(r,t){switch(t){case Boolean:r=r?kt:null;break;case Object:case Array:r=r==null?r:JSON.stringify(r)}return r},fromAttribute(r,t){let e=r;switch(t){case Boolean:e=r!==null;break;case Number:e=r===null?null:Number(r);break;case Object:case Array:try{e=JSON.parse(r)}catch{e=null}}return e}},D=(r,t)=>!Et(r,t),at={attribute:!0,type:String,converter:P,reflect:!1,useDefault:!1,hasChanged:D};Symbol.metadata??=Symbol("metadata"),L.litPropertyMetadata??=new WeakMap;var f=class extends HTMLElement{static addInitializer(t){this._$Ei(),(this.l??=[]).push(t)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(t,e=at){if(e.state&&(e.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(t)&&((e=Object.create(e)).wrapped=!0),this.elementProperties.set(t,e),!e.noAccessor){let s=Symbol(),i=this.getPropertyDescriptor(t,s,e);i!==void 0&&Ct(this.prototype,t,i)}}static getPropertyDescriptor(t,e,s){let{get:i,set:o}=Pt(this.prototype,t)??{get(){return this[e]},set(n){this[e]=n}};return{get:i,set(n){let c=i?.call(this);o?.call(this,n),this.requestUpdate(t,c,s)},configurable:!0,enumerable:!0}}static getPropertyOptions(t){return this.elementProperties.get(t)??at}static _$Ei(){if(this.hasOwnProperty(C("elementProperties")))return;let t=Ut(this);t.finalize(),t.l!==void 0&&(this.l=[...t.l]),this.elementProperties=new Map(t.elementProperties)}static finalize(){if(this.hasOwnProperty(C("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(C("properties"))){let e=this.properties,s=[...Ot(e),...Rt(e)];for(let i of s)this.createProperty(i,e[i])}let t=this[Symbol.metadata];if(t!==null){let e=litPropertyMetadata.get(t);if(e!==void 0)for(let[s,i]of e)this.elementProperties.set(s,i)}this._$Eh=new Map;for(let[e,s]of this.elementProperties){let i=this._$Eu(e,s);i!==void 0&&this._$Eh.set(i,e)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(t){let e=[];if(Array.isArray(t)){let s=new Set(t.flat(1/0).reverse());for(let i of s)e.unshift(K(i))}else t!==void 0&&e.push(K(t));return e}static _$Eu(t,e){let s=e.attribute;return s===!1?void 0:typeof s=="string"?s:typeof t=="string"?t.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(t=>this.enableUpdating=t),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(t=>t(this))}addController(t){(this._$EO??=new Set).add(t),this.renderRoot!==void 0&&this.isConnected&&t.hostConnected?.()}removeController(t){this._$EO?.delete(t)}_$E_(){let t=new Map,e=this.constructor.elementProperties;for(let s of e.keys())this.hasOwnProperty(s)&&(t.set(s,this[s]),delete this[s]);t.size>0&&(this._$Ep=t)}createRenderRoot(){let t=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return ot(t,this.constructor.elementStyles),t}connectedCallback(){this.renderRoot??=this.createRenderRoot(),this.enableUpdating(!0),this._$EO?.forEach(t=>t.hostConnected?.())}enableUpdating(t){}disconnectedCallback(){this._$EO?.forEach(t=>t.hostDisconnected?.())}attributeChangedCallback(t,e,s){this._$AK(t,s)}_$ET(t,e){let s=this.constructor.elementProperties.get(t),i=this.constructor._$Eu(t,s);if(i!==void 0&&s.reflect===!0){let o=(s.converter?.toAttribute!==void 0?s.converter:P).toAttribute(e,s.type);this._$Em=t,o==null?this.removeAttribute(i):this.setAttribute(i,o),this._$Em=null}}_$AK(t,e){let s=this.constructor,i=s._$Eh.get(t);if(i!==void 0&&this._$Em!==i){let o=s.getPropertyOptions(i),n=typeof o.converter=="function"?{fromAttribute:o.converter}:o.converter?.fromAttribute!==void 0?o.converter:P;this._$Em=i;let c=n.fromAttribute(e,o.type);this[i]=c??this._$Ej?.get(i)??c,this._$Em=null}}requestUpdate(t,e,s,i=!1,o){if(t!==void 0){let n=this.constructor;if(i===!1&&(o=this[t]),s??=n.getPropertyOptions(t),!((s.hasChanged??D)(o,e)||s.useDefault&&s.reflect&&o===this._$Ej?.get(t)&&!this.hasAttribute(n._$Eu(t,s))))return;this.C(t,e,s)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(t,e,{useDefault:s,reflect:i,wrapped:o},n){s&&!(this._$Ej??=new Map).has(t)&&(this._$Ej.set(t,n??e??this[t]),o!==!0||n!==void 0)||(this._$AL.has(t)||(this.hasUpdated||s||(e=void 0),this._$AL.set(t,e)),i===!0&&this._$Em!==t&&(this._$Eq??=new Set).add(t))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(e){Promise.reject(e)}let t=this.scheduleUpdate();return t!=null&&await t,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??=this.createRenderRoot(),this._$Ep){for(let[i,o]of this._$Ep)this[i]=o;this._$Ep=void 0}let s=this.constructor.elementProperties;if(s.size>0)for(let[i,o]of s){let{wrapped:n}=o,c=this[i];n!==!0||this._$AL.has(i)||c===void 0||this.C(i,void 0,o,c)}}let t=!1,e=this._$AL;try{t=this.shouldUpdate(e),t?(this.willUpdate(e),this._$EO?.forEach(s=>s.hostUpdate?.()),this.update(e)):this._$EM()}catch(s){throw t=!1,this._$EM(),s}t&&this._$AE(e)}willUpdate(t){}_$AE(t){this._$EO?.forEach(e=>e.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(t)),this.updated(t)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(t){return!0}update(t){this._$Eq&&=this._$Eq.forEach(e=>this._$ET(e,this[e])),this._$EM()}updated(t){}firstUpdated(t){}};f.elementStyles=[],f.shadowRootOptions={mode:"open"},f[C("elementProperties")]=new Map,f[C("finalized")]=new Map,Tt?.({ReactiveElement:f}),(L.reactiveElementVersions??=[]).push("2.1.2");var Y=globalThis,ct=r=>r,q=Y.trustedTypes,lt=q?q.createPolicy("lit-html",{createHTML:r=>r}):void 0,mt="$lit$",g=`lit$${Math.random().toFixed(9).slice(2)}$`,gt="?"+g,Ht=`<${gt}>`,v=document,R=()=>v.createComment(""),U=r=>r===null||typeof r!="object"&&typeof r!="function",tt=Array.isArray,Nt=r=>tt(r)||typeof r?.[Symbol.iterator]=="function",F=`[ 	
-\f\r]`,O=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,ht=/-->/g,pt=/>/g,_=RegExp(`>|${F}(?:([^\\s"'>=/]+)(${F}*=${F}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`,"g"),dt=/'/g,ut=/"/g,$t=/^(?:script|style|textarea|title)$/i,et=r=>(t,...e)=>({_$litType$:r,strings:t,values:e}),A=et(1),Jt=et(2),Zt=et(3),b=Symbol.for("lit-noChange"),l=Symbol.for("lit-nothing"),ft=new WeakMap,y=v.createTreeWalker(v,129);function _t(r,t){if(!tt(r)||!r.hasOwnProperty("raw"))throw Error("invalid template strings array");return lt!==void 0?lt.createHTML(t):t}var Mt=(r,t)=>{let e=r.length-1,s=[],i,o=t===2?"<svg>":t===3?"<math>":"",n=O;for(let c=0;c<e;c++){let a=r[c],p,d,h=-1,u=0;for(;u<a.length&&(n.lastIndex=u,d=n.exec(a),d!==null);)u=n.lastIndex,n===O?d[1]==="!--"?n=ht:d[1]!==void 0?n=pt:d[2]!==void 0?($t.test(d[2])&&(i=RegExp("</"+d[2],"g")),n=_):d[3]!==void 0&&(n=_):n===_?d[0]===">"?(n=i??O,h=-1):d[1]===void 0?h=-2:(h=n.lastIndex-d[2].length,p=d[1],n=d[3]===void 0?_:d[3]==='"'?ut:dt):n===ut||n===dt?n=_:n===ht||n===pt?n=O:(n=_,i=void 0);let m=n===_&&r[c+1].startsWith("/>")?" ":"";o+=n===O?a+Ht:h>=0?(s.push(p),a.slice(0,h)+mt+a.slice(h)+g+m):a+g+(h===-2?c:m)}return[_t(r,o+(r[e]||"<?>")+(t===2?"</svg>":t===3?"</math>":"")),s]},k=class r{constructor({strings:t,_$litType$:e},s){let i;this.parts=[];let o=0,n=0,c=t.length-1,a=this.parts,[p,d]=Mt(t,e);if(this.el=r.createElement(p,s),y.currentNode=this.el.content,e===2||e===3){let h=this.el.content.firstChild;h.replaceWith(...h.childNodes)}for(;(i=y.nextNode())!==null&&a.length<c;){if(i.nodeType===1){if(i.hasAttributes())for(let h of i.getAttributeNames())if(h.endsWith(mt)){let u=d[n++],m=i.getAttribute(h).split(g),N=/([.?@])?(.*)/.exec(u);a.push({type:1,index:o,name:N[2],strings:m,ctor:N[1]==="."?Z:N[1]==="?"?G:N[1]==="@"?Q:S}),i.removeAttribute(h)}else h.startsWith(g)&&(a.push({type:6,index:o}),i.removeAttribute(h));if($t.test(i.tagName)){let h=i.textContent.split(g),u=h.length-1;if(u>0){i.textContent=q?q.emptyScript:"";for(let m=0;m<u;m++)i.append(h[m],R()),y.nextNode(),a.push({type:2,index:++o});i.append(h[u],R())}}}else if(i.nodeType===8)if(i.data===gt)a.push({type:2,index:o});else{let h=-1;for(;(h=i.data.indexOf(g,h+1))!==-1;)a.push({type:7,index:o}),h+=g.length-1}o++}}static createElement(t,e){let s=v.createElement("template");return s.innerHTML=t,s}};function x(r,t,e=r,s){if(t===b)return t;let i=s!==void 0?e._$Co?.[s]:e._$Cl,o=U(t)?void 0:t._$litDirective$;return i?.constructor!==o&&(i?._$AO?.(!1),o===void 0?i=void 0:(i=new o(r),i._$AT(r,e,s)),s!==void 0?(e._$Co??=[])[s]=i:e._$Cl=i),i!==void 0&&(t=x(r,i._$AS(r,t.values),i,s)),t}var J=class{constructor(t,e){this._$AV=[],this._$AN=void 0,this._$AD=t,this._$AM=e}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(t){let{el:{content:e},parts:s}=this._$AD,i=(t?.creationScope??v).importNode(e,!0);y.currentNode=i;let o=y.nextNode(),n=0,c=0,a=s[0];for(;a!==void 0;){if(n===a.index){let p;a.type===2?p=new T(o,o.nextSibling,this,t):a.type===1?p=new a.ctor(o,a.name,a.strings,this,t):a.type===6&&(p=new X(o,this,t)),this._$AV.push(p),a=s[++c]}n!==a?.index&&(o=y.nextNode(),n++)}return y.currentNode=v,i}p(t){let e=0;for(let s of this._$AV)s!==void 0&&(s.strings!==void 0?(s._$AI(t,s,e),e+=s.strings.length-2):s._$AI(t[e])),e++}},T=class r{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(t,e,s,i){this.type=2,this._$AH=l,this._$AN=void 0,this._$AA=t,this._$AB=e,this._$AM=s,this.options=i,this._$Cv=i?.isConnected??!0}get parentNode(){let t=this._$AA.parentNode,e=this._$AM;return e!==void 0&&t?.nodeType===11&&(t=e.parentNode),t}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(t,e=this){t=x(this,t,e),U(t)?t===l||t==null||t===""?(this._$AH!==l&&this._$AR(),this._$AH=l):t!==this._$AH&&t!==b&&this._(t):t._$litType$!==void 0?this.$(t):t.nodeType!==void 0?this.T(t):Nt(t)?this.k(t):this._(t)}O(t){return this._$AA.parentNode.insertBefore(t,this._$AB)}T(t){this._$AH!==t&&(this._$AR(),this._$AH=this.O(t))}_(t){this._$AH!==l&&U(this._$AH)?this._$AA.nextSibling.data=t:this.T(v.createTextNode(t)),this._$AH=t}$(t){let{values:e,_$litType$:s}=t,i=typeof s=="number"?this._$AC(t):(s.el===void 0&&(s.el=k.createElement(_t(s.h,s.h[0]),this.options)),s);if(this._$AH?._$AD===i)this._$AH.p(e);else{let o=new J(i,this),n=o.u(this.options);o.p(e),this.T(n),this._$AH=o}}_$AC(t){let e=ft.get(t.strings);return e===void 0&&ft.set(t.strings,e=new k(t)),e}k(t){tt(this._$AH)||(this._$AH=[],this._$AR());let e=this._$AH,s,i=0;for(let o of t)i===e.length?e.push(s=new r(this.O(R()),this.O(R()),this,this.options)):s=e[i],s._$AI(o),i++;i<e.length&&(this._$AR(s&&s._$AB.nextSibling,i),e.length=i)}_$AR(t=this._$AA.nextSibling,e){for(this._$AP?.(!1,!0,e);t!==this._$AB;){let s=ct(t).nextSibling;ct(t).remove(),t=s}}setConnected(t){this._$AM===void 0&&(this._$Cv=t,this._$AP?.(t))}},S=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(t,e,s,i,o){this.type=1,this._$AH=l,this._$AN=void 0,this.element=t,this.name=e,this._$AM=i,this.options=o,s.length>2||s[0]!==""||s[1]!==""?(this._$AH=Array(s.length-1).fill(new String),this.strings=s):this._$AH=l}_$AI(t,e=this,s,i){let o=this.strings,n=!1;if(o===void 0)t=x(this,t,e,0),n=!U(t)||t!==this._$AH&&t!==b,n&&(this._$AH=t);else{let c=t,a,p;for(t=o[0],a=0;a<o.length-1;a++)p=x(this,c[s+a],e,a),p===b&&(p=this._$AH[a]),n||=!U(p)||p!==this._$AH[a],p===l?t=l:t!==l&&(t+=(p??"")+o[a+1]),this._$AH[a]=p}n&&!i&&this.j(t)}j(t){t===l?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,t??"")}},Z=class extends S{constructor(){super(...arguments),this.type=3}j(t){this.element[this.name]=t===l?void 0:t}},G=class extends S{constructor(){super(...arguments),this.type=4}j(t){this.element.toggleAttribute(this.name,!!t&&t!==l)}},Q=class extends S{constructor(t,e,s,i,o){super(t,e,s,i,o),this.type=5}_$AI(t,e=this){if((t=x(this,t,e,0)??l)===b)return;let s=this._$AH,i=t===l&&s!==l||t.capture!==s.capture||t.once!==s.once||t.passive!==s.passive,o=t!==l&&(s===l||i);i&&this.element.removeEventListener(this.name,this,s),o&&this.element.addEventListener(this.name,this,t),this._$AH=t}handleEvent(t){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,t):this._$AH.handleEvent(t)}},X=class{constructor(t,e,s){this.element=t,this.type=6,this._$AN=void 0,this._$AM=e,this.options=s}get _$AU(){return this._$AM._$AU}_$AI(t){x(this,t)}};var jt=Y.litHtmlPolyfillSupport;jt?.(k,T),(Y.litHtmlVersions??=[]).push("3.3.3");var yt=(r,t,e)=>{let s=e?.renderBefore??t,i=s._$litPart$;if(i===void 0){let o=e?.renderBefore??null;s._$litPart$=i=new T(t.insertBefore(R(),o),o,void 0,e??{})}return i._$AI(r),i};var st=globalThis,$=class extends f{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){let t=super.createRenderRoot();return this.renderOptions.renderBefore??=t.firstChild,t}update(t){let e=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(t),this._$Do=yt(e,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return b}};$._$litElement$=!0,$.finalized=!0,st.litElementHydrateSupport?.({LitElement:$});var zt=st.litElementPolyfillSupport;zt?.({LitElement:$});(st.litElementVersions??=[]).push("4.2.2");var vt=r=>(t,e)=>{e!==void 0?e.addInitializer(()=>{customElements.define(r,t)}):customElements.define(r,t)};var Lt={attribute:!0,type:String,converter:P,reflect:!1,hasChanged:D},Dt=(r=Lt,t,e)=>{let{kind:s,metadata:i}=e,o=globalThis.litPropertyMetadata.get(i);if(o===void 0&&globalThis.litPropertyMetadata.set(i,o=new Map),s==="setter"&&((r=Object.create(r)).wrapped=!0),o.set(e.name,r),s==="accessor"){let{name:n}=e;return{set(c){let a=t.get.call(this);t.set.call(this,c),this.requestUpdate(n,a,r,!0,c)},init(c){return c!==void 0&&this.C(n,void 0,r,c),c}}}if(s==="setter"){let{name:n}=e;return function(c){let a=this[n];t.call(this,c),this.requestUpdate(n,a,r,!0,c)}}throw Error("Unsupported decorator location: "+s)};function V(r){return(t,e)=>typeof e=="object"?Dt(r,t,e):((s,i,o)=>{let n=i.hasOwnProperty(o);return i.constructor.createProperty(o,s),n?Object.getOwnPropertyDescriptor(i,o):void 0})(r,t,e)}function bt(r){return V({...r,state:!0,attribute:!1})}var qt=new Set(["idle","ringing","connecting","active","ended","error"]);function At(r){return r&&qt.has(r)?r:"idle"}var H={visible:!1,video:"none",showAccept:!1,showReject:!1,showHangup:!1,showOpen:!1,showMic:!1,showTimer:!1,busy:!1,isError:!1};function wt(r){switch(r){case"ringing":return{...H,visible:!0,video:"doorbell",showAccept:!0,showReject:!0,showOpen:!0};case"connecting":return{...H,visible:!0,video:"doorbell",showReject:!0,showOpen:!0,busy:!0};case"active":return{...H,visible:!0,video:"call",showHangup:!0,showOpen:!0,showMic:!0,showTimer:!0};case"error":return{...H,visible:!0,video:"none",showHangup:!0,showOpen:!0,isError:!0};case"idle":case"ended":default:return{...H}}}var Vt={ringing:"\u0412\u0445\u043E\u0434\u044F\u0449\u0438\u0439 \u0432\u044B\u0437\u043E\u0432",connecting:"\u0421\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u2026",active:"\u0420\u0430\u0437\u0433\u043E\u0432\u043E\u0440",error:"\u041E\u0448\u0438\u0431\u043A\u0430 \u0432\u044B\u0437\u043E\u0432\u0430"},w=class extends ${constructor(){super(...arguments);this._config={};this._answer=()=>{this.hass?.callService("elektronny_gorod","answer")};this._hangup=()=>{this.hass?.callService("elektronny_gorod","hangup")};this._open=()=>{let e=this._config.lock;e&&confirm(`\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u0432\u0435\u0440\u044C \u2014 ${this._intercomName}?`)&&this.hass?.callService("lock","unlock",{entity_id:e})}}setConfig(e){if(!e||!e.call_state)throw new Error("eg-intercom-call-card: \u0443\u043A\u0430\u0436\u0438\u0442\u0435 'call_state' (sensor.*_call_state)");this._config=e}getCardSize(){return 6}get _phase(){let e=this._config.call_state,s=e&&this.hass?this.hass.states[e]?.state:void 0;return At(s)}get _intercomName(){let e=this._config.call_state,i=(e&&this.hass?this.hass.states[e]?.attributes:void 0)?.intercom_name;return this._config.name??(typeof i=="string"?i:"\u0414\u043E\u043C\u043E\u0444\u043E\u043D")}render(){let e=wt(this._phase);return e.visible?A`
-      <ha-card>
-        <div class="head">
-          <span class="name">${this._intercomName}</span>
-          <span class="status ${e.isError?"err":""}">
-            ${e.busy?A`<span class="dot" aria-hidden="true"></span>`:l}
-            ${Vt[this._phase]??""}
-          </span>
-        </div>
-
-        <div class="video" role="img" aria-label="Видео с домофона">
-          <ha-icon icon="mdi:cctv"></ha-icon>
-          <span class="video-hint">видео (${e.video})</span>
-        </div>
-
-        ${e.showOpen?this._renderOpen():l}
-
-        <div class="actions">
-          ${e.showReject?A`<button class="btn reject" @click=${this._hangup} aria-label="Отклонить">
-                <ha-icon icon="mdi:phone-hangup"></ha-icon><span>Отклонить</span>
-              </button>`:l}
-          ${e.showAccept?A`<button class="btn accept" @click=${this._answer} aria-label="Принять">
-                <ha-icon icon="mdi:phone"></ha-icon><span>Принять</span>
-              </button>`:l}
-          ${e.showHangup?A`<button class="btn reject" @click=${this._hangup} aria-label="Завершить">
-                <ha-icon icon="mdi:phone-hangup"></ha-icon><span>Завершить</span>
-              </button>`:l}
-        </div>
-      </ha-card>
-    `:l}_renderOpen(){return A`
-      <button class="open" @click=${this._open} aria-label="Открыть дверь">
-        <ha-icon icon="mdi:key-variant"></ha-icon><span>Открыть дверь</span>
+var Re=Object.defineProperty;var Ue=Object.getOwnPropertyDescriptor;var p=(r,e,t,i)=>{for(var s=i>1?void 0:i?Ue(e,t):e,o=r.length-1,n;o>=0;o--)(n=r[o])&&(s=(i?n(e,t,s):n(s))||s);return i&&s&&Re(e,t,s),s};var B=globalThis,V=B.ShadowRoot&&(B.ShadyCSS===void 0||B.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,G=Symbol(),ce=new WeakMap,U=class{constructor(e,t,i){if(this._$cssResult$=!0,i!==G)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=e,this.t=t}get styleSheet(){let e=this.o,t=this.t;if(V&&e===void 0){let i=t!==void 0&&t.length===1;i&&(e=ce.get(t)),e===void 0&&((this.o=e=new CSSStyleSheet).replaceSync(this.cssText),i&&ce.set(t,e))}return e}toString(){return this.cssText}},le=r=>new U(typeof r=="string"?r:r+"",void 0,G),S=(r,...e)=>{let t=r.length===1?r[0]:e.reduce((i,s,o)=>i+(n=>{if(n._$cssResult$===!0)return n.cssText;if(typeof n=="number")return n;throw Error("Value passed to 'css' function must be a 'css' function result: "+n+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(s)+r[o+1],r[0]);return new U(t,r,G)},he=(r,e)=>{if(V)r.adoptedStyleSheets=e.map(t=>t instanceof CSSStyleSheet?t:t.styleSheet);else for(let t of e){let i=document.createElement("style"),s=B.litNonce;s!==void 0&&i.setAttribute("nonce",s),i.textContent=t.cssText,r.appendChild(i)}},Z=V?r=>r:r=>r instanceof CSSStyleSheet?(e=>{let t="";for(let i of e.cssRules)t+=i.cssText;return le(t)})(r):r;var{is:He,defineProperty:Oe,getOwnPropertyDescriptor:Ne,getOwnPropertyNames:je,getOwnPropertySymbols:Le,getPrototypeOf:De}=Object,W=globalThis,de=W.trustedTypes,qe=de?de.emptyScript:"",ze=W.reactiveElementPolyfillSupport,H=(r,e)=>r,O={toAttribute(r,e){switch(e){case Boolean:r=r?qe:null;break;case Object:case Array:r=r==null?r:JSON.stringify(r)}return r},fromAttribute(r,e){let t=r;switch(e){case Boolean:t=r!==null;break;case Number:t=r===null?null:Number(r);break;case Object:case Array:try{t=JSON.parse(r)}catch{t=null}}return t}},F=(r,e)=>!He(r,e),pe={attribute:!0,type:String,converter:O,reflect:!1,useDefault:!1,hasChanged:F};Symbol.metadata??=Symbol("metadata"),W.litPropertyMetadata??=new WeakMap;var w=class extends HTMLElement{static addInitializer(e){this._$Ei(),(this.l??=[]).push(e)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(e,t=pe){if(t.state&&(t.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(e)&&((t=Object.create(t)).wrapped=!0),this.elementProperties.set(e,t),!t.noAccessor){let i=Symbol(),s=this.getPropertyDescriptor(e,i,t);s!==void 0&&Oe(this.prototype,e,s)}}static getPropertyDescriptor(e,t,i){let{get:s,set:o}=Ne(this.prototype,e)??{get(){return this[t]},set(n){this[t]=n}};return{get:s,set(n){let c=s?.call(this);o?.call(this,n),this.requestUpdate(e,c,i)},configurable:!0,enumerable:!0}}static getPropertyOptions(e){return this.elementProperties.get(e)??pe}static _$Ei(){if(this.hasOwnProperty(H("elementProperties")))return;let e=De(this);e.finalize(),e.l!==void 0&&(this.l=[...e.l]),this.elementProperties=new Map(e.elementProperties)}static finalize(){if(this.hasOwnProperty(H("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(H("properties"))){let t=this.properties,i=[...je(t),...Le(t)];for(let s of i)this.createProperty(s,t[s])}let e=this[Symbol.metadata];if(e!==null){let t=litPropertyMetadata.get(e);if(t!==void 0)for(let[i,s]of t)this.elementProperties.set(i,s)}this._$Eh=new Map;for(let[t,i]of this.elementProperties){let s=this._$Eu(t,i);s!==void 0&&this._$Eh.set(s,t)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(e){let t=[];if(Array.isArray(e)){let i=new Set(e.flat(1/0).reverse());for(let s of i)t.unshift(Z(s))}else e!==void 0&&t.push(Z(e));return t}static _$Eu(e,t){let i=t.attribute;return i===!1?void 0:typeof i=="string"?i:typeof e=="string"?e.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(e=>this.enableUpdating=e),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(e=>e(this))}addController(e){(this._$EO??=new Set).add(e),this.renderRoot!==void 0&&this.isConnected&&e.hostConnected?.()}removeController(e){this._$EO?.delete(e)}_$E_(){let e=new Map,t=this.constructor.elementProperties;for(let i of t.keys())this.hasOwnProperty(i)&&(e.set(i,this[i]),delete this[i]);e.size>0&&(this._$Ep=e)}createRenderRoot(){let e=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return he(e,this.constructor.elementStyles),e}connectedCallback(){this.renderRoot??=this.createRenderRoot(),this.enableUpdating(!0),this._$EO?.forEach(e=>e.hostConnected?.())}enableUpdating(e){}disconnectedCallback(){this._$EO?.forEach(e=>e.hostDisconnected?.())}attributeChangedCallback(e,t,i){this._$AK(e,i)}_$ET(e,t){let i=this.constructor.elementProperties.get(e),s=this.constructor._$Eu(e,i);if(s!==void 0&&i.reflect===!0){let o=(i.converter?.toAttribute!==void 0?i.converter:O).toAttribute(t,i.type);this._$Em=e,o==null?this.removeAttribute(s):this.setAttribute(s,o),this._$Em=null}}_$AK(e,t){let i=this.constructor,s=i._$Eh.get(e);if(s!==void 0&&this._$Em!==s){let o=i.getPropertyOptions(s),n=typeof o.converter=="function"?{fromAttribute:o.converter}:o.converter?.fromAttribute!==void 0?o.converter:O;this._$Em=s;let c=n.fromAttribute(t,o.type);this[s]=c??this._$Ej?.get(s)??c,this._$Em=null}}requestUpdate(e,t,i,s=!1,o){if(e!==void 0){let n=this.constructor;if(s===!1&&(o=this[e]),i??=n.getPropertyOptions(e),!((i.hasChanged??F)(o,t)||i.useDefault&&i.reflect&&o===this._$Ej?.get(e)&&!this.hasAttribute(n._$Eu(e,i))))return;this.C(e,t,i)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(e,t,{useDefault:i,reflect:s,wrapped:o},n){i&&!(this._$Ej??=new Map).has(e)&&(this._$Ej.set(e,n??t??this[e]),o!==!0||n!==void 0)||(this._$AL.has(e)||(this.hasUpdated||i||(t=void 0),this._$AL.set(e,t)),s===!0&&this._$Em!==e&&(this._$Eq??=new Set).add(e))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(t){Promise.reject(t)}let e=this.scheduleUpdate();return e!=null&&await e,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??=this.createRenderRoot(),this._$Ep){for(let[s,o]of this._$Ep)this[s]=o;this._$Ep=void 0}let i=this.constructor.elementProperties;if(i.size>0)for(let[s,o]of i){let{wrapped:n}=o,c=this[s];n!==!0||this._$AL.has(s)||c===void 0||this.C(s,void 0,o,c)}}let e=!1,t=this._$AL;try{e=this.shouldUpdate(t),e?(this.willUpdate(t),this._$EO?.forEach(i=>i.hostUpdate?.()),this.update(t)):this._$EM()}catch(i){throw e=!1,this._$EM(),i}e&&this._$AE(t)}willUpdate(e){}_$AE(e){this._$EO?.forEach(t=>t.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(e)),this.updated(e)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(e){return!0}update(e){this._$Eq&&=this._$Eq.forEach(t=>this._$ET(t,this[t])),this._$EM()}updated(e){}firstUpdated(e){}};w.elementStyles=[],w.shadowRootOptions={mode:"open"},w[H("elementProperties")]=new Map,w[H("finalized")]=new Map,ze?.({ReactiveElement:w}),(W.reactiveElementVersions??=[]).push("2.1.2");var re=globalThis,ue=r=>r,K=re.trustedTypes,me=K?K.createPolicy("lit-html",{createHTML:r=>r}):void 0,ye="$lit$",x=`lit$${Math.random().toFixed(9).slice(2)}$`,$e="?"+x,Ie=`<${$e}>`,E=document,j=()=>E.createComment(""),L=r=>r===null||typeof r!="object"&&typeof r!="function",oe=Array.isArray,Be=r=>oe(r)||typeof r?.[Symbol.iterator]=="function",Q=`[ 	
+\f\r]`,N=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,fe=/-->/g,_e=/>/g,P=RegExp(`>|${Q}(?:([^\\s"'>=/]+)(${Q}*=${Q}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`,"g"),ve=/'/g,ge=/"/g,we=/^(?:script|style|textarea|title)$/i,ne=r=>(e,...t)=>({_$litType$:r,strings:e,values:t}),d=ne(1),lt=ne(2),ht=ne(3),C=Symbol.for("lit-noChange"),l=Symbol.for("lit-nothing"),be=new WeakMap,k=E.createTreeWalker(E,129);function Ae(r,e){if(!oe(r)||!r.hasOwnProperty("raw"))throw Error("invalid template strings array");return me!==void 0?me.createHTML(e):e}var Ve=(r,e)=>{let t=r.length-1,i=[],s,o=e===2?"<svg>":e===3?"<math>":"",n=N;for(let c=0;c<t;c++){let a=r[c],u,m,h=-1,g=0;for(;g<a.length&&(n.lastIndex=g,m=n.exec(a),m!==null);)g=n.lastIndex,n===N?m[1]==="!--"?n=fe:m[1]!==void 0?n=_e:m[2]!==void 0?(we.test(m[2])&&(s=RegExp("</"+m[2],"g")),n=P):m[3]!==void 0&&(n=P):n===P?m[0]===">"?(n=s??N,h=-1):m[1]===void 0?h=-2:(h=n.lastIndex-m[2].length,u=m[1],n=m[3]===void 0?P:m[3]==='"'?ge:ve):n===ge||n===ve?n=P:n===fe||n===_e?n=N:(n=P,s=void 0);let b=n===P&&r[c+1].startsWith("/>")?" ":"";o+=n===N?a+Ie:h>=0?(i.push(u),a.slice(0,h)+ye+a.slice(h)+x+b):a+x+(h===-2?c:b)}return[Ae(r,o+(r[t]||"<?>")+(e===2?"</svg>":e===3?"</math>":"")),i]},D=class r{constructor({strings:e,_$litType$:t},i){let s;this.parts=[];let o=0,n=0,c=e.length-1,a=this.parts,[u,m]=Ve(e,t);if(this.el=r.createElement(u,i),k.currentNode=this.el.content,t===2||t===3){let h=this.el.content.firstChild;h.replaceWith(...h.childNodes)}for(;(s=k.nextNode())!==null&&a.length<c;){if(s.nodeType===1){if(s.hasAttributes())for(let h of s.getAttributeNames())if(h.endsWith(ye)){let g=m[n++],b=s.getAttribute(h).split(x),I=/([.?@])?(.*)/.exec(g);a.push({type:1,index:o,name:I[2],strings:b,ctor:I[1]==="."?ee:I[1]==="?"?te:I[1]==="@"?ie:M}),s.removeAttribute(h)}else h.startsWith(x)&&(a.push({type:6,index:o}),s.removeAttribute(h));if(we.test(s.tagName)){let h=s.textContent.split(x),g=h.length-1;if(g>0){s.textContent=K?K.emptyScript:"";for(let b=0;b<g;b++)s.append(h[b],j()),k.nextNode(),a.push({type:2,index:++o});s.append(h[g],j())}}}else if(s.nodeType===8)if(s.data===$e)a.push({type:2,index:o});else{let h=-1;for(;(h=s.data.indexOf(x,h+1))!==-1;)a.push({type:7,index:o}),h+=x.length-1}o++}}static createElement(e,t){let i=E.createElement("template");return i.innerHTML=e,i}};function T(r,e,t=r,i){if(e===C)return e;let s=i!==void 0?t._$Co?.[i]:t._$Cl,o=L(e)?void 0:e._$litDirective$;return s?.constructor!==o&&(s?._$AO?.(!1),o===void 0?s=void 0:(s=new o(r),s._$AT(r,t,i)),i!==void 0?(t._$Co??=[])[i]=s:t._$Cl=s),s!==void 0&&(e=T(r,s._$AS(r,e.values),s,i)),e}var Y=class{constructor(e,t){this._$AV=[],this._$AN=void 0,this._$AD=e,this._$AM=t}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(e){let{el:{content:t},parts:i}=this._$AD,s=(e?.creationScope??E).importNode(t,!0);k.currentNode=s;let o=k.nextNode(),n=0,c=0,a=i[0];for(;a!==void 0;){if(n===a.index){let u;a.type===2?u=new q(o,o.nextSibling,this,e):a.type===1?u=new a.ctor(o,a.name,a.strings,this,e):a.type===6&&(u=new se(o,this,e)),this._$AV.push(u),a=i[++c]}n!==a?.index&&(o=k.nextNode(),n++)}return k.currentNode=E,s}p(e){let t=0;for(let i of this._$AV)i!==void 0&&(i.strings!==void 0?(i._$AI(e,i,t),t+=i.strings.length-2):i._$AI(e[t])),t++}},q=class r{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(e,t,i,s){this.type=2,this._$AH=l,this._$AN=void 0,this._$AA=e,this._$AB=t,this._$AM=i,this.options=s,this._$Cv=s?.isConnected??!0}get parentNode(){let e=this._$AA.parentNode,t=this._$AM;return t!==void 0&&e?.nodeType===11&&(e=t.parentNode),e}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(e,t=this){e=T(this,e,t),L(e)?e===l||e==null||e===""?(this._$AH!==l&&this._$AR(),this._$AH=l):e!==this._$AH&&e!==C&&this._(e):e._$litType$!==void 0?this.$(e):e.nodeType!==void 0?this.T(e):Be(e)?this.k(e):this._(e)}O(e){return this._$AA.parentNode.insertBefore(e,this._$AB)}T(e){this._$AH!==e&&(this._$AR(),this._$AH=this.O(e))}_(e){this._$AH!==l&&L(this._$AH)?this._$AA.nextSibling.data=e:this.T(E.createTextNode(e)),this._$AH=e}$(e){let{values:t,_$litType$:i}=e,s=typeof i=="number"?this._$AC(e):(i.el===void 0&&(i.el=D.createElement(Ae(i.h,i.h[0]),this.options)),i);if(this._$AH?._$AD===s)this._$AH.p(t);else{let o=new Y(s,this),n=o.u(this.options);o.p(t),this.T(n),this._$AH=o}}_$AC(e){let t=be.get(e.strings);return t===void 0&&be.set(e.strings,t=new D(e)),t}k(e){oe(this._$AH)||(this._$AH=[],this._$AR());let t=this._$AH,i,s=0;for(let o of e)s===t.length?t.push(i=new r(this.O(j()),this.O(j()),this,this.options)):i=t[s],i._$AI(o),s++;s<t.length&&(this._$AR(i&&i._$AB.nextSibling,s),t.length=s)}_$AR(e=this._$AA.nextSibling,t){for(this._$AP?.(!1,!0,t);e!==this._$AB;){let i=ue(e).nextSibling;ue(e).remove(),e=i}}setConnected(e){this._$AM===void 0&&(this._$Cv=e,this._$AP?.(e))}},M=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(e,t,i,s,o){this.type=1,this._$AH=l,this._$AN=void 0,this.element=e,this.name=t,this._$AM=s,this.options=o,i.length>2||i[0]!==""||i[1]!==""?(this._$AH=Array(i.length-1).fill(new String),this.strings=i):this._$AH=l}_$AI(e,t=this,i,s){let o=this.strings,n=!1;if(o===void 0)e=T(this,e,t,0),n=!L(e)||e!==this._$AH&&e!==C,n&&(this._$AH=e);else{let c=e,a,u;for(e=o[0],a=0;a<o.length-1;a++)u=T(this,c[i+a],t,a),u===C&&(u=this._$AH[a]),n||=!L(u)||u!==this._$AH[a],u===l?e=l:e!==l&&(e+=(u??"")+o[a+1]),this._$AH[a]=u}n&&!s&&this.j(e)}j(e){e===l?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,e??"")}},ee=class extends M{constructor(){super(...arguments),this.type=3}j(e){this.element[this.name]=e===l?void 0:e}},te=class extends M{constructor(){super(...arguments),this.type=4}j(e){this.element.toggleAttribute(this.name,!!e&&e!==l)}},ie=class extends M{constructor(e,t,i,s,o){super(e,t,i,s,o),this.type=5}_$AI(e,t=this){if((e=T(this,e,t,0)??l)===C)return;let i=this._$AH,s=e===l&&i!==l||e.capture!==i.capture||e.once!==i.once||e.passive!==i.passive,o=e!==l&&(i===l||s);s&&this.element.removeEventListener(this.name,this,i),o&&this.element.addEventListener(this.name,this,e),this._$AH=e}handleEvent(e){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,e):this._$AH.handleEvent(e)}},se=class{constructor(e,t,i){this.element=e,this.type=6,this._$AN=void 0,this._$AM=t,this.options=i}get _$AU(){return this._$AM._$AU}_$AI(e){T(this,e)}};var We=re.litHtmlPolyfillSupport;We?.(D,q),(re.litHtmlVersions??=[]).push("3.3.3");var xe=(r,e,t)=>{let i=t?.renderBefore??e,s=i._$litPart$;if(s===void 0){let o=t?.renderBefore??null;i._$litPart$=s=new q(e.insertBefore(j(),o),o,void 0,t??{})}return s._$AI(r),s};var ae=globalThis,y=class extends w{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){let e=super.createRenderRoot();return this.renderOptions.renderBefore??=e.firstChild,e}update(e){let t=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(e),this._$Do=xe(t,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return C}};y._$litElement$=!0,y.finalized=!0,ae.litElementHydrateSupport?.({LitElement:y});var Fe=ae.litElementPolyfillSupport;Fe?.({LitElement:y});(ae.litElementVersions??=[]).push("4.2.2");var R=r=>(e,t)=>{t!==void 0?t.addInitializer(()=>{customElements.define(r,e)}):customElements.define(r,e)};var Ke={attribute:!0,type:String,converter:O,reflect:!1,hasChanged:F},Xe=(r=Ke,e,t)=>{let{kind:i,metadata:s}=t,o=globalThis.litPropertyMetadata.get(s);if(o===void 0&&globalThis.litPropertyMetadata.set(s,o=new Map),i==="setter"&&((r=Object.create(r)).wrapped=!0),o.set(t.name,r),i==="accessor"){let{name:n}=t;return{set(c){let a=e.get.call(this);e.set.call(this,c),this.requestUpdate(n,a,r,!0,c)},init(c){return c!==void 0&&this.C(n,void 0,r,c),c}}}if(i==="setter"){let{name:n}=t;return function(c){let a=this[n];e.call(this,c),this.requestUpdate(n,a,r,!0,c)}}throw Error("Unsupported decorator location: "+i)};function f(r){return(e,t)=>typeof t=="object"?Xe(r,e,t):((i,s,o)=>{let n=s.hasOwnProperty(o);return s.constructor.createProperty(o,i),n?Object.getOwnPropertyDescriptor(s,o):void 0})(r,e,t)}function _(r){return f({...r,state:!0,attribute:!1})}var Je=new Set(["idle","ringing","connecting","active","ended","error"]);function Se(r){return r&&Je.has(r)?r:"idle"}var z={visible:!1,video:"none",showAccept:!1,showReject:!1,showHangup:!1,showOpen:!1,showMic:!1,showTimer:!1,busy:!1,isError:!1};function Pe(r){switch(r){case"ringing":return{...z,visible:!0,video:"doorbell",showAccept:!0,showReject:!0,showOpen:!0};case"connecting":return{...z,visible:!0,video:"doorbell",showReject:!0,showOpen:!0,busy:!0};case"active":return{...z,visible:!0,video:"call",showHangup:!0,showOpen:!0,showMic:!0,showTimer:!0};case"error":return{...z,visible:!0,video:"none",showHangup:!0,showOpen:!0,isError:!0};case"idle":case"ended":default:return{...z}}}function ke(r,e){if(r==="call")return e.camera;if(r==="doorbell")return e.doorbell_camera??e.camera}var A=class extends y{constructor(){super(...arguments);this.muted=!1;this._provider="pending"}connectedCallback(){super.connectedCallback(),this._resolveProvider()}async _resolveProvider(){if(customElements.get("ha-camera-stream")){this._provider="ha";return}try{await window.loadCardHelpers?.()}catch{}customElements.get("ha-camera-stream")?this._provider="ha":customElements.get("webrtc-camera")?this._provider="webrtc":this._provider="none"}updated(t){this._provider==="webrtc"&&this._syncWebrtc(t)}_syncWebrtc(t){let i=this.renderRoot.querySelector("#webrtc-host");if(!(!i||!this.entity||!this.hass))if(t.has("entity")||t.has("_provider")||t.has("muted")||!this._webrtcEl){i.replaceChildren();let s=document.createElement("webrtc-camera");s.setConfig({entity:this.entity,muted:this.muted}),s.hass=this.hass,i.appendChild(s),this._webrtcEl=s}else this._webrtcEl.hass=this.hass}render(){if(!this.entity||!this.hass)return this._frame("mdi:cctv-off","\u041D\u0435\u0442 \u0430\u043A\u0442\u0438\u0432\u043D\u043E\u0433\u043E \u0432\u0438\u0434\u0435\u043E");let t=this.hass.states[this.entity];if(!t)return this._frame("mdi:cctv-off","\u041A\u0430\u043C\u0435\u0440\u0430 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u0430");switch(this._provider){case"pending":return this._frame("mdi:loading","\u0417\u0430\u0433\u0440\u0443\u0437\u043A\u0430 \u0432\u0438\u0434\u0435\u043E\u2026");case"ha":return d`
+          <ha-camera-stream
+            .hass=${this.hass}
+            .stateObj=${t}
+            .muted=${this.muted}
+            controls
+          ></ha-camera-stream>
+        `;case"webrtc":return d`<div id="webrtc-host"></div>`;default:return this._frame("mdi:cctv-off","\u0412\u0438\u0434\u0435\u043E\u043F\u043B\u0435\u0435\u0440 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D \u2014 \u043E\u0431\u043D\u043E\u0432\u0438\u0442\u0435 HA \u0438\u043B\u0438 \u0443\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u0435 advanced-camera-card")}}_frame(t,i){return d`
+      <div class="frame" role="img" aria-label=${i}>
+        <ha-icon icon=${t}></ha-icon>
+        <span>${i}</span>
+      </div>
+      ${l}
+    `}};A.styles=S`
+    :host {
+      display: block;
+      width: 100%;
+    }
+    ha-camera-stream,
+    #webrtc-host {
+      display: block;
+      width: 100%;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .frame {
+      aspect-ratio: 16 / 9;
+      width: 100%;
+      background: var(--secondary-background-color);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      color: var(--secondary-text-color);
+      text-align: center;
+      padding: 8px;
+      box-sizing: border-box;
+    }
+    .frame ha-icon {
+      --mdc-icon-size: 40px;
+    }
+    .frame span {
+      font-size: 0.85rem;
+    }
+  `,p([f({attribute:!1})],A.prototype,"hass",2),p([f()],A.prototype,"entity",2),p([f({type:Boolean})],A.prototype,"muted",2),p([_()],A.prototype,"_provider",2),A=p([R("eg-call-video")],A);function Ee(r){return r<0?0:r>1?1:r}function Ge(r,e,t,i){let s=Math.max(1,t-i);return Ee((r-e-i/2)/s)}function Ze(r,e){return Ee(r/Math.max(1,e))}var Qe=.92,Ye=800,$=class extends y{constructor(){super(...arguments);this.mode="hold";this.disabled=!1;this.label="\u041E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u0432\u0435\u0440\u044C";this.status="idle";this._progress=0;this._arming=!1;this._raf=0;this._holdStart=0;this._trackRect=null;this._holdTick=()=>{if(this._progress=Ze(performance.now()-this._holdStart,Ye),this._progress>=1){this._reset(),this._fireOpen();return}this._raf=requestAnimationFrame(this._holdTick)};this._onHoldDown=t=>{this.disabled||(t.target.setPointerCapture?.(t.pointerId),this._arming=!0,this._holdStart=performance.now(),this._raf=requestAnimationFrame(this._holdTick))};this._onHoldUp=()=>{this._progress<1&&this._reset()};this._onSlideDown=t=>{if(this.disabled)return;let i=t.currentTarget.closest(".track");this._trackRect=i?.getBoundingClientRect()??null,t.target.setPointerCapture?.(t.pointerId),this._arming=!0};this._onSlideMove=t=>{if(!this._arming||!this._trackRect)return;let i=56;this._progress=Ge(t.clientX,this._trackRect.left,this._trackRect.width,i)};this._onSlideUp=()=>{this._progress>=Qe?(this._reset(),this._fireOpen()):this._reset()};this._onTap=()=>{this.disabled||this._fireOpen()}}_fireOpen(){this.dispatchEvent(new CustomEvent("open",{bubbles:!0,composed:!0}))}_reset(){this._raf&&cancelAnimationFrame(this._raf),this._raf=0,this._arming=!1,this._progress=0,this._trackRect=null}render(){return this.mode==="tap"?this._renderTap():this.mode==="slide"?this._renderSlide():this._renderHold()}_caption(){return this.status==="opening"?"\u041E\u0442\u043A\u0440\u044B\u0432\u0430\u044E\u2026":this.status==="opened"?"\u041E\u0442\u043A\u0440\u044B\u0442\u043E":this.status==="error"?"\u041E\u0448\u0438\u0431\u043A\u0430":this.label}_renderTap(){return d`
+      <button class="bar tap" ?disabled=${this.disabled} @click=${this._onTap}
+              aria-label=${this.label}>
+        <ha-icon icon="mdi:key-variant"></ha-icon><span>${this._caption()}</span>
       </button>
-    `}};w.styles=I`
+    `}_renderHold(){return d`
+      <button
+        class="bar hold ${this._arming?"arming":""}"
+        ?disabled=${this.disabled}
+        aria-label="${this.label} — удерживайте"
+        @pointerdown=${this._onHoldDown}
+        @pointerup=${this._onHoldUp}
+        @pointercancel=${this._onHoldUp}
+        @pointerleave=${this._onHoldUp}
+      >
+        <div class="fill" style="width:${this._progress*100}%"></div>
+        <span class="bar-label">
+          <ha-icon icon="mdi:key-variant"></ha-icon>
+          ${this._arming?"\u0423\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0439\u0442\u0435\u2026":this._caption()}
+        </span>
+      </button>
+    `}_renderSlide(){return d`
+      <div class="track" aria-label="${this.label} — сдвиньте, чтобы открыть" role="slider"
+           aria-valuemin="0" aria-valuemax="100"
+           aria-valuenow=${Math.round(this._progress*100)}>
+        <div class="fill" style="width:${this._progress*100}%"></div>
+        <span class="bar-label">${this._caption()}</span>
+        <div
+          class="knob ${this.disabled?"off":""}"
+          style="transform:translateX(calc(${this._progress} * (100% + var(--eg-track-w, 0px))))"
+          @pointerdown=${this._onSlideDown}
+          @pointermove=${this._onSlideMove}
+          @pointerup=${this._onSlideUp}
+          @pointercancel=${this._onSlideUp}
+        >
+          <ha-icon icon="mdi:key-variant"></ha-icon>
+        </div>
+      </div>
+    `}};$.styles=S`
+    :host {
+      display: block;
+    }
+    .bar,
+    .track {
+      position: relative;
+      overflow: hidden;
+      min-height: 56px;
+      border-radius: 28px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--secondary-background-color);
+      color: var(--primary-text-color);
+      font-weight: 600;
+      user-select: none;
+      touch-action: none;
+    }
+    .bar {
+      width: 100%;
+      border: none;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 600;
+    }
+    .bar[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .fill {
+      position: absolute;
+      inset: 0 auto 0 0;
+      /* Открыть = accent (НЕ красный — красный за «Завершить», см. spec §3). */
+      background: var(--primary-color);
+      opacity: 0.25;
+      transition: width 80ms linear;
+    }
+    .bar-label,
+    .bar > span {
+      position: relative;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 1;
+    }
+    .knob {
+      position: absolute;
+      left: 4px;
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      background: var(--primary-color);
+      color: var(--text-primary-color, #fff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: grab;
+      touch-action: none;
+      z-index: 2;
+    }
+    .knob.off {
+      opacity: 0.5;
+    }
+    ha-icon {
+      --mdc-icon-size: 24px;
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .fill {
+        transition: none;
+      }
+    }
+  `,p([f()],$.prototype,"mode",2),p([f({type:Boolean})],$.prototype,"disabled",2),p([f()],$.prototype,"label",2),p([f()],$.prototype,"status",2),p([_()],$.prototype,"_progress",2),p([_()],$.prototype,"_arming",2),$=p([R("eg-open-control")],$);function Ce(r,e){return e&&r==="granted"}var J=class{constructor(e,t=()=>{}){this._getConn=e;this._onChange=t;this.active=!1;this.lastError=""}async queryPermission(){try{return(await navigator.permissions?.query({name:"microphone"}))?.state??"unknown"}catch{return"unknown"}}get secure(){return typeof window<"u"&&window.isSecureContext===!0}async start(){if(this.active)return;let e=this._getConn();if(!e){this._fail("\u043D\u0435\u0442 \u0441\u0432\u044F\u0437\u0438 \u0441 Home Assistant");return}if(!navigator.mediaDevices?.getUserMedia){this._fail("\u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u0435\u043D (\u043D\u0443\u0436\u0435\u043D HTTPS-origin)");return}try{let t=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:!0,noiseSuppression:!0,autoGainControl:!0}}),i=window.AudioContext||window.webkitAudioContext,s=new i,o=s.sampleRate,n=this._sub;(!n||n.sampleRate!==o)&&(n={handlerId:(await e.sendMessagePromise({type:"elektronny_gorod/intercom_uplink",sample_rate:o})).handler_id,sampleRate:o},this._sub=n);let c=n.handlerId,a=e.socket;await s.audioWorklet.addModule(this._workletUrl());let u=new AudioWorkletNode(s,"eg-pcm-int16",{numberOfOutputs:0});u.port.onmessage=h=>{let g=h.data,b=new Uint8Array(1+g.byteLength);b[0]=c,b.set(new Uint8Array(g.buffer),1),a.readyState===1&&a.send(b)};let m=s.createMediaStreamSource(t);m.connect(u),this._ctx={ac:s,stream:t,node:u,src:m},this.active=!0,this.lastError="",this._onChange()}catch(t){this._fail(t instanceof Error?t.message:String(t))}}stop(){let e=this._ctx;if(e){try{e.node.port.onmessage=null,e.node.disconnect(),e.src.disconnect()}catch{}try{e.stream.getTracks().forEach(t=>t.stop())}catch{}try{e.ac.close()}catch{}}if(this._ctx=void 0,this.active=!1,this._wUrl){try{URL.revokeObjectURL(this._wUrl)}catch{}this._wUrl=void 0}this._onChange()}_fail(e){this.lastError=e,this.stop()}_workletUrl(){if(this._wUrl)return this._wUrl;let e=`
+      class EgPcmInt16 extends AudioWorkletProcessor {
+        process(inputs) {
+          const ch = inputs[0] && inputs[0][0];
+          if (ch && ch.length) {
+            const i16 = new Int16Array(ch.length);
+            for (let i = 0; i < ch.length; i++) {
+              const s = Math.max(-1, Math.min(1, ch[i]));
+              i16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+            }
+            this.port.postMessage(i16, [i16.buffer]);
+          }
+          return true;
+        }
+      }
+      registerProcessor("eg-pcm-int16", EgPcmInt16);`;return this._wUrl=URL.createObjectURL(new Blob([e],{type:"application/javascript"})),this._wUrl}};var et=new Set(["slide","hold","tap"]);function Te(r,e){return r&&et.has(r)?r:e?"slide":"hold"}function Me(){return typeof window<"u"&&typeof window.matchMedia=="function"&&window.matchMedia("(pointer: coarse)").matches}var tt={ringing:"\u0412\u0445\u043E\u0434\u044F\u0449\u0438\u0439 \u0432\u044B\u0437\u043E\u0432",connecting:"\u0421\u043E\u0435\u0434\u0438\u043D\u0435\u043D\u0438\u0435\u2026",active:"\u0420\u0430\u0437\u0433\u043E\u0432\u043E\u0440",ended:"\u0412\u044B\u0437\u043E\u0432 \u0437\u0430\u0432\u0435\u0440\u0448\u0451\u043D",error:"\u041E\u0448\u0438\u0431\u043A\u0430 \u0432\u044B\u0437\u043E\u0432\u0430"},it=5e3,st=3e3,v=class extends y{constructor(){super(...arguments);this._config={};this._muted=!1;this._micActive=!1;this._micPerm="unknown";this._openStatus="idle";this._now=Date.now();this._dismissed=!1;this._openAction="hold";this._prevPhase="idle";this._mic=new J(()=>this.hass?.connection,()=>{this._micActive=this._mic.active,this.requestUpdate()});this._answer=()=>{this.hass?.callService("elektronny_gorod","answer")};this._hangup=()=>{this.hass?.callService("elektronny_gorod","hangup")};this._toggleMute=()=>{this._muted=!this._muted};this._toggleMic=async()=>{this._mic.active?this._mic.stop():await this._mic.start(),this._micPerm=await this._mic.queryPermission()};this._open=async()=>{if(!(!this._config.lock||!this.hass)){this._openStatus="opening";try{await this.hass.callService("lock","unlock",{entity_id:this._config.lock}),this._openStatus="opened"}catch{this._openStatus="error"}this._openReset&&clearTimeout(this._openReset),this._openReset=window.setTimeout(()=>{this._openStatus="idle",this.requestUpdate()},st)}}}setConfig(t){if(!t||!t.call_state)throw new Error("eg-intercom-call-card: \u0443\u043A\u0430\u0436\u0438\u0442\u0435 'call_state' (sensor.*_call_state)");this._config=t,this._openAction=Te(t.open_action,Me())}getCardSize(){return 8}static getStubConfig(){return{call_state:"",camera:"",doorbell_camera:"",lock:""}}disconnectedCallback(){super.disconnectedCallback(),this._mic.stop(),this._stopTick(),this._errHide&&clearTimeout(this._errHide),this._openReset&&clearTimeout(this._openReset)}get _phase(){let t=this._config.call_state,i=t&&this.hass?this.hass.states[t]?.state:void 0;return Se(i)}get _intercomName(){let t=this._config.call_state,s=(t&&this.hass?this.hass.states[t]?.attributes:void 0)?.intercom_name;return this._config.name??(typeof s=="string"?s:"\u0414\u043E\u043C\u043E\u0444\u043E\u043D")}get _startedAtMs(){let t=this._config.call_state,i=t&&this.hass?this.hass.states[t]?.attributes?.started_at:void 0;if(typeof i!="string")return;let s=Date.parse(i);return Number.isNaN(s)?void 0:s}willUpdate(t){if(!t.has("hass"))return;let i=this._phase;i!==this._prevPhase&&(this._onPhase(i),this._prevPhase=i)}_onPhase(t){(t==="ringing"||t==="connecting"||t==="active")&&(this._dismissed=!1),t==="active"?this._enterActive():this._exitActive(),(t==="error"||t==="ended")&&this._scheduleDismiss(),(t==="ringing"||t==="idle")&&(this._openStatus="idle")}async _enterActive(){this._muted=!1,this._startTick(),this._micPerm=await this._mic.queryPermission(),this._config.mic_autostart!==!1&&Ce(this._micPerm,this._mic.secure)&&await this._mic.start()}_exitActive(){this._mic.stop(),this._stopTick()}_startTick(){this._stopTick(),this._now=Date.now(),this._tick=window.setInterval(()=>{this._now=Date.now()},1e3)}_stopTick(){this._tick&&(clearInterval(this._tick),this._tick=void 0)}_scheduleDismiss(){this._errHide&&clearTimeout(this._errHide),this._errHide=window.setTimeout(()=>{this._dismissed=!0,this.requestUpdate()},it)}_timerText(){let t=this._startedAtMs;if(t===void 0)return"";let i=Math.max(0,Math.floor((this._now-t)/1e3)),s=String(Math.floor(i/60)).padStart(2,"0"),o=String(i%60).padStart(2,"0");return`${s}:${o}`}render(){let t=this._phase,i=Pe(t);if(!i.visible||this._dismissed)return l;let s=ke(i.video,this._config),o=i.showTimer&&this._config.timer!=="off";return d`
+      <ha-card class="phase-${t}">
+        <header>
+          <span class="name" title=${this._intercomName}>${this._intercomName}</span>
+          <span class="status ${i.isError?"err":""}">
+            ${i.busy?d`<span class="dot" aria-hidden="true"></span>`:l}
+            <span>${tt[t]??""}</span>
+            ${o?d`<span class="timer">${this._timerText()}</span>`:l}
+          </span>
+        </header>
+
+        ${s?d`<eg-call-video .hass=${this.hass} .entity=${s} .muted=${this._muted}></eg-call-video>`:i.isError?d`<div class="frame err"><ha-icon icon="mdi:phone-alert"></ha-icon><span>Не удалось установить вызов</span></div>`:l}
+
+        ${i.showOpen?this._renderOpen():l}
+        ${this._renderActions(i)}
+      </ha-card>
+    `}_renderOpen(){return d`
+      <eg-open-control
+        .mode=${this._openAction}
+        .status=${this._openStatus}
+        ?disabled=${!this._config.lock}
+        @open=${this._open}
+      ></eg-open-control>
+    `}_renderActions(t){return t.showAccept||t.showReject&&!t.showHangup?d`
+        <div class="actions">
+          ${t.showReject?d`<button class="circle reject" @click=${this._hangup}>
+                  <ha-icon icon="mdi:phone-hangup"></ha-icon><small>Отклонить</small>
+                </button>`:l}
+          ${t.showAccept?d`<button class="circle accept" @click=${this._answer}>
+                  <ha-icon icon="mdi:phone"></ha-icon><small>Принять</small>
+                </button>`:l}
+        </div>
+      `:t.showHangup?d`
+        <div class="actions">
+          ${t.showMic&&this._config.mic!==!1?this._renderMic():l}
+          ${t.showMic?d`<button class="circle" @click=${this._toggleMute}
+                    aria-label=${this._muted?"\u0412\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0437\u0432\u0443\u043A":"\u0412\u044B\u043A\u043B\u044E\u0447\u0438\u0442\u044C \u0437\u0432\u0443\u043A"}>
+                  <ha-icon icon=${this._muted?"mdi:volume-off":"mdi:volume-high"}></ha-icon>
+                  <small>${this._muted?"\u0417\u0432\u0443\u043A":"\u0414\u0438\u043D\u0430\u043C\u0438\u043A"}</small>
+                </button>`:l}
+          <button class="circle reject" @click=${this._hangup} aria-label="Завершить">
+            <ha-icon icon="mdi:phone-hangup"></ha-icon><small>Завершить</small>
+          </button>
+        </div>
+      `:d`<div class="actions"></div>`}_renderMic(){return this._mic.secure?this._micPerm==="denied"?d`<button class="circle" disabled aria-label="Доступ к микрофону запрещён" title="Разрешите микрофон в настройках браузера">
+        <ha-icon icon="mdi:microphone-off"></ha-icon><small>Запрещён</small>
+      </button>`:this._micActive?d`<button class="circle mic-on" @click=${this._toggleMic} aria-label="Выключить микрофон">
+        <ha-icon icon="mdi:microphone"></ha-icon><small>Микрофон</small>
+      </button>`:this._micPerm!=="granted"?d`<button class="circle" @click=${this._toggleMic} aria-label="Разрешить микрофон">
+        <ha-icon icon="mdi:microphone-question"></ha-icon><small>Разрешить</small>
+      </button>`:d`<button class="circle" @click=${this._toggleMic} aria-label="Включить микрофон">
+      <ha-icon icon="mdi:microphone-off"></ha-icon><small>Микрофон</small>
+    </button>`:d`<button class="circle" disabled aria-label="Микрофон требует HTTPS" title="Микрофон доступен только по HTTPS">
+        <ha-icon icon="mdi:microphone-off"></ha-icon><small>Нет HTTPS</small>
+      </button>`}};v.styles=S`
     :host {
       display: block;
     }
     ha-card {
-      padding: 12px;
+      padding: 14px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 14px;
     }
-    .head {
+    header {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      gap: 8px;
+      gap: 10px;
     }
     .name {
-      font-size: 1.1rem;
+      font-size: 1.15rem;
       font-weight: 600;
       color: var(--primary-text-color);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .status {
-      font-size: 0.9rem;
-      color: var(--secondary-text-color);
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: var(--secondary-text-color);
+      flex-shrink: 0;
     }
     .status.err {
       color: var(--error-color);
     }
+    .timer {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      color: var(--primary-text-color);
+    }
     .dot {
-      width: 8px;
-      height: 8px;
+      width: 9px;
+      height: 9px;
       border-radius: 50%;
       background: var(--primary-color);
       animation: pulse 1s ease-in-out infinite;
@@ -77,12 +278,7 @@ var xt=Object.defineProperty;var St=Object.getOwnPropertyDescriptor;var M=(r,t,e
         opacity: 0.3;
       }
     }
-    @media (prefers-reduced-motion: reduce) {
-      .dot {
-        animation: none;
-      }
-    }
-    .video {
+    .frame {
       aspect-ratio: 16 / 9;
       background: var(--secondary-background-color);
       border-radius: 12px;
@@ -90,56 +286,67 @@ var xt=Object.defineProperty;var St=Object.getOwnPropertyDescriptor;var M=(r,t,e
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 4px;
+      gap: 6px;
       color: var(--secondary-text-color);
     }
-    .video ha-icon {
+    .frame.err {
+      color: var(--error-color);
+    }
+    .frame ha-icon {
       --mdc-icon-size: 40px;
-    }
-    .video-hint {
-      font-size: 0.8rem;
-    }
-    .open {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      min-height: 56px;
-      border: none;
-      border-radius: 12px;
-      cursor: pointer;
-      font-size: 1rem;
-      font-weight: 600;
-      color: var(--text-primary-color, #fff);
-      background: var(--primary-color);
     }
     .actions {
       display: flex;
-      gap: 12px;
+      gap: 16px;
       justify-content: center;
+      flex-wrap: wrap;
     }
-    .btn {
-      flex: 1;
-      max-width: 180px;
+    .circle {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 4px;
-      padding: 10px;
-      min-height: 56px;
       border: none;
-      border-radius: 12px;
+      background: none;
       cursor: pointer;
-      font-size: 0.85rem;
+      color: var(--primary-text-color);
+      font: inherit;
+      min-width: 64px;
+    }
+    .circle ha-icon {
+      --mdc-icon-size: 28px;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--secondary-background-color);
+      color: var(--primary-text-color);
+    }
+    .circle small {
+      font-size: 0.78rem;
+      color: var(--secondary-text-color);
+    }
+    .circle[disabled] {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    .circle.accept ha-icon {
+      background: var(--success-color, #2e7d32);
+      color: #fff;
+    }
+    .circle.reject ha-icon {
+      background: var(--error-color, #c62828);
+      color: #fff;
+    }
+    .circle.mic-on ha-icon {
+      background: var(--primary-color);
       color: var(--text-primary-color, #fff);
     }
-    .btn.accept {
-      background: var(--success-color, #2e7d32);
+    @media (prefers-reduced-motion: reduce) {
+      .dot {
+        animation: none;
+      }
     }
-    .btn.reject {
-      background: var(--error-color, #c62828);
-    }
-    .btn ha-icon {
-      --mdc-icon-size: 26px;
-    }
-  `,M([V({attribute:!1})],w.prototype,"hass",2),M([bt()],w.prototype,"_config",2),w=M([vt("eg-intercom-call-card")],w);window.customCards=window.customCards||[];window.customCards.push({type:"eg-intercom-call-card",name:"\u042D\u0413 \u0414\u043E\u043C\u043E\u0444\u043E\u043D \u2014 \u042D\u043A\u0440\u0430\u043D \u0432\u044B\u0437\u043E\u0432\u0430",description:"\u042D\u043A\u0440\u0430\u043D \u0432\u0445\u043E\u0434\u044F\u0449\u0435\u0433\u043E \u0432\u044B\u0437\u043E\u0432\u0430 \u0438 \u0440\u0430\u0437\u0433\u043E\u0432\u043E\u0440\u0430 \u0441 \u0434\u043E\u043C\u043E\u0444\u043E\u043D\u043E\u043C (\u0432\u0438\u0434\u0435\u043E, \u043E\u0442\u043A\u0440\u044B\u0442\u044C, \u043F\u0440\u0438\u043D\u044F\u0442\u044C/\u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044C)."});export{w as EgIntercomCallCard};
+  `,p([f({attribute:!1})],v.prototype,"hass",2),p([_()],v.prototype,"_config",2),p([_()],v.prototype,"_muted",2),p([_()],v.prototype,"_micActive",2),p([_()],v.prototype,"_micPerm",2),p([_()],v.prototype,"_openStatus",2),p([_()],v.prototype,"_now",2),p([_()],v.prototype,"_dismissed",2),v=p([R("eg-intercom-call-card")],v);window.customCards=window.customCards||[];window.customCards.push({type:"eg-intercom-call-card",name:"\u042D\u0413 \u0414\u043E\u043C\u043E\u0444\u043E\u043D \u2014 \u042D\u043A\u0440\u0430\u043D \u0432\u044B\u0437\u043E\u0432\u0430",description:"\u0412\u0445\u043E\u0434\u044F\u0449\u0438\u0439 \u0432\u044B\u0437\u043E\u0432 \u0438 \u0440\u0430\u0437\u0433\u043E\u0432\u043E\u0440 \u0441 \u0434\u043E\u043C\u043E\u0444\u043E\u043D\u043E\u043C: \u0432\u0438\u0434\u0435\u043E+\u0437\u0432\u0443\u043A, \u043E\u0442\u043A\u0440\u044B\u0442\u044C \u0434\u0432\u0435\u0440\u044C, \u043F\u0440\u0438\u043D\u044F\u0442\u044C/\u0437\u0430\u0432\u0435\u0440\u0448\u0438\u0442\u044C, \u043C\u0438\u043A\u0440\u043E\u0444\u043E\u043D.",preview:!1});export{v as EgIntercomCallCard};

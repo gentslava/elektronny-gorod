@@ -1,16 +1,20 @@
-// eg-intercom-call-card — экран вызова домофона «Электронный город» (Lit+TS).
-// Каркас Slice 3b-1: state-машина по sensor.*_call_state + действия (answer/hangup/
-// открыть). Видео (HA-native WebRTC), адаптивный slide/hold open-control и микрофон —
-// следующие слайсы (см. plan-call-card-ui.md). Облик — нативный HA (theme-токены).
-import { LitElement, css, html, nothing, type TemplateResult } from "lit";
+// eg-intercom-call-card — экран входящего вызова и разговора с домофоном «Электронный
+// город» (Lit+TS). Облик нативный HA (theme-токены, mdi, M3-кнопки). Состояние ведётся
+// по sensor.*_call_state (Slice 3a). Композиция: <eg-call-video> (видео+звук гостя),
+// <eg-open-control> (адаптивное открытие), MicController (микрофон). См. call-card-ux-spec.md.
+import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
-import { type CallView, deriveView, toPhase } from "./state-machine.js";
+import { type CallPhase, type CallView, deriveView, toPhase } from "./state-machine.js";
+import { pickCameraEntity } from "./components/call-video.js";
+import "./components/open-control.js";
+import { MicController, type MicPermission, shouldAutoStartMic } from "./components/mic-controller.js";
+import { isCoarsePointer, type OpenAction, resolveOpenAction } from "./util/open-action.js";
 
 interface HassLike {
   states: Record<string, { state: string; attributes: Record<string, unknown> }>;
+  connection?: unknown;
   callService: (domain: string, service: string, data?: Record<string, unknown>) => Promise<unknown>;
-  localize?: (key: string) => string;
 }
 
 interface CardConfig {
@@ -19,32 +23,75 @@ interface CardConfig {
   doorbell_camera?: string;
   lock?: string;
   name?: string;
+  open_action?: string;
+  mic?: boolean;
+  mic_autostart?: boolean;
+  timer?: "auto" | "stopwatch" | "off";
 }
 
-const STATUS_RU: Record<string, string> = {
+type OpenStatus = "idle" | "opening" | "opened" | "error";
+
+const STATUS_RU: Partial<Record<CallPhase, string>> = {
   ringing: "Входящий вызов",
   connecting: "Соединение…",
   active: "Разговор",
+  ended: "Вызов завершён",
   error: "Ошибка вызова",
 };
+
+const DISMISS_MS = 5000;
+const OPEN_RESET_MS = 3000;
 
 @customElement("eg-intercom-call-card")
 export class EgIntercomCallCard extends LitElement {
   @property({ attribute: false }) public hass?: HassLike;
+
   @state() private _config: CardConfig = {};
+  @state() private _muted = false;
+  @state() private _micActive = false;
+  @state() private _micPerm: MicPermission = "unknown";
+  @state() private _openStatus: OpenStatus = "idle";
+  @state() private _now = Date.now();
+  @state() private _dismissed = false;
+
+  private _openAction: OpenAction = "hold";
+  private _prevPhase: CallPhase = "idle";
+  private _tick?: number;
+  private _errHide?: number;
+  private _openReset?: number;
+  private readonly _mic = new MicController(
+    () => this.hass?.connection as never,
+    () => {
+      this._micActive = this._mic.active;
+      this.requestUpdate();
+    },
+  );
 
   public setConfig(config: CardConfig): void {
     if (!config || !config.call_state) {
       throw new Error("eg-intercom-call-card: укажите 'call_state' (sensor.*_call_state)");
     }
     this._config = config;
+    this._openAction = resolveOpenAction(config.open_action, isCoarsePointer());
   }
 
   public getCardSize(): number {
-    return 6;
+    return 8;
   }
 
-  private get _phase() {
+  public static getStubConfig(): CardConfig {
+    return { call_state: "", camera: "", doorbell_camera: "", lock: "" };
+  }
+
+  public override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._mic.stop();
+    this._stopTick();
+    if (this._errHide) clearTimeout(this._errHide);
+    if (this._openReset) clearTimeout(this._openReset);
+  }
+
+  private get _phase(): CallPhase {
     const eid = this._config.call_state;
     const st = eid && this.hass ? this.hass.states[eid]?.state : undefined;
     return toPhase(st);
@@ -57,6 +104,78 @@ export class EgIntercomCallCard extends LitElement {
     return this._config.name ?? (typeof fromAttr === "string" ? fromAttr : "Домофон");
   }
 
+  private get _startedAtMs(): number | undefined {
+    const eid = this._config.call_state;
+    const v = eid && this.hass ? this.hass.states[eid]?.attributes?.["started_at"] : undefined;
+    if (typeof v !== "string") return undefined;
+    const t = Date.parse(v);
+    return Number.isNaN(t) ? undefined : t;
+  }
+
+  protected override willUpdate(changed: PropertyValues): void {
+    if (!changed.has("hass")) return;
+    const phase = this._phase;
+    if (phase !== this._prevPhase) {
+      this._onPhase(phase);
+      this._prevPhase = phase;
+    }
+  }
+
+  private _onPhase(phase: CallPhase): void {
+    if (phase === "ringing" || phase === "connecting" || phase === "active") {
+      this._dismissed = false;
+    }
+    if (phase === "active") {
+      void this._enterActive();
+    } else {
+      this._exitActive();
+    }
+    if (phase === "error" || phase === "ended") {
+      this._scheduleDismiss();
+    }
+    if (phase === "ringing" || phase === "idle") {
+      this._openStatus = "idle";
+    }
+  }
+
+  private async _enterActive(): Promise<void> {
+    this._muted = false; // пытаемся со звуком; снять блок автоплея — кнопкой звука (жест)
+    this._startTick();
+    this._micPerm = await this._mic.queryPermission();
+    if (this._config.mic_autostart !== false && shouldAutoStartMic(this._micPerm, this._mic.secure)) {
+      await this._mic.start();
+    }
+  }
+
+  private _exitActive(): void {
+    this._mic.stop();
+    this._stopTick();
+  }
+
+  private _startTick(): void {
+    this._stopTick();
+    this._now = Date.now();
+    this._tick = window.setInterval(() => {
+      this._now = Date.now();
+    }, 1000);
+  }
+
+  private _stopTick(): void {
+    if (this._tick) {
+      clearInterval(this._tick);
+      this._tick = undefined;
+    }
+  }
+
+  private _scheduleDismiss(): void {
+    if (this._errHide) clearTimeout(this._errHide);
+    this._errHide = window.setTimeout(() => {
+      this._dismissed = true;
+      this.requestUpdate();
+    }, DISMISS_MS);
+  }
+
+  // ---- действия ----
   private _answer = (): void => {
     void this.hass?.callService("elektronny_gorod", "answer");
   };
@@ -65,63 +184,149 @@ export class EgIntercomCallCard extends LitElement {
     void this.hass?.callService("elektronny_gorod", "hangup");
   };
 
-  private _open = (): void => {
-    const lock = this._config.lock;
-    if (!lock) return;
-    // Slice 3b-1: подтверждение tap'ом. Адаптивный slide/hold — следующий слайс.
-    if (confirm(`Открыть дверь — ${this._intercomName}?`)) {
-      void this.hass?.callService("lock", "unlock", { entity_id: lock });
-    }
+  private _toggleMute = (): void => {
+    this._muted = !this._muted;
   };
 
+  private _toggleMic = async (): Promise<void> => {
+    if (this._mic.active) {
+      this._mic.stop();
+    } else {
+      await this._mic.start();
+    }
+    this._micPerm = await this._mic.queryPermission();
+  };
+
+  private _open = async (): Promise<void> => {
+    if (!this._config.lock || !this.hass) return;
+    this._openStatus = "opening";
+    try {
+      await this.hass.callService("lock", "unlock", { entity_id: this._config.lock });
+      this._openStatus = "opened";
+    } catch {
+      this._openStatus = "error";
+    }
+    if (this._openReset) clearTimeout(this._openReset);
+    this._openReset = window.setTimeout(() => {
+      this._openStatus = "idle";
+      this.requestUpdate();
+    }, OPEN_RESET_MS);
+  };
+
+  private _timerText(): string {
+    const start = this._startedAtMs;
+    if (start === undefined) return "";
+    const sec = Math.max(0, Math.floor((this._now - start) / 1000));
+    const mm = String(Math.floor(sec / 60)).padStart(2, "0");
+    const ss = String(sec % 60).padStart(2, "0");
+    return `${mm}:${ss}`;
+  }
+
   protected override render(): TemplateResult | typeof nothing {
-    const view: CallView = deriveView(this._phase);
-    if (!view.visible) return nothing;
+    const phase = this._phase;
+    const view = deriveView(phase);
+    if (!view.visible || this._dismissed) return nothing;
+
+    const cam = pickCameraEntity(view.video, this._config);
+    const showTimer = view.showTimer && this._config.timer !== "off";
 
     return html`
-      <ha-card>
-        <div class="head">
-          <span class="name">${this._intercomName}</span>
+      <ha-card class="phase-${phase}">
+        <header>
+          <span class="name" title=${this._intercomName}>${this._intercomName}</span>
           <span class="status ${view.isError ? "err" : ""}">
             ${view.busy ? html`<span class="dot" aria-hidden="true"></span>` : nothing}
-            ${STATUS_RU[this._phase] ?? ""}
+            <span>${STATUS_RU[phase] ?? ""}</span>
+            ${showTimer ? html`<span class="timer">${this._timerText()}</span>` : nothing}
           </span>
-        </div>
+        </header>
 
-        <div class="video" role="img" aria-label="Видео с домофона">
-          <ha-icon icon="mdi:cctv"></ha-icon>
-          <span class="video-hint">видео (${view.video})</span>
-        </div>
+        ${cam
+          ? html`<eg-call-video .hass=${this.hass} .entity=${cam} .muted=${this._muted}></eg-call-video>`
+          : view.isError
+            ? html`<div class="frame err"><ha-icon icon="mdi:phone-alert"></ha-icon><span>Не удалось установить вызов</span></div>`
+            : nothing}
 
         ${view.showOpen ? this._renderOpen() : nothing}
-
-        <div class="actions">
-          ${view.showReject
-            ? html`<button class="btn reject" @click=${this._hangup} aria-label="Отклонить">
-                <ha-icon icon="mdi:phone-hangup"></ha-icon><span>Отклонить</span>
-              </button>`
-            : nothing}
-          ${view.showAccept
-            ? html`<button class="btn accept" @click=${this._answer} aria-label="Принять">
-                <ha-icon icon="mdi:phone"></ha-icon><span>Принять</span>
-              </button>`
-            : nothing}
-          ${view.showHangup
-            ? html`<button class="btn reject" @click=${this._hangup} aria-label="Завершить">
-                <ha-icon icon="mdi:phone-hangup"></ha-icon><span>Завершить</span>
-              </button>`
-            : nothing}
-        </div>
+        ${this._renderActions(view)}
       </ha-card>
     `;
   }
 
   private _renderOpen(): TemplateResult {
     return html`
-      <button class="open" @click=${this._open} aria-label="Открыть дверь">
-        <ha-icon icon="mdi:key-variant"></ha-icon><span>Открыть дверь</span>
-      </button>
+      <eg-open-control
+        .mode=${this._openAction}
+        .status=${this._openStatus}
+        ?disabled=${!this._config.lock}
+        @open=${this._open}
+      ></eg-open-control>
     `;
+  }
+
+  private _renderActions(view: CallView): TemplateResult {
+    if (view.showAccept || (view.showReject && !view.showHangup)) {
+      // ringing / connecting
+      return html`
+        <div class="actions">
+          ${view.showReject
+            ? html`<button class="circle reject" @click=${this._hangup}>
+                  <ha-icon icon="mdi:phone-hangup"></ha-icon><small>Отклонить</small>
+                </button>`
+            : nothing}
+          ${view.showAccept
+            ? html`<button class="circle accept" @click=${this._answer}>
+                  <ha-icon icon="mdi:phone"></ha-icon><small>Принять</small>
+                </button>`
+            : nothing}
+        </div>
+      `;
+    }
+    if (view.showHangup) {
+      // active / error
+      return html`
+        <div class="actions">
+          ${view.showMic && this._config.mic !== false ? this._renderMic() : nothing}
+          ${view.showMic
+            ? html`<button class="circle" @click=${this._toggleMute}
+                    aria-label=${this._muted ? "Включить звук" : "Выключить звук"}>
+                  <ha-icon icon=${this._muted ? "mdi:volume-off" : "mdi:volume-high"}></ha-icon>
+                  <small>${this._muted ? "Звук" : "Динамик"}</small>
+                </button>`
+            : nothing}
+          <button class="circle reject" @click=${this._hangup} aria-label="Завершить">
+            <ha-icon icon="mdi:phone-hangup"></ha-icon><small>Завершить</small>
+          </button>
+        </div>
+      `;
+    }
+    return html`<div class="actions"></div>`;
+  }
+
+  private _renderMic(): TemplateResult {
+    if (!this._mic.secure) {
+      return html`<button class="circle" disabled aria-label="Микрофон требует HTTPS" title="Микрофон доступен только по HTTPS">
+        <ha-icon icon="mdi:microphone-off"></ha-icon><small>Нет HTTPS</small>
+      </button>`;
+    }
+    if (this._micPerm === "denied") {
+      return html`<button class="circle" disabled aria-label="Доступ к микрофону запрещён" title="Разрешите микрофон в настройках браузера">
+        <ha-icon icon="mdi:microphone-off"></ha-icon><small>Запрещён</small>
+      </button>`;
+    }
+    if (this._micActive) {
+      return html`<button class="circle mic-on" @click=${this._toggleMic} aria-label="Выключить микрофон">
+        <ha-icon icon="mdi:microphone"></ha-icon><small>Микрофон</small>
+      </button>`;
+    }
+    if (this._micPerm !== "granted") {
+      return html`<button class="circle" @click=${this._toggleMic} aria-label="Разрешить микрофон">
+        <ha-icon icon="mdi:microphone-question"></ha-icon><small>Разрешить</small>
+      </button>`;
+    }
+    return html`<button class="circle" @click=${this._toggleMic} aria-label="Включить микрофон">
+      <ha-icon icon="mdi:microphone-off"></ha-icon><small>Микрофон</small>
+    </button>`;
   }
 
   static override styles = css`
@@ -129,35 +334,44 @@ export class EgIntercomCallCard extends LitElement {
       display: block;
     }
     ha-card {
-      padding: 12px;
+      padding: 14px;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 14px;
     }
-    .head {
+    header {
       display: flex;
       align-items: baseline;
       justify-content: space-between;
-      gap: 8px;
+      gap: 10px;
     }
     .name {
-      font-size: 1.1rem;
+      font-size: 1.15rem;
       font-weight: 600;
       color: var(--primary-text-color);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .status {
-      font-size: 0.9rem;
-      color: var(--secondary-text-color);
       display: inline-flex;
       align-items: center;
-      gap: 6px;
+      gap: 8px;
+      font-size: 0.9rem;
+      color: var(--secondary-text-color);
+      flex-shrink: 0;
     }
     .status.err {
       color: var(--error-color);
     }
+    .timer {
+      font-variant-numeric: tabular-nums;
+      font-weight: 600;
+      color: var(--primary-text-color);
+    }
     .dot {
-      width: 8px;
-      height: 8px;
+      width: 9px;
+      height: 9px;
       border-radius: 50%;
       background: var(--primary-color);
       animation: pulse 1s ease-in-out infinite;
@@ -167,12 +381,7 @@ export class EgIntercomCallCard extends LitElement {
         opacity: 0.3;
       }
     }
-    @media (prefers-reduced-motion: reduce) {
-      .dot {
-        animation: none;
-      }
-    }
-    .video {
+    .frame {
       aspect-ratio: 16 / 9;
       background: var(--secondary-background-color);
       border-radius: 12px;
@@ -180,64 +389,75 @@ export class EgIntercomCallCard extends LitElement {
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      gap: 4px;
+      gap: 6px;
       color: var(--secondary-text-color);
     }
-    .video ha-icon {
+    .frame.err {
+      color: var(--error-color);
+    }
+    .frame ha-icon {
       --mdc-icon-size: 40px;
-    }
-    .video-hint {
-      font-size: 0.8rem;
-    }
-    .open {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-      min-height: 56px;
-      border: none;
-      border-radius: 12px;
-      cursor: pointer;
-      font-size: 1rem;
-      font-weight: 600;
-      color: var(--text-primary-color, #fff);
-      background: var(--primary-color);
     }
     .actions {
       display: flex;
-      gap: 12px;
+      gap: 16px;
       justify-content: center;
+      flex-wrap: wrap;
     }
-    .btn {
-      flex: 1;
-      max-width: 180px;
+    .circle {
       display: flex;
       flex-direction: column;
       align-items: center;
       gap: 4px;
-      padding: 10px;
-      min-height: 56px;
       border: none;
-      border-radius: 12px;
+      background: none;
       cursor: pointer;
-      font-size: 0.85rem;
+      color: var(--primary-text-color);
+      font: inherit;
+      min-width: 64px;
+    }
+    .circle ha-icon {
+      --mdc-icon-size: 28px;
+      width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: var(--secondary-background-color);
+      color: var(--primary-text-color);
+    }
+    .circle small {
+      font-size: 0.78rem;
+      color: var(--secondary-text-color);
+    }
+    .circle[disabled] {
+      cursor: not-allowed;
+      opacity: 0.5;
+    }
+    .circle.accept ha-icon {
+      background: var(--success-color, #2e7d32);
+      color: #fff;
+    }
+    .circle.reject ha-icon {
+      background: var(--error-color, #c62828);
+      color: #fff;
+    }
+    .circle.mic-on ha-icon {
+      background: var(--primary-color);
       color: var(--text-primary-color, #fff);
     }
-    .btn.accept {
-      background: var(--success-color, #2e7d32);
-    }
-    .btn.reject {
-      background: var(--error-color, #c62828);
-    }
-    .btn ha-icon {
-      --mdc-icon-size: 26px;
+    @media (prefers-reduced-motion: reduce) {
+      .dot {
+        animation: none;
+      }
     }
   `;
 }
 
 declare global {
   interface Window {
-    customCards?: Array<{ type: string; name: string; description: string }>;
+    customCards?: Array<{ type: string; name: string; description: string; preview?: boolean }>;
   }
 }
 
@@ -245,5 +465,7 @@ window.customCards = window.customCards || [];
 window.customCards.push({
   type: "eg-intercom-call-card",
   name: "ЭГ Домофон — Экран вызова",
-  description: "Экран входящего вызова и разговора с домофоном (видео, открыть, принять/завершить).",
+  description:
+    "Входящий вызов и разговор с домофоном: видео+звук, открыть дверь, принять/завершить, микрофон.",
+  preview: false,
 });

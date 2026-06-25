@@ -14,6 +14,8 @@ const opts = {
   minify: true,
   sourcemap: false,
   legalComments: "none",
+  // Lit production-режим (убирает dev-mode warnings в консоли HA).
+  define: { "process.env.NODE_ENV": '"production"' },
   outfile: OUT,
   banner: {
     js: "/* eg-intercom-call-card — собранный бандл. Источник: frontend/src/. Не редактировать вручную. */",
