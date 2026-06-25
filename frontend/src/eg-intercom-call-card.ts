@@ -132,10 +132,12 @@ export class EgIntercomCallCard extends LitElement {
 
   private get _intercomName(): string {
     const a = this._active;
-    if (!a) return this._config.name ?? "Домофон";
-    const attrs = this.hass?.states[a.call_state]?.attributes;
+    // Заголовок = полный адрес домофона (как в оригинальном приложении):
+    // берём intercom_name из атрибута сенсора, схлопывая двойные пробелы.
+    const attrs = a ? this.hass?.states[a.call_state]?.attributes : undefined;
     const fromAttr = attrs?.["intercom_name"];
-    return a.name ?? (typeof fromAttr === "string" ? fromAttr : "Домофон");
+    const full = typeof fromAttr === "string" ? fromAttr.replace(/\s+/g, " ").trim() : "";
+    return full || a?.name || this._config.name || "Домофон";
   }
 
   private get _startedAtMs(): number | undefined {

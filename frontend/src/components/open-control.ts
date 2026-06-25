@@ -97,7 +97,7 @@ export class EgOpenControl extends LitElement {
 
   private _onSlideMove = (e: PointerEvent): void => {
     if (!this._arming || !this._trackRect) return;
-    const knob = 56;
+    const knob = 60;
     this._progress = slideProgress(
       e.clientX,
       this._trackRect.left,
@@ -130,14 +130,21 @@ export class EgOpenControl extends LitElement {
     if (this.status === "opening") return "Открываю…";
     if (this.status === "opened") return "Открыто";
     if (this.status === "error") return "Ошибка";
-    // Подпись по режиму — чтобы было очевидно, что делать (а не просто «нажать»).
-    if (this.mode === "slide") return "Сдвиньте, чтобы открыть";
+    // hold (десктоп) не самоочевиден — явно просим удерживать. slide/tap — коротко.
     if (this.mode === "hold") return "Удерживайте, чтобы открыть";
-    return this.label;
+    return "Открыть";
   }
 
+  /** Иконка плашки hold/tap: закрытый замок → открытый при успехе. */
   private _iconName(): string {
-    if (this.status === "opened") return "mdi:check-circle";
+    if (this.status === "opened") return "mdi:lock-open-variant";
+    if (this.status === "error") return "mdi:lock-alert";
+    return "mdi:lock";
+  }
+
+  /** Иконка кружка-слайдера: ключ (тащим к замку), замок при результате. */
+  private _knobIcon(): string {
+    if (this.status === "opened") return "mdi:lock-open-variant";
     if (this.status === "error") return "mdi:lock-alert";
     return "mdi:key-variant";
   }
@@ -178,28 +185,36 @@ export class EgOpenControl extends LitElement {
         <div class="fill" style="width:${this._vp() * 100}%"></div>
         <span class="bar-label">
           <ha-icon icon=${this._iconName()}></ha-icon>
-          ${this._arming ? "Удерживайте…" : this._caption()}
+          ${this._caption()}
         </span>
       </button>
     `;
   }
 
   private _renderSlide(): TemplateResult {
+    const vp = this._vp();
     return html`
-      <div class="track ${this._statusClass()}" aria-label="${this.label} — сдвиньте, чтобы открыть"
-           role="slider" aria-valuemin="0" aria-valuemax="100"
-           aria-valuenow=${Math.round(this._vp() * 100)}>
-        <div class="fill" style="width:${this._vp() * 100}%"></div>
+      <div
+        class="track ${this._statusClass()} ${this._arming ? "dragging" : ""}"
+        style="--eg-prog:${vp}"
+        role="slider"
+        aria-label=${this.label}
+        aria-valuemin="0"
+        aria-valuemax="100"
+        aria-valuenow=${Math.round(vp * 100)}
+      >
+        <ha-icon class="hint hint-l" icon="mdi:lock" aria-hidden="true"></ha-icon>
+        <ha-icon class="hint hint-r" icon="mdi:lock-open-variant" aria-hidden="true"></ha-icon>
+        <div class="fill"></div>
         <span class="bar-label">${this._caption()}</span>
         <div
           class="knob ${this.disabled ? "off" : ""}"
-          style="transform:translateX(calc(${this._vp()} * (100% + var(--eg-track-w, 0px))))"
           @pointerdown=${this._onSlideDown}
           @pointermove=${this._onSlideMove}
           @pointerup=${this._onSlideUp}
           @pointercancel=${this._onSlideUp}
         >
-          <ha-icon icon=${this._iconName()}></ha-icon>
+          <ha-icon icon=${this._knobIcon()}></ha-icon>
         </div>
       </div>
     `;
@@ -213,29 +228,34 @@ export class EgOpenControl extends LitElement {
     .track {
       position: relative;
       overflow: hidden;
-      min-height: 56px;
-      border-radius: 28px;
+      min-height: 68px;
+      border-radius: 34px;
       display: flex;
       align-items: center;
       justify-content: center;
       background: var(--secondary-background-color);
       color: var(--primary-text-color);
       font-weight: 600;
+      font-size: 1.05rem;
       user-select: none;
       touch-action: none;
     }
     .bar {
       width: 100%;
+      max-width: 340px;
+      margin: 0 auto;
       border: none;
       cursor: pointer;
       font: inherit;
       font-weight: 600;
     }
+    /* слайдер — подтверждение действия: узкий, не во всю ширину (как в оригинале) */
     .track {
       box-sizing: border-box;
-      /* резерв под кружок-ключ слева → подпись центрируется в свободной зоне, не под кружком */
-      padding-left: 60px;
-      padding-right: 14px;
+      width: 100%;
+      max-width: 300px;
+      margin: 0 auto;
+      --knob: 60px; /* крупная цель под палец: > 48dp Material / 44pt Apple HIG */
     }
     .bar[disabled] {
       opacity: 0.5;
@@ -246,8 +266,15 @@ export class EgOpenControl extends LitElement {
       inset: 0 auto 0 0;
       /* Открыть = accent (НЕ красный — красный за «Завершить», см. spec §3). */
       background: var(--primary-color);
-      opacity: 0.25;
+      opacity: 0.16;
       transition: width 80ms linear;
+    }
+    /* на слайдере заливка следует за кнопкой через --eg-prog (тот же источник, без лага) */
+    .track .fill {
+      width: calc(var(--eg-prog, 0) * 100%);
+    }
+    .track.dragging .fill {
+      transition: none;
     }
     .bar-label,
     .bar > span {
@@ -257,11 +284,29 @@ export class EgOpenControl extends LitElement {
       gap: 8px;
       z-index: 1;
     }
+    /* подсказки направления: закрытый замок слева (старт), открытый справа (цель) */
+    .hint {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      --mdc-icon-size: 22px;
+      color: var(--secondary-text-color);
+      opacity: 0.5;
+      z-index: 0;
+    }
+    .hint-l {
+      left: 20px;
+    }
+    .hint-r {
+      right: 20px;
+    }
+    /* кружок слайдера: позиция строго по прогрессу (CSS left от --eg-prog, без JS-трансформа) */
     .knob {
       position: absolute;
-      left: 4px;
-      width: 48px;
-      height: 48px;
+      top: 4px;
+      left: calc(var(--eg-prog, 0) * (100% - var(--knob, 60px)));
+      width: var(--knob, 60px);
+      height: var(--knob, 60px);
       border-radius: 50%;
       background: var(--primary-color);
       color: var(--text-primary-color, #fff);
@@ -271,27 +316,37 @@ export class EgOpenControl extends LitElement {
       cursor: grab;
       touch-action: none;
       z-index: 2;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
+      transition: left 0.18s ease;
+    }
+    .track.dragging .knob {
+      transition: none;
+      cursor: grabbing;
     }
     .knob.off {
       opacity: 0.5;
     }
-    ha-icon {
+    .knob ha-icon {
+      --mdc-icon-size: 26px;
+    }
+    .bar ha-icon {
       --mdc-icon-size: 24px;
     }
-    /* «Открыто» — success (зелёный + галочка); «Ошибка» — error (красный). */
-    .st-opened .fill {
+    /* «Открыто»/«Ошибка»: на плашке hold/tap — вся плашка; на слайдере — ТОЛЬКО кнопка */
+    .bar.st-opened .fill {
       background: var(--success-color, #2e7d32);
       opacity: 1;
     }
-    .st-error .fill {
+    .bar.st-error .fill {
       background: var(--error-color, #c62828);
       opacity: 1;
     }
-    .st-opened .bar-label,
-    .st-error .bar-label {
+    .bar.st-opened .bar-label,
+    .bar.st-error .bar-label {
       color: #fff;
     }
-    .bar.st-opened ha-icon {
+    .bar.st-opened ha-icon,
+    .bar.st-error ha-icon {
       color: #fff;
     }
     .track.st-opened .knob {
@@ -301,7 +356,8 @@ export class EgOpenControl extends LitElement {
       background: var(--error-color, #c62828);
     }
     @media (prefers-reduced-motion: reduce) {
-      .fill {
+      .fill,
+      .knob {
         transition: none;
       }
     }
