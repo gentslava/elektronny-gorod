@@ -112,6 +112,12 @@ var Re=Object.defineProperty;var Ue=Object.getOwnPropertyDescriptor;var p=(r,e,t
       font: inherit;
       font-weight: 600;
     }
+    .track {
+      box-sizing: border-box;
+      /* резерв под кружок-ключ слева → подпись центрируется в свободной зоне, не под кружком */
+      padding-left: 60px;
+      padding-right: 14px;
+    }
     .bar[disabled] {
       opacity: 0.5;
       cursor: not-allowed;
