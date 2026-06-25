@@ -224,6 +224,10 @@ frontend/
   камеры (ringing). Реюз `ha-camera-stream`/`ha-web-rtc-player`, если доступны в `hass`.
 - [ ] **State-машина:** `sensor.*_call_state` → `idle/ringing/connecting/active/ended`;
   слои `opening_door` (по `lock`-state), `audio_unavailable`, `mic_permission`.
+- [ ] **Сброс `error` (контракт из review P2 Slice 3a):** backend оставляет `error`
+  терминальным (не авто-переходит в `ended`). Карточка показывает «Ошибка вызова»
+  ~3–5с, затем сама гасит экран (локальный таймер) — чтобы `error` не «залипал» в UI
+  до следующего вызова.
 - [ ] **Open-control адаптивный** (`open_action: auto`): тач → slide (на стиле
   `ha-control-slider`); десктоп → hold(`lock.unlock` по удержанию) или tap+confirm.
   Прогресс/успех(`mdi:lock-open-check`)/ошибка(`mdi:lock-alert`) — overlay.
