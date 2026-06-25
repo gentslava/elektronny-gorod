@@ -31,11 +31,11 @@ dispatcher); фронтенд — **Lit + TypeScript** + Rollup/Vite (бандл
 
 ## Слайсы
 
-| Slice | Что | Риск | Зависит от |
+| Slice | Что | Риск | Статус (2026-06-25) |
 |---|---|---|---|
-| **3a** | backend `sensor.*_call_state` + `SIGNAL_CALL_STATE` | низкий | — |
-| **3b** | Lit-карточка `eg-intercom-call-card` (поглощает mic-card) | средний | 3a |
-| **3c** (опц.) | fullscreen на панели (auto-view / browser_mod) | низкий | 3b |
+| **3a** | backend `sensor.*_call_state` + `EVENT_CALL_STATE` | низкий | ✅ сделано (тесты+review) |
+| **3b** | Lit-карточка `eg-intercom-call-card` (поглощает mic-card) | средний | ✅ собрано (typecheck+25 unit+smoke); ⏳ дизайн на согласовании + live-проверка видео/микрофона |
+| **3c** (опц.) | fullscreen на панели (auto-view / browser_mod) | низкий | ⏳ позже |
 
 Каждый слайс — отдельный PR (pre-PR checklist). 3a мерджится самостоятельно
 (полезен для DIY даже без карточки).

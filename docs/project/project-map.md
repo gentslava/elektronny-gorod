@@ -81,7 +81,8 @@ elektronny-gorod/
 │   │   └── call_controller.py     ← DoorbellCallController: трекинг FCM-вызова + answer/hangup + UplinkSink
 │   ├── uplink_ws.py               ← WS-команда intercom_uplink: микрофон → SIP-uplink (ADR-0013)
 │   ├── www/                       ← static Lovelace-ресурсы (зарегистрированы из uplink_ws.py)
-│   │   └── eg-intercom-mic-card.js ← карта микрофона домофона: getUserMedia → HA-WS (ADR-0013)
+│   │   ├── eg-intercom-mic-card.js ← карта микрофона домофона: getUserMedia → HA-WS (ADR-0013)
+│   │   └── eg-intercom-call-card.js ← карта экрана вызова (бандл из frontend/, Slice 3b)
 │   ├── services.yaml              ← сервисы answer / hangup (A-81)
 │   ├── go2rtc.py                  ← go2rtc валидация / upsert
 │   ├── entity_migration.py        ← стабильные unique_id + registry migration
@@ -194,6 +195,8 @@ elektronny-gorod/
 | [`call_camera.py`](../../custom_components/elektronny_gorod/call_camera.py) | `ElektronnyGorodCallCamera` — camera-сущность `camera.intercom_call`; `stream_source()` пересобирает `eg_intercom_call` при активном вызове; вне вызова → `None` |
 | [`uplink_ws.py`](../../custom_components/elektronny_gorod/uplink_ws.py) | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): микрофон из Lovelace-карты → `DoorbellCallController.feed_uplink`; static-регистрация JS-карты (`async_register_uplink_ws_command` / `async_register_uplink_card`, зовутся из `__init__.py`) (ADR-0013) |
 | [`www/eg-intercom-mic-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-mic-card.js) | Lovelace-карта микрофона домофона: `getUserMedia` + AudioWorklet → Int16 PCM по авторизованному HA-WebSocket (ADR-0013) |
+| [`www/eg-intercom-call-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js) | Карта экрана вызова (Slice 3b) — собранный бандл из `frontend/` (Lit+TS). Не редактировать вручную |
+| [`frontend/`](../../frontend/) | Исходники карточки вызова (Lit+TS, esbuild→`www/`, vitest). `src/eg-intercom-call-card.ts` + `components/` (call-video, open-control, mic-controller) + `state-machine.ts`; `node_modules` в .gitignore |
 | [`services.yaml`](../../custom_components/elektronny_gorod/services.yaml) | сервисы `answer` / `hangup` |
 
 ### Diagnostics / безопасность
