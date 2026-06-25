@@ -130,6 +130,9 @@ export class EgOpenControl extends LitElement {
     if (this.status === "opening") return "Открываю…";
     if (this.status === "opened") return "Открыто";
     if (this.status === "error") return "Ошибка";
+    // Подпись по режиму — чтобы было очевидно, что делать (а не просто «нажать»).
+    if (this.mode === "slide") return "Сдвиньте, чтобы открыть";
+    if (this.mode === "hold") return "Удерживайте, чтобы открыть";
     return this.label;
   }
 

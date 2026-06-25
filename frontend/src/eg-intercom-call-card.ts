@@ -241,11 +241,18 @@ export class EgIntercomCallCard extends LitElement {
           </span>
         </header>
 
-        ${cam
-          ? html`<eg-call-video .hass=${this.hass} .entity=${cam} .muted=${this._muted}></eg-call-video>`
-          : view.isError
-            ? html`<div class="frame err"><ha-icon icon="mdi:phone-alert"></ha-icon><span>Не удалось установить вызов</span></div>`
+        <div class="stage">
+          ${cam
+            ? html`<eg-call-video .hass=${this.hass} .entity=${cam} .muted=${this._muted}></eg-call-video>`
+            : view.isError
+              ? html`<div class="frame err"><ha-icon icon="mdi:phone-alert"></ha-icon><span>Не удалось установить вызов</span></div>`
+              : nothing}
+          ${view.busy
+            ? html`<div class="connecting" role="status">
+                <div class="spinner" aria-hidden="true"></div><span>Соединение…</span>
+              </div>`
             : nothing}
+        </div>
 
         ${view.showOpen ? this._renderOpen() : nothing}
         ${this._renderActions(view)}
@@ -379,6 +386,40 @@ export class EgIntercomCallCard extends LitElement {
     @keyframes pulse {
       50% {
         opacity: 0.3;
+      }
+    }
+    .stage {
+      position: relative;
+    }
+    .connecting {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      background: rgba(0, 0, 0, 0.45);
+      border-radius: 12px;
+      color: #fff;
+      font-weight: 600;
+    }
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 4px solid rgba(255, 255, 255, 0.3);
+      border-top-color: #fff;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .spinner {
+        animation: none;
       }
     }
     .frame {
