@@ -325,9 +325,9 @@ export class EgOpenControl extends LitElement {
         );
         transition: none;
       }
-      /* открытие (loading): ключ залип в конце, заливка тянется под него + пульс */
+      /* открытие (loading): доведено до конца — заливка на всю ширину + пульс */
       .track.st-opening .fill {
-        width: calc(100% - 40px * var(--eg-scale, 1));
+        width: 100%;
         background: var(--eg-primary);
         opacity: 0.15;
         animation: eg-pulse 1.1s ease-in-out infinite;
