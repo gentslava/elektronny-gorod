@@ -4,7 +4,7 @@
 **Компонент:** `<eg-intercom-call-card>` (Lit + TypeScript)
 **Макеты:** `pencil/design.pen` — 6 секций (мобайл тёмная/светлая, состояния/ошибки, настенная панель, десктоп-модалка, компакт+idle, стадии «Открыть» + аудио)
 **Референс:** `ru.inetra.intercom` (скриншоты экрана вызова с устройства) + `mockups/*.png`
-**Статус:** iteration 1 — production-ready UX-контракт для фронта.
+**Статус:** ✅ реализовано (перевёрстка `frontend/`, pixel-perfect по `design.pen`; см. [plan-call-card-reverstka](plan-call-card-reverstka.md) + CHANGELOG `[Unreleased] › Changed`). Изначально — iteration 1 UX-контракт.
 
 ---
 

@@ -196,7 +196,7 @@ elektronny-gorod/
 | [`uplink_ws.py`](../../custom_components/elektronny_gorod/uplink_ws.py) | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): микрофон из Lovelace-карты → `DoorbellCallController.feed_uplink`; static-регистрация JS-карты (`async_register_uplink_ws_command` / `async_register_uplink_card`, зовутся из `__init__.py`) (ADR-0013) |
 | [`www/eg-intercom-mic-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-mic-card.js) | Lovelace-карта микрофона домофона: `getUserMedia` + AudioWorklet → Int16 PCM по авторизованному HA-WebSocket (ADR-0013) |
 | [`www/eg-intercom-call-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js) | Карта экрана вызова (Slice 3b) — собранный бандл из `frontend/` (Lit+TS). Не редактировать вручную |
-| [`frontend/`](../../frontend/) | Исходники карточки вызова (Lit+TS, esbuild→`www/`, vitest). `src/eg-intercom-call-card.ts` + `components/` (call-video, open-control, mic-controller) + `state-machine.ts`; `node_modules` в .gitignore |
+| [`frontend/`](../../frontend/) | Исходники карточки вызова (Lit+TS, esbuild→`www/`, vitest). `src/eg-intercom-call-card.ts` (оркестратор) + `theme/tokens.ts` (токен-слой `--eg-*`→HA) + `components/` (eg-icon — lucide-иконки, call-stage — видео+оверлеи, call-video, open-control — слайдер, mic-controller) + `state-machine.ts`; перевёрстка по `design.pen` (см. [plan-call-card-reverstka](../features/intercom-two-way-audio/plan-call-card-reverstka.md)); `node_modules` в .gitignore |
 | [`services.yaml`](../../custom_components/elektronny_gorod/services.yaml) | сервисы `answer` / `hangup` |
 
 ### Diagnostics / безопасность
