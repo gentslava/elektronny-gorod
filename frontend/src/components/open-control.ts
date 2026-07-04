@@ -35,7 +35,8 @@ export function holdProgress(elapsedMs: number, durationMs: number): number {
 export const SLIDE_COMPLETE = 0.92;
 /** Длительность удержания для hold. */
 export const HOLD_MS = 800;
-/** Диаметр ключа-thumb (px) — совпадает с CSS --knob. */
+/** Диаметр ключа-thumb (px) в масштабе 1 — базовый CSS-размер; при --eg-scale
+ *  реальная ширина читается в рантайме (см. `_knobW`), чтобы жест не «уплывал». */
 const KNOB = 68;
 
 /**
@@ -56,6 +57,7 @@ export class EgOpenControl extends LitElement {
   private _raf = 0;
   private _holdStart = 0;
   private _trackRect: DOMRect | null = null;
+  private _knobW = KNOB; // фактическая ширина ключа (учитывает --eg-scale)
 
   public override disconnectedCallback(): void {
     super.disconnectedCallback();
@@ -102,13 +104,20 @@ export class EgOpenControl extends LitElement {
     if (this.disabled) return;
     const track = (e.currentTarget as HTMLElement).closest(".track") as HTMLElement | null;
     this._trackRect = track?.getBoundingClientRect() ?? null;
+    const knob = track?.querySelector(".knob") as HTMLElement | null;
+    this._knobW = knob?.getBoundingClientRect().width || KNOB;
     (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
     this._arming = true;
   };
 
   private _onSlideMove = (e: PointerEvent): void => {
     if (!this._arming || !this._trackRect) return;
-    this._progress = slideProgress(e.clientX, this._trackRect.left, this._trackRect.width, KNOB);
+    this._progress = slideProgress(
+      e.clientX,
+      this._trackRect.left,
+      this._trackRect.width,
+      this._knobW,
+    );
   };
 
   private _onSlideUp = (): void => {
@@ -251,7 +260,7 @@ export class EgOpenControl extends LitElement {
       .wrap {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: calc(8px * var(--eg-scale, 1));
         align-items: center;
         width: 100%;
       }
@@ -264,12 +273,13 @@ export class EgOpenControl extends LitElement {
         opacity: 0.15;
         transition: width 0.2s ease;
       }
-      /* ---- slide: трек 300×80 (макет: фиксированный, центрирован — не на всю ширину) ---- */
+      /* ---- slide: трек 300×80 в масштабе 1 (макет: центрирован, не на всю
+         ширину); при --eg-scale трек/ключ растут пропорционально, ширина не
+         превышает контейнер (min(...,100%)) — на панели слайдер крупный ---- */
       .track {
         position: relative;
-        width: 300px;
-        max-width: 100%;
-        height: 80px;
+        width: min(calc(300px * var(--eg-scale, 1)), 100%);
+        height: calc(80px * var(--eg-scale, 1));
         border-radius: var(--eg-r-full);
         background: var(--eg-elevated);
         overflow: hidden;
@@ -285,42 +295,44 @@ export class EgOpenControl extends LitElement {
       }
       /* при drag правый край заливки строго = центр ключа (не обгоняет) */
       .track.dragging .fill {
-        width: calc(40px + var(--eg-prog, 0) * (100% - 80px));
+        width: calc(
+          40px * var(--eg-scale, 1) + var(--eg-prog, 0) * (100% - 80px * var(--eg-scale, 1))
+        );
         transition: none;
       }
       /* закрытый замок под ключом (проявляется при отъезде): иконка 20, центр под ключом */
       .lock-under {
         position: absolute;
-        left: 30px;
+        left: calc(30px * var(--eg-scale, 1));
         top: 50%;
         transform: translateY(-50%);
-        --eg-icon-size: 20px;
+        --eg-icon-size: calc(20px * var(--eg-scale, 1));
         color: var(--eg-text-3);
         z-index: 0;
       }
       /* торец: открытый замок (макет: иконка 20, центр 28px от правого края) */
       .end {
         position: absolute;
-        right: 18px;
+        right: calc(18px * var(--eg-scale, 1));
         top: 50%;
         transform: translateY(-50%);
-        --eg-icon-size: 20px;
+        --eg-icon-size: calc(20px * var(--eg-scale, 1));
         color: var(--eg-text-3);
         z-index: 0;
       }
       .track .label {
         position: relative;
         z-index: 1;
-        font-size: 17px;
+        font-size: calc(17px * var(--eg-scale, 1));
         font-weight: 600;
         color: var(--eg-text);
       }
       .knob {
         position: absolute;
-        top: 6px;
-        left: calc(6px + var(--eg-prog, 0) * (100% - 80px));
-        width: 68px;
-        height: 68px;
+        top: calc(6px * var(--eg-scale, 1));
+        left: calc(6px * var(--eg-scale, 1) + var(--eg-prog, 0) * (100% - 80px * var(--eg-scale, 1)));
+        width: calc(68px * var(--eg-scale, 1));
+        height: calc(68px * var(--eg-scale, 1));
         border-radius: 50%;
         background: var(--eg-primary);
         color: var(--eg-on-fill);
@@ -330,7 +342,7 @@ export class EgOpenControl extends LitElement {
         cursor: grab;
         touch-action: none;
         z-index: 2;
-        --eg-icon-size: 28px;
+        --eg-icon-size: calc(28px * var(--eg-scale, 1));
         transition: left 0.18s ease;
       }
       .track.dragging .knob {
@@ -360,7 +372,7 @@ export class EgOpenControl extends LitElement {
       .pill {
         position: relative;
         width: 100%;
-        min-height: 64px;
+        min-height: calc(64px * var(--eg-scale, 1));
         border-radius: var(--eg-r-full);
         border: 2px solid var(--eg-primary);
         background: transparent;
@@ -373,7 +385,7 @@ export class EgOpenControl extends LitElement {
         touch-action: none;
         user-select: none;
         font: inherit;
-        padding: 0 16px;
+        padding: 0 calc(16px * var(--eg-scale, 1));
       }
       .pill.arming .fill {
         transition: none;
@@ -386,10 +398,10 @@ export class EgOpenControl extends LitElement {
         z-index: 1;
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        font-size: 17px;
+        gap: calc(8px * var(--eg-scale, 1));
+        font-size: calc(17px * var(--eg-scale, 1));
         font-weight: 600;
-        --eg-icon-size: 24px;
+        --eg-icon-size: calc(24px * var(--eg-scale, 1));
       }
       .pill[disabled] {
         opacity: 0.5;
@@ -408,7 +420,7 @@ export class EgOpenControl extends LitElement {
       }
       /* ---- подпись под контролом ---- */
       .caption {
-        font-size: 12px;
+        font-size: calc(12px * var(--eg-scale, 1));
         color: var(--eg-text-3);
         text-align: center;
       }

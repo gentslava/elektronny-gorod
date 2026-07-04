@@ -112,9 +112,9 @@ export class EgCallStage extends LitElement {
       /* верхний ряд оверлеев: LIVE (слева) + чип звука (справа) */
       .top {
         position: absolute;
-        top: 12px;
-        left: 12px;
-        right: 12px;
+        top: calc(12px * var(--eg-scale, 1));
+        left: calc(12px * var(--eg-scale, 1));
+        right: calc(12px * var(--eg-scale, 1));
         display: flex;
         align-items: flex-start;
         justify-content: space-between;
@@ -123,39 +123,39 @@ export class EgCallStage extends LitElement {
       .live {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 3px 9px;
+        gap: calc(6px * var(--eg-scale, 1));
+        padding: calc(3px * var(--eg-scale, 1)) calc(9px * var(--eg-scale, 1));
         border-radius: var(--eg-r-full);
         background: rgba(211, 47, 47, 0.88);
         color: #fff;
-        font-size: 10px;
+        font-size: calc(10px * var(--eg-scale, 1));
         font-weight: 600;
         letter-spacing: 0.04em;
       }
       .live-dot {
-        width: 6px;
-        height: 6px;
+        width: calc(6px * var(--eg-scale, 1));
+        height: calc(6px * var(--eg-scale, 1));
         border-radius: 50%;
         background: #fff;
       }
       .chip {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 5px 10px;
+        gap: calc(6px * var(--eg-scale, 1));
+        padding: calc(5px * var(--eg-scale, 1)) calc(10px * var(--eg-scale, 1));
         border-radius: var(--eg-r-full);
         background: rgba(0, 0, 0, 0.63);
         color: #fff;
-        font-size: 11px;
+        font-size: calc(11px * var(--eg-scale, 1));
       }
       .chip eg-icon {
-        --eg-icon-size: 14px;
+        --eg-icon-size: calc(14px * var(--eg-scale, 1));
       }
       .ts {
         position: absolute;
-        left: 12px;
-        bottom: 12px;
-        font-size: 10px;
+        left: calc(12px * var(--eg-scale, 1));
+        bottom: calc(12px * var(--eg-scale, 1));
+        font-size: calc(10px * var(--eg-scale, 1));
         color: rgba(255, 255, 255, 0.69);
         font-variant-numeric: tabular-nums;
         pointer-events: none;
@@ -173,23 +173,23 @@ export class EgCallStage extends LitElement {
       .cta {
         position: absolute;
         left: 50%;
-        bottom: 16px;
+        bottom: calc(16px * var(--eg-scale, 1));
         transform: translateX(-50%);
         display: inline-flex;
         align-items: center;
-        gap: 8px;
-        padding: 10px 18px;
+        gap: calc(8px * var(--eg-scale, 1));
+        padding: calc(10px * var(--eg-scale, 1)) calc(18px * var(--eg-scale, 1));
         border-radius: var(--eg-r-full);
         background: var(--eg-scrim);
         color: #fff;
-        font-size: 13px;
+        font-size: calc(13px * var(--eg-scale, 1));
         font-weight: 500;
         white-space: nowrap;
         z-index: 3;
         pointer-events: none;
       }
       .cta eg-icon {
-        --eg-icon-size: 18px;
+        --eg-icon-size: calc(18px * var(--eg-scale, 1));
       }
       /* плейсхолдеры (камера недоступна / связь прервана) */
       .fallback {
@@ -200,24 +200,24 @@ export class EgCallStage extends LitElement {
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        gap: 6px;
+        gap: calc(6px * var(--eg-scale, 1));
         text-align: center;
-        padding: 12px;
+        padding: calc(12px * var(--eg-scale, 1));
         box-sizing: border-box;
       }
       .fallback eg-icon {
-        --eg-icon-size: 36px;
+        --eg-icon-size: calc(36px * var(--eg-scale, 1));
         color: var(--eg-text-3);
       }
       .fallback.err eg-icon {
         color: var(--eg-error);
       }
       .fb-title {
-        font-size: 15px;
+        font-size: calc(15px * var(--eg-scale, 1));
         color: var(--eg-text);
       }
       .fb-sub {
-        font-size: 12px;
+        font-size: calc(12px * var(--eg-scale, 1));
         color: var(--eg-text-2);
       }
     `,

@@ -711,6 +711,31 @@ export class EgIntercomCallCard extends LitElement {
         padding: max(32px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
         box-sizing: border-box;
       }
+      /* Адаптивный масштаб контента: телефон = 1, на большом экране крупнее
+         (настенная панель/десктоп — «читаемо с ~1м», UX §10). Наследуется в
+         дочерние компоненты (open-control) через --eg-scale. */
+      .content,
+      ha-card.idle {
+        --eg-scale: 1;
+      }
+      @container (min-width: 700px) {
+        .content,
+        ha-card.idle {
+          --eg-scale: 1.35;
+        }
+      }
+      @container (min-width: 1100px) {
+        .content,
+        ha-card.idle {
+          --eg-scale: 1.7;
+        }
+      }
+      @container (min-width: 1600px) {
+        .content,
+        ha-card.idle {
+          --eg-scale: 2;
+        }
+      }
       /* шапка/статус/видео — сверху, фиксированной высоты */
       header,
       .statusrow,
@@ -735,7 +760,10 @@ export class EgIntercomCallCard extends LitElement {
       @container (min-width: 760px) {
         .content {
           display: grid;
-          grid-template-columns: 1fr 340px;
+          /* Колонка контролов растёт вместе с --eg-scale, но мягко (+200px на
+             единицу масштаба), чтобы вместить укрупнённые кнопки/слайдер и при
+             этом видео оставалось «героем» на реальных панелях (1280–1920). */
+          grid-template-columns: 1fr calc(340px + (var(--eg-scale, 1) - 1) * 200px);
           grid-template-areas:
             "header header"
             "status status"
@@ -758,31 +786,13 @@ export class EgIntercomCallCard extends LitElement {
           grid-area: stage;
           align-self: start;
         }
-        /* колонка контролов = высоте видео: слайдер по центру, кнопки по нижней кромке */
+        /* Колонка контролов растягивается на высоту строки = max(видео, контролы).
+           Flex-поток (НЕ absolute): если видео выше — слайдер центрируется по его
+           середине, кнопки по нижней кромке; если укрупнённые контролы выше видео —
+           строка растёт под них, видео прижимается вверх, перекрытия нет. */
         .controls {
           grid-area: controls;
-          position: relative;
           align-self: stretch;
-          display: block;
-        }
-        .controls .mic-banner {
-          position: absolute;
-          top: 0;
-          left: 0;
-          right: 0;
-        }
-        .controls .open-area {
-          position: absolute;
-          top: 50%;
-          left: 0;
-          right: 0;
-          transform: translateY(-50%);
-        }
-        .controls .actions {
-          position: absolute;
-          bottom: 0;
-          left: 0;
-          right: 0;
         }
       }
       /* ---- шапка: имя + адрес + свернуть ---- */
@@ -799,7 +809,7 @@ export class EgIntercomCallCard extends LitElement {
         min-width: 0;
       }
       .name {
-        font-size: 22px;
+        font-size: calc(22px * var(--eg-scale, 1));
         font-weight: 700;
         line-height: 1.15;
         color: var(--eg-text);
@@ -808,7 +818,7 @@ export class EgIntercomCallCard extends LitElement {
         white-space: nowrap;
       }
       .addr {
-        font-size: 13px;
+        font-size: calc(13px * var(--eg-scale, 1));
         color: var(--eg-text-2);
         overflow: hidden;
         text-overflow: ellipsis;
@@ -816,8 +826,8 @@ export class EgIntercomCallCard extends LitElement {
       }
       .close {
         flex: none;
-        width: 44px;
-        height: 44px;
+        width: calc(44px * var(--eg-scale, 1));
+        height: calc(44px * var(--eg-scale, 1));
         border: none;
         border-radius: var(--eg-r-full);
         background: var(--eg-elevated);
@@ -828,7 +838,7 @@ export class EgIntercomCallCard extends LitElement {
         cursor: pointer;
       }
       .close eg-icon {
-        --eg-icon-size: 20px;
+        --eg-icon-size: calc(20px * var(--eg-scale, 1));
       }
       /* ---- статус-строка: бейдж + таймер/countdown + окно ответа ---- */
       .statusrow {
@@ -845,33 +855,33 @@ export class EgIntercomCallCard extends LitElement {
       .badge {
         display: inline-flex;
         align-items: center;
-        gap: 7px;
-        padding: 5px 12px;
+        gap: calc(7px * var(--eg-scale, 1));
+        padding: calc(5px * var(--eg-scale, 1)) calc(12px * var(--eg-scale, 1));
         border-radius: var(--eg-r-full);
-        font-size: 13px;
+        font-size: calc(13px * var(--eg-scale, 1));
         font-weight: 600;
         color: var(--badge, var(--eg-text-2));
         background: color-mix(in srgb, var(--badge, var(--eg-text-2)) 18%, transparent);
       }
       .badge .dot {
-        width: 8px;
-        height: 8px;
+        width: calc(8px * var(--eg-scale, 1));
+        height: calc(8px * var(--eg-scale, 1));
         border-radius: 50%;
         background: var(--badge, var(--eg-text-2));
       }
       .countdown {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        font-size: 15px;
+        gap: calc(6px * var(--eg-scale, 1));
+        font-size: calc(15px * var(--eg-scale, 1));
         color: var(--eg-text-2);
       }
       .countdown eg-icon {
-        --eg-icon-size: 15px;
+        --eg-icon-size: calc(15px * var(--eg-scale, 1));
       }
       .timer {
         font-family: var(--eg-mono);
-        font-size: 17px;
+        font-size: calc(17px * var(--eg-scale, 1));
         font-weight: 600;
         color: var(--eg-text);
         font-variant-numeric: tabular-nums;
@@ -897,13 +907,13 @@ export class EgIntercomCallCard extends LitElement {
       .mic-banner {
         display: flex;
         align-items: center;
-        gap: 12px;
-        padding: 12px;
+        gap: calc(12px * var(--eg-scale, 1));
+        padding: calc(12px * var(--eg-scale, 1));
         border-radius: var(--eg-r-md);
         background: var(--eg-warning-bg);
       }
       .mic-banner > eg-icon {
-        --eg-icon-size: 20px;
+        --eg-icon-size: calc(20px * var(--eg-scale, 1));
         color: var(--eg-warning);
       }
       .mb-text {
@@ -914,12 +924,12 @@ export class EgIntercomCallCard extends LitElement {
         min-width: 0;
       }
       .mb-title {
-        font-size: 13px;
+        font-size: calc(13px * var(--eg-scale, 1));
         font-weight: 600;
         color: var(--eg-warning);
       }
       .mb-sub {
-        font-size: 12px;
+        font-size: calc(12px * var(--eg-scale, 1));
         color: var(--eg-text-2);
       }
       .mb-btn {
@@ -928,10 +938,10 @@ export class EgIntercomCallCard extends LitElement {
         background: transparent;
         color: var(--eg-warning);
         font: inherit;
-        font-size: 13px;
+        font-size: calc(13px * var(--eg-scale, 1));
         font-weight: 600;
         border-radius: var(--eg-r-full);
-        padding: 6px 14px;
+        padding: calc(6px * var(--eg-scale, 1)) calc(14px * var(--eg-scale, 1));
         cursor: pointer;
       }
       /* ---- видео-стейдж ---- */
@@ -964,7 +974,7 @@ export class EgIntercomCallCard extends LitElement {
       /* ---- ряд действий: круги top-align (как в макете), gap 28 ---- */
       .actions {
         display: flex;
-        gap: 28px;
+        gap: calc(28px * var(--eg-scale, 1));
         justify-content: center;
         align-items: flex-start;
         flex-wrap: wrap;
@@ -973,7 +983,7 @@ export class EgIntercomCallCard extends LitElement {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 8px;
+        gap: calc(8px * var(--eg-scale, 1));
         border: none;
         background: none;
         cursor: pointer;
@@ -982,8 +992,8 @@ export class EgIntercomCallCard extends LitElement {
         padding: 0;
       }
       .circle .ic {
-        width: 68px;
-        height: 68px;
+        width: calc(68px * var(--eg-scale, 1));
+        height: calc(68px * var(--eg-scale, 1));
         border-radius: 50%;
         display: flex;
         align-items: center;
@@ -992,10 +1002,10 @@ export class EgIntercomCallCard extends LitElement {
         color: var(--eg-text);
       }
       .circle .ic eg-icon {
-        --eg-icon-size: 28px;
+        --eg-icon-size: calc(28px * var(--eg-scale, 1));
       }
       .circle small {
-        font-size: 12px;
+        font-size: calc(12px * var(--eg-scale, 1));
         font-weight: 500;
         color: var(--eg-text-2);
       }
@@ -1056,12 +1066,12 @@ export class EgIntercomCallCard extends LitElement {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 14px;
+        gap: calc(18px * var(--eg-scale, 1));
         text-align: center;
       }
       .idle-ico {
-        width: 52px;
-        height: 52px;
+        width: calc(76px * var(--eg-scale, 1));
+        height: calc(76px * var(--eg-scale, 1));
         border-radius: var(--eg-r-full);
         background: var(--eg-elevated);
         display: flex;
@@ -1069,39 +1079,39 @@ export class EgIntercomCallCard extends LitElement {
         justify-content: center;
       }
       .idle-ico eg-icon {
-        --eg-icon-size: 24px;
+        --eg-icon-size: calc(36px * var(--eg-scale, 1));
         color: var(--eg-text-3);
       }
       .idle-title {
-        font-size: 15px;
-        font-weight: 600;
+        font-size: calc(22px * var(--eg-scale, 1));
+        font-weight: 700;
         color: var(--eg-text);
       }
       .idle-sub {
-        font-size: 12px;
+        font-size: calc(15px * var(--eg-scale, 1));
         color: var(--eg-text-2);
-        max-width: 34ch;
+        max-width: 40ch;
       }
       .idle-chips {
         display: flex;
         flex-wrap: wrap;
-        gap: 8px;
+        gap: calc(10px * var(--eg-scale, 1));
         justify-content: center;
-        padding-top: 4px;
+        padding-top: calc(6px * var(--eg-scale, 1));
       }
       .chip {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        padding: 6px 12px;
+        gap: calc(7px * var(--eg-scale, 1));
+        padding: calc(9px * var(--eg-scale, 1)) calc(16px * var(--eg-scale, 1));
         border-radius: var(--eg-r-full);
         background: var(--eg-elevated);
         color: var(--eg-text-2);
-        font-size: 12px;
+        font-size: calc(14px * var(--eg-scale, 1));
         font-weight: 500;
       }
       .chip eg-icon {
-        --eg-icon-size: 14px;
+        --eg-icon-size: calc(16px * var(--eg-scale, 1));
         color: var(--eg-text-2);
       }
       /* ---- компактная строка (layout: compact) — узел aSs3Z ---- */
