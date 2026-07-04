@@ -46,6 +46,8 @@ interface CardConfig {
   mic_autostart?: boolean;
   timer?: "auto" | "stopwatch" | "off";
   idle_text?: string;
+  /** "compact" — одна строка (мини-превью + имя/статус + быстрые кнопки). */
+  layout?: "compact" | "full";
 }
 
 type OpenStatus = "idle" | "opening" | "opened" | "error";
@@ -413,6 +415,9 @@ export class EgIntercomCallCard extends LitElement {
       camera: this._config.camera,
       doorbell_camera: active.doorbell_camera,
     });
+
+    if (this._config.layout === "compact") return this._renderCompact(active, phase, view, cam);
+
     const stageState = this._stageState(view, cam, phase);
 
     return html`
@@ -496,20 +501,90 @@ export class EgIntercomCallCard extends LitElement {
     const names = this._doorbellNames();
     return html`
       <ha-card class="idle">
-        <div class="idle-stage" role="status">
-          <eg-icon name="door-open" class="idle-ic"></eg-icon>
+        <div class="idle-box" role="status">
+          <div class="idle-ico"><eg-icon name="door-closed"></eg-icon></div>
           <div class="idle-title">${this._config.idle_text ?? "Нет активного вызова"}</div>
-          <div class="idle-sub">Экран покажет видео, звук и кнопки при звонке домофона</div>
+          <div class="idle-sub">Видео появится при звонке в домофон</div>
           ${names.length
             ? html`<div class="idle-chips">
                 ${names.map(
-                  (n) => html`<span class="chip"><eg-icon name="circle-check"></eg-icon>${n}</span>`,
+                  (n) => html`<span class="chip"><eg-icon name="door-open"></eg-icon>${n}</span>`,
                 )}
               </div>`
             : nothing}
         </div>
       </ha-card>
     `;
+  }
+
+  /** Компактная строка (layout: compact) — узел aSs3Z: мини-превью + имя/статус + быстрые кнопки. */
+  private _renderCompact(
+    entity: DoorbellCfg,
+    phase: CallPhase,
+    view: CallView,
+    cam: string | undefined,
+  ): TemplateResult {
+    const stageState = this._stageState(view, cam, phase);
+    return html`
+      <ha-card class="compact phase-${phase}">
+        <div class="cx-thumb">
+          ${cam
+            ? html`<eg-call-video .hass=${this.hass} .entity=${cam} .muted=${true}></eg-call-video>`
+            : nothing}
+          ${stageState === "live" ? html`<span class="cx-live">LIVE</span>` : nothing}
+        </div>
+        <div class="cx-info">
+          <span class="cx-name" title=${this._intercomName}>${this._intercomName}</span>
+          <span class="cx-status" style="--badge:${statusColor(phase)}">
+            <span class="cx-dot" aria-hidden="true"></span>
+            <span>${this._compactStatus(phase)}</span>
+          </span>
+        </div>
+        <div class="cx-btns">
+          ${view.showOpen && entity.lock
+            ? this._quickBtn("key-round", "Открыть", this._open, "q-open")
+            : nothing}
+          ${view.actions.map((a) => this._quickAction(a))}
+        </div>
+      </ha-card>
+    `;
+  }
+
+  private _quickAction(kind: ActionKind): TemplateResult | typeof nothing {
+    switch (kind) {
+      case "accept":
+        return this._quickBtn("phone", "Принять", this._answer, "q-accept");
+      case "reject":
+      case "cancel":
+      case "hangup":
+        return this._quickBtn("phone-off", "Завершить", this._hangup, "q-reject");
+      case "close":
+        return this._quickBtn("x", "Закрыть", this._clearEnded, "");
+      default:
+        return nothing; // mic/sound/connecting/retry — не в компакте
+    }
+  }
+
+  private _quickBtn(
+    icon: string,
+    label: string,
+    onClick: () => void,
+    cls: string,
+  ): TemplateResult {
+    return html`
+      <button class="q-btn ${cls}" @click=${onClick} aria-label=${label}>
+        <eg-icon name=${icon}></eg-icon>
+      </button>
+    `;
+  }
+
+  private _compactStatus(phase: CallPhase): string {
+    if (phase === "ringing") return `Вызов · ${this._answerWindow().text}`;
+    if (phase === "active") return `Разговор · ${this._timerText()}`;
+    if (phase === "connecting") return "Соединение…";
+    if (phase === "ended") return this._endedDuration ? `Завершён · ${this._endedDuration}` : "Завершён";
+    if (phase === "error") return "Ошибка вызова";
+    return "";
   }
 
   /** Баннер «нет доступа к микрофону» (между видео и слайдером) — узел iUNo1. */
@@ -886,42 +961,43 @@ export class EgIntercomCallCard extends LitElement {
         color: var(--eg-text-2);
         animation: spin 0.9s linear infinite;
       }
-      /* ---- idle-заглушка (детально — в Slice 5) ---- */
+      /* ---- idle-заглушка (узел aSs3Z) ---- */
       ha-card.idle {
         height: 100%;
         box-sizing: border-box;
         display: flex;
-        align-items: stretch;
+        align-items: center;
         justify-content: center;
-        padding: 20px 16px;
+        padding: 18px;
       }
-      .idle-stage {
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        border-radius: var(--eg-r-md);
-        background: var(--eg-elevated);
+      .idle-box {
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
-        gap: 6px;
+        gap: 14px;
         text-align: center;
-        padding: 14px;
-        box-sizing: border-box;
-        color: var(--eg-text-2);
       }
-      .idle-stage .idle-ic {
-        --eg-icon-size: 52px;
-        color: var(--eg-primary);
-        opacity: 0.75;
+      .idle-ico {
+        width: 52px;
+        height: 52px;
+        border-radius: var(--eg-r-full);
+        background: var(--eg-elevated);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .idle-ico eg-icon {
+        --eg-icon-size: 24px;
+        color: var(--eg-text-3);
       }
       .idle-title {
-        font-size: 1.3rem;
-        font-weight: 700;
+        font-size: 15px;
+        font-weight: 600;
         color: var(--eg-text);
       }
       .idle-sub {
-        font-size: 0.95rem;
+        font-size: 12px;
+        color: var(--eg-text-2);
         max-width: 34ch;
       }
       .idle-chips {
@@ -929,23 +1005,118 @@ export class EgIntercomCallCard extends LitElement {
         flex-wrap: wrap;
         gap: 8px;
         justify-content: center;
-        margin-top: 8px;
+        padding-top: 4px;
       }
       .chip {
         display: inline-flex;
         align-items: center;
-        gap: 5px;
-        padding: 5px 12px 5px 8px;
+        gap: 6px;
+        padding: 6px 12px;
         border-radius: var(--eg-r-full);
-        background: var(--eg-card);
-        color: var(--eg-text);
-        font-size: 0.8rem;
-        font-weight: 600;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+        background: var(--eg-elevated);
+        color: var(--eg-text-2);
+        font-size: 12px;
+        font-weight: 500;
       }
       .chip eg-icon {
-        --eg-icon-size: 16px;
-        color: var(--eg-success);
+        --eg-icon-size: 14px;
+        color: var(--eg-text-2);
+      }
+      /* ---- компактная строка (layout: compact) — узел aSs3Z ---- */
+      ha-card.compact {
+        height: auto;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        box-sizing: border-box;
+      }
+      .cx-thumb {
+        position: relative;
+        width: 80px;
+        height: 60px;
+        flex: none;
+        border-radius: 10px;
+        overflow: hidden;
+        background: #20262b;
+      }
+      .cx-thumb eg-call-video {
+        position: absolute;
+        inset: 0;
+      }
+      .cx-live {
+        position: absolute;
+        top: 6px;
+        left: 6px;
+        padding: 2px 6px;
+        border-radius: var(--eg-r-full);
+        background: rgba(211, 47, 47, 0.88);
+        color: #fff;
+        font-size: 8px;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+      }
+      .cx-info {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .cx-name {
+        font-size: 15px;
+        font-weight: 700;
+        color: var(--eg-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .cx-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--badge, var(--eg-text-2));
+      }
+      .cx-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--badge, var(--eg-text-2));
+        flex: none;
+      }
+      .cx-btns {
+        display: flex;
+        gap: 8px;
+        flex: none;
+      }
+      .q-btn {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        border: none;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--eg-elevated);
+        color: var(--eg-text);
+      }
+      .q-btn eg-icon {
+        --eg-icon-size: 20px;
+      }
+      .q-btn.q-open {
+        background: var(--eg-primary);
+        color: var(--eg-on-fill);
+      }
+      .q-btn.q-accept {
+        background: var(--eg-success);
+        color: var(--eg-on-fill);
+      }
+      .q-btn.q-reject {
+        background: var(--eg-error);
+        color: var(--eg-on-fill);
       }
     `,
   ];
