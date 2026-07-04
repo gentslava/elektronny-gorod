@@ -1,7 +1,8 @@
 // eg-intercom-call-card — экран входящего вызова и разговора с домофоном «Электронный
 // город» (Lit+TS). Одна карточка на ВСЕ домофоны: показывает активный вызов (любой из
 // списка) или единую заглушку «Нет вызова» в простое. Облик нативный HA (theme-токены,
-// mdi, M3, a11y). Состояние — по sensor.*_call_state (Slice 3a). См. call-card-ux-spec.md.
+// mdi, M3, a11y). Состояние — по sensor.*_call_state. Вёрстка — по production-макетам
+// (pencil/design.pen), см. call-card-ux-production.md + plan-call-card-reverstka.md.
 import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
@@ -10,6 +11,7 @@ import { pickCameraEntity } from "./components/call-video.js";
 import "./components/open-control.js";
 import { MicController, type MicPermission, shouldAutoStartMic } from "./components/mic-controller.js";
 import { isCoarsePointer, type OpenAction, resolveOpenAction } from "./util/open-action.js";
+import { egTokens, statusColor } from "./theme/tokens.js";
 
 interface HassLike {
   states: Record<string, { state: string; attributes: Record<string, unknown> }>;
@@ -22,6 +24,7 @@ interface DoorbellCfg {
   doorbell_camera?: string;
   lock?: string;
   name?: string;
+  address?: string;
 }
 
 interface CardConfig {
@@ -34,6 +37,7 @@ interface CardConfig {
   doorbell_camera?: string;
   lock?: string;
   name?: string;
+  address?: string;
   open_action?: string;
   mic?: boolean;
   mic_autostart?: boolean;
@@ -56,6 +60,8 @@ const LIVE_PHASES: ReadonlySet<CallPhase> = new Set(["ringing", "connecting", "a
 
 const DISMISS_MS = 6000;
 const OPEN_RESET_MS = 3000;
+/** Окно ответа на входящий (домофон отменяет вызов ~через 30с). Domain-timing — локально. */
+const ANSWER_WINDOW_MS = 30000;
 
 @customElement("eg-intercom-call-card")
 export class EgIntercomCallCard extends LitElement {
@@ -67,6 +73,8 @@ export class EgIntercomCallCard extends LitElement {
   @state() private _micPerm: MicPermission = "unknown";
   @state() private _openStatus: OpenStatus = "idle";
   @state() private _now = Date.now();
+  /** Момент начала звонка (для окна ответа на ringing). */
+  @state() private _ringingSince = 0;
   /** call_state-сущности, чей error уже «погашен» по таймеру (показываем idle). */
   @state() private _errDismissed = new Set<string>();
 
@@ -87,7 +95,7 @@ export class EgIntercomCallCard extends LitElement {
   public setConfig(config: CardConfig): void {
     const list = config?.doorbells
       ?? (config?.call_state
-        ? [{ call_state: config.call_state, doorbell_camera: config.doorbell_camera, lock: config.lock, name: config.name }]
+        ? [{ call_state: config.call_state, doorbell_camera: config.doorbell_camera, lock: config.lock, name: config.name, address: config.address }]
         : []);
     if (!list.length || list.some((d) => !d.call_state)) {
       throw new Error("eg-intercom-call-card: укажите 'doorbells' (с call_state) или 'call_state'");
@@ -130,14 +138,19 @@ export class EgIntercomCallCard extends LitElement {
     return a ? this._phaseOf(a) : "idle";
   }
 
+  /** Имя домофона (короткое): config name → атрибут intercom_name → дефолт. */
   private get _intercomName(): string {
     const a = this._active;
-    // Заголовок = полный адрес домофона (как в оригинальном приложении):
-    // берём intercom_name из атрибута сенсора, схлопывая двойные пробелы.
+    if (a?.name) return a.name;
     const attrs = a ? this.hass?.states[a.call_state]?.attributes : undefined;
     const fromAttr = attrs?.["intercom_name"];
     const full = typeof fromAttr === "string" ? fromAttr.replace(/\s+/g, " ").trim() : "";
-    return full || a?.name || this._config.name || "Домофон";
+    return full || this._config.name || "Домофон";
+  }
+
+  /** Адрес (вторая строка шапки) — из конфига домофона/карты; иначе скрыт. */
+  private get _address(): string {
+    return this._active?.address ?? this._config.address ?? "";
   }
 
   private get _startedAtMs(): number | undefined {
@@ -167,6 +180,9 @@ export class EgIntercomCallCard extends LitElement {
   private _onPhase(phase: CallPhase, active: DoorbellCfg | undefined): void {
     if (phase === "active") {
       void this._enterActive();
+    } else if (phase === "ringing") {
+      this._ringingSince = Date.now();
+      this._startTick(); // тикаем для отсчёта окна ответа
     } else {
       this._exitActive();
     }
@@ -254,13 +270,32 @@ export class EgIntercomCallCard extends LitElement {
     }, OPEN_RESET_MS);
   };
 
+  /** Свернуть карточку (звонок продолжается на фоне) — «✕» в шапке. */
+  private _dismiss = (): void => {
+    this.dispatchEvent(new CustomEvent("eg-dismiss", { bubbles: true, composed: true }));
+  };
+
   private _timerText(): string {
     const start = this._startedAtMs;
     if (start === undefined) return "";
     const sec = Math.max(0, Math.floor((this._now - start) / 1000));
+    return this._mmss(sec);
+  }
+
+  private _mmss(sec: number): string {
     const mm = String(Math.floor(sec / 60)).padStart(2, "0");
     const ss = String(sec % 60).padStart(2, "0");
     return `${mm}:${ss}`;
+  }
+
+  /** Окно ответа на входящий: сколько осталось и доля [0..1] для полосы.
+   *  Формат countdown — m:ss (минуты без ведущего нуля, как в макете «0:24»). */
+  private _answerWindow(): { text: string; fraction: number } {
+    if (!this._ringingSince) return { text: "", fraction: 0 };
+    const remaining = Math.max(0, ANSWER_WINDOW_MS - (this._now - this._ringingSince));
+    const sec = Math.ceil(remaining / 1000);
+    const text = `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, "0")}`;
+    return { text, fraction: remaining / ANSWER_WINDOW_MS };
   }
 
   protected override render(): TemplateResult {
@@ -273,20 +308,12 @@ export class EgIntercomCallCard extends LitElement {
       camera: this._config.camera,
       doorbell_camera: active.doorbell_camera,
     });
-    const showTimer = view.showTimer && this._config.timer !== "off";
 
     return html`
       <ha-card class="phase-${phase}">
-        <div class="media">
-          <header>
-            <span class="name" title=${this._intercomName}>${this._intercomName}</span>
-            <span class="status ${view.isError ? "err" : ""}">
-              ${view.busy ? html`<span class="dot" aria-hidden="true"></span>` : nothing}
-              <span>${STATUS_RU[phase] ?? ""}</span>
-              ${showTimer ? html`<span class="timer">${this._timerText()}</span>` : nothing}
-            </span>
-          </header>
-
+        <div class="content">
+          ${this._renderHeader()}
+          ${this._renderStatus(view, phase)}
           <div class="stage">
             ${cam
               ? html`<eg-call-video .hass=${this.hass} .entity=${cam} .muted=${this._muted}></eg-call-video>`
@@ -297,15 +324,50 @@ export class EgIntercomCallCard extends LitElement {
               ? html`<div class="connecting" aria-hidden="true"><div class="spinner"></div></div>`
               : nothing}
           </div>
-        </div>
-
-        <div class="controls">
           <div class="open-area">
             ${view.showOpen ? this._renderOpen() : nothing}
           </div>
           ${this._renderActions(view)}
         </div>
       </ha-card>
+    `;
+  }
+
+  private _renderHeader(): TemplateResult {
+    const addr = this._address;
+    return html`
+      <header>
+        <div class="hgroup">
+          <span class="name" title=${this._intercomName}>${this._intercomName}</span>
+          ${addr ? html`<span class="addr">${addr}</span>` : nothing}
+        </div>
+        <button class="close" @click=${this._dismiss} aria-label="Свернуть">
+          <ha-icon icon="mdi:close"></ha-icon>
+        </button>
+      </header>
+    `;
+  }
+
+  private _renderStatus(view: CallView, phase: CallPhase): TemplateResult {
+    const showTimer = view.showTimer && this._config.timer !== "off";
+    const win = phase === "ringing" ? this._answerWindow() : null;
+    return html`
+      <div class="statusrow">
+        <div class="strow">
+          <span class="badge" style="--badge:${statusColor(phase)}">
+            <span class="dot" aria-hidden="true"></span>
+            <span>${STATUS_RU[phase] ?? ""}</span>
+          </span>
+          ${win
+            ? html`<span class="countdown"><ha-icon icon="mdi:timer-outline"></ha-icon>${win.text}</span>`
+            : showTimer
+              ? html`<span class="timer">${this._timerText()}</span>`
+              : nothing}
+        </div>
+        ${win
+          ? html`<div class="window"><div class="fill" style="width:${win.fraction * 100}%"></div></div>`
+          : nothing}
+      </div>
     `;
   }
 
@@ -412,306 +474,311 @@ export class EgIntercomCallCard extends LitElement {
     </button>`;
   }
 
-  static override styles = css`
-    :host {
-      display: block;
-      height: 100%;
-      /* адаптив по собственной ширине карточки (телефон / планшет-ландшафт / десктоп) */
-      container-type: inline-size;
-    }
-    ha-card {
-      height: 100%;
-      box-sizing: border-box;
-      /* щедрые отступы от краёв экрана + безопасные зоны */
-      padding: max(20px, env(safe-area-inset-top))
-        max(20px, env(safe-area-inset-right))
-        max(20px, env(safe-area-inset-bottom))
-        max(20px, env(safe-area-inset-left));
-      display: flex;
-      flex-direction: column;
-      /* телефон: равномерные промежутки вокруг видео; на низком экране схлопываются */
-      justify-content: space-evenly;
-      gap: 12px;
-    }
-    .media {
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      flex: none; /* видео фиксированной высоты (16:9 по ширине), не пляшет */
-    }
-    .stage {
-      position: relative;
-      /* видео всегда полная ширина и 16:9 (не «окошко», не ужимается по высоте) */
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      border-radius: 12px;
-      overflow: hidden;
-      background: var(--secondary-background-color);
-    }
-    .stage > eg-call-video {
-      position: absolute;
-      inset: 0;
-    }
-    /* телефон: open и actions — прямые flex-элементы карточки (равномерно вокруг видео) */
-    .controls {
-      display: contents;
-    }
-    .open-area {
-      display: flex;
-      justify-content: center;
-      flex: none;
-    }
-    .open-area eg-open-control {
-      width: 100%;
-    }
-    /* idle-заглушка «Нет активного вызова» — «призрак» экрана вызова */
-    ha-card.idle {
-      align-items: stretch;
-      justify-content: center;
-    }
-    .idle-stage {
-      width: 100%;
-      aspect-ratio: 16 / 9;
-      border-radius: 12px;
-      background: var(--secondary-background-color);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      text-align: center;
-      padding: 14px;
-      box-sizing: border-box;
-      color: var(--secondary-text-color);
-    }
-    .idle-stage ha-icon {
-      --mdc-icon-size: 52px;
-      color: var(--primary-color);
-      opacity: 0.75;
-    }
-    .idle-title {
-      font-size: 1.3rem;
-      font-weight: 700;
-      color: var(--primary-text-color);
-    }
-    .idle-sub {
-      font-size: 0.95rem;
-      max-width: 34ch;
-    }
-    .idle-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: center;
-      margin-top: 8px;
-    }
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      padding: 5px 12px 5px 8px;
-      border-radius: 999px;
-      background: var(--card-background-color, var(--ha-card-background));
-      color: var(--primary-text-color);
-      font-size: 0.8rem;
-      font-weight: 600;
-      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
-    }
-    .chip ha-icon {
-      --mdc-icon-size: 16px;
-      color: var(--success-color, #4caf50);
-      opacity: 1;
-    }
-    /* широкий контейнер — планшет-ландшафт / десктоп: 2 колонки */
-    @container (min-width: 640px) {
+  static override styles = [
+    egTokens,
+    css`
+      :host {
+        display: block;
+        height: 100%;
+        /* адаптив по собственной ширине карточки (телефон / планшет / десктоп / панель) */
+        container-type: inline-size;
+      }
       ha-card {
-        flex-direction: row;
-        align-items: center;
-        justify-content: flex-start;
-        gap: 18px;
+        height: 100%;
+        box-sizing: border-box;
+        background: var(--eg-card);
+        border-radius: var(--eg-r-card);
       }
-      ha-card.idle {
-        flex-direction: column;
-        justify-content: center;
-        align-items: center;
-      }
-      ha-card.idle .idle-stage {
-        max-width: 760px;
-        gap: 10px;
-        padding: 28px;
-      }
-      ha-card.idle .idle-stage ha-icon {
-        --mdc-icon-size: 80px;
-      }
-      ha-card.idle .idle-title {
-        font-size: 1.7rem;
-      }
-      ha-card.idle .idle-sub {
-        font-size: 1.1rem;
-      }
-      ha-card.idle .idle-chips {
-        gap: 10px;
-        margin-top: 14px;
-      }
-      ha-card.idle .chip {
-        font-size: 0.95rem;
-        padding: 7px 16px 7px 11px;
-      }
-      ha-card.idle .chip ha-icon {
-        --mdc-icon-size: 18px;
-      }
-      .media {
-        flex: 1.6 1 0;
-      }
-      .controls {
+      .content {
         display: flex;
         flex-direction: column;
-        gap: 14px;
-        flex: 1 1 0;
-        max-width: 380px;
+        gap: 20px;
+        padding: 6px 16px 28px;
+        box-sizing: border-box;
       }
-    }
-    header {
-      display: flex;
-      align-items: baseline;
-      justify-content: space-between;
-      gap: 10px;
-    }
-    .name {
-      font-size: 1.15rem;
-      font-weight: 600;
-      color: var(--primary-text-color);
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-    .status {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.9rem;
-      color: var(--secondary-text-color);
-      flex-shrink: 0;
-    }
-    .status.err {
-      color: var(--error-color);
-    }
-    .timer {
-      font-variant-numeric: tabular-nums;
-      font-weight: 600;
-      color: var(--primary-text-color);
-    }
-    .dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 50%;
-      background: var(--primary-color);
-      animation: pulse 1s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      50% {
-        opacity: 0.3;
+      /* ---- шапка: имя + адрес + свернуть ---- */
+      header {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 12px;
       }
-    }
-    .connecting {
-      position: absolute;
-      inset: 0;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 10px;
-      background: rgba(0, 0, 0, 0.45);
-      border-radius: 12px;
-      color: #fff;
-      font-weight: 600;
-    }
-    .spinner {
-      width: 44px;
-      height: 44px;
-      border-radius: 50%;
-      border: 4px solid rgba(255, 255, 255, 0.3);
-      border-top-color: #fff;
-      animation: spin 0.9s linear infinite;
-    }
-    @keyframes spin {
-      to {
-        transform: rotate(360deg);
+      .hgroup {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        min-width: 0;
       }
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .spinner,
-      .dot {
-        animation: none;
+      .name {
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1.15;
+        color: var(--eg-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
-    }
-    .frame {
-      position: absolute;
-      inset: 0;
-      background: var(--secondary-background-color);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      color: var(--secondary-text-color);
-    }
-    .frame.err {
-      color: var(--error-color);
-    }
-    .frame ha-icon {
-      --mdc-icon-size: 40px;
-    }
-    .actions {
-      display: flex;
-      gap: 16px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .circle {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 4px;
-      border: none;
-      background: none;
-      cursor: pointer;
-      color: var(--primary-text-color);
-      font: inherit;
-      min-width: 64px;
-    }
-    .circle ha-icon {
-      --mdc-icon-size: 28px;
-      width: 56px;
-      height: 56px;
-      border-radius: 50%;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--secondary-background-color);
-      color: var(--primary-text-color);
-    }
-    .circle small {
-      font-size: 0.78rem;
-      color: var(--secondary-text-color);
-    }
-    .circle[disabled] {
-      cursor: not-allowed;
-      opacity: 0.5;
-    }
-    .circle.accept ha-icon {
-      background: var(--success-color, #2e7d32);
-      color: #fff;
-    }
-    .circle.reject ha-icon {
-      background: var(--error-color, #c62828);
-      color: #fff;
-    }
-    .circle.mic-on ha-icon {
-      background: var(--primary-color);
-      color: var(--text-primary-color, #fff);
-    }
-  `;
+      .addr {
+        font-size: 13px;
+        color: var(--eg-text-2);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .close {
+        flex: none;
+        width: 44px;
+        height: 44px;
+        border: none;
+        border-radius: var(--eg-r-full);
+        background: var(--eg-elevated);
+        color: var(--eg-text-2);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      .close ha-icon {
+        --mdc-icon-size: 20px;
+      }
+      /* ---- статус-строка: бейдж + таймер/countdown + окно ответа ---- */
+      .statusrow {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .strow {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+      }
+      .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 5px 12px;
+        border-radius: var(--eg-r-full);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--badge, var(--eg-text-2));
+        background: color-mix(in srgb, var(--badge, var(--eg-text-2)) 18%, transparent);
+      }
+      .badge .dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--badge, var(--eg-text-2));
+      }
+      .countdown {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 15px;
+        color: var(--eg-text-2);
+      }
+      .countdown ha-icon {
+        --mdc-icon-size: 15px;
+      }
+      .timer {
+        font-family: var(--eg-mono);
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--eg-text);
+        font-variant-numeric: tabular-nums;
+      }
+      .window {
+        width: 100%;
+        height: 4px;
+        border-radius: var(--eg-r-full);
+        background: var(--eg-elevated);
+        overflow: hidden;
+      }
+      .window .fill {
+        height: 100%;
+        border-radius: var(--eg-r-full);
+        background: var(--eg-warning);
+        transition: width 1s linear;
+      }
+      /* ---- видео-стейдж ---- */
+      .stage {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        border-radius: var(--eg-r-md);
+        overflow: hidden;
+        background: var(--eg-elevated);
+      }
+      .stage > eg-call-video {
+        position: absolute;
+        inset: 0;
+      }
+      .connecting {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--eg-scrim);
+      }
+      .spinner {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        border: 4px solid rgba(255, 255, 255, 0.3);
+        border-top-color: #fff;
+        animation: spin 0.9s linear infinite;
+      }
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .spinner {
+          animation: none;
+        }
+      }
+      .frame {
+        position: absolute;
+        inset: 0;
+        background: var(--eg-elevated);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        color: var(--eg-text-2);
+      }
+      .frame.err {
+        color: var(--eg-error);
+      }
+      .frame ha-icon {
+        --mdc-icon-size: 40px;
+      }
+      /* ---- зона «Открыть» ---- */
+      .open-area {
+        display: flex;
+        justify-content: center;
+      }
+      .open-area eg-open-control {
+        width: 100%;
+      }
+      /* ---- ряд действий (кнопки заменяются в Slice 1–2) ---- */
+      .actions {
+        display: flex;
+        gap: 28px;
+        justify-content: center;
+        flex-wrap: wrap;
+      }
+      .circle {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 6px;
+        border: none;
+        background: none;
+        cursor: pointer;
+        color: var(--eg-text);
+        font: inherit;
+        min-width: 68px;
+      }
+      .circle ha-icon {
+        --mdc-icon-size: 28px;
+        width: 68px;
+        height: 68px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--eg-elevated);
+        color: var(--eg-text);
+      }
+      .circle small {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--eg-text-2);
+      }
+      .circle[disabled] {
+        cursor: not-allowed;
+        opacity: 0.5;
+      }
+      .circle.accept ha-icon {
+        background: var(--eg-success);
+        color: var(--eg-on-fill);
+      }
+      .circle.reject ha-icon {
+        background: var(--eg-error);
+        color: var(--eg-on-fill);
+      }
+      .circle.mic-on ha-icon {
+        background: var(--eg-primary);
+        color: var(--eg-on-fill);
+      }
+      /* ---- idle-заглушка (детально — в Slice 5) ---- */
+      ha-card.idle {
+        height: 100%;
+        box-sizing: border-box;
+        display: flex;
+        align-items: stretch;
+        justify-content: center;
+        padding: 20px 16px;
+      }
+      .idle-stage {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        border-radius: var(--eg-r-md);
+        background: var(--eg-elevated);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        text-align: center;
+        padding: 14px;
+        box-sizing: border-box;
+        color: var(--eg-text-2);
+      }
+      .idle-stage ha-icon {
+        --mdc-icon-size: 52px;
+        color: var(--eg-primary);
+        opacity: 0.75;
+      }
+      .idle-title {
+        font-size: 1.3rem;
+        font-weight: 700;
+        color: var(--eg-text);
+      }
+      .idle-sub {
+        font-size: 0.95rem;
+        max-width: 34ch;
+      }
+      .idle-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+        margin-top: 8px;
+      }
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        padding: 5px 12px 5px 8px;
+        border-radius: var(--eg-r-full);
+        background: var(--eg-card);
+        color: var(--eg-text);
+        font-size: 0.8rem;
+        font-weight: 600;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+      }
+      .chip ha-icon {
+        --mdc-icon-size: 16px;
+        color: var(--eg-success);
+        opacity: 1;
+      }
+    `,
+  ];
 }
 
 declare global {
