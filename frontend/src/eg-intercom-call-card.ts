@@ -438,11 +438,13 @@ export class EgIntercomCallCard extends LitElement {
               @unmute=${this._unmute}
             ></eg-call-stage>
           </div>
-          ${this._micNeedsPermission ? this._renderMicBanner() : nothing}
-          <div class="open-area">
-            ${view.showOpen ? this._renderOpen() : nothing}
+          <div class="controls">
+            ${this._micNeedsPermission ? this._renderMicBanner() : nothing}
+            <div class="open-area">
+              ${view.showOpen ? this._renderOpen() : nothing}
+            </div>
+            ${this._renderActions(view)}
           </div>
-          ${this._renderActions(view)}
         </div>
       </ha-card>
     `;
@@ -702,6 +704,63 @@ export class EgIntercomCallCard extends LitElement {
         gap: 20px;
         padding: 6px 16px 28px;
         box-sizing: border-box;
+      }
+      /* зона контролов (баннер + слайдер + кнопки) — колонка */
+      .controls {
+        display: flex;
+        flex-direction: column;
+        gap: 20px;
+      }
+      /* ---- широкий контейнер (настенная панель / десктоп): 2 колонки ---- */
+      @container (min-width: 760px) {
+        .content {
+          display: grid;
+          grid-template-columns: 1fr 340px;
+          grid-template-areas:
+            "header header"
+            "status status"
+            "stage controls";
+          column-gap: 28px;
+          row-gap: 20px;
+          align-items: start;
+          padding: 24px;
+        }
+        header {
+          grid-area: header;
+        }
+        .statusrow {
+          grid-area: status;
+        }
+        .stage {
+          grid-area: stage;
+          align-self: start;
+        }
+        /* колонка контролов = высоте видео: слайдер по центру, кнопки по нижней кромке */
+        .controls {
+          grid-area: controls;
+          position: relative;
+          align-self: stretch;
+          display: block;
+        }
+        .controls .mic-banner {
+          position: absolute;
+          top: 0;
+          left: 0;
+          right: 0;
+        }
+        .controls .open-area {
+          position: absolute;
+          top: 50%;
+          left: 0;
+          right: 0;
+          transform: translateY(-50%);
+        }
+        .controls .actions {
+          position: absolute;
+          bottom: 0;
+          left: 0;
+          right: 0;
+        }
       }
       /* ---- шапка: имя + адрес + свернуть ---- */
       header {
