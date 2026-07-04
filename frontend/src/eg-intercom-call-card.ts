@@ -258,7 +258,10 @@ export class EgIntercomCallCard extends LitElement {
     // auto-разворот (kiosk-панель, без тапа) → браузер блокирует → показываем CTA.
     this._audioBlocked = this._detectAudioBlocked();
     this._startTick();
+    if (this._config.mic === false) return; // микрофон отключён конфигом — не захватываем (privacy)
     this._micPerm = await this._mic.queryPermission();
+    // фаза могла смениться за время await (active → ended/idle) — не стартуем мик задним числом
+    if (this._phase !== "active") return;
     if (this._config.mic_autostart !== false && shouldAutoStartMic(this._micPerm, this._mic.secure)) {
       await this._mic.start();
     }
@@ -429,7 +432,7 @@ export class EgIntercomCallCard extends LitElement {
             <eg-call-stage
               .hass=${this.hass}
               .entity=${cam}
-              .muted=${this._muted}
+              .muted=${this._muted || this._audioBlocked}
               .live=${stageState === "live"}
               .soundOff=${phase === "active" && this._muted && !this._audioBlocked}
               .timestamp=${this._timestamp(stageState)}
@@ -702,14 +705,31 @@ export class EgIntercomCallCard extends LitElement {
         display: flex;
         flex-direction: column;
         gap: 20px;
-        padding: 6px 16px 28px;
+        /* заполняем высоту карточки; вертикальный экран → верт. отступы вдвое больше
+           горизонтальных (16), с учётом safe-area панели/телефона */
+        min-height: 100%;
+        padding: max(32px, env(safe-area-inset-top)) 16px max(32px, env(safe-area-inset-bottom));
         box-sizing: border-box;
       }
-      /* зона контролов (баннер + слайдер + кнопки) — колонка */
+      /* шапка/статус/видео — сверху, фиксированной высоты */
+      header,
+      .statusrow,
+      .stage {
+        flex: none;
+      }
+      /* зона контролов заполняет остаток: слайдер по центру, кнопки — по нижней кромке */
       .controls {
+        flex: 1;
         display: flex;
         flex-direction: column;
         gap: 20px;
+      }
+      .controls .open-area {
+        flex: 1;
+        align-items: center;
+      }
+      .controls .actions {
+        margin-top: auto;
       }
       /* ---- широкий контейнер (настенная панель / десктоп): 2 колонки ---- */
       @container (min-width: 760px) {
@@ -723,6 +743,9 @@ export class EgIntercomCallCard extends LitElement {
           column-gap: 28px;
           row-gap: 20px;
           align-items: start;
+          /* grid default align-content = stretch → строки растягивались (дыры);
+             start = контент сверху, строка stage/controls по высоте видео */
+          align-content: start;
           padding: 24px;
         }
         header {

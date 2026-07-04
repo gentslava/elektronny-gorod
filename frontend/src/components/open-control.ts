@@ -57,6 +57,11 @@ export class EgOpenControl extends LitElement {
   private _holdStart = 0;
   private _trackRect: DOMRect | null = null;
 
+  public override disconnectedCallback(): void {
+    super.disconnectedCallback();
+    this._reset(); // отменить RAF hold/slide при удалении элемента (гигиена)
+  }
+
   private _fireOpen(): void {
     this.dispatchEvent(new CustomEvent("open", { bubbles: true, composed: true }));
   }
