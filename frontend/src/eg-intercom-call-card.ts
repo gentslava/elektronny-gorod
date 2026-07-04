@@ -9,6 +9,7 @@ import { customElement, property, state } from "lit/decorators.js";
 import { type CallPhase, type CallView, deriveView, toPhase } from "./state-machine.js";
 import { pickCameraEntity } from "./components/call-video.js";
 import "./components/open-control.js";
+import "./components/eg-icon.js";
 import { MicController, type MicPermission, shouldAutoStartMic } from "./components/mic-controller.js";
 import { isCoarsePointer, type OpenAction, resolveOpenAction } from "./util/open-action.js";
 import { egTokens, statusColor } from "./theme/tokens.js";
@@ -318,7 +319,7 @@ export class EgIntercomCallCard extends LitElement {
             ${cam
               ? html`<eg-call-video .hass=${this.hass} .entity=${cam} .muted=${this._muted}></eg-call-video>`
               : view.isError
-                ? html`<div class="frame err"><ha-icon icon="mdi:phone-alert"></ha-icon><span>Не удалось установить вызов</span></div>`
+                ? html`<div class="frame err"><eg-icon name="phone-off"></eg-icon><span>Не удалось установить вызов</span></div>`
                 : nothing}
             ${view.busy
               ? html`<div class="connecting" aria-hidden="true"><div class="spinner"></div></div>`
@@ -342,7 +343,7 @@ export class EgIntercomCallCard extends LitElement {
           ${addr ? html`<span class="addr">${addr}</span>` : nothing}
         </div>
         <button class="close" @click=${this._dismiss} aria-label="Свернуть">
-          <ha-icon icon="mdi:close"></ha-icon>
+          <eg-icon name="x"></eg-icon>
         </button>
       </header>
     `;
@@ -359,7 +360,7 @@ export class EgIntercomCallCard extends LitElement {
             <span>${STATUS_RU[phase] ?? ""}</span>
           </span>
           ${win
-            ? html`<span class="countdown"><ha-icon icon="mdi:timer-outline"></ha-icon>${win.text}</span>`
+            ? html`<span class="countdown"><eg-icon name="timer"></eg-icon>${win.text}</span>`
             : showTimer
               ? html`<span class="timer">${this._timerText()}</span>`
               : nothing}
@@ -385,13 +386,13 @@ export class EgIntercomCallCard extends LitElement {
     return html`
       <ha-card class="idle">
         <div class="idle-stage" role="status">
-          <ha-icon icon="mdi:doorbell-video"></ha-icon>
+          <eg-icon name="door-open" class="idle-ic"></eg-icon>
           <div class="idle-title">${this._config.idle_text ?? "Нет активного вызова"}</div>
           <div class="idle-sub">Экран покажет видео, звук и кнопки при звонке домофона</div>
           ${names.length
             ? html`<div class="idle-chips">
                 ${names.map(
-                  (n) => html`<span class="chip"><ha-icon icon="mdi:check-circle"></ha-icon>${n}</span>`,
+                  (n) => html`<span class="chip"><eg-icon name="circle-check"></eg-icon>${n}</span>`,
                 )}
               </div>`
             : nothing}
@@ -411,20 +412,27 @@ export class EgIntercomCallCard extends LitElement {
     `;
   }
 
+  /** Круглая кнопка действия: обёртка .ic (68) + lucide-иконка (28) + подпись. */
+  private _circle(
+    icon: string,
+    label: string,
+    onClick: () => void,
+    variant = "",
+  ): TemplateResult {
+    return html`
+      <button class="circle ${variant}" @click=${onClick} aria-label=${label}>
+        <span class="ic"><eg-icon name=${icon}></eg-icon></span>
+        <small>${label}</small>
+      </button>
+    `;
+  }
+
   private _renderActions(view: CallView): TemplateResult {
     if (view.showAccept || (view.showReject && !view.showHangup)) {
       return html`
         <div class="actions">
-          ${view.showReject
-            ? html`<button class="circle reject" @click=${this._hangup}>
-                  <ha-icon icon="mdi:phone-hangup"></ha-icon><small>Отклонить</small>
-                </button>`
-            : nothing}
-          ${view.showAccept
-            ? html`<button class="circle accept" @click=${this._answer}>
-                  <ha-icon icon="mdi:phone"></ha-icon><small>Принять</small>
-                </button>`
-            : nothing}
+          ${view.showReject ? this._circle("phone-off", "Отклонить", this._hangup, "reject") : nothing}
+          ${view.showAccept ? this._circle("phone", "Принять", this._answer, "accept") : nothing}
         </div>
       `;
     }
@@ -433,15 +441,13 @@ export class EgIntercomCallCard extends LitElement {
         <div class="actions">
           ${view.showMic && this._config.mic !== false ? this._renderMic() : nothing}
           ${view.showMic
-            ? html`<button class="circle" @click=${this._toggleMute}
-                    aria-label=${this._muted ? "Включить звук" : "Выключить звук"}>
-                  <ha-icon icon=${this._muted ? "mdi:volume-off" : "mdi:volume-high"}></ha-icon>
-                  <small>${this._muted ? "Звук" : "Динамик"}</small>
-                </button>`
+            ? this._circle(
+                this._muted ? "volume-x" : "volume-2",
+                this._muted ? "Звук" : "Динамик",
+                this._toggleMute,
+              )
             : nothing}
-          <button class="circle reject" @click=${this._hangup} aria-label="Завершить">
-            <ha-icon icon="mdi:phone-hangup"></ha-icon><small>Завершить</small>
-          </button>
+          ${this._circle("phone-off", "Завершить", this._hangup, "reject")}
         </div>
       `;
     }
@@ -451,26 +457,26 @@ export class EgIntercomCallCard extends LitElement {
   private _renderMic(): TemplateResult {
     if (!this._mic.secure) {
       return html`<button class="circle" disabled aria-label="Микрофон требует HTTPS" title="Микрофон доступен только по HTTPS">
-        <ha-icon icon="mdi:microphone-off"></ha-icon><small>Нет HTTPS</small>
+        <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Нет HTTPS</small>
       </button>`;
     }
     if (this._micPerm === "denied") {
       return html`<button class="circle" disabled aria-label="Доступ к микрофону запрещён" title="Разрешите микрофон в настройках браузера">
-        <ha-icon icon="mdi:microphone-off"></ha-icon><small>Запрещён</small>
+        <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Запрещён</small>
       </button>`;
     }
     if (this._micActive) {
       return html`<button class="circle mic-on" @click=${this._toggleMic} aria-label="Выключить микрофон">
-        <ha-icon icon="mdi:microphone"></ha-icon><small>Микрофон</small>
+        <span class="ic"><eg-icon name="mic"></eg-icon></span><small>Микрофон</small>
       </button>`;
     }
     if (this._micPerm !== "granted") {
       return html`<button class="circle" @click=${this._toggleMic} aria-label="Разрешить микрофон">
-        <ha-icon icon="mdi:microphone-question"></ha-icon><small>Разрешить</small>
+        <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Разрешить</small>
       </button>`;
     }
     return html`<button class="circle" @click=${this._toggleMic} aria-label="Включить микрофон">
-      <ha-icon icon="mdi:microphone-off"></ha-icon><small>Микрофон</small>
+      <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Микрофон</small>
     </button>`;
   }
 
@@ -538,8 +544,8 @@ export class EgIntercomCallCard extends LitElement {
         justify-content: center;
         cursor: pointer;
       }
-      .close ha-icon {
-        --mdc-icon-size: 20px;
+      .close eg-icon {
+        --eg-icon-size: 20px;
       }
       /* ---- статус-строка: бейдж + таймер/countdown + окно ответа ---- */
       .statusrow {
@@ -577,8 +583,8 @@ export class EgIntercomCallCard extends LitElement {
         font-size: 15px;
         color: var(--eg-text-2);
       }
-      .countdown ha-icon {
-        --mdc-icon-size: 15px;
+      .countdown eg-icon {
+        --eg-icon-size: 15px;
       }
       .timer {
         font-family: var(--eg-mono);
@@ -653,8 +659,8 @@ export class EgIntercomCallCard extends LitElement {
       .frame.err {
         color: var(--eg-error);
       }
-      .frame ha-icon {
-        --mdc-icon-size: 40px;
+      .frame eg-icon {
+        --eg-icon-size: 40px;
       }
       /* ---- зона «Открыть» ---- */
       .open-area {
@@ -683,8 +689,7 @@ export class EgIntercomCallCard extends LitElement {
         font: inherit;
         min-width: 68px;
       }
-      .circle ha-icon {
-        --mdc-icon-size: 28px;
+      .circle .ic {
         width: 68px;
         height: 68px;
         border-radius: 50%;
@@ -693,6 +698,9 @@ export class EgIntercomCallCard extends LitElement {
         justify-content: center;
         background: var(--eg-elevated);
         color: var(--eg-text);
+      }
+      .circle .ic eg-icon {
+        --eg-icon-size: 28px;
       }
       .circle small {
         font-size: 12px;
@@ -703,15 +711,15 @@ export class EgIntercomCallCard extends LitElement {
         cursor: not-allowed;
         opacity: 0.5;
       }
-      .circle.accept ha-icon {
+      .circle.accept .ic {
         background: var(--eg-success);
         color: var(--eg-on-fill);
       }
-      .circle.reject ha-icon {
+      .circle.reject .ic {
         background: var(--eg-error);
         color: var(--eg-on-fill);
       }
-      .circle.mic-on ha-icon {
+      .circle.mic-on .ic {
         background: var(--eg-primary);
         color: var(--eg-on-fill);
       }
@@ -739,8 +747,8 @@ export class EgIntercomCallCard extends LitElement {
         box-sizing: border-box;
         color: var(--eg-text-2);
       }
-      .idle-stage ha-icon {
-        --mdc-icon-size: 52px;
+      .idle-stage .idle-ic {
+        --eg-icon-size: 52px;
         color: var(--eg-primary);
         opacity: 0.75;
       }
@@ -772,10 +780,9 @@ export class EgIntercomCallCard extends LitElement {
         font-weight: 600;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
       }
-      .chip ha-icon {
-        --mdc-icon-size: 16px;
+      .chip eg-icon {
+        --eg-icon-size: 16px;
         color: var(--eg-success);
-        opacity: 1;
       }
     `,
   ];

@@ -5,6 +5,7 @@ import { LitElement, css, html, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import type { OpenAction } from "../util/open-action.js";
+import "./eg-icon.js";
 
 /** Зажать в [0..1]. */
 export function clamp01(x: number): number {
@@ -137,16 +138,15 @@ export class EgOpenControl extends LitElement {
 
   /** Иконка плашки hold/tap: закрытый замок → открытый при успехе. */
   private _iconName(): string {
-    if (this.status === "opened") return "mdi:lock-open-variant";
-    if (this.status === "error") return "mdi:lock-alert";
-    return "mdi:lock";
+    if (this.status === "opened") return "lock-open";
+    return "lock";
   }
 
   /** Иконка кружка-слайдера: ключ (тащим к замку), замок при результате. */
   private _knobIcon(): string {
-    if (this.status === "opened") return "mdi:lock-open-variant";
-    if (this.status === "error") return "mdi:lock-alert";
-    return "mdi:key-variant";
+    if (this.status === "opened") return "lock-open";
+    if (this.status === "error") return "lock";
+    return "key-round";
   }
 
   /** Визуальный прогресс: при «открыто»/«ошибка» — заполнено целиком. */
@@ -166,7 +166,7 @@ export class EgOpenControl extends LitElement {
       <button class="bar tap ${this._statusClass()}" ?disabled=${this.disabled} @click=${this._onTap}
               aria-label=${this.label}>
         <div class="fill" style="width:${this._vp() * 100}%"></div>
-        <span class="bar-label"><ha-icon icon=${this._iconName()}></ha-icon>${this._caption()}</span>
+        <span class="bar-label"><eg-icon name=${this._iconName()}></eg-icon>${this._caption()}</span>
       </button>
     `;
   }
@@ -184,7 +184,7 @@ export class EgOpenControl extends LitElement {
       >
         <div class="fill" style="width:${this._vp() * 100}%"></div>
         <span class="bar-label">
-          <ha-icon icon=${this._iconName()}></ha-icon>
+          <eg-icon name=${this._iconName()}></eg-icon>
           ${this._caption()}
         </span>
       </button>
@@ -203,8 +203,8 @@ export class EgOpenControl extends LitElement {
         aria-valuemax="100"
         aria-valuenow=${Math.round(vp * 100)}
       >
-        <ha-icon class="hint hint-l" icon="mdi:lock" aria-hidden="true"></ha-icon>
-        <ha-icon class="hint hint-r" icon="mdi:lock-open-variant" aria-hidden="true"></ha-icon>
+        <eg-icon class="hint hint-l" name="lock"></eg-icon>
+        <eg-icon class="hint hint-r" name="lock-open"></eg-icon>
         <div class="fill"></div>
         <span class="bar-label">${this._caption()}</span>
         <div
@@ -214,7 +214,7 @@ export class EgOpenControl extends LitElement {
           @pointerup=${this._onSlideUp}
           @pointercancel=${this._onSlideUp}
         >
-          <ha-icon icon=${this._knobIcon()}></ha-icon>
+          <eg-icon name=${this._knobIcon()}></eg-icon>
         </div>
       </div>
     `;
@@ -289,7 +289,7 @@ export class EgOpenControl extends LitElement {
       position: absolute;
       top: 50%;
       transform: translateY(-50%);
-      --mdc-icon-size: 22px;
+      --eg-icon-size: 22px;
       color: var(--secondary-text-color);
       opacity: 0.5;
       z-index: 0;
@@ -326,11 +326,11 @@ export class EgOpenControl extends LitElement {
     .knob.off {
       opacity: 0.5;
     }
-    .knob ha-icon {
-      --mdc-icon-size: 26px;
+    .knob eg-icon {
+      --eg-icon-size: 26px;
     }
-    .bar ha-icon {
-      --mdc-icon-size: 24px;
+    .bar eg-icon {
+      --eg-icon-size: 24px;
     }
     /* «Открыто»/«Ошибка»: на плашке hold/tap — вся плашка; на слайдере — ТОЛЬКО кнопка */
     .bar.st-opened .fill {
