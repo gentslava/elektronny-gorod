@@ -18,9 +18,15 @@ describe("toPhase", () => {
 });
 
 describe("deriveView", () => {
-  it("idle / ended → карточка скрыта", () => {
+  it("idle → карточка скрыта", () => {
     expect(deriveView("idle").visible).toBe(false);
-    expect(deriveView("ended").visible).toBe(false);
+  });
+
+  it("ended → краткий экран «Вызов завершён» с [Закрыть]", () => {
+    const v = deriveView("ended");
+    expect(v.visible).toBe(true);
+    expect(v.actions).toEqual(["close"]);
+    expect(v.showOpen).toBe(true);
   });
 
   it("ringing → видео домофона + [Отклонить, Принять] + Открыть + окно ответа", () => {

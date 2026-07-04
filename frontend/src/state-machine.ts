@@ -112,8 +112,17 @@ export function deriveView(phase: CallPhase): CallView {
         showOpen: true,
         isError: true,
       };
-    case "idle":
     case "ended":
+      // Краткий экран «Вызов завершён» (карточка держит ~2.5с) — затемнённый кадр,
+      // Открыть ещё доступно, единственное действие — Закрыть.
+      return {
+        ...HIDDEN,
+        visible: true,
+        video: "call",
+        actions: ["close"],
+        showOpen: true,
+      };
+    case "idle":
     default:
       return { ...HIDDEN };
   }

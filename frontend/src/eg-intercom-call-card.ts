@@ -65,6 +65,8 @@ const DISMISS_MS = 6000;
 const OPEN_RESET_MS = 3000;
 /** Окно ответа на входящий (домофон отменяет вызов ~через 30с). Domain-timing — локально. */
 const ANSWER_WINDOW_MS = 30000;
+/** Сколько держать экран «Вызов завершён» после завершения, мс. */
+const ENDED_MS = 2500;
 
 @customElement("eg-intercom-call-card")
 export class EgIntercomCallCard extends LitElement {
@@ -82,6 +84,10 @@ export class EgIntercomCallCard extends LitElement {
   @state() private _ringingSince = 0;
   /** call_state-сущности, чей error уже «погашен» по таймеру (показываем idle). */
   @state() private _errDismissed = new Set<string>();
+  /** Домофон, чей экран «Вызов завершён» держим (пусто = нет). */
+  @state() private _endedEntity = "";
+  /** Замороженная длительность завершённого вызова «MM:SS». */
+  @state() private _endedDuration = "";
 
   private _doorbells: DoorbellCfg[] = [];
   private _openAction: OpenAction = "hold";
@@ -89,6 +95,8 @@ export class EgIntercomCallCard extends LitElement {
   private _tick?: number;
   private _errHide?: number;
   private _openReset?: number;
+  private _endedHide?: number;
+  private _prevPhases = new Map<string, CallPhase>();
   private readonly _mic = new MicController(
     () => this.hass?.connection as never,
     () => {
@@ -124,6 +132,7 @@ export class EgIntercomCallCard extends LitElement {
     this._stopTick();
     if (this._errHide) clearTimeout(this._errHide);
     if (this._openReset) clearTimeout(this._openReset);
+    if (this._endedHide) clearTimeout(this._endedHide);
   }
 
   private _phaseOf(d: DoorbellCfg): CallPhase {
@@ -131,16 +140,22 @@ export class EgIntercomCallCard extends LitElement {
     return toPhase(st);
   }
 
-  /** Активный домофон: первый с «живой» фазой (не погашенной error'ом). */
+  /** Активный домофон: живой (ringing/connecting/active/error) или удерживаемый «завершён». */
   private get _active(): DoorbellCfg | undefined {
-    return this._doorbells.find(
+    const live = this._doorbells.find(
       (d) => LIVE_PHASES.has(this._phaseOf(d)) && !this._errDismissed.has(d.call_state),
     );
+    if (live) return live;
+    if (this._endedEntity) return this._doorbells.find((d) => d.call_state === this._endedEntity);
+    return undefined;
   }
 
   private get _phase(): CallPhase {
     const a = this._active;
-    return a ? this._phaseOf(a) : "idle";
+    if (!a) return "idle";
+    const real = this._phaseOf(a);
+    if (LIVE_PHASES.has(real)) return real;
+    return a.call_state === this._endedEntity ? "ended" : "idle";
   }
 
   /** Имя домофона (короткое): config name → атрибут intercom_name → дефолт. */
@@ -168,18 +183,54 @@ export class EgIntercomCallCard extends LitElement {
 
   protected override willUpdate(changed: PropertyValues): void {
     if (!changed.has("hass")) return;
-    // снять «погашенный error» с домофонов, которые уже вышли из error
     for (const d of this._doorbells) {
-      if (this._errDismissed.has(d.call_state) && this._phaseOf(d) !== "error") {
+      const ph = this._phaseOf(d);
+      const prev = this._prevPhases.get(d.call_state);
+      this._prevPhases.set(d.call_state, ph);
+      // снять «погашенный error» с домофонов, которые уже вышли из error
+      if (this._errDismissed.has(d.call_state) && ph !== "error") {
         this._errDismissed.delete(d.call_state);
+      }
+      // живой звонок → ended: подержать экран «Вызов завершён»
+      if (ph === "ended" && prev !== undefined && LIVE_PHASES.has(prev) && prev !== "error") {
+        this._enterEnded(d);
+      }
+      // удерживаемый ended снова ожил → снять удержание
+      if (this._endedEntity === d.call_state && LIVE_PHASES.has(ph)) {
+        this._clearEnded();
       }
     }
     const a = this._active;
-    const key = a ? `${a.call_state}|${this._phaseOf(a)}` : "idle";
+    const key = a ? `${a.call_state}|${this._phase}` : "idle";
     if (key !== this._prevKey) {
       this._onPhase(this._phase, a);
       this._prevKey = key;
     }
+  }
+
+  private _enterEnded(d: DoorbellCfg): void {
+    this._endedDuration = this._durationOf(d);
+    this._endedEntity = d.call_state;
+    if (this._endedHide) clearTimeout(this._endedHide);
+    this._endedHide = window.setTimeout(() => this._clearEnded(), ENDED_MS);
+  }
+
+  private _clearEnded = (): void => {
+    if (this._endedHide) {
+      clearTimeout(this._endedHide);
+      this._endedHide = undefined;
+    }
+    this._endedEntity = "";
+    this.requestUpdate();
+  };
+
+  /** Длительность вызова «MM:SS» на момент завершения (из started_at). */
+  private _durationOf(d: DoorbellCfg): string {
+    const v = this.hass?.states[d.call_state]?.attributes?.["started_at"];
+    if (typeof v !== "string") return "";
+    const start = Date.parse(v);
+    if (Number.isNaN(start)) return "";
+    return this._mmss(Math.max(0, Math.floor((Date.now() - start) / 1000)));
   }
 
   private _onPhase(phase: CallPhase, active: DoorbellCfg | undefined): void {
@@ -324,12 +375,24 @@ export class EgIntercomCallCard extends LitElement {
     return { text, fraction: remaining / ANSWER_WINDOW_MS };
   }
 
-  /** Состояние видео-области: связь прервана / камера недоступна / живое. */
-  private _stageState(view: CallView, cam: string | undefined): StageState {
+  /** Состояние видео-области: завершён / связь прервана / камера недоступна / живое. */
+  private _stageState(view: CallView, cam: string | undefined, phase: CallPhase): StageState {
+    if (phase === "ended") return "ended";
     if (view.isError) return "connection_lost";
     const camObj = cam ? this.hass?.states[cam] : undefined;
     if (!camObj || camObj.state === "unavailable") return "camera_off";
     return "live";
+  }
+
+  /** Показать баннер «нет доступа к микрофону» (active + права не выданы/нет HTTPS). */
+  private get _micNeedsPermission(): boolean {
+    if (this._config.mic === false || this._phase !== "active" || this._micActive) return false;
+    return !this._mic.secure || this._micPerm === "denied" || this._micPerm === "prompt";
+  }
+
+  /** Микрофон недоступен принципиально (нет HTTPS / запрещён) — красный индикатор. */
+  private get _micBlocked(): boolean {
+    return !this._mic.secure || this._micPerm === "denied";
   }
 
   /** Таймстамп потока «DD-MM-YYYY HH:MM:SS» (только на живом видео). */
@@ -350,7 +413,7 @@ export class EgIntercomCallCard extends LitElement {
       camera: this._config.camera,
       doorbell_camera: active.doorbell_camera,
     });
-    const stageState = this._stageState(view, cam);
+    const stageState = this._stageState(view, cam, phase);
 
     return html`
       <ha-card class="phase-${phase}">
@@ -370,6 +433,7 @@ export class EgIntercomCallCard extends LitElement {
               @unmute=${this._unmute}
             ></eg-call-stage>
           </div>
+          ${this._micNeedsPermission ? this._renderMicBanner() : nothing}
           <div class="open-area">
             ${view.showOpen ? this._renderOpen() : nothing}
           </div>
@@ -408,7 +472,9 @@ export class EgIntercomCallCard extends LitElement {
             ? html`<span class="countdown"><eg-icon name="timer"></eg-icon>${win.text}</span>`
             : showTimer
               ? html`<span class="timer">${this._timerText()}</span>`
-              : nothing}
+              : phase === "ended" && this._endedDuration
+                ? html`<span class="timer ended-dur">${this._endedDuration}</span>`
+                : nothing}
         </div>
         ${win
           ? html`<div class="window"><div class="fill" style="width:${win.fraction * 100}%"></div></div>`
@@ -443,6 +509,20 @@ export class EgIntercomCallCard extends LitElement {
             : nothing}
         </div>
       </ha-card>
+    `;
+  }
+
+  /** Баннер «нет доступа к микрофону» (между видео и слайдером) — узел iUNo1. */
+  private _renderMicBanner(): TemplateResult {
+    return html`
+      <div class="mic-banner" role="alert">
+        <eg-icon name="mic-off"></eg-icon>
+        <div class="mb-text">
+          <span class="mb-title">Нет доступа к микрофону</span>
+          <span class="mb-sub">Вас не слышно. Разрешите доступ в браузере.</span>
+        </div>
+        <button class="mb-btn" @click=${this._toggleMic}>Разрешить</button>
+      </div>
     `;
   }
 
@@ -498,7 +578,7 @@ export class EgIntercomCallCard extends LitElement {
       case "retry":
         return this._circle("refresh-cw", "Повторить", this._retry, "retry");
       case "close":
-        return this._circle("x", "Закрыть", this._dismiss);
+        return this._circle("x", "Закрыть", this._clearEnded);
       default:
         return nothing;
     }
@@ -514,14 +594,10 @@ export class EgIntercomCallCard extends LitElement {
     `;
   }
 
-  /** Микрофон: базовый тумблер. Denied/HTTPS/баннер — уточняется в Slice 4. */
+  /** Микрофон: тумблер; при denied/нет-HTTPS — красный индикатор «Нет доступа» (iUNo1). */
   private _renderMic(): TemplateResult {
-    const usable = this._mic.secure && this._micPerm !== "denied";
-    if (!usable) {
-      return html`<button class="circle" disabled aria-label="Микрофон недоступен"
-              title="Микрофон доступен только по HTTPS и с разрешением браузера">
-        <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Микрофон</small>
-      </button>`;
+    if (this._micBlocked) {
+      return this._circle("mic-off", "Нет доступа", this._toggleMic, "mic-blocked");
     }
     const icon = this._micActive ? "mic" : "mic-off";
     const aria = this._micActive ? "Выключить микрофон" : "Включить микрофон";
@@ -643,6 +719,10 @@ export class EgIntercomCallCard extends LitElement {
         color: var(--eg-text);
         font-variant-numeric: tabular-nums;
       }
+      .timer.ended-dur {
+        color: var(--eg-text-3);
+        font-weight: 500;
+      }
       .window {
         width: 100%;
         height: 4px;
@@ -655,6 +735,47 @@ export class EgIntercomCallCard extends LitElement {
         border-radius: var(--eg-r-full);
         background: var(--eg-warning);
         transition: width 1s linear;
+      }
+      /* ---- баннер «нет доступа к микрофону» ---- */
+      .mic-banner {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px;
+        border-radius: var(--eg-r-md);
+        background: var(--eg-warning-bg);
+      }
+      .mic-banner > eg-icon {
+        --eg-icon-size: 20px;
+        color: var(--eg-warning);
+      }
+      .mb-text {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        flex: 1;
+        min-width: 0;
+      }
+      .mb-title {
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--eg-warning);
+      }
+      .mb-sub {
+        font-size: 12px;
+        color: var(--eg-text-2);
+      }
+      .mb-btn {
+        flex: none;
+        border: 1px solid var(--eg-warning);
+        background: transparent;
+        color: var(--eg-warning);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 600;
+        border-radius: var(--eg-r-full);
+        padding: 6px 14px;
+        cursor: pointer;
       }
       /* ---- видео-стейдж ---- */
       .stage {
@@ -745,6 +866,14 @@ export class EgIntercomCallCard extends LitElement {
       }
       .circle.warn small {
         color: var(--eg-warning);
+      }
+      /* микрофон недоступен: красный индикатор «Нет доступа» (iUNo1) */
+      .circle.mic-blocked .ic {
+        background: var(--eg-error-bg);
+        color: var(--eg-error);
+      }
+      .circle.mic-blocked small {
+        color: var(--eg-error);
       }
       /* «Соединяем…» — неинтерактивно, приглушённый крутящийся loader */
       .spinner-btn {
