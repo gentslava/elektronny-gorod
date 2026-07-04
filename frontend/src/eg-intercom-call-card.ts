@@ -8,6 +8,8 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import { type ActionKind, type CallPhase, type CallView, deriveView, toPhase } from "./state-machine.js";
 import { pickCameraEntity } from "./components/call-video.js";
+import { type StageState } from "./components/call-stage.js";
+import "./components/call-stage.js";
 import "./components/open-control.js";
 import "./components/eg-icon.js";
 import { MicController, type MicPermission, shouldAutoStartMic } from "./components/mic-controller.js";
@@ -70,6 +72,8 @@ export class EgIntercomCallCard extends LitElement {
 
   @state() private _config: CardConfig = {};
   @state() private _muted = false;
+  /** Автоплей со звуком заблокирован (auto-разворот без жеста) → CTA/тап снимают. */
+  @state() private _audioBlocked = false;
   @state() private _micActive = false;
   @state() private _micPerm: MicPermission = "unknown";
   @state() private _openStatus: OpenStatus = "idle";
@@ -196,7 +200,10 @@ export class EgIntercomCallCard extends LitElement {
   }
 
   private async _enterActive(): Promise<void> {
-    this._muted = false; // пытаемся со звуком; снять блок автоплея — кнопкой звука (жест)
+    this._muted = false; // пытаемся со звуком; снять блок автоплея — тап по видео/CTA (жест)
+    // Автоплей со звуком разрешён только после user-жеста. Приняли тапом → звук ок;
+    // auto-разворот (kiosk-панель, без тапа) → браузер блокирует → показываем CTA.
+    this._audioBlocked = this._detectAudioBlocked();
     this._startTick();
     this._micPerm = await this._mic.queryPermission();
     if (this._config.mic_autostart !== false && shouldAutoStartMic(this._micPerm, this._mic.secure)) {
@@ -204,10 +211,23 @@ export class EgIntercomCallCard extends LitElement {
     }
   }
 
+  /** Эвристика блокировки автоплея-со-звуком: не было ли user-активации на странице. */
+  private _detectAudioBlocked(): boolean {
+    const ua = (navigator as Navigator & { userActivation?: { hasBeenActive: boolean } }).userActivation;
+    return ua ? !ua.hasBeenActive : false;
+  }
+
   private _exitActive(): void {
     this._mic.stop();
     this._stopTick();
+    this._audioBlocked = false;
   }
+
+  /** Снять mute (тап по видео / CTA / кнопка «Звук выкл.»). */
+  private _unmute = (): void => {
+    this._muted = false;
+    this._audioBlocked = false;
+  };
 
   private _startTick(): void {
     this._stopTick();
@@ -304,6 +324,22 @@ export class EgIntercomCallCard extends LitElement {
     return { text, fraction: remaining / ANSWER_WINDOW_MS };
   }
 
+  /** Состояние видео-области: связь прервана / камера недоступна / живое. */
+  private _stageState(view: CallView, cam: string | undefined): StageState {
+    if (view.isError) return "connection_lost";
+    const camObj = cam ? this.hass?.states[cam] : undefined;
+    if (!camObj || camObj.state === "unavailable") return "camera_off";
+    return "live";
+  }
+
+  /** Таймстамп потока «DD-MM-YYYY HH:MM:SS» (только на живом видео). */
+  private _timestamp(stageState: StageState): string {
+    if (stageState !== "live") return "";
+    const d = new Date(this._now);
+    const p = (n: number): string => String(n).padStart(2, "0");
+    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+  }
+
   protected override render(): TemplateResult {
     const active = this._active;
     if (!active) return this._renderIdle();
@@ -314,6 +350,7 @@ export class EgIntercomCallCard extends LitElement {
       camera: this._config.camera,
       doorbell_camera: active.doorbell_camera,
     });
+    const stageState = this._stageState(view, cam);
 
     return html`
       <ha-card class="phase-${phase}">
@@ -321,11 +358,17 @@ export class EgIntercomCallCard extends LitElement {
           ${this._renderHeader()}
           ${this._renderStatus(view, phase)}
           <div class="stage">
-            ${cam
-              ? html`<eg-call-video .hass=${this.hass} .entity=${cam} .muted=${this._muted}></eg-call-video>`
-              : view.isError
-                ? html`<div class="frame err"><eg-icon name="phone-off"></eg-icon><span>Не удалось установить вызов</span></div>`
-                : nothing}
+            <eg-call-stage
+              .hass=${this.hass}
+              .entity=${cam}
+              .muted=${this._muted}
+              .live=${stageState === "live"}
+              .soundOff=${phase === "active" && this._muted && !this._audioBlocked}
+              .timestamp=${this._timestamp(stageState)}
+              .stageState=${stageState}
+              .audioBlocked=${this._audioBlocked}
+              @unmute=${this._unmute}
+            ></eg-call-stage>
           </div>
           <div class="open-area">
             ${view.showOpen ? this._renderOpen() : nothing}
@@ -447,7 +490,9 @@ export class EgIntercomCallCard extends LitElement {
       case "mic":
         return this._config.mic === false ? nothing : this._renderMic();
       case "sound":
-        return this._circle(this._muted ? "volume-x" : "volume-2", "Звук", this._toggleMute);
+        return this._audioBlocked
+          ? this._circle("volume-x", "Звук выкл.", this._unmute, "warn")
+          : this._circle(this._muted ? "volume-x" : "volume-2", "Звук", this._toggleMute);
       case "hangup":
         return this._circle("phone-off", "Завершить", this._hangup, "reject");
       case "retry":
@@ -620,10 +665,6 @@ export class EgIntercomCallCard extends LitElement {
         overflow: hidden;
         background: var(--eg-elevated);
       }
-      .stage > eg-call-video {
-        position: absolute;
-        inset: 0;
-      }
       @keyframes spin {
         to {
           transform: rotate(360deg);
@@ -633,23 +674,6 @@ export class EgIntercomCallCard extends LitElement {
         .spin {
           animation: none;
         }
-      }
-      .frame {
-        position: absolute;
-        inset: 0;
-        background: var(--eg-elevated);
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 6px;
-        color: var(--eg-text-2);
-      }
-      .frame.err {
-        color: var(--eg-error);
-      }
-      .frame eg-icon {
-        --eg-icon-size: 40px;
       }
       /* ---- зона «Открыть» ---- */
       .open-area {
@@ -714,6 +738,13 @@ export class EgIntercomCallCard extends LitElement {
       .circle.retry .ic {
         background: var(--eg-primary);
         color: var(--eg-on-fill);
+      }
+      /* audio_blocked: «Звук выкл.» — warning-иконка на elevated */
+      .circle.warn .ic {
+        color: var(--eg-warning);
+      }
+      .circle.warn small {
+        color: var(--eg-warning);
       }
       /* «Соединяем…» — неинтерактивно, приглушённый крутящийся loader */
       .spinner-btn {

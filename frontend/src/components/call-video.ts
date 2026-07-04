@@ -6,6 +6,7 @@ import { LitElement, css, html, nothing, type PropertyValues, type TemplateResul
 import { customElement, property, state } from "lit/decorators.js";
 
 import type { VideoSource } from "../state-machine.js";
+import "./eg-icon.js";
 
 interface HassLike {
   states: Record<string, { state: string; attributes: Record<string, unknown> }>;
@@ -84,29 +85,31 @@ export class EgCallVideo extends LitElement {
 
   protected override render(): TemplateResult {
     if (!this.entity || !this.hass) {
-      return this._frame("mdi:cctv-off", "Нет активного видео");
+      return this._frame("video-off", "Нет активного видео");
     }
     const stateObj = this.hass.states[this.entity];
     if (!stateObj) {
-      return this._frame("mdi:cctv-off", "Камера недоступна");
+      return this._frame("video-off", "Камера недоступна");
     }
     switch (this._provider) {
       case "pending":
-        return this._frame("mdi:loading", "Загрузка видео…");
+        return this._frame("video-off", "Загрузка видео…");
       case "ha":
+        // Без controls: chromeless-поверхность — весь UI наш (LIVE/чип/CTA/tap-to-unmute
+        // в call-stage). controls в Chrome/FF = клик по видео → пауза живого звонка +
+        // дубль нативной панели. См. call-card-ux-production.md §13.1.
         return html`
           <ha-camera-stream
             .hass=${this.hass}
             .stateObj=${stateObj}
             .muted=${this.muted}
-            controls
           ></ha-camera-stream>
         `;
       case "webrtc":
         return html`<div id="webrtc-host"></div>`;
       default:
         return this._frame(
-          "mdi:cctv-off",
+          "video-off",
           "Видеоплеер недоступен — обновите HA или установите advanced-camera-card",
         );
     }
@@ -115,7 +118,7 @@ export class EgCallVideo extends LitElement {
   private _frame(icon: string, text: string): TemplateResult {
     return html`
       <div class="frame" role="img" aria-label=${text}>
-        <ha-icon icon=${icon}></ha-icon>
+        <eg-icon name=${icon}></eg-icon>
         <span>${text}</span>
       </div>
       ${nothing}
@@ -149,8 +152,8 @@ export class EgCallVideo extends LitElement {
       padding: 8px;
       box-sizing: border-box;
     }
-    .frame ha-icon {
-      --mdc-icon-size: 40px;
+    .frame eg-icon {
+      --eg-icon-size: 40px;
     }
     .frame span {
       font-size: 0.85rem;
