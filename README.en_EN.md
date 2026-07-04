@@ -181,6 +181,29 @@ automation:
           entity_id: lock.YOUR_INTERCOM
 ```
 
+## 📞 Call screen card
+
+Ready-to-use Lovelace card `custom:eg-intercom-call-card` — the whole call on one screen: guest video, "Open door" with a protected gesture, accept/hang up, microphone. Driven by `sensor.<intercom>_call_state`, styled with Home Assistant theme tokens (dark/light), responsive from phone to wall panel.
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/incoming.png" alt="Incoming call" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/active.png" alt="In call" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/light-theme.png" alt="Light theme" width="100%"/></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Incoming call</b><br/><sub>video before answering, answer window, slide-to-open</sub></td>
+    <td align="center"><b>In call</b><br/><sub>LIVE, timer, mic / sound / hang up</sub></td>
+    <td align="center"><b>Light theme</b><br/><sub>out of the box, HA tokens</sub></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/features/intercom-two-way-audio/screenshots/wall-panel.png" alt="Wall panel / desktop" width="760"/><br/><b>Wall panel / desktop</b> — two columns: video hero + controls (slider centered, buttons pinned to the bottom)</td>
+  </tr>
+</table>
+
 ## Automation example: balance
 Here is an example of automation for low balance notification:
 
