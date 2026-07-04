@@ -182,13 +182,13 @@ export class EgOpenControl extends LitElement {
       text = "Не удалось открыть · Повторить";
       cls = "st-error";
     } else if (this.status === "opening") {
-      return html``; // «Открываю…» уже на контроле — не дублируем подписью
+      text = ""; // «Открываю…» уже на контроле — подписью не дублируем
     } else if (this.mode === "slide") {
       text = "Сдвиньте, чтобы открыть дверь";
-    } else {
-      return html``; // hold/tap: текст на пилюле, подписи в покое нет
     }
-    return html`<span class="caption ${cls}">${text}</span>`;
+    // Строку подписи рендерим ВСЕГДА (пустую → &nbsp;): фиксированная высота
+    // блока во всех состояниях, чтобы контрол не прыгал по вертикали.
+    return html`<span class="caption ${cls}">${text || html`&nbsp;`}</span>`;
   }
 
   /** Текст на контроле. */
