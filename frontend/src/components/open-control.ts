@@ -3,7 +3,7 @@
 // SliderStages/HoldStages): трек 80 / ключ-thumb 68, торец-замок, стадии
 // покой→тянем→«Открыто», подпись снизу. Математика жеста — экспортируемые
 // pure-функции (юнит-тесты). Иконки — единый набор lucide (eg-icon).
-import { LitElement, css, html, type TemplateResult } from "lit";
+import { LitElement, css, html, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import type { OpenAction } from "../util/open-action.js";
@@ -64,6 +64,14 @@ export class EgOpenControl extends LitElement {
     this._reset(); // отменить RAF hold/slide при удалении элемента (гигиена)
   }
 
+  protected override updated(changed: PropertyValues): void {
+    // Карта вернула контрол в покой/ошибку (после «Открыто» или неудачи) →
+    // возвращаем ключ в начало, чтобы жест можно было повторить.
+    if (changed.has("status") && (this.status === "idle" || this.status === "error")) {
+      this._progress = 0;
+    }
+  }
+
   private _fireOpen(): void {
     this.dispatchEvent(new CustomEvent("open", { bubbles: true, composed: true }));
   }
@@ -76,12 +84,27 @@ export class EgOpenControl extends LitElement {
     this._trackRect = null;
   }
 
+  /**
+   * Жест доведён до конца: фиксируем контрол в конце (`_progress = 1`) и шлём
+   * `open`, но НЕ сбрасываем в начало. Ключ «залипает» в конце на время попытки
+   * открытия (loading), пока карта держит `status="opening"`; реальный сброс —
+   * по возврату status в idle/error (см. `updated`). Иначе ключ отскакивал в
+   * начало и потом резко прыгал в «Открыто».
+   */
+  private _commit(): void {
+    if (this._raf) cancelAnimationFrame(this._raf);
+    this._raf = 0;
+    this._arming = false;
+    this._progress = 1;
+    this._trackRect = null;
+    this._fireOpen();
+  }
+
   // ---- hold ----
   private _holdTick = (): void => {
     this._progress = holdProgress(performance.now() - this._holdStart, HOLD_MS);
     if (this._progress >= 1) {
-      this._reset();
-      this._fireOpen();
+      this._commit();
       return;
     }
     this._raf = requestAnimationFrame(this._holdTick);
@@ -122,8 +145,7 @@ export class EgOpenControl extends LitElement {
 
   private _onSlideUp = (): void => {
     if (this._progress >= SLIDE_COMPLETE) {
-      this._reset();
-      this._fireOpen();
+      this._commit();
     } else {
       this._reset();
     }
@@ -160,7 +182,7 @@ export class EgOpenControl extends LitElement {
       text = "Не удалось открыть · Повторить";
       cls = "st-error";
     } else if (this.status === "opening") {
-      text = "Открываю…";
+      return html``; // «Открываю…» уже на контроле — не дублируем подписью
     } else if (this.mode === "slide") {
       text = "Сдвиньте, чтобы открыть дверь";
     } else {
@@ -172,27 +194,30 @@ export class EgOpenControl extends LitElement {
   /** Текст на контроле. */
   private _labelText(): string {
     if (this.status === "opened") return "Открыто";
+    if (this.status === "opening") return "Открываю…";
     if (this.mode === "slide") return "Открыть";
     return "Удерживайте, чтобы открыть";
   }
 
-  /** Иконка ключа/замка на пилюле hold/tap. */
+  /** Иконка ключа/замка на пилюле hold/tap; на время открытия — спиннер. */
   private _barIcon(): string {
+    if (this.status === "opening") return "loader-circle";
     return this.status === "opened" ? "lock-open" : "key-round";
   }
 
-  /** Иконка кружка-слайдера: ключ-thumb едет к открытому замку (всегда ключ). */
+  /** Иконка кружка-слайдера: ключ едет к замку; на время открытия — спиннер. */
   private _knobIcon(): string {
-    return "key-round";
+    return this.status === "opening" ? "loader-circle" : "key-round";
   }
 
-  /** Визуальный прогресс: при «открыто»/«ошибка» — заполнено целиком. */
+  /** Визуальный прогресс: на время открытия и при успехе — заполнено до конца. */
   private _vp(): number {
-    return this.status === "opened" ? 1 : this._progress;
+    return this.status === "opening" || this.status === "opened" ? 1 : this._progress;
   }
 
   private _statusClass(): string {
     if (this.status === "opened") return "st-opened";
+    if (this.status === "opening") return "st-opening";
     if (this.status === "error") return "st-error";
     return "";
   }
@@ -239,7 +264,7 @@ export class EgOpenControl extends LitElement {
         <div class="fill"></div>
         <span class="label">${this._labelText()}</span>
         <div
-          class="knob ${this.disabled ? "off" : ""}"
+          class="knob ${this.disabled ? "off" : ""} ${this.status === "opening" ? "loading" : ""}"
           @pointerdown=${this._onSlideDown}
           @pointermove=${this._onSlideMove}
           @pointerup=${this._onSlideUp}
@@ -299,6 +324,13 @@ export class EgOpenControl extends LitElement {
           40px * var(--eg-scale, 1) + var(--eg-prog, 0) * (100% - 80px * var(--eg-scale, 1))
         );
         transition: none;
+      }
+      /* открытие (loading): ключ залип в конце, заливка тянется под него + пульс */
+      .track.st-opening .fill {
+        width: calc(100% - 40px * var(--eg-scale, 1));
+        background: var(--eg-primary);
+        opacity: 0.15;
+        animation: eg-pulse 1.1s ease-in-out infinite;
       }
       /* закрытый замок под ключом (проявляется при отъезде): иконка 20, центр под ключом */
       .lock-under {
@@ -430,10 +462,34 @@ export class EgOpenControl extends LitElement {
       .caption.st-error {
         color: var(--eg-error);
       }
+      /* спиннер на ключе слайдера / иконке пилюли во время открытия */
+      .knob.loading eg-icon,
+      .pill.st-opening .content eg-icon {
+        animation: eg-spin 0.8s linear infinite;
+      }
+      @keyframes eg-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @keyframes eg-pulse {
+        0%,
+        100% {
+          opacity: 0.12;
+        }
+        50% {
+          opacity: 0.26;
+        }
+      }
       @media (prefers-reduced-motion: reduce) {
         .fill,
         .knob {
           transition: none;
+        }
+        .knob.loading eg-icon,
+        .pill.st-opening .content eg-icon,
+        .track.st-opening .fill {
+          animation: none;
         }
       }
     `,
