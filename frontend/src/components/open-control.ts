@@ -1,10 +1,13 @@
 // Адаптивный контрол открытия двери: slide (тач) | hold (десктоп) | tap.
-// Защита от случайного открытия + «не инородно» (на стиле HA-слайдера, theme-токены).
-// Чистая математика жеста вынесена в экспортируемые функции (юнит-тесты).
+// Защита от случайного открытия, облик — по макетам pencil/design.pen (узлы
+// SliderStages/HoldStages): трек 80 / ключ-thumb 68, торец-замок, стадии
+// покой→тянем→«Открыто», подпись снизу. Математика жеста — экспортируемые
+// pure-функции (юнит-тесты). Иконки — единый набор lucide (eg-icon).
 import { LitElement, css, html, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
 import type { OpenAction } from "../util/open-action.js";
+import { egTokens } from "../theme/tokens.js";
 import "./eg-icon.js";
 
 /** Зажать в [0..1]. */
@@ -32,6 +35,8 @@ export function holdProgress(elapsedMs: number, durationMs: number): number {
 export const SLIDE_COMPLETE = 0.92;
 /** Длительность удержания для hold. */
 export const HOLD_MS = 800;
+/** Диаметр ключа-thumb (px) — совпадает с CSS --knob. */
+const KNOB = 68;
 
 /**
  * `<eg-open-control mode hold|slide|tap>` — на завершении жеста шлёт `open`-событие.
@@ -98,13 +103,7 @@ export class EgOpenControl extends LitElement {
 
   private _onSlideMove = (e: PointerEvent): void => {
     if (!this._arming || !this._trackRect) return;
-    const knob = 60;
-    this._progress = slideProgress(
-      e.clientX,
-      this._trackRect.left,
-      this._trackRect.width,
-      knob,
-    );
+    this._progress = slideProgress(e.clientX, this._trackRect.left, this._trackRect.width, KNOB);
   };
 
   private _onSlideUp = (): void => {
@@ -122,51 +121,74 @@ export class EgOpenControl extends LitElement {
   };
 
   protected override render(): TemplateResult {
-    if (this.mode === "tap") return this._renderTap();
-    if (this.mode === "slide") return this._renderSlide();
-    return this._renderHold();
+    const control =
+      this.mode === "tap"
+        ? this._renderTap()
+        : this.mode === "slide"
+          ? this._renderSlide()
+          : this._renderHold();
+    return html`
+      <div class="wrap" style="--eg-prog:${this._vp()}">
+        ${control}
+        ${this._caption()}
+      </div>
+    `;
   }
 
-  private _caption(): string {
-    if (this.status === "opening") return "Открываю…";
+  /** Подпись под контролом (цвет по статусу). */
+  private _caption(): TemplateResult {
+    let text = "";
+    let cls = "";
+    if (this.status === "opened") {
+      text = "Дверь открыта";
+      cls = "st-opened";
+    } else if (this.status === "error") {
+      text = "Не удалось открыть · Повторить";
+      cls = "st-error";
+    } else if (this.status === "opening") {
+      text = "Открываю…";
+    } else if (this.mode === "slide") {
+      text = "Сдвиньте, чтобы открыть дверь";
+    } else {
+      return html``; // hold/tap: текст на пилюле, подписи в покое нет
+    }
+    return html`<span class="caption ${cls}">${text}</span>`;
+  }
+
+  /** Текст на контроле. */
+  private _labelText(): string {
     if (this.status === "opened") return "Открыто";
-    if (this.status === "error") return "Ошибка";
-    // hold (десктоп) не самоочевиден — явно просим удерживать. slide/tap — коротко.
-    if (this.mode === "hold") return "Удерживайте, чтобы открыть";
-    return "Открыть";
+    if (this.mode === "slide") return "Открыть";
+    return "Удерживайте, чтобы открыть";
   }
 
-  /** Иконка плашки hold/tap: закрытый замок → открытый при успехе. */
-  private _iconName(): string {
-    if (this.status === "opened") return "lock-open";
-    return "lock";
+  /** Иконка ключа/замка на пилюле hold/tap. */
+  private _barIcon(): string {
+    return this.status === "opened" ? "lock-open" : "key-round";
   }
 
-  /** Иконка кружка-слайдера: ключ (тащим к замку), замок при результате. */
+  /** Иконка кружка-слайдера: ключ-thumb едет к открытому замку (всегда ключ). */
   private _knobIcon(): string {
-    if (this.status === "opened") return "lock-open";
-    if (this.status === "error") return "lock";
     return "key-round";
   }
 
   /** Визуальный прогресс: при «открыто»/«ошибка» — заполнено целиком. */
   private _vp(): number {
-    return this.status === "opened" || this.status === "error" ? 1 : this._progress;
+    return this.status === "opened" ? 1 : this._progress;
   }
 
   private _statusClass(): string {
     if (this.status === "opened") return "st-opened";
     if (this.status === "error") return "st-error";
-    if (this.status === "opening") return "st-opening";
     return "";
   }
 
   private _renderTap(): TemplateResult {
     return html`
-      <button class="bar tap ${this._statusClass()}" ?disabled=${this.disabled} @click=${this._onTap}
+      <button class="pill tap ${this._statusClass()}" ?disabled=${this.disabled} @click=${this._onTap}
               aria-label=${this.label}>
-        <div class="fill" style="width:${this._vp() * 100}%"></div>
-        <span class="bar-label"><eg-icon name=${this._iconName()}></eg-icon>${this._caption()}</span>
+        <div class="fill"></div>
+        <span class="content"><eg-icon name=${this._barIcon()}></eg-icon>${this._labelText()}</span>
       </button>
     `;
   }
@@ -174,7 +196,7 @@ export class EgOpenControl extends LitElement {
   private _renderHold(): TemplateResult {
     return html`
       <button
-        class="bar hold ${this._arming ? "arming" : ""} ${this._statusClass()}"
+        class="pill hold ${this._arming ? "arming" : ""} ${this._statusClass()}"
         ?disabled=${this.disabled}
         aria-label="${this.label} — удерживайте"
         @pointerdown=${this._onHoldDown}
@@ -182,31 +204,26 @@ export class EgOpenControl extends LitElement {
         @pointercancel=${this._onHoldUp}
         @pointerleave=${this._onHoldUp}
       >
-        <div class="fill" style="width:${this._vp() * 100}%"></div>
-        <span class="bar-label">
-          <eg-icon name=${this._iconName()}></eg-icon>
-          ${this._caption()}
-        </span>
+        <div class="fill"></div>
+        <span class="content"><eg-icon name=${this._barIcon()}></eg-icon>${this._labelText()}</span>
       </button>
     `;
   }
 
   private _renderSlide(): TemplateResult {
-    const vp = this._vp();
     return html`
       <div
         class="track ${this._statusClass()} ${this._arming ? "dragging" : ""}"
-        style="--eg-prog:${vp}"
         role="slider"
         aria-label=${this.label}
         aria-valuemin="0"
         aria-valuemax="100"
-        aria-valuenow=${Math.round(vp * 100)}
+        aria-valuenow=${Math.round(this._vp() * 100)}
       >
-        <eg-icon class="hint hint-l" name="lock"></eg-icon>
-        <eg-icon class="hint hint-r" name="lock-open"></eg-icon>
+        <eg-icon class="lock-under" name="lock"></eg-icon>
+        <eg-icon class="end" name="lock-open"></eg-icon>
         <div class="fill"></div>
-        <span class="bar-label">${this._caption()}</span>
+        <span class="label">${this._labelText()}</span>
         <div
           class="knob ${this.disabled ? "off" : ""}"
           @pointerdown=${this._onSlideDown}
@@ -220,146 +237,188 @@ export class EgOpenControl extends LitElement {
     `;
   }
 
-  static override styles = css`
-    :host {
-      display: block;
-    }
-    .bar,
-    .track {
-      position: relative;
-      overflow: hidden;
-      min-height: 68px;
-      border-radius: 34px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background: var(--secondary-background-color);
-      color: var(--primary-text-color);
-      font-weight: 600;
-      font-size: 1.05rem;
-      user-select: none;
-      touch-action: none;
-    }
-    .bar {
-      width: 100%;
-      max-width: 340px;
-      margin: 0 auto;
-      border: none;
-      cursor: pointer;
-      font: inherit;
-      font-weight: 600;
-    }
-    /* слайдер — подтверждение действия: узкий, не во всю ширину (как в оригинале) */
-    .track {
-      box-sizing: border-box;
-      width: 100%;
-      max-width: 300px;
-      margin: 0 auto;
-      --knob: 60px; /* крупная цель под палец: > 48dp Material / 44pt Apple HIG */
-    }
-    .bar[disabled] {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    .fill {
-      position: absolute;
-      inset: 0 auto 0 0;
-      /* Открыть = accent (НЕ красный — красный за «Завершить», см. spec §3). */
-      background: var(--primary-color);
-      opacity: 0.16;
-      transition: width 80ms linear;
-    }
-    /* на слайдере заливка следует за кнопкой через --eg-prog (тот же источник, без лага) */
-    .track .fill {
-      width: calc(var(--eg-prog, 0) * 100%);
-    }
-    .track.dragging .fill {
-      transition: none;
-    }
-    .bar-label,
-    .bar > span {
-      position: relative;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      z-index: 1;
-    }
-    /* подсказки направления: закрытый замок слева (старт), открытый справа (цель) */
-    .hint {
-      position: absolute;
-      top: 50%;
-      transform: translateY(-50%);
-      --eg-icon-size: 22px;
-      color: var(--secondary-text-color);
-      opacity: 0.5;
-      z-index: 0;
-    }
-    .hint-l {
-      left: 20px;
-    }
-    .hint-r {
-      right: 20px;
-    }
-    /* кружок слайдера: позиция строго по прогрессу (CSS left от --eg-prog, без JS-трансформа) */
-    .knob {
-      position: absolute;
-      top: 4px;
-      left: calc(var(--eg-prog, 0) * (100% - var(--knob, 60px)));
-      width: var(--knob, 60px);
-      height: var(--knob, 60px);
-      border-radius: 50%;
-      background: var(--primary-color);
-      color: var(--text-primary-color, #fff);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      cursor: grab;
-      touch-action: none;
-      z-index: 2;
-      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.28);
-      transition: left 0.18s ease;
-    }
-    .track.dragging .knob {
-      transition: none;
-      cursor: grabbing;
-    }
-    .knob.off {
-      opacity: 0.5;
-    }
-    .knob eg-icon {
-      --eg-icon-size: 26px;
-    }
-    .bar eg-icon {
-      --eg-icon-size: 24px;
-    }
-    /* «Открыто»/«Ошибка»: на плашке hold/tap — вся плашка; на слайдере — ТОЛЬКО кнопка */
-    .bar.st-opened .fill {
-      background: var(--success-color, #2e7d32);
-      opacity: 1;
-    }
-    .bar.st-error .fill {
-      background: var(--error-color, #c62828);
-      opacity: 1;
-    }
-    .bar.st-opened .bar-label,
-    .bar.st-error .bar-label {
-      color: #fff;
-    }
-    .bar.st-opened ha-icon,
-    .bar.st-error ha-icon {
-      color: #fff;
-    }
-    .track.st-opened .knob {
-      background: var(--success-color, #2e7d32);
-    }
-    .track.st-error .knob {
-      background: var(--error-color, #c62828);
-    }
-    @media (prefers-reduced-motion: reduce) {
-      .fill,
-      .knob {
+  static override styles = [
+    egTokens,
+    css`
+      :host {
+        display: block;
+      }
+      .wrap {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        align-items: center;
+        width: 100%;
+      }
+      /* ---- общая заливка-прогресс ---- */
+      .fill {
+        position: absolute;
+        inset: 0 auto 0 0;
+        width: calc(var(--eg-prog, 0) * 100%);
+        background: var(--eg-primary);
+        opacity: 0.15;
+        transition: width 0.2s ease;
+      }
+      /* ---- slide: трек 300×80 (макет: фиксированный, центрирован — не на всю ширину) ---- */
+      .track {
+        position: relative;
+        width: 300px;
+        max-width: 100%;
+        height: 80px;
+        border-radius: var(--eg-r-full);
+        background: var(--eg-elevated);
+        overflow: hidden;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        touch-action: none;
+        user-select: none;
+      }
+      /* в покое заливки нет (иначе «залипло»); появляется только при перетаскивании */
+      .track .fill {
+        width: 0;
+      }
+      /* при drag правый край заливки строго = центр ключа (не обгоняет) */
+      .track.dragging .fill {
+        width: calc(40px + var(--eg-prog, 0) * (100% - 80px));
         transition: none;
       }
-    }
-  `;
+      /* закрытый замок под ключом (проявляется при отъезде): иконка 20, центр под ключом */
+      .lock-under {
+        position: absolute;
+        left: 30px;
+        top: 50%;
+        transform: translateY(-50%);
+        --eg-icon-size: 20px;
+        color: var(--eg-text-3);
+        z-index: 0;
+      }
+      /* торец: открытый замок (макет: иконка 20, центр 28px от правого края) */
+      .end {
+        position: absolute;
+        right: 18px;
+        top: 50%;
+        transform: translateY(-50%);
+        --eg-icon-size: 20px;
+        color: var(--eg-text-3);
+        z-index: 0;
+      }
+      .track .label {
+        position: relative;
+        z-index: 1;
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--eg-text);
+      }
+      .knob {
+        position: absolute;
+        top: 6px;
+        left: calc(6px + var(--eg-prog, 0) * (100% - 80px));
+        width: 68px;
+        height: 68px;
+        border-radius: 50%;
+        background: var(--eg-primary);
+        color: var(--eg-on-fill);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: grab;
+        touch-action: none;
+        z-index: 2;
+        --eg-icon-size: 28px;
+        transition: left 0.18s ease;
+      }
+      .track.dragging .knob {
+        transition: none;
+        cursor: grabbing;
+      }
+      .knob.off {
+        opacity: 0.5;
+      }
+      /* slide success: зелёный трек + «Открыто» + ключ справа */
+      .track.st-opened .fill {
+        background: var(--eg-success);
+        opacity: 1;
+        width: 100%;
+      }
+      .track.st-opened .label {
+        color: var(--eg-on-fill);
+      }
+      .track.st-opened .knob {
+        background: var(--eg-success);
+      }
+      /* success: ключ-knob уехал вправо и накрыл торец — торец прячем */
+      .track.st-opened .end {
+        display: none;
+      }
+      /* ---- hold/tap: outlined-пилюля, контент неподвижен, заливка бежит ---- */
+      .pill {
+        position: relative;
+        width: 100%;
+        min-height: 64px;
+        border-radius: var(--eg-r-full);
+        border: 2px solid var(--eg-primary);
+        background: transparent;
+        color: var(--eg-text);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden;
+        cursor: pointer;
+        touch-action: none;
+        user-select: none;
+        font: inherit;
+        padding: 0 16px;
+      }
+      .pill.arming .fill {
+        transition: none;
+      }
+      .pill .fill {
+        opacity: 0.2;
+      }
+      .pill .content {
+        position: relative;
+        z-index: 1;
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 17px;
+        font-weight: 600;
+        --eg-icon-size: 24px;
+      }
+      .pill[disabled] {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      .pill.st-opened {
+        border-color: var(--eg-success);
+      }
+      .pill.st-opened .fill {
+        background: var(--eg-success);
+        opacity: 1;
+        width: 100%;
+      }
+      .pill.st-opened .content {
+        color: var(--eg-on-fill);
+      }
+      /* ---- подпись под контролом ---- */
+      .caption {
+        font-size: 12px;
+        color: var(--eg-text-3);
+        text-align: center;
+      }
+      .caption.st-opened {
+        color: var(--eg-success);
+      }
+      .caption.st-error {
+        color: var(--eg-error);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .fill,
+        .knob {
+          transition: none;
+        }
+      }
+    `,
+  ];
 }

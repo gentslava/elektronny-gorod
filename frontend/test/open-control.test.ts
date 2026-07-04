@@ -30,6 +30,10 @@ describe("slideProgress", () => {
     expect(slideProgress(1000, 1000, 300, 56)).toBeCloseTo(0, 1);
     expect(slideProgress(1300, 1000, 300, 56)).toBe(1);
   });
+  it("knob 68 (макет): край справа завершает, центр kнопки у левого края ≈ 0", () => {
+    expect(slideProgress(300, 0, 300, 68)).toBeGreaterThanOrEqual(SLIDE_COMPLETE);
+    expect(slideProgress(34, 0, 300, 68)).toBeCloseTo(0, 1);
+  });
 });
 
 describe("holdProgress", () => {
