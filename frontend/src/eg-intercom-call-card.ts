@@ -6,7 +6,7 @@
 import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
-import { type CallPhase, type CallView, deriveView, toPhase } from "./state-machine.js";
+import { type ActionKind, type CallPhase, type CallView, deriveView, toPhase } from "./state-machine.js";
 import { pickCameraEntity } from "./components/call-video.js";
 import "./components/open-control.js";
 import "./components/eg-icon.js";
@@ -276,6 +276,11 @@ export class EgIntercomCallCard extends LitElement {
     this.dispatchEvent(new CustomEvent("eg-dismiss", { bubbles: true, composed: true }));
   };
 
+  /** Повторить (error/connection_lost) — уточняется в Slice 4. */
+  private _retry = (): void => {
+    void this.hass?.callService("elektronny_gorod", "answer");
+  };
+
   private _timerText(): string {
     const start = this._startedAtMs;
     if (start === undefined) return "";
@@ -321,9 +326,6 @@ export class EgIntercomCallCard extends LitElement {
               : view.isError
                 ? html`<div class="frame err"><eg-icon name="phone-off"></eg-icon><span>Не удалось установить вызов</span></div>`
                 : nothing}
-            ${view.busy
-              ? html`<div class="connecting" aria-hidden="true"><div class="spinner"></div></div>`
-              : nothing}
           </div>
           <div class="open-area">
             ${view.showOpen ? this._renderOpen() : nothing}
@@ -351,7 +353,7 @@ export class EgIntercomCallCard extends LitElement {
 
   private _renderStatus(view: CallView, phase: CallPhase): TemplateResult {
     const showTimer = view.showTimer && this._config.timer !== "off";
-    const win = phase === "ringing" ? this._answerWindow() : null;
+    const win = view.showAnswerWindow ? this._answerWindow() : null;
     return html`
       <div class="statusrow">
         <div class="strow">
@@ -427,56 +429,59 @@ export class EgIntercomCallCard extends LitElement {
     `;
   }
 
+  /** Ряд действий — из view.actions (порядок = слева-направо). */
   private _renderActions(view: CallView): TemplateResult {
-    if (view.showAccept || (view.showReject && !view.showHangup)) {
-      return html`
-        <div class="actions">
-          ${view.showReject ? this._circle("phone-off", "Отклонить", this._hangup, "reject") : nothing}
-          ${view.showAccept ? this._circle("phone", "Принять", this._answer, "accept") : nothing}
-        </div>
-      `;
-    }
-    if (view.showHangup) {
-      return html`
-        <div class="actions">
-          ${view.showMic && this._config.mic !== false ? this._renderMic() : nothing}
-          ${view.showMic
-            ? this._circle(
-                this._muted ? "volume-x" : "volume-2",
-                this._muted ? "Звук" : "Динамик",
-                this._toggleMute,
-              )
-            : nothing}
-          ${this._circle("phone-off", "Завершить", this._hangup, "reject")}
-        </div>
-      `;
-    }
-    return html`<div class="actions"></div>`;
+    return html`<div class="actions">${view.actions.map((a) => this._renderAction(a))}</div>`;
   }
 
+  private _renderAction(kind: ActionKind): TemplateResult | typeof nothing {
+    switch (kind) {
+      case "accept":
+        return this._circle("phone", "Принять", this._answer, "accept");
+      case "reject":
+        return this._circle("phone-off", "Отклонить", this._hangup, "reject");
+      case "cancel":
+        return this._circle("phone-off", "Отменить", this._hangup, "reject");
+      case "connecting":
+        return this._spinnerBtn("Соединяем…");
+      case "mic":
+        return this._config.mic === false ? nothing : this._renderMic();
+      case "sound":
+        return this._circle(this._muted ? "volume-x" : "volume-2", "Звук", this._toggleMute);
+      case "hangup":
+        return this._circle("phone-off", "Завершить", this._hangup, "reject");
+      case "retry":
+        return this._circle("refresh-cw", "Повторить", this._retry, "retry");
+      case "close":
+        return this._circle("x", "Закрыть", this._dismiss);
+      default:
+        return nothing;
+    }
+  }
+
+  /** «Соединяем…» — неинтерактивная кнопка со спиннером (elevated, приглушённая). */
+  private _spinnerBtn(label: string): TemplateResult {
+    return html`
+      <div class="circle spinner-btn" role="status" aria-label=${label} aria-busy="true">
+        <span class="ic"><eg-icon class="spin" name="loader-circle"></eg-icon></span>
+        <small>${label}</small>
+      </div>
+    `;
+  }
+
+  /** Микрофон: базовый тумблер. Denied/HTTPS/баннер — уточняется в Slice 4. */
   private _renderMic(): TemplateResult {
-    if (!this._mic.secure) {
-      return html`<button class="circle" disabled aria-label="Микрофон требует HTTPS" title="Микрофон доступен только по HTTPS">
-        <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Нет HTTPS</small>
+    const usable = this._mic.secure && this._micPerm !== "denied";
+    if (!usable) {
+      return html`<button class="circle" disabled aria-label="Микрофон недоступен"
+              title="Микрофон доступен только по HTTPS и с разрешением браузера">
+        <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Микрофон</small>
       </button>`;
     }
-    if (this._micPerm === "denied") {
-      return html`<button class="circle" disabled aria-label="Доступ к микрофону запрещён" title="Разрешите микрофон в настройках браузера">
-        <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Запрещён</small>
-      </button>`;
-    }
-    if (this._micActive) {
-      return html`<button class="circle mic-on" @click=${this._toggleMic} aria-label="Выключить микрофон">
-        <span class="ic"><eg-icon name="mic"></eg-icon></span><small>Микрофон</small>
-      </button>`;
-    }
-    if (this._micPerm !== "granted") {
-      return html`<button class="circle" @click=${this._toggleMic} aria-label="Разрешить микрофон">
-        <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Разрешить</small>
-      </button>`;
-    }
-    return html`<button class="circle" @click=${this._toggleMic} aria-label="Включить микрофон">
-      <span class="ic"><eg-icon name="mic-off"></eg-icon></span><small>Микрофон</small>
+    const icon = this._micActive ? "mic" : "mic-off";
+    const aria = this._micActive ? "Выключить микрофон" : "Включить микрофон";
+    return html`<button class="circle" @click=${this._toggleMic} aria-label=${aria}>
+      <span class="ic"><eg-icon name=${icon}></eg-icon></span><small>Микрофон</small>
     </button>`;
   }
 
@@ -619,29 +624,13 @@ export class EgIntercomCallCard extends LitElement {
         position: absolute;
         inset: 0;
       }
-      .connecting {
-        position: absolute;
-        inset: 0;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        background: var(--eg-scrim);
-      }
-      .spinner {
-        width: 44px;
-        height: 44px;
-        border-radius: 50%;
-        border: 4px solid rgba(255, 255, 255, 0.3);
-        border-top-color: #fff;
-        animation: spin 0.9s linear infinite;
-      }
       @keyframes spin {
         to {
           transform: rotate(360deg);
         }
       }
       @media (prefers-reduced-motion: reduce) {
-        .spinner {
+        .spin {
           animation: none;
         }
       }
@@ -670,24 +659,25 @@ export class EgIntercomCallCard extends LitElement {
       .open-area eg-open-control {
         width: 100%;
       }
-      /* ---- ряд действий (кнопки заменяются в Slice 1–2) ---- */
+      /* ---- ряд действий: круги top-align (как в макете), gap 28 ---- */
       .actions {
         display: flex;
         gap: 28px;
         justify-content: center;
+        align-items: flex-start;
         flex-wrap: wrap;
       }
       .circle {
         display: flex;
         flex-direction: column;
         align-items: center;
-        gap: 6px;
+        gap: 8px;
         border: none;
         background: none;
         cursor: pointer;
         color: var(--eg-text);
         font: inherit;
-        min-width: 68px;
+        padding: 0;
       }
       .circle .ic {
         width: 68px;
@@ -711,6 +701,8 @@ export class EgIntercomCallCard extends LitElement {
         cursor: not-allowed;
         opacity: 0.5;
       }
+      /* Все кнопки ряда — единый стиль: круг 68, иконка 28, подпись fs12/fw500/text-2.
+         Акцент действия — только ЦВЕТОМ круга (см. call-card-ux-production.md §6/§9). */
       .circle.accept .ic {
         background: var(--eg-success);
         color: var(--eg-on-fill);
@@ -719,9 +711,20 @@ export class EgIntercomCallCard extends LitElement {
         background: var(--eg-error);
         color: var(--eg-on-fill);
       }
-      .circle.mic-on .ic {
+      .circle.retry .ic {
         background: var(--eg-primary);
         color: var(--eg-on-fill);
+      }
+      /* «Соединяем…» — неинтерактивно, приглушённый крутящийся loader */
+      .spinner-btn {
+        cursor: default;
+      }
+      .spinner-btn small {
+        color: var(--eg-text-3);
+      }
+      .spinner-btn .ic eg-icon.spin {
+        color: var(--eg-text-2);
+        animation: spin 0.9s linear infinite;
       }
       /* ---- idle-заглушка (детально — в Slice 5) ---- */
       ha-card.idle {

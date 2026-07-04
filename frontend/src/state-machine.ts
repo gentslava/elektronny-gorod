@@ -1,5 +1,5 @@
 // Чистая логика экрана вызова: фаза вызова (sensor.*_call_state) → что показывать.
-// Без DOM/Lit — юнит-тестируемо (vitest). Соответствует call-card-ux-spec.md §5.
+// Без DOM/Lit — юнит-тестируемо (vitest). Соответствует call-card-ux-production.md §5.
 
 export type CallPhase =
   | "idle"
@@ -11,18 +11,30 @@ export type CallPhase =
 
 export type VideoSource = "call" | "doorbell" | "none";
 
+/** Действие в нижнем ряду. Порядок массива = порядок слева-направо. */
+export type ActionKind =
+  | "accept" // Принять (success, primary)
+  | "reject" // Отклонить (error)
+  | "cancel" // Отменить (error) — на connecting
+  | "connecting" // «Соединяем…» — disabled-спиннер
+  | "mic" // Микрофон (состояния — в карточке)
+  | "sound" // Звук (mute/unmute)
+  | "hangup" // Завершить (error, primary)
+  | "retry" // Повторить (primary) — error/connection_lost
+  | "close"; // Закрыть (нейтральная) — ended
+
 export interface CallView {
   /** Карточка видима (idle/ended-после-скрытия → false). */
   visible: boolean;
   /** Какую камеру показывать: активный вызов (видео+звук) / домофон (ringing) / нет. */
   video: VideoSource;
-  showAccept: boolean;
-  showReject: boolean;
-  showHangup: boolean;
+  /** Набор кнопок нижнего ряда (порядок = слева-направо). */
+  actions: ActionKind[];
   showOpen: boolean;
-  showMic: boolean;
   showTimer: boolean;
-  /** Идёт соединение (connecting) — показать спиннер вместо статичного статуса. */
+  /** Полоса окна ответа (только входящий). */
+  showAnswerWindow: boolean;
+  /** Идёт соединение (connecting) — спиннер в кнопке «Соединяем…». */
   busy: boolean;
   /** Терминальная ошибка — карточка гасится по локальному таймеру (контракт 3a). */
   isError: boolean;
@@ -45,12 +57,10 @@ export function toPhase(state: string | undefined | null): CallPhase {
 const HIDDEN: CallView = {
   visible: false,
   video: "none",
-  showAccept: false,
-  showReject: false,
-  showHangup: false,
+  actions: [],
   showOpen: false,
-  showMic: false,
   showTimer: false,
+  showAnswerWindow: false,
   busy: false,
   isError: false,
 };
@@ -58,12 +68,11 @@ const HIDDEN: CallView = {
 /**
  * Свести фазу вызова к видимой модели экрана.
  *
- * - idle / ended → карточка скрыта (ended гасится после краткого показа на стороне
- *   карточки таймером; модель здесь — «скрыто»);
- * - ringing → видео домофона (без звука) + Принять/Отклонить/Открыть;
- * - connecting → видео домофона + спиннер + Отклонить/Открыть (Принять убран);
- * - active → видео вызова (видео+звук) + Открыть/Микрофон/Завершить + таймер;
- * - error → краткий показ ошибки + Открыть/Завершить (контракт 3a: карточка гасит сама).
+ * - idle / ended → карточка скрыта (ended гасится после краткого показа таймером);
+ * - ringing → видео домофона (без звука) + Отклонить/Принять + Открыть + окно ответа;
+ * - connecting → видео домофона + Отменить/«Соединяем…»(спиннер) + Открыть;
+ * - active → видео вызова (видео+звук) + Микрофон/Звук/Завершить + Открыть + таймер;
+ * - error → краткий показ ошибки + Повторить/Завершить (карточка гасит сама, 3a).
  */
 export function deriveView(phase: CallPhase): CallView {
   switch (phase) {
@@ -72,16 +81,16 @@ export function deriveView(phase: CallPhase): CallView {
         ...HIDDEN,
         visible: true,
         video: "doorbell",
-        showAccept: true,
-        showReject: true,
+        actions: ["reject", "accept"],
         showOpen: true,
+        showAnswerWindow: true,
       };
     case "connecting":
       return {
         ...HIDDEN,
         visible: true,
         video: "doorbell",
-        showReject: true,
+        actions: ["cancel", "connecting"],
         showOpen: true,
         busy: true,
       };
@@ -90,9 +99,8 @@ export function deriveView(phase: CallPhase): CallView {
         ...HIDDEN,
         visible: true,
         video: "call",
-        showHangup: true,
+        actions: ["mic", "sound", "hangup"],
         showOpen: true,
-        showMic: true,
         showTimer: true,
       };
     case "error":
@@ -100,7 +108,7 @@ export function deriveView(phase: CallPhase): CallView {
         ...HIDDEN,
         visible: true,
         video: "none",
-        showHangup: true,
+        actions: ["retry", "hangup"],
         showOpen: true,
         isError: true,
       };

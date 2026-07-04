@@ -23,46 +23,42 @@ describe("deriveView", () => {
     expect(deriveView("ended").visible).toBe(false);
   });
 
-  it("ringing → видео домофона + Принять/Отклонить/Открыть, без Завершить/микрофона", () => {
+  it("ringing → видео домофона + [Отклонить, Принять] + Открыть + окно ответа", () => {
     const v = deriveView("ringing");
     expect(v).toMatchObject({
       visible: true,
       video: "doorbell",
-      showAccept: true,
-      showReject: true,
+      actions: ["reject", "accept"],
       showOpen: true,
-      showHangup: false,
-      showMic: false,
+      showAnswerWindow: true,
       showTimer: false,
     });
   });
 
-  it("connecting → спиннер, Принять убран, Отклонить/Открыть есть", () => {
+  it("connecting → busy + [Отменить, «Соединяем…»] + Открыть", () => {
     const v = deriveView("connecting");
     expect(v.busy).toBe(true);
-    expect(v.showAccept).toBe(false);
-    expect(v.showReject).toBe(true);
+    expect(v.actions).toEqual(["cancel", "connecting"]);
     expect(v.showOpen).toBe(true);
+    expect(v.showAnswerWindow).toBe(false);
   });
 
-  it("active → видео вызова + Открыть/Микрофон/Завершить/таймер, без Принять", () => {
+  it("active → видео вызова + [Микрофон, Звук, Завершить] + Открыть + таймер", () => {
     const v = deriveView("active");
     expect(v).toMatchObject({
       visible: true,
       video: "call",
-      showAccept: false,
-      showHangup: true,
+      actions: ["mic", "sound", "hangup"],
       showOpen: true,
-      showMic: true,
       showTimer: true,
     });
   });
 
-  it("error → видим, помечен isError, Завершить/Открыть доступны", () => {
+  it("error → видим, isError, [Повторить, Завершить] + Открыть", () => {
     const v = deriveView("error");
     expect(v.visible).toBe(true);
     expect(v.isError).toBe(true);
-    expect(v.showHangup).toBe(true);
-    expect(v.showAccept).toBe(false);
+    expect(v.actions).toEqual(["retry", "hangup"]);
+    expect(v.showOpen).toBe(true);
   });
 });
