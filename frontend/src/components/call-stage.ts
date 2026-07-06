@@ -42,7 +42,6 @@ export class EgCallStage extends LitElement {
   /** Показать чип «Звук выкл.» (звук выключен пользователем) — подсказка, почему тихо. */
   @property({ type: Boolean }) public soundOff = false;
   /** Таймстамп потока (bottom-left), пусто = скрыт. */
-  @property() public timestamp = "";
   @property() public stageState: StageState = "live";
   /** Автоплей со звуком заблокирован — CTA + тап по всему видео снимают mute. */
   @property({ type: Boolean }) public audioBlocked = false;
@@ -70,7 +69,6 @@ export class EgCallStage extends LitElement {
           ? html`<span class="chip"><eg-icon name="volume-x"></eg-icon>Звук выкл.</span>`
           : nothing}
       </div>
-      ${this.timestamp && !this.audioBlocked ? html`<span class="ts">${this.timestamp}</span>` : nothing}
       ${this.audioBlocked
         ? html`
             <button class="tap" @click=${this._unmute} aria-label="Включить звук"></button>
@@ -150,15 +148,6 @@ export class EgCallStage extends LitElement {
       }
       .chip eg-icon {
         --eg-icon-size: calc(14px * var(--eg-scale, 1));
-      }
-      .ts {
-        position: absolute;
-        left: calc(12px * var(--eg-scale, 1));
-        bottom: calc(12px * var(--eg-scale, 1));
-        font-size: calc(10px * var(--eg-scale, 1));
-        color: rgba(255, 255, 255, 0.69);
-        font-variant-numeric: tabular-nums;
-        pointer-events: none;
       }
       /* CTA «включить звук» + прозрачный tap-слой поверх всего видео */
       .tap {

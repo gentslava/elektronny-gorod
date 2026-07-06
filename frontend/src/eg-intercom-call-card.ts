@@ -400,14 +400,6 @@ export class EgIntercomCallCard extends LitElement {
     return !this._mic.secure || this._micPerm === "denied";
   }
 
-  /** Таймстамп потока «DD-MM-YYYY HH:MM:SS» (только на живом видео). */
-  private _timestamp(stageState: StageState): string {
-    if (stageState !== "live") return "";
-    const d = new Date(this._now);
-    const p = (n: number): string => String(n).padStart(2, "0");
-    return `${p(d.getDate())}-${p(d.getMonth() + 1)}-${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
-  }
-
   protected override render(): TemplateResult {
     const active = this._active;
     if (!active) return this._renderIdle();
@@ -435,7 +427,6 @@ export class EgIntercomCallCard extends LitElement {
               .muted=${this._muted || this._audioBlocked}
               .live=${stageState === "live"}
               .soundOff=${phase === "active" && this._muted && !this._audioBlocked}
-              .timestamp=${this._timestamp(stageState)}
               .stageState=${stageState}
               .audioBlocked=${this._audioBlocked}
               @unmute=${this._unmute}
