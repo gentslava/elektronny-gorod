@@ -1134,6 +1134,38 @@ Quality gates:
   approve (P0/P1 нет), контракт `firebase-messaging 0.4.5` верифицирован.
 - **Связь:** [ADR-0011](../decisions/0011-doorbell-fcm-channel.md) (FCM-канал вызова).
 
+### A-87. Фаза вызова залипает в `ringing`/`ended` без FCM `ended` (ring-таймаут)
+
+- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-call-ui`)**.
+  Bug-fix. Root cause подтверждён runtime-evidence (прод logbook/logger 2026-07-06).
+  После merge → RESOLVED.
+- **Severity:** P2 (карточка/сенсор показывают фантомный «Входящий вызов»
+  бесконечно; статус интеграции `loaded`, реального звонка нет).
+- **Area:** `sip/call_controller.py` (`handle_signal` / `_emit_call_state` /
+  `_schedule_ring_timeout` / `_on_ring_expired` / `_schedule_idle_reset`).
+- **Симптом:** прод 2026-07-06 — `sensor.*_call_state` двух домофонов застряли:
+  один в `ringing`, другой в `ended` (одинаковый `last_changed` = момент старта
+  HA). В logbook у застрявшего — единственное событие `→ ringing`, больше ничего.
+- **Root cause (confirmed):** контроллер держит `ringing` до FCM `ended`, а
+  страховочный release (`_schedule_hold_timeout`) ставится **только** при
+  поднятом SIP-hold (`held=True`). В degrade (held не поднялся), при
+  неотвеченном звонке без `CALL_END`, и при **реплее протухшей FCM-очереди
+  после рестарта HA** (звонок пришёл во время downtime → `CALL_INCOMING`
+  доставлен на старте, парный `CALL_END` — нет) фаза `ringing` не имеет
+  таймаута. Плюс терминалы `ended`/`error` не возвращались в `idle`.
+- **Fix:** (1) **ring-таймаут окна ответа** — на `ring` таймер до
+  `call_invalidated`-дедлайна + грейс; если к нему всё ещё `ringing` → авто-
+  `ended` (+ release держимого). (2) **guard протухшего `ring`** — если дедлайн
+  окна ответа уже в прошлом, фаза `ringing` не публикуется. (3) **возврат
+  терминала** — `ended`/`error` через `_IDLE_RESET_SEC` (~6с) сбрасываются в
+  `idle`; отменяется новым `ring`/фазой.
+- **Evidence:** прод logbook (`kalitka_2_call_state` — единственное `→ ringing`
+  20:34:43) + сверка кода (`_schedule_hold_timeout` под `held=True`). 6 тестов
+  `test_sip_call_controller.py` (ring-таймаут expiry/noop-after-answer/schedule,
+  протухший ring, ended→idle, new-ring отменяет idle-reset). 333 теста зелёные.
+- **Связь:** [ADR-0011](../decisions/0011-doorbell-fcm-channel.md) (FCM-канал),
+  [ADR-0012](../decisions/0012-register-on-ring.md) (register-on-ring / окно).
+
 ### A-85. Uplink-микрофон — говорить гостю (завершение two-way audio, ADR-0013)
 
 - **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-uplink-mic`)**.

@@ -34,6 +34,7 @@ from ..const import (
     CALL_STATE_CONNECTING,
     CALL_STATE_ENDED,
     CALL_STATE_ERROR,
+    CALL_STATE_IDLE,
     CALL_STATE_RINGING,
     DOORBELL_CALL_WINDOW_FALLBACK_SEC,
     EVENT_CALL_STATE,
@@ -65,6 +66,13 @@ _MAX_CALL_SEC = 120
 # Страховка: макс. время держания неотвеченного вызова (нет CANCEL/ответа) → release,
 # чтобы освободить фикс-порт SIP для следующего вызова. Чуть больше окна вызова (~30с).
 _HOLD_MAX_SEC = 40
+# Грейс после дедлайна окна ответа: страховочный ring-таймаут завершает `ringing`,
+# если FCM `ended` не пришёл (degrade held / неотвеченный звонок / протухший реплей
+# FCM-очереди после рестарта HA). Небольшой запас — дать шанс живому `ended` (A-72).
+_RING_GRACE_SEC = 3.0
+# Задержка возврата терминальной фазы (`ended`/`error`) в `idle`: даёт карточке
+# показать финальный экран (её hold ~2.5с), затем сенсор чистится, не залипая (A-72).
+_IDLE_RESET_SEC = 6.0
 
 
 @dataclass
@@ -114,6 +122,9 @@ class DoorbellCallController:
         self._uplink_sink: UplinkSink | None = None
         self._call_timeout: asyncio.TimerHandle | None = None
         self._hold_timeout: asyncio.TimerHandle | None = None
+        # Страховка залипшего `ringing` (нет FCM `ended`) и возврата терминала в idle.
+        self._ring_timeout: asyncio.TimerHandle | None = None
+        self._idle_timeout: asyncio.TimerHandle | None = None
         # Сериализует hold/answer: без него параллельные register создали бы 2 SipManager
         # на фикс-портах. Hold и accept проходят под одним локом.
         self._answer_lock = asyncio.Lock()
@@ -138,13 +149,21 @@ class DoorbellCallController:
                 # Уже держим/в разговоре (фикс-порты) — игнор параллельного ring.
                 LOGGER.info("SIP: уже держим/в разговоре — игнор параллельного ring")
                 return
-            self._active = ActiveCall(
+            active = ActiveCall(
                 call_id=attrs.get("call_id"),
                 place_id=str(payload.get("place_id") or ""),
                 access_control_id=str(payload.get("access_control_id") or ""),
                 deadline=self._compute_deadline(attrs.get("call_invalidated")),
             )
+            # Протухший ring: дедлайн окна ответа уже в прошлом (реплей FCM-очереди
+            # после рестарта HA / устаревшее событие). Не поднимаем `ringing` — иначе
+            # фаза залипнет без последующего `ended` (A-72).
+            if dt_util.utcnow() >= active.deadline:
+                LOGGER.info("SIP: протухший ring (дедлайн в прошлом) — игнор")
+                return
+            self._active = active
             self._emit_call_state(CALL_STATE_RINGING)
+            self._schedule_ring_timeout()  # страховка залипшего ringing (нет `ended`)
             # register-on-ring: держим SIP сразу (зеркало приложения, ADR-0012).
             self._hass.async_create_task(self._async_hold_current())
         elif event_type == "ended" and self._active is not None:
@@ -336,6 +355,14 @@ class DoorbellCallController:
                 "started_at": self._call_started_at,
             },
         )
+        # Watchdog'и фаз (A-72): вне `ringing` снять ring-таймаут; терминал
+        # (`ended`/`error`) — запланировать возврат в `idle`, иначе фаза залипает.
+        if state != CALL_STATE_RINGING:
+            self._cancel_ring_timeout()
+        if state in (CALL_STATE_ENDED, CALL_STATE_ERROR):
+            self._schedule_idle_reset()
+        elif state != CALL_STATE_IDLE:
+            self._cancel_idle_timeout()
 
     @callback
     def _on_ring_cancelled(self) -> None:
@@ -376,6 +403,62 @@ class DoorbellCallController:
         if self._hold_timeout is not None:
             self._hold_timeout.cancel()
             self._hold_timeout = None
+
+    # ---- ring-таймаут окна ответа + возврат терминала в idle (A-72) ----
+    @callback
+    def _schedule_ring_timeout(self) -> None:
+        """Таймер до дедлайна окна ответа (+грейс): если к нему всё ещё `ringing` —
+        завершить. Закрывает залипание, когда FCM `ended` не приходит: degrade held
+        (не поднялся `_schedule_hold_timeout`), неотвеченный звонок, протухший реплей
+        FCM-очереди после рестарта HA."""
+        self._cancel_ring_timeout()
+        if self._active is None:
+            return
+        delay = max(0.0, (self._active.deadline - dt_util.utcnow()).total_seconds())
+        self._ring_timeout = self._hass.loop.call_later(
+            delay + _RING_GRACE_SEC, self._on_ring_expired
+        )
+
+    @callback
+    def _cancel_ring_timeout(self) -> None:
+        if self._ring_timeout is not None:
+            self._ring_timeout.cancel()
+            self._ring_timeout = None
+
+    @callback
+    def _on_ring_expired(self) -> None:
+        """Окно ответа истекло, никто не ответил и `ended` не пришёл → завершить
+        зависший `ringing`. Держимый INVITE (если поднят) снять корректно (release)."""
+        self._ring_timeout = None
+        if self._call_state != CALL_STATE_RINGING:
+            return  # уже ответили/завершили — не мешаем
+        if self._manager is not None and self._manager.holding:
+            self._hass.async_create_task(self._async_release_held())
+        else:
+            self._emit_call_state(CALL_STATE_ENDED)
+            self._fire_call_state(False)
+        self._active = None
+
+    @callback
+    def _schedule_idle_reset(self) -> None:
+        """Отложенный возврат терминала (`ended`/`error`) в `idle`: сенсор не должен
+        залипать в конечной фазе. Карточка к этому времени уже показала финальный
+        экран (её hold ~2.5с). Отменяется новым `ring`/фазой (см. _emit_call_state)."""
+        self._cancel_idle_timeout()
+        self._idle_timeout = self._hass.loop.call_later(_IDLE_RESET_SEC, self._on_idle_reset)
+
+    @callback
+    def _cancel_idle_timeout(self) -> None:
+        if self._idle_timeout is not None:
+            self._idle_timeout.cancel()
+            self._idle_timeout = None
+
+    @callback
+    def _on_idle_reset(self) -> None:
+        self._idle_timeout = None
+        if self._call_state in (CALL_STATE_ENDED, CALL_STATE_ERROR):
+            self._active = None
+            self._emit_call_state(CALL_STATE_IDLE)
 
     # ---- активный вызов: интерфейс для camera-сущности ----
     @callback

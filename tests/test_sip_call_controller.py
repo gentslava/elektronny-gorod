@@ -17,6 +17,7 @@ from custom_components.elektronny_gorod.const import (
     CALL_STATE_CONNECTING,
     CALL_STATE_ENDED,
     CALL_STATE_ERROR,
+    CALL_STATE_IDLE,
     CALL_STATE_RINGING,
     EVENT_CALL_STATE,
 )
@@ -608,3 +609,68 @@ def test_call_state_dedup_consecutive_ended():
     c.handle_signal(_ended(ac="A", call_id="c1"))
     ended_count = _call_states(c._hass).count(CALL_STATE_ENDED)
     assert ended_count == 1
+
+
+# ---- ring-таймаут окна ответа + сброс терминальных фаз в idle (A-72) ----
+# Баг: `ringing` держится, пока не придёт FCM `ended`. Если held не поднялся
+# (degrade) или `ended` не пришёл (неотвеченный звонок / протухший реплей
+# FCM-очереди после рестарта HA) — фаза залипает. Плюс `ended`/`error` не
+# возвращаются в `idle` (терминал висит). Диагностика: логи прод-HA 2026-07-06.
+
+
+def test_ring_schedules_answer_window_timeout(controller):
+    # На `ring` планируется страховочный таймаут окна ответа.
+    controller.handle_signal(_ring())
+    controller._hass.loop.call_later.assert_called()
+    delay = controller._hass.loop.call_later.call_args.args[0]
+    # ≈ окно ответа (35с) + грейс; в любом случае положительный.
+    assert delay > 0
+
+
+def test_ring_expiry_ends_unanswered_ringing(controller):
+    # Окно ответа истекло, никто не ответил, held не поднят → таймаут завершает
+    # зависший `ringing` (ended), current_call сбрасывается.
+    controller.handle_signal(_ring())
+    assert _call_states(controller._hass)[-1] == CALL_STATE_RINGING
+    controller._on_ring_expired()
+    assert CALL_STATE_ENDED in _call_states(controller._hass)
+    assert controller.current_call() is None
+
+
+def test_ring_expiry_noop_after_answered(controller):
+    # Если вызов уже отвечен (active) — таймаут окна ответа ничего не завершает.
+    controller.handle_signal(_ring())
+    controller._call_state = CALL_STATE_ACTIVE  # эмулируем состоявшийся ответ
+    before = _call_states(controller._hass).count(CALL_STATE_ENDED)
+    controller._on_ring_expired()
+    assert _call_states(controller._hass).count(CALL_STATE_ENDED) == before
+
+
+def test_stale_ring_past_deadline_ignored(controller):
+    # Протухший `ring` (дедлайн уже в прошлом — реплей FCM-очереди после рестарта)
+    # игнорируется: фаза `ringing` не публикуется, current_call пуст.
+    past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    controller.handle_signal(_ring(invalidated=past))
+    assert CALL_STATE_RINGING not in _call_states(controller._hass)
+    assert controller.current_call() is None
+
+
+def test_ended_resets_to_idle(controller):
+    # `ended` не залипает: по таймеру состояние возвращается в `idle`.
+    controller.handle_signal(_ring())
+    controller.handle_signal(_ended())
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+    controller._on_idle_reset()
+    assert _call_states(controller._hass)[-1] == CALL_STATE_IDLE
+    assert controller.current_call() is None
+
+
+def test_new_ring_cancels_pending_idle_reset(controller):
+    # Новый звонок отменяет отложенный idle-reset прошлого — не клобберит `ringing`.
+    controller.handle_signal(_ring(call_id="c1"))
+    controller.handle_signal(_ended(call_id="c1"))
+    controller.handle_signal(_ring(call_id="c2"))
+    assert _call_states(controller._hass)[-1] == CALL_STATE_RINGING
+    controller._on_idle_reset()  # state=ringing → no-op
+    assert _call_states(controller._hass)[-1] == CALL_STATE_RINGING
+    assert controller.current_call() is not None
