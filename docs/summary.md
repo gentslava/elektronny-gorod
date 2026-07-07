@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-05-30
+Last reviewed: 2026-07-07 (A-86 → RESOLVED/merged PR #66; A-73/A-74 формализованы в audit; исправлена stale-пометка про A-21)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -71,7 +71,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 
 ### P1 — важные (открыты)
 
-1. **Нет `ClientTimeout` на основном operator API** — [`http.py:110,112`](../custom_components/elektronny_gorod/http.py#L110-L112). Зависший запрос к `myhome.proptech.ru` блокирует coordinator tick / setup бессрочно. ⚠️ `ha-compatibility.md` ошибочно помечает это fixed. (A-21 / S-09)
+1. **Нет `ClientTimeout` на основном operator API** — [`http.py:111-116`](../custom_components/elektronny_gorod/http.py#L111-L116). Зависший/медленный запрос к `myhome.proptech.ru` тормозит coordinator tick (refresh сериальный, ~6 HTTP на place) и первый `setup` — на время дефолтного aiohttp-таймаута (~5 мин на запрос); явного контроля/ретраев нет. Точечный митигатор есть только для латентно-критичного SIP-mint (`asyncio.timeout(8с)` в `call_controller.py`, см. A-81) — глобальный `ClientTimeout` остаётся открытым. `ha-compatibility.md` при этом **корректно** помечает это `🔴 нет ClientTimeout` (строка 116) — прежняя пометка «ошибочно fixed» была stale. (A-21 / S-09)
 2. **config_flow + миграции v1→2→3 без тестов** — `config_flow.py` 15% coverage, `async_migrate_entry` не покрыт. Bronze IQS требует config-flow-test-coverage → заявленный `quality_scale: bronze` пока не defensible. (A-73)
 3. **`helpers.py` crypto без golden vectors** — изменение формата бэкенда молча сломает auth. (A-74)
 4. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold).
