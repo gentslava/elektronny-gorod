@@ -12,7 +12,13 @@ import { type StageState } from "./components/call-stage.js";
 import "./components/call-stage.js";
 import "./components/open-control.js";
 import "./components/eg-icon.js";
-import { MicController, type MicPermission, shouldAutoStartMic } from "./components/mic-controller.js";
+import {
+  MicController,
+  type MicBannerReason,
+  type MicPermission,
+  micBannerReason,
+  shouldAutoStartMic,
+} from "./components/mic-controller.js";
 import { isCoarsePointer, type OpenAction, resolveOpenAction } from "./util/open-action.js";
 import { egTokens, statusColor } from "./theme/tokens.js";
 
@@ -262,8 +268,14 @@ export class EgIntercomCallCard extends LitElement {
     this._micPerm = await this._mic.queryPermission();
     // фаза могла смениться за время await (active → ended/idle) — не стартуем мик задним числом
     if (this._phase !== "active") return;
-    if (this._config.mic_autostart !== false && shouldAutoStartMic(this._micPerm, this._mic.secure)) {
+    const autoStart =
+      this._config.mic_autostart !== false
+      && shouldAutoStartMic(this._micPerm, this._mic.secure, this._mic.hasGrantedBefore());
+    if (autoStart) {
       await this._mic.start();
+      // permission-статус мог стать «granted» после успешного захвата — обновим
+      // для корректного скрытия баннера/индикатора.
+      this._micPerm = await this._mic.queryPermission();
     }
   }
 
@@ -389,10 +401,10 @@ export class EgIntercomCallCard extends LitElement {
     return "live";
   }
 
-  /** Показать баннер «нет доступа к микрофону» (active + права не выданы/нет HTTPS). */
-  private get _micNeedsPermission(): boolean {
-    if (this._config.mic === false || this._phase !== "active" || this._micActive) return false;
-    return !this._mic.secure || this._micPerm === "denied" || this._micPerm === "prompt";
+  /** Причина баннера микрофона (или "none"): active + мик не захвачен + есть повод. */
+  private get _micBanner(): MicBannerReason {
+    if (this._config.mic === false || this._phase !== "active" || this._micActive) return "none";
+    return micBannerReason(this._mic.secure, this._micPerm, this._mic.hasGrantedBefore());
   }
 
   /** Микрофон недоступен принципиально (нет HTTPS / запрещён) — красный индикатор. */
@@ -433,7 +445,10 @@ export class EgIntercomCallCard extends LitElement {
             ></eg-call-stage>
           </div>
           <div class="controls">
-            ${this._micNeedsPermission ? this._renderMicBanner() : nothing}
+            ${(() => {
+              const mb = this._micBanner;
+              return mb !== "none" ? this._renderMicBanner(mb) : nothing;
+            })()}
             <div class="open-area">
               ${view.showOpen ? this._renderOpen() : nothing}
             </div>
@@ -583,16 +598,35 @@ export class EgIntercomCallCard extends LitElement {
     return "";
   }
 
-  /** Баннер «нет доступа к микрофону» (между видео и слайдером) — узел iUNo1. */
-  private _renderMicBanner(): TemplateResult {
+  /** Баннер микрофона (между видео и слайдером) — узел iUNo1. Текст/CTA по причине:
+   *  no_https — только HTTPS поможет (без кнопки); denied — снять запрет в браузере;
+   *  prompt — нужен разовый тап-запрос. */
+  private _renderMicBanner(reason: Exclude<MicBannerReason, "none">): TemplateResult {
+    const copy: Record<Exclude<MicBannerReason, "none">, { title: string; sub: string; cta?: string }> = {
+      no_https: {
+        title: "Микрофон недоступен",
+        sub: "Откройте Home Assistant по HTTPS, чтобы говорить в домофон.",
+      },
+      denied: {
+        title: "Доступ к микрофону запрещён",
+        sub: "Разрешите микрофон для этого сайта в настройках браузера.",
+        cta: "Повторить",
+      },
+      prompt: {
+        title: "Нужен доступ к микрофону",
+        sub: "Нажмите «Разрешить», чтобы вас было слышно.",
+        cta: "Разрешить",
+      },
+    };
+    const c = copy[reason];
     return html`
       <div class="mic-banner" role="alert">
         <eg-icon name="mic-off"></eg-icon>
         <div class="mb-text">
-          <span class="mb-title">Нет доступа к микрофону</span>
-          <span class="mb-sub">Вас не слышно. Разрешите доступ в браузере.</span>
+          <span class="mb-title">${c.title}</span>
+          <span class="mb-sub">${c.sub}</span>
         </div>
-        <button class="mb-btn" @click=${this._toggleMic}>Разрешить</button>
+        ${c.cta ? html`<button class="mb-btn" @click=${this._toggleMic}>${c.cta}</button>` : nothing}
       </div>
     `;
   }
