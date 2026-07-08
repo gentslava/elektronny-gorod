@@ -8,6 +8,7 @@ import { customElement, property, state } from "lit/decorators.js";
 
 import type { OpenAction } from "../util/open-action.js";
 import { egTokens } from "../theme/tokens.js";
+import { type Lang, t } from "../i18n.js";
 import "./eg-icon.js";
 
 /** Зажать в [0..1]. */
@@ -47,9 +48,17 @@ const KNOB = 68;
 export class EgOpenControl extends LitElement {
   @property() public mode: OpenAction = "hold";
   @property({ type: Boolean }) public disabled = false;
-  @property() public label = "Открыть дверь";
+  /** Кастомный лейбл (aria); пусто → берётся из i18n по `lang`. */
+  @property() public label = "";
+  /** Язык (ru/en) — прокидывается картой. */
+  @property() public uiLang: Lang = "ru";
   /** Внешний статус: idle | opening | opened | error (для подписи/цвета). */
   @property() public status: "idle" | "opening" | "opened" | "error" = "idle";
+
+  /** Лейбл для aria: кастомный или дефолтный по языку. */
+  private get _ariaLabel(): string {
+    return this.label || t(this.uiLang).open.labelDefault;
+  }
 
   @state() private _progress = 0;
   @state() private _arming = false;
@@ -173,18 +182,19 @@ export class EgOpenControl extends LitElement {
 
   /** Подпись под контролом (цвет по статусу). */
   private _caption(): TemplateResult {
+    const s = t(this.uiLang).open;
     let text = "";
     let cls = "";
     if (this.status === "opened") {
-      text = "Дверь открыта";
+      text = s.captionOpened;
       cls = "st-opened";
     } else if (this.status === "error") {
-      text = "Не удалось открыть · Повторить";
+      text = s.captionError;
       cls = "st-error";
     } else if (this.status === "opening") {
       text = ""; // «Открываю…» уже на контроле — подписью не дублируем
     } else if (this.mode === "slide") {
-      text = "Сдвиньте, чтобы открыть дверь";
+      text = s.captionSlideHint;
     }
     // Строку подписи рендерим ВСЕГДА (пустую → &nbsp;): фиксированная высота
     // блока во всех состояниях, чтобы контрол не прыгал по вертикали.
@@ -193,10 +203,11 @@ export class EgOpenControl extends LitElement {
 
   /** Текст на контроле. */
   private _labelText(): string {
-    if (this.status === "opened") return "Открыто";
-    if (this.status === "opening") return "Открываю…";
-    if (this.mode === "slide") return "Открыть";
-    return "Удерживайте, чтобы открыть";
+    const s = t(this.uiLang).open;
+    if (this.status === "opened") return s.opened;
+    if (this.status === "opening") return s.opening;
+    if (this.mode === "slide") return s.slide;
+    return s.hold;
   }
 
   /** Иконка ключа/замка на пилюле hold/tap; на время открытия — спиннер. */
@@ -225,7 +236,7 @@ export class EgOpenControl extends LitElement {
   private _renderTap(): TemplateResult {
     return html`
       <button class="pill tap ${this._statusClass()}" ?disabled=${this.disabled} @click=${this._onTap}
-              aria-label=${this.label}>
+              aria-label=${this._ariaLabel}>
         <div class="fill"></div>
         <span class="content"><eg-icon name=${this._barIcon()}></eg-icon>${this._labelText()}</span>
       </button>
@@ -237,7 +248,7 @@ export class EgOpenControl extends LitElement {
       <button
         class="pill hold ${this._arming ? "arming" : ""} ${this._statusClass()}"
         ?disabled=${this.disabled}
-        aria-label="${this.label} — удерживайте"
+        aria-label="${this._ariaLabel} ${t(this.uiLang).open.holdAriaSuffix}"
         @pointerdown=${this._onHoldDown}
         @pointerup=${this._onHoldUp}
         @pointercancel=${this._onHoldUp}
@@ -254,7 +265,7 @@ export class EgOpenControl extends LitElement {
       <div
         class="track ${this._statusClass()} ${this._arming ? "dragging" : ""}"
         role="slider"
-        aria-label=${this.label}
+        aria-label=${this._ariaLabel}
         aria-valuemin="0"
         aria-valuemax="100"
         aria-valuenow=${Math.round(this._vp() * 100)}

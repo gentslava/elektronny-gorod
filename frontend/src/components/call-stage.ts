@@ -7,6 +7,7 @@ import { LitElement, css, html, nothing, type TemplateResult } from "lit";
 import { customElement, property } from "lit/decorators.js";
 
 import { egTokens } from "../theme/tokens.js";
+import { type Lang, t } from "../i18n.js";
 import "./call-video.js";
 import "./eg-icon.js";
 
@@ -45,35 +46,38 @@ export class EgCallStage extends LitElement {
   @property() public stageState: StageState = "live";
   /** Автоплей со звуком заблокирован — CTA + тап по всему видео снимают mute. */
   @property({ type: Boolean }) public audioBlocked = false;
+  /** Язык (ru/en) — прокидывается картой. */
+  @property() public uiLang: Lang = "ru";
 
   private _unmute = (): void => {
     this.dispatchEvent(new CustomEvent("unmute", { bubbles: true, composed: true }));
   };
 
   protected override render(): TemplateResult {
+    const s = t(this.uiLang);
     const content = pickStageContent(this.stageState);
     if (content === "placeholder-camera") {
-      return this._placeholder("video-off", "muted", "Видео недоступно", "Аудиовызов продолжается");
+      return this._placeholder("video-off", "muted", s.stage.cameraOff.title, s.stage.cameraOff.sub);
     }
     if (content === "placeholder-connection") {
-      return this._placeholder("wifi-off", "err", "Соединение прервано", "Пробуем восстановить…");
+      return this._placeholder("wifi-off", "err", s.stage.connectionLost.title, s.stage.connectionLost.sub);
     }
     return html`
-      <eg-call-video .hass=${this.hass} .entity=${this.entity} .muted=${this.muted}></eg-call-video>
+      <eg-call-video .hass=${this.hass} .uiLang=${this.uiLang} .entity=${this.entity} .muted=${this.muted}></eg-call-video>
       ${content === "video-dimmed" ? html`<div class="dim" aria-hidden="true"></div>` : nothing}
       <div class="top">
         ${this.live
           ? html`<span class="live"><span class="live-dot" aria-hidden="true"></span>LIVE</span>`
           : nothing}
         ${this.soundOff
-          ? html`<span class="chip"><eg-icon name="volume-x"></eg-icon>Звук выкл.</span>`
+          ? html`<span class="chip"><eg-icon name="volume-x"></eg-icon>${s.stage.soundOffChip}</span>`
           : nothing}
       </div>
       ${this.audioBlocked
         ? html`
-            <button class="tap" @click=${this._unmute} aria-label="Включить звук"></button>
+            <button class="tap" @click=${this._unmute} aria-label=${s.stage.unmuteAria}></button>
             <span class="cta" aria-hidden="true">
-              <eg-icon name="volume-x"></eg-icon>Нажмите, чтобы включить звук
+              <eg-icon name="volume-x"></eg-icon>${s.stage.unmuteCta}
             </span>
           `
         : nothing}

@@ -6,6 +6,7 @@ import { LitElement, css, html, nothing, type PropertyValues, type TemplateResul
 import { customElement, property, state } from "lit/decorators.js";
 
 import type { VideoSource } from "../state-machine.js";
+import { type Lang, t } from "../i18n.js";
 import "./eg-icon.js";
 
 interface HassLike {
@@ -32,6 +33,8 @@ export class EgCallVideo extends LitElement {
   @property({ attribute: false }) public hass?: HassLike;
   @property() public entity?: string;
   @property({ type: Boolean }) public muted = false;
+  /** Язык (ru/en) — прокидывается стейджем. */
+  @property() public uiLang: Lang = "ru";
 
   @state() private _provider: Provider = "pending";
   private _webrtcEl?: HTMLElement & { setConfig: (c: unknown) => void; hass?: unknown };
@@ -84,16 +87,17 @@ export class EgCallVideo extends LitElement {
   }
 
   protected override render(): TemplateResult {
+    const s = t(this.uiLang).video;
     if (!this.entity || !this.hass) {
-      return this._frame("video-off", "Нет активного видео");
+      return this._frame("video-off", s.noVideo);
     }
     const stateObj = this.hass.states[this.entity];
     if (!stateObj) {
-      return this._frame("video-off", "Камера недоступна");
+      return this._frame("video-off", s.cameraUnavailable);
     }
     switch (this._provider) {
       case "pending":
-        return this._frame("video-off", "Загрузка видео…");
+        return this._frame("video-off", s.loading);
       case "ha":
         // Без controls: chromeless-поверхность — весь UI наш (LIVE/чип/CTA/tap-to-unmute
         // в call-stage). controls в Chrome/FF = клик по видео → пауза живого звонка +
@@ -108,10 +112,7 @@ export class EgCallVideo extends LitElement {
       case "webrtc":
         return html`<div id="webrtc-host"></div>`;
       default:
-        return this._frame(
-          "video-off",
-          "Видеоплеер недоступен — обновите HA или установите advanced-camera-card",
-        );
+        return this._frame("video-off", s.playerUnavailable);
     }
   }
 

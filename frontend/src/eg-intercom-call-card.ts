@@ -21,11 +21,14 @@ import {
 } from "./components/mic-controller.js";
 import { isCoarsePointer, type OpenAction, resolveOpenAction } from "./util/open-action.js";
 import { egTokens, statusColor } from "./theme/tokens.js";
+import { type Lang, langOf, t } from "./i18n.js";
 
 interface HassLike {
   states: Record<string, { state: string; attributes: Record<string, unknown> }>;
   connection?: unknown;
   callService: (domain: string, service: string, data?: Record<string, unknown>) => Promise<unknown>;
+  locale?: { language?: string };
+  language?: string;
 }
 
 interface DoorbellCfg {
@@ -57,14 +60,6 @@ interface CardConfig {
 }
 
 type OpenStatus = "idle" | "opening" | "opened" | "error";
-
-const STATUS_RU: Partial<Record<CallPhase, string>> = {
-  ringing: "Входящий вызов",
-  connecting: "Соединение…",
-  active: "Разговор",
-  ended: "Вызов завершён",
-  error: "Ошибка вызова",
-};
 
 /** Фазы, при которых вызов «активен» и карточка показывает экран (не idle). */
 const LIVE_PHASES: ReadonlySet<CallPhase> = new Set(["ringing", "connecting", "active", "error"]);
@@ -173,12 +168,17 @@ export class EgIntercomCallCard extends LitElement {
     const attrs = a ? this.hass?.states[a.call_state]?.attributes : undefined;
     const fromAttr = attrs?.["intercom_name"];
     const full = typeof fromAttr === "string" ? fromAttr.replace(/\s+/g, " ").trim() : "";
-    return full || this._config.name || "Домофон";
+    return full || this._config.name || t(this._lang).nameFallback;
   }
 
   /** Адрес (вторая строка шапки) — из конфига домофона/карты; иначе скрыт. */
   private get _address(): string {
     return this._active?.address ?? this._config.address ?? "";
+  }
+
+  /** Язык карточки (ru/en) по hass.locale. */
+  private get _lang(): Lang {
+    return langOf(this.hass);
   }
 
   private get _startedAtMs(): number | undefined {
@@ -435,6 +435,7 @@ export class EgIntercomCallCard extends LitElement {
           <div class="stage">
             <eg-call-stage
               .hass=${this.hass}
+              .uiLang=${this._lang}
               .entity=${cam}
               .muted=${this._muted || this._audioBlocked}
               .live=${stageState === "live"}
@@ -467,7 +468,7 @@ export class EgIntercomCallCard extends LitElement {
           <span class="name" title=${this._intercomName}>${this._intercomName}</span>
           ${addr ? html`<span class="addr">${addr}</span>` : nothing}
         </div>
-        <button class="close" @click=${this._dismiss} aria-label="Свернуть">
+        <button class="close" @click=${this._dismiss} aria-label=${t(this._lang).minimize}>
           <eg-icon name="x"></eg-icon>
         </button>
       </header>
@@ -482,7 +483,7 @@ export class EgIntercomCallCard extends LitElement {
         <div class="strow">
           <span class="badge" style="--badge:${statusColor(phase)}">
             <span class="dot" aria-hidden="true"></span>
-            <span>${STATUS_RU[phase] ?? ""}</span>
+            <span>${(t(this._lang).status as Partial<Record<CallPhase, string>>)[phase] ?? ""}</span>
           </span>
           ${win
             ? html`<span class="countdown"><eg-icon name="timer"></eg-icon>${win.text}</span>`
@@ -514,8 +515,8 @@ export class EgIntercomCallCard extends LitElement {
       <ha-card class="idle">
         <div class="idle-box" role="status">
           <div class="idle-ico"><eg-icon name="door-closed"></eg-icon></div>
-          <div class="idle-title">${this._config.idle_text ?? "Нет активного вызова"}</div>
-          <div class="idle-sub">Видео появится при звонке в домофон</div>
+          <div class="idle-title">${this._config.idle_text ?? t(this._lang).idle.title}</div>
+          <div class="idle-sub">${t(this._lang).idle.sub}</div>
           ${names.length
             ? html`<div class="idle-chips">
                 ${names.map(
@@ -553,7 +554,7 @@ export class EgIntercomCallCard extends LitElement {
         </div>
         <div class="cx-btns">
           ${view.showOpen && entity.lock
-            ? this._quickBtn("key-round", "Открыть", this._open, "q-open")
+            ? this._quickBtn("key-round", t(this._lang).open.slide, this._open, "q-open")
             : nothing}
           ${view.actions.map((a) => this._quickAction(a))}
         </div>
@@ -562,15 +563,16 @@ export class EgIntercomCallCard extends LitElement {
   }
 
   private _quickAction(kind: ActionKind): TemplateResult | typeof nothing {
+    const s = t(this._lang).action;
     switch (kind) {
       case "accept":
-        return this._quickBtn("phone", "Принять", this._answer, "q-accept");
+        return this._quickBtn("phone", s.accept, this._answer, "q-accept");
       case "reject":
       case "cancel":
       case "hangup":
-        return this._quickBtn("phone-off", "Завершить", this._hangup, "q-reject");
+        return this._quickBtn("phone-off", s.hangup, this._hangup, "q-reject");
       case "close":
-        return this._quickBtn("x", "Закрыть", this._clearEnded, "");
+        return this._quickBtn("x", s.close, this._clearEnded, "");
       default:
         return nothing; // mic/sound/connecting/retry — не в компакте
     }
@@ -590,11 +592,12 @@ export class EgIntercomCallCard extends LitElement {
   }
 
   private _compactStatus(phase: CallPhase): string {
-    if (phase === "ringing") return `Вызов · ${this._answerWindow().text}`;
-    if (phase === "active") return `Разговор · ${this._timerText()}`;
-    if (phase === "connecting") return "Соединение…";
-    if (phase === "ended") return this._endedDuration ? `Завершён · ${this._endedDuration}` : "Завершён";
-    if (phase === "error") return "Ошибка вызова";
+    const s = t(this._lang).compact;
+    if (phase === "ringing") return `${s.call} · ${this._answerWindow().text}`;
+    if (phase === "active") return `${s.talk} · ${this._timerText()}`;
+    if (phase === "connecting") return s.connecting;
+    if (phase === "ended") return this._endedDuration ? `${s.ended} · ${this._endedDuration}` : s.ended;
+    if (phase === "error") return s.error;
     return "";
   }
 
@@ -602,23 +605,7 @@ export class EgIntercomCallCard extends LitElement {
    *  no_https — только HTTPS поможет (без кнопки); denied — снять запрет в браузере;
    *  prompt — нужен разовый тап-запрос. */
   private _renderMicBanner(reason: Exclude<MicBannerReason, "none">): TemplateResult {
-    const copy: Record<Exclude<MicBannerReason, "none">, { title: string; sub: string; cta?: string }> = {
-      no_https: {
-        title: "Микрофон недоступен",
-        sub: "Откройте Home Assistant по HTTPS, чтобы говорить в домофон.",
-      },
-      denied: {
-        title: "Доступ к микрофону запрещён",
-        sub: "Разрешите микрофон для этого сайта в настройках браузера.",
-        cta: "Повторить",
-      },
-      prompt: {
-        title: "Нужен доступ к микрофону",
-        sub: "Нажмите «Разрешить», чтобы вас было слышно.",
-        cta: "Разрешить",
-      },
-    };
-    const c = copy[reason];
+    const c = t(this._lang).micBanner[reason] as { title: string; sub: string; cta?: string };
     return html`
       <div class="mic-banner" role="alert">
         <eg-icon name="mic-off"></eg-icon>
@@ -636,6 +623,7 @@ export class EgIntercomCallCard extends LitElement {
       <eg-open-control
         .mode=${this._openAction}
         .status=${this._openStatus}
+        .uiLang=${this._lang}
         ?disabled=${!this._active?.lock}
         @open=${this._open}
       ></eg-open-control>
@@ -663,27 +651,28 @@ export class EgIntercomCallCard extends LitElement {
   }
 
   private _renderAction(kind: ActionKind): TemplateResult | typeof nothing {
+    const s = t(this._lang).action;
     switch (kind) {
       case "accept":
-        return this._circle("phone", "Принять", this._answer, "accept");
+        return this._circle("phone", s.accept, this._answer, "accept");
       case "reject":
-        return this._circle("phone-off", "Отклонить", this._hangup, "reject");
+        return this._circle("phone-off", s.reject, this._hangup, "reject");
       case "cancel":
-        return this._circle("phone-off", "Отменить", this._hangup, "reject");
+        return this._circle("phone-off", s.cancel, this._hangup, "reject");
       case "connecting":
-        return this._spinnerBtn("Соединяем…");
+        return this._spinnerBtn(s.connecting);
       case "mic":
         return this._config.mic === false ? nothing : this._renderMic();
       case "sound":
         return this._audioBlocked
-          ? this._circle("volume-x", "Звук выкл.", this._unmute, "warn")
-          : this._circle(this._muted ? "volume-x" : "volume-2", "Звук", this._toggleMute);
+          ? this._circle("volume-x", s.soundOff, this._unmute, "warn")
+          : this._circle(this._muted ? "volume-x" : "volume-2", s.sound, this._toggleMute);
       case "hangup":
-        return this._circle("phone-off", "Завершить", this._hangup, "reject");
+        return this._circle("phone-off", s.hangup, this._hangup, "reject");
       case "retry":
-        return this._circle("refresh-cw", "Повторить", this._retry, "retry");
+        return this._circle("refresh-cw", s.retry, this._retry, "retry");
       case "close":
-        return this._circle("x", "Закрыть", this._clearEnded);
+        return this._circle("x", s.close, this._clearEnded);
       default:
         return nothing;
     }
@@ -701,13 +690,14 @@ export class EgIntercomCallCard extends LitElement {
 
   /** Микрофон: тумблер; при denied/нет-HTTPS — красный индикатор «Нет доступа» (iUNo1). */
   private _renderMic(): TemplateResult {
+    const s = t(this._lang).action;
     if (this._micBlocked) {
-      return this._circle("mic-off", "Нет доступа", this._toggleMic, "mic-blocked");
+      return this._circle("mic-off", s.micNoAccess, this._toggleMic, "mic-blocked");
     }
     const icon = this._micActive ? "mic" : "mic-off";
-    const aria = this._micActive ? "Выключить микрофон" : "Включить микрофон";
+    const aria = this._micActive ? s.micOff : s.micOn;
     return html`<button class="circle" @click=${this._toggleMic} aria-label=${aria}>
-      <span class="ic"><eg-icon name=${icon}></eg-icon></span><small>Микрофон</small>
+      <span class="ic"><eg-icon name=${icon}></eg-icon></span><small>${s.mic}</small>
     </button>`;
   }
 
@@ -1285,8 +1275,9 @@ declare global {
 window.customCards = window.customCards || [];
 window.customCards.push({
   type: "eg-intercom-call-card",
-  name: "ЭГ Домофон — Экран вызова",
+  name: "EG Intercom — Call screen / ЭГ Домофон — Экран вызова",
   description:
-    "Входящий вызов и разговор с домофоном: видео+звук, открыть дверь, принять/завершить, микрофон. Одна карта на все домофоны.",
+    "Doorbell incoming call & talk: video+audio, open door, accept/hang up, mic — one card for all intercoms. "
+    + "Входящий вызов и разговор с домофоном: видео+звук, открыть дверь, принять/завершить, микрофон.",
   preview: false,
 });
