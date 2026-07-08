@@ -115,3 +115,53 @@ async def test_error_log_passes_through_non_auth_path(http_client, fake_session,
             await http_client.get("/rest/v1/places/12345/accesscontrols")
 
     assert "/rest/v1/places/12345/accesscontrols" in caplog.text
+
+
+# --- A-21: explicit ClientTimeout on operator API -------------------------- #
+
+
+async def test_rest_get_uses_rest_timeout(http_client, fake_session):
+    """GET (JSON) идёт с REST-таймаутом (total=30, connect=10), не с aiohttp-дефолтом."""
+    from custom_components.elektronny_gorod.http import _REST_TIMEOUT
+
+    await http_client.get("/rest/v1/places/12345/accesscontrols")
+
+    timeout = fake_session.get.await_args.kwargs["timeout"]
+    assert timeout is _REST_TIMEOUT
+    assert timeout.total == 30
+    assert timeout.connect == 10
+
+
+async def test_post_uses_rest_timeout(http_client, fake_session):
+    """POST также получает REST-таймаут."""
+    from custom_components.elektronny_gorod.http import _REST_TIMEOUT
+
+    await http_client.post("/rest/v1/something", '{"x": 1}')
+
+    assert fake_session.post.await_args.kwargs["timeout"] is _REST_TIMEOUT
+
+
+async def test_delete_uses_rest_timeout(http_client, fake_session):
+    """DELETE получает REST-таймаут."""
+    from custom_components.elektronny_gorod.http import _REST_TIMEOUT
+
+    fake_session.delete = AsyncMock(return_value=_FakeResponse(200))
+    await http_client.delete("/rest/v1/something", '{"x": 1}')
+
+    assert fake_session.delete.await_args.kwargs["timeout"] is _REST_TIMEOUT
+
+
+async def test_binary_get_uses_binary_timeout(http_client, fake_session):
+    """Binary-чтение (snapshot JPEG) идёт с более щедрым binary-таймаутом (total=60)."""
+    from custom_components.elektronny_gorod.http import _BINARY_TIMEOUT
+
+    resp = MagicMock()
+    resp.read = AsyncMock(return_value=b"jpeg-bytes")
+    fake_session.get = AsyncMock(return_value=resp)
+
+    result = await http_client.get("/rest/v1/cameras/1/snapshot", binary=True)
+
+    assert result == b"jpeg-bytes"
+    timeout = fake_session.get.await_args.kwargs["timeout"]
+    assert timeout is _BINARY_TIMEOUT
+    assert timeout.total == 60

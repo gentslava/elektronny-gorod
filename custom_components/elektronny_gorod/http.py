@@ -1,6 +1,6 @@
 """HTTP interface."""
 
-from aiohttp import ClientError, ClientResponse
+from aiohttp import ClientError, ClientResponse, ClientTimeout
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -11,6 +11,15 @@ from .const import (
     LOGGER,
 )
 from .user_agent import UserAgent
+
+# A-21: явные таймауты на operator API. Без них shared HA-сессия использует
+# дефолт aiohttp (total≈5 мин), а refresh coordinator-а сериальный (~6 HTTP на
+# place) — один зависший запрос надолго тормозит tick / первый setup.
+# REST — короткий кап; binary (snapshot JPEG) — щедрее по total; connect-кап
+# даёт быстрый fail на недоступный хост. Retry/backoff сознательно вне scope
+# этого слайса (POST/login/open_lock не идемпотентны) — см. audit A-21.
+_REST_TIMEOUT = ClientTimeout(total=30, connect=10)
+_BINARY_TIMEOUT = ClientTimeout(total=60, connect=10)
 
 
 def _log_request(url: str, method: str, headers: dict, body_size: int) -> None:
@@ -108,12 +117,13 @@ class HTTP:
         else:
             body_size = len(str(data).encode("utf-8"))
         _log_request(url, method, headers, body_size)
+        timeout = _BINARY_TIMEOUT if binary else _REST_TIMEOUT
         if method == "GET":
-            response = await session.get(url, headers=headers)
+            response = await session.get(url, headers=headers, timeout=timeout)
         elif method == "POST":
-            response = await session.post(url, data=data, headers=headers)
+            response = await session.post(url, data=data, headers=headers, timeout=timeout)
         elif method == "DELETE":
-            response = await session.delete(url, data=data, headers=headers)
+            response = await session.delete(url, data=data, headers=headers, timeout=timeout)
 
         if binary:
             return await response.read()

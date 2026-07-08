@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-08 (feat/intercom-call-ui: card-UI + mic-fix + call-camera fixes 2a/2b/4 + cross-call guard + anti-delay — UI-часть готова; заведены A-88 видео-конкурентность/anti-churn и A-89 мульти-вызов как фазы A/B на след. ветках. A-85 uplink ADR-0013 live-прод 2026-06-24; 14 sip/-модулей)
+Last reviewed: 2026-07-08 (feat/intercom-call-ui: card-UI + mic-fix + call-camera fixes 2a/2b/4 + cross-call guard + anti-delay — UI-часть готова; A-88 видео-конкурентность/anti-churn и A-89 мульти-вызов заведены как фазы A/B на след. ветках. Master: A-73 ✅/A-74 ✅ RESOLVED — тесты `3a60b15`/`362237b`; A-21 🟡 PARTIALLY — ClientTimeout `3885bb0`, retry follow-up; A-86 ✅ RESOLVED merged PR #66; A-85 uplink-микрофон ADR-0013 live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref feat/intercom-uplink-mic; 14 sip/-модулей включая uplink.py)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -193,9 +193,15 @@ Quality gates:
 
 ### A-21. Нет timeout/retry/backoff
 
+- **Status:** 🟡 **PARTIALLY RESOLVED** — timeout закрыт (merged в master,
+  commit `3885bb0`): `http.py` шлёт явный `ClientTimeout` (`_REST_TIMEOUT`
+  total=30/connect=10; `_BINARY_TIMEOUT` total=60/connect=10 для snapshot).
+  **Остаётся открытым:** retry/backoff (вынесен в follow-up — POST/login/
+  open_lock не идемпотентны, ADR-0006 mirror-app). Тесты — `tests/test_http.py`.
 - **Area:** Reliability
 - **Evidence:** `http.py`, `api.py`
-- **Recommended fix:** `ClientTimeout(total=30)` + helper для retry с backoff.
+- **Recommended fix (остаток):** helper для retry с backoff только для
+  идемпотентных GET (5xx / connection errors).
 
 ### A-22. Поведение при 401 (auto-refresh — unknown)
 
@@ -1107,9 +1113,9 @@ Quality gates:
 
 ### A-86. FCM push-receiver молча умирает → вызовы домофона пропадают (watchdog)
 
-- **Status:** 🟢 **resolved-in-branch (pending merge `fix/fcm-reconnect-watchdog`)**.
-  Bug-fix. Root cause подтверждён runtime-evidence (прод-лог 2026-06-24). После
-  merge → RESOLVED.
+- **Status:** ✅ **RESOLVED** — merged в master через **PR #66**
+  (`fix/fcm-reconnect-watchdog`, commit `575d885`). Bug-fix; root cause подтверждён
+  runtime-evidence (прод-лог 2026-06-24).
 - **Severity:** P1 (вызовы домофона молча перестают приходить — пропущенные
   звонки, статус интеграции при этом `loaded`, юзер не узнаёт).
 - **Area:** `fcm.py` (`DoorbellFcmListener`: `_async_connect` / `_async_watchdog`
@@ -1370,6 +1376,50 @@ Quality gates:
   scope). Фикс-порты SIP/RTP свободны для held-переключения.
 - **First step:** в ring-guard ветвление holding→release+re-hold нового вызова.
 
+### A-73. config_flow + `async_migrate_entry` без тестов (Bronze IQS gate)
+
+- **Status:** ✅ **RESOLVED** — merged в master, commit `3a60b15`
+  (`tests/test_config_flow.py` — 3 ветки auth + go2rtc + abort/reauth;
+  `tests/test_init.py` — миграции v1→2→3). Bronze config-flow gate закрыт.
+  (ID ранее жил только в `summary.md` — формализован в audit 2026-07-07.)
+- **Severity:** P1 — заявленный `quality_scale: "bronze"` формально **не
+  defensible**; регрессии в 3-веточном flow и в миграциях ловятся только руками.
+- **Area:** `config_flow.py` (user / contract / sms / password / advanced +
+  go2rtc-меню + options), `__init__.py` `async_migrate_entry` v1→2→3.
+- **Evidence (по коду):** в `tests/` **нет** `test_config_flow.py` и **нет**
+  теста config-entry миграции. Есть только `test_options_flow_clear_creds.py`
+  (узкий кусок options-flow) и `test_entity_migration.py` (про entity-registry
+  `unique_id`, **не** про `async_migrate_entry`). Исходный scaffold-stub удалён
+  (A-07). Детальный план — [`testing/strategy.md`](../testing/strategy.md) §1-3.
+- **Impact:** HA Integration Quality Scale Bronze требует config-flow
+  test-coverage → без этих тестов Bronze нельзя защитить на review.
+- **Recommended fix:** `test_config_flow.py` (happy path всех 3 веток + abort
+  `already_configured` / `reauth`) + `test_init.py` (миграции v1→2→3) по
+  `testing/strategy.md`.
+- **First step:** `test_config_flow` happy path phone+SMS + abort
+  `already_configured` (минимальный Bronze-defensible набор).
+
+### A-74. `helpers.py` crypto без golden vectors (тихий breakage auth)
+
+- **Status:** ✅ **RESOLVED** — merged в master, commit `362237b`
+  (`tests/test_helpers.py` — golden vectors для hash_password /
+  hash_password_timestamp + list-utils). (ID ранее жил только в `summary.md` —
+  формализован в audit 2026-07-07.)
+- **Severity:** P1 — правка формулы или смена схемы бэкендом молча ломает login,
+  CI это не поймает.
+- **Area:** `helpers.py` — `hash_password` (SHA1 → base64),
+  `hash_password_timestamp` (захардкоженные `prefix="DigitalHomeNTKpassword"` +
+  `secret` + MD5 hex).
+- **Evidence (по коду):** `test_helpers.py` **не существует**. Функции —
+  reverse-engineered формат оператора; порядок конкатенации и prefix/secret
+  load-bearing (см. `helpers.py:35-47`).
+- **Impact:** нет регрессионного guard на auth-крипту — любой breakage тихий.
+- **Recommended fix:** `test_helpers.py` с **golden vectors** (зафиксированные
+  пары вход→ожидаемый хеш, снятые с эталона) для обеих hash-функций +
+  `find` / `contains` / `dedupe_by_id` / `append_unique`.
+- **First step:** снять 2-3 golden-пары для `hash_password` /
+  `hash_password_timestamp` и закрепить параметризованным тестом.
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
@@ -1391,6 +1441,7 @@ Quality gates:
 | 🟢 A-81 (register-on-ring ADR-0012 + downlink AudioBridge + call_camera.py, pending merge `feat/intercom-uplink-mic`) — закрывает практическую часть A-49 (`sipdevices` используется) | Итерация 4 (two-way audio: приём вызова + downlink-вывод + экран вызова) |
 | 🟢 A-85 (uplink-микрофон ADR-0013: HA WS-binary #1, дрейф-фикс rtp.py, Lovelace-карта; live-прод 2026-06-24, pending merge `feat/intercom-uplink-mic`) — завершает two-way audio (говорить гостю) | Итерация 4 (two-way audio: uplink-микрофон; #2/#3/#4 эмпирически отвергнуты) |
 | 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) + 🔴 A-84 (go2rtc config bloat P2 — стрим дописывается, не мёржится; через DIAG + R7) | backlog (tech-debt из рефактор-оценки 2026-06-23 + A-84 найден пользователем; не блокирует two-way audio) |
+| ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
 | 🔴 A-88 (видео вызова: anti-churn при конкурентных клиентах + teardown стрима/worker) | Итерация 4 (фаза A — ветка `feat/intercom-video-concurrency`; первично после UI) |
 | 🔴 A-89 (мульти-вызов: смена звонящего домофона на новый ring во время held) | Итерация 4 (фаза B — отдельная ветка, после A) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
