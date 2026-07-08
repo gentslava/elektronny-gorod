@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-06-24 (A-85 uplink-микрофон ADR-0013: HA WS-binary #1, live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref приведён к feat/intercom-uplink-mic; 14 sip/-модулей включая uplink.py)
+Last reviewed: 2026-07-08 (feat/intercom-call-ui: card-UI + mic-fix + call-camera fixes 2a/2b/4 + cross-call guard + anti-delay — UI-часть готова; заведены A-88 видео-конкурентность/anti-churn и A-89 мульти-вызов как фазы A/B на след. ветках. A-85 uplink ADR-0013 live-прод 2026-06-24; 14 sip/-модулей)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1313,6 +1313,63 @@ Quality gates:
   периодическая компакция конфига, или go2rtc-side опция → **сложить в
   go2rtc-консолидацию (R7)**. Пользователь чистит текущий конфиг сам.
 
+### A-88. Видео вызова рвётся при конкурентных клиентах / пересборка стрима (anti-churn)
+
+- **Status:** 🔴 **OPEN / PLANNED** (ветка `feat/intercom-video-concurrency`, фаза A).
+- **Severity:** **P1** — видео вызова нестабильно у пользователя («на ноуте нет —
+  на телефоне есть», задержка 3/5/иногда 20с, иногда только картинка).
+- **Area:** `call_camera.py` (`stream_source`), `sip/call_controller.py`
+  (`active_call_media`), `go2rtc.py` (`upsert_audio_stream`), `camera.py`
+  (общий `eg_<id>`).
+- **Evidence (прод 2026-07-08, полный разбор: HA-лог + go2rtc-проба + браузерный
+  WebRTC-хук):**
+  - Видео вызова = **copy с общей forpost-камеры домофона**: `eg_intercom_call`
+    **вложен** в `rtsp://127.0.0.1:8554/eg_5593590#video=copy` + аудио-мост. SIP
+    от панели несёт **только аудио** (G.711), видео — из camera-API оператора.
+  - go2rtc **отдаёт валидный кадр** (проба `frame.jpeg` = 65 КБ, `ff d8 ff`,
+    H264) — серверный пайплайн исправен.
+  - При нескольких консьюмерах (ноут + телефон, ringing-превью + стрим вызова)
+    каждое открытие **пере-фетчит одноразовый operator-URL и пере-собирает
+    продюсер** → `eg_5593590` `Error opening (Invalid data)` / `Operation timed
+    out`, у части клиентов видео пустое (браузерный хук: `frames=0 0x0`).
+  - После звонка HA Stream worker `camera.*_intercom_call` **не гасится** →
+    `404 eg_intercom_call` каждые ~60-90с 9+ минут.
+- **Root cause:** пересборка/пере-PUT общего продюсера на **каждое** открытие
+  клиента; одноразовый forpost-URL + (вероятно) одна operator-сессия на камеру →
+  конкурентные консьюмеры рвут друг друга.
+- **Recommended fix (фаза A):**
+  1. Собирать стрим вызова **один раз на звонок** (warm-up на `answer`), внутри
+     звонка все клиенты **делят один продюсер** — не пересобирать per-open (дедуп
+     собранного URL, как `_last_src` в `camera.py`).
+  2. Обновления только **PATCH** (не PUT — не убивает живой продюсер, A-71).
+  3. **Teardown** `eg_intercom_call` + остановка HA Stream worker на завершении
+     вызова (убрать вечные 404).
+  4. НЕ давать вызову отдельный второй operator-pull (две сессии к одной камере
+     → оператор рвёт одну) — делить единый продюсер камеры домофона.
+- **First step:** дедуп сборки в пределах звонка в `call_camera.stream_source` +
+  teardown стрима/worker на `ended`.
+- **Rollback:** всё в git-коммитах; прод-файлы восстанавливаются из git + docker cp.
+
+### A-89. Мульти-вызов: смена звонящего домофона (не одновременные разговоры)
+
+- **Status:** 🔴 **OPEN / PLANNED** (фаза B, отдельная ветка).
+- **Severity:** **P2** — UX. Текущее поведение — by-design single concurrent call.
+- **Area:** `sip/call_controller.py` `handle_signal` (ring-guard
+  `if self._manager is not None: игнор параллельного ring`).
+- **Evidence (прод):** пока 1-й вызов held (ещё не отвечен), `ring` со 2-го
+  домофона **игнорируется** → 2-й домофон не появляется, принять нельзя, пока 1-й
+  не завершится.
+- **Уточнение требования (пользователь):** НЕ нужны одновременные разговоры по
+  нескольким домофонам. Нужна **смена активного звонящего**: курьер позвонил в
+  один, потом в другой (пока не открыли) → экран должен **переключиться** на
+  новый звонящий домофон.
+- **Recommended fix (фаза B):** в `handle_signal` на `ring` различать
+  **holding** (ещё не ответили) vs **in_call** (идёт разговор): при holding +
+  новый ring — снять старый held (release) и захватить новый вызов (переключение
+  звонящего домофона); при in_call — оставить текущий (одновременный разговор вне
+  scope). Фикс-порты SIP/RTP свободны для held-переключения.
+- **First step:** в ring-guard ветвление holding→release+re-hold нового вызова.
+
 ## Maintenance rules (повтор)
 
 См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
@@ -1334,6 +1391,8 @@ Quality gates:
 | 🟢 A-81 (register-on-ring ADR-0012 + downlink AudioBridge + call_camera.py, pending merge `feat/intercom-uplink-mic`) — закрывает практическую часть A-49 (`sipdevices` используется) | Итерация 4 (two-way audio: приём вызова + downlink-вывод + экран вызова) |
 | 🟢 A-85 (uplink-микрофон ADR-0013: HA WS-binary #1, дрейф-фикс rtp.py, Lovelace-карта; live-прод 2026-06-24, pending merge `feat/intercom-uplink-mic`) — завершает two-way audio (говорить гостю) | Итерация 4 (two-way audio: uplink-микрофон; #2/#3/#4 эмпирически отвергнуты) |
 | 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) + 🔴 A-84 (go2rtc config bloat P2 — стрим дописывается, не мёржится; через DIAG + R7) | backlog (tech-debt из рефактор-оценки 2026-06-23 + A-84 найден пользователем; не блокирует two-way audio) |
+| 🔴 A-88 (видео вызова: anti-churn при конкурентных клиентах + teardown стрима/worker) | Итерация 4 (фаза A — ветка `feat/intercom-video-concurrency`; первично после UI) |
+| 🔴 A-89 (мульти-вызов: смена звонящего домофона на новый ring во время held) | Итерация 4 (фаза B — отдельная ветка, после A) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 
