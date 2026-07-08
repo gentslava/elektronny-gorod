@@ -30,6 +30,7 @@ from custom_components.elektronny_gorod.const import (
     DOORBELL_CALL_WINDOW_FALLBACK_SEC,
     DOMAIN,
     SIGNAL_DOORBELL,
+    SIP_DATA,
 )
 
 # call_controller (A-72): ring fallback + grace + idle reset после `ended`
@@ -91,6 +92,19 @@ async def _setup(hass: HomeAssistant) -> str:
     return entity_id
 
 
+def _cancel_call_controller_loop_timers(hass: HomeAssistant) -> None:
+    """Отменить `loop.call_later` watchdog'и A-72 — они не привязаны к HA time.
+
+    `async_fire_time_changed` снимает только datetime-таймеры event.py; на CI
+    verify_cleanup всё равно ловит `_on_idle_reset` / `_on_ring_expired`.
+    """
+    for controller in hass.data.get(SIP_DATA, {}).values():
+        controller._cancel_ring_timeout()
+        controller._cancel_idle_timeout()
+        controller._cancel_call_timeout()
+        controller._cancel_hold_timeout()
+
+
 async def _drain_call_controller_timers(hass: HomeAssistant) -> None:
     """Снять таймеры call_controller: ring watchdog и idle reset после `ended`.
 
@@ -101,6 +115,7 @@ async def _drain_call_controller_timers(hass: HomeAssistant) -> None:
         hass, dt_util.utcnow() + timedelta(seconds=_CALL_TIMER_DRAIN_SEC)
     )
     await hass.async_block_till_done()
+    _cancel_call_controller_loop_timers(hass)
 
 
 async def test_doorbell_event_entity_created(hass: HomeAssistant, mock_api):
