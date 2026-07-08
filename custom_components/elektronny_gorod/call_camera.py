@@ -16,8 +16,16 @@ from homeassistant.core import Event, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import CALL_STATE_ACTIVE, DOMAIN, EVENT_CALL_STATE, GO2RTC_RTSP_PORT, LOGGER
-from .go2rtc import upsert_audio_stream
+from .const import (
+    CALL_STATE_ACTIVE,
+    CALL_STATE_ENDED,
+    CALL_STATE_ERROR,
+    DOMAIN,
+    EVENT_CALL_STATE,
+    GO2RTC_RTSP_PORT,
+    LOGGER,
+)
+from .go2rtc import remove_audio_stream, upsert_audio_stream
 from .sip.call_controller import CALL_STREAM_NAME, DoorbellCallController
 
 
@@ -69,9 +77,28 @@ class ElektronnyGorodCallCamera(Camera):
     @callback
     def _on_call_state(self, event: Event) -> None:
         """Фаза вызова изменилась → обновить state; на `active` — прогреть стрим."""
+        state = (getattr(event, "data", None) or {}).get("state")
         self.async_write_ha_state()
-        if (getattr(event, "data", None) or {}).get("state") == CALL_STATE_ACTIVE:
+        if state == CALL_STATE_ACTIVE:
             self.hass.async_create_task(self._warm_up())
+        elif state in (CALL_STATE_ENDED, CALL_STATE_ERROR):
+            # A-88: снять go2rtc-стрим вызова — иначе HA Stream worker ретраит
+            # мёртвый `eg_intercom_call` (404 каждые ~60–90 с после звонка).
+            self.hass.async_create_task(self._teardown_call_stream())
+
+    async def _teardown_call_stream(self) -> None:
+        """Best-effort снятие `eg_intercom_call` из go2rtc + сброс anti-churn кэша."""
+        self._call_stream_cache = None
+        if not self._base_url:
+            return
+        try:
+            session = async_get_clientsession(self.hass)
+            await remove_audio_stream(
+                self._base_url, CALL_STREAM_NAME, session, self._headers
+            )
+            LOGGER.debug("call-camera teardown: стрим %s снят из go2rtc", CALL_STREAM_NAME)
+        except Exception:  # noqa: BLE001 — teardown best-effort
+            LOGGER.debug("call-camera teardown не удался", exc_info=True)
 
     async def _warm_up(self) -> None:
         """Anti-delay: на answer заранее собрать `eg_intercom_call` и поднять

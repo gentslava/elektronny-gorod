@@ -5,8 +5,7 @@
 > `- [x]`). Источник findings — [`project-audit.md`](../../audit/project-audit.md)
 > A-88 / A-89; строки плана — [`roadmap.md`](../../roadmap.md) Итерация 4.
 
-**Ветка:** `feat/intercom-video-concurrency` (от `feat/intercom-call-ui` после
-UI-части). Перед продолжением: подтянуть master (там уже A-21/73/74 + merge PR #68).
+**Ветка:** `feat/intercom-video-concurrency`. Master подтянут (PR #68 merged + docs-sync).
 
 **Scope = Phase A (A-88, видео anti-churn) + Phase B (A-89, мульти-вызов).**
 Фаза B — отдельная, начинается только после стабильной A.
@@ -78,6 +77,9 @@ Cross-call guard (fix 3) не ловит — это тот же `call_id`/`ac`, 
   готовый URL без повторного upsert в go2rtc. Кэш сбрасывается при `media is
   None` (конец звонка) и на новом `bridge`. Тесты в `tests/test_call_camera.py`.
   _(commit `feat(call-camera): anti-churn … (A-88)`)_
+- [x] **teardown на ended** — `call_camera._teardown_call_stream()` по
+  `CALL_STATE_ENDED`/`error`: `remove_audio_stream(eg_intercom_call)` + сброс кэша.
+  _(Phase A Task A1)_
 - [x] **warm-up на answer** — `_warm_up()` строит стрим один раз на
   `CALL_STATE_ACTIVE` и пробит `frame.jpeg`, чтобы keyframe был готов к моменту
   открытия клиентами (anti-delay). _(перенесено из UI-ветки, commit `75fe655`)_
@@ -93,20 +95,20 @@ Cross-call guard (fix 3) не ловит — это тот же `call_id`/`ac`, 
 
 Цель — убрать вечные `404 eg_intercom_call` после завершения вызова.
 
-- [ ] На `CALL_STATE_ENDED`: `remove_audio_stream(eg_intercom_call)` из go2rtc
-      (см. `go2rtc.py`), сбросить `_call_stream_cache`.
-- [ ] Погасить HA Stream worker камеры вызова (перевести `available`→False уже
-      сделано; убедиться, что HA действительно закрывает worker — проверить, не
-      держит ли фронт открытым `camera.intercom_call` после `ended`).
-- [ ] Тест: после `ended` `stream_source()` → `None`, `remove_audio_stream`
-      вызван один раз, повторный `ended` идемпотентен.
+- [x] На `CALL_STATE_ENDED`/`error`: `remove_audio_stream(eg_intercom_call)` из go2rtc
+      (`call_camera._teardown_call_stream`), сброс `_call_stream_cache`.
+- [x] `available`→False на конце вызова (уже было); teardown go2rtc снимает 404-ретраи
+      worker'а (фронт после `ended` скрывает карточку ~2.5с — отдельный UX, не блокер).
+- [x] Тест: после `ended` `stream_source()` → `None`, `remove_audio_stream`
+      вызван, повторный teardown идемпотентен (`tests/test_call_camera.py`).
 
 ### Task A2: PATCH-only обновления (не PUT) — не убивать живой продюсер (A-71)
-**Files:** `go2rtc.py` (`upsert_audio_stream`), `tests/test_go2rtc.py`.
+**Files:** `go2rtc.py` (`upsert_audio_stream`), `tests/test_go2rtc_audio.py`.
 
-- [ ] Убедиться, что upsert стрима вызова использует **PATCH** при существующем
-      продюсере (PUT пересоздаёт → рвёт живых консьюмеров). Свериться с A-71.
-- [ ] Тест: повторный upsert того же src не шлёт PUT.
+- [x] Upsert стрима вызова — **PATCH-first**, PUT только fallback на 4xx/ClientError
+      (см. `go2rtc.py:upsert_audio_stream`, A-71).
+- [x] Тест: повторный upsert того же src не шлёт PUT при успешном PATCH
+      (`test_upsert_audio_stream_patch_first`).
 
 ### Task A3: Не давать вызову второй operator-pull
 **Files:** `call_camera.py`, `camera.py` (общий `eg_<id>`).
