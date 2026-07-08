@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from aiohttp import ClientTimeout
+
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.core import Event, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import DOMAIN, EVENT_CALL_STATE, GO2RTC_RTSP_PORT, LOGGER
+from .const import CALL_STATE_ACTIVE, DOMAIN, EVENT_CALL_STATE, GO2RTC_RTSP_PORT, LOGGER
 from .go2rtc import upsert_audio_stream
 from .sip.call_controller import CALL_STREAM_NAME, DoorbellCallController
 
@@ -61,9 +63,31 @@ class ElektronnyGorodCallCamera(Camera):
         )
 
     @callback
-    def _on_call_state(self, _event: Event) -> None:
-        """Фаза вызова изменилась → переоценить available/state в UI."""
+    def _on_call_state(self, event: Event) -> None:
+        """Фаза вызова изменилась → обновить state; на `active` — прогреть стрим."""
         self.async_write_ha_state()
+        if (getattr(event, "data", None) or {}).get("state") == CALL_STATE_ACTIVE:
+            self.hass.async_create_task(self._warm_up())
+
+    async def _warm_up(self) -> None:
+        """Anti-delay: на answer заранее собрать `eg_intercom_call` и поднять
+        producer (первый keyframe) ДО открытия карточки — иначе видео вызова
+        поднимается с ~3с задержкой (сборка стрима + первый keyframe в момент
+        открытия). Идемпотентно с последующим `stream_source()` от фронтенда."""
+        try:
+            url = await self.stream_source()  # строит eg_intercom_call в go2rtc
+            if not url:
+                return
+            # Нудж go2rtc поднять producer (и первый keyframe) — GET frame.jpeg.
+            session = async_get_clientsession(self.hass)
+            probe = f"{self._base_url}/api/frame.jpeg?src={CALL_STREAM_NAME}"
+            async with session.get(
+                probe, headers=self._headers, timeout=ClientTimeout(total=8)
+            ) as resp:
+                await resp.read()
+            LOGGER.debug("call-camera warm-up: producer прогрет (keyframe запрошен)")
+        except Exception:  # noqa: BLE001 — прогрев best-effort, не влияет на вызов
+            LOGGER.debug("call-camera warm-up не удался", exc_info=True)
 
     @property
     def available(self) -> bool:
