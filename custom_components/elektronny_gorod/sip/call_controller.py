@@ -195,6 +195,19 @@ class DoorbellCallController:
                     cid, ac,
                 )
                 return
+            # A-90: оператор снимает ring-уведомление со ВСЕХ устройств, когда вызов
+            # приняли → шлёт FCM `ended` (reason=answered_elsewhere) сразу после «Принять»,
+            # хотя SIP-диалог ещё жив (BYE приходит на несколько секунд позже). Для уже
+            # ПРИНЯТОГО вызова источник истины о завершении — SIP (BYE/CANCEL/hangup/
+            # страховка `_MAX_CALL_SEC`), не FCM. Иначе HA гасит «Вызов завершён» на живом
+            # разговоре (прод 2026-07-08 20:57). Для неотвеченного (`holding`/`ringing`)
+            # `in_call`=False → FCM `ended` по-прежнему корректно завершает.
+            if self._manager is not None and self._manager.in_call:
+                LOGGER.info(
+                    "SIP: FCM `ended` во время активного разговора — игнор "
+                    "(завершение придёт по SIP BYE/hangup)"
+                )
+                return
             self._emit_call_state(CALL_STATE_ENDED)  # до сброса _active (читает ids)
             self._active = None
             # CANCEL мог не прийти (ответ на др. устройстве) — снять держимый сами.

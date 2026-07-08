@@ -47,8 +47,32 @@ timed out`, у части клиентов WebRTC не успевает деко
 
 ---
 
+## Проблема (A-90, P1 — авто-сброс принятого вызова)
+
+Оператор при ответе **снимает ring-уведомление со всех устройств** → шлёт FCM
+`ended` (`reason=answered_elsewhere`) через ~0.7 с после «Принять», хотя SIP-диалог
+ещё жив (реальный BYE — на несколько секунд позже). `handle_signal("ended")`
+принимал этот push за hangup и гасил `sensor.*_call_state` → карта «Вызов
+завершён» на живом разговоре (домофон продолжает разговор).
+
+**Evidence (прод 2026-07-08 20:57, ac=35604, call_id=`R.rgCE…`):**
+```
+20:57:39.297 вызов ПРИНЯТ, active_call_media OK cam=5593592
+20:57:39.298 call-camera available False -> True
+20:57:39.965 SIP signal ended: call_id=R.rgCE… (active call_id=R.rgCE…)  ← FCM, +0.67с
+20:57:45.827 SIP: вызов завершён (BYE)                                    ← реальный SIP, +6с
+```
+Cross-call guard (fix 3) не ловит — это тот же `call_id`/`ac`, не чужой вызов.
+
 ## Что уже сделано (в этой ветке)
 
+- [x] **A-90: игнор FCM `ended` для принятого вызова** — в `handle_signal` (ветка
+  `ended`, после cross-call guard) при `self._manager.in_call` событие игнорируется:
+  завершение отвеченного вызова приходит по SIP (BYE→`_schedule_audio_cleanup`,
+  CANCEL→`_on_ring_cancelled`, `hangup`, страховка `_MAX_CALL_SEC`). Для
+  неотвеченного (`holding`/`ringing`, `in_call=False`) FCM `ended` по-прежнему
+  завершает (ответ не в HA). `event.*` doorbell-сущность не затронута — сырые FCM
+  события стреляют как раньше. Тесты в `tests/test_sip_call_controller.py`.
 - [x] **anti-churn dedup** — `call_camera.stream_source` кэширует
   `(id(bridge), rtsp_url)` активного вызова: повторные открытия камеры отдают
   готовый URL без повторного upsert в go2rtc. Кэш сбрасывается при `media is

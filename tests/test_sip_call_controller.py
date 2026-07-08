@@ -107,6 +107,32 @@ def test_ended_for_other_call_id_does_not_clear(controller):
     assert controller.current_call() is not None
 
 
+def test_fcm_ended_ignored_during_active_call(controller):
+    # A-90: HA сам ответил (in_call) → оператор снимает ring-уведомление со всех
+    # устройств и шлёт FCM `ended` (answered_elsewhere) сразу после «Принять». Живой
+    # разговор гасить нельзя — завершение придёт по SIP BYE (прод 2026-07-08 20:57).
+    controller.handle_signal(_ring(call_id="c1"))
+    mgr = MagicMock()
+    mgr.in_call = True
+    mgr.holding = False
+    controller._manager = mgr
+    controller.handle_signal(_ended(call_id="c1"))  # тот же call_id/ac
+    assert controller.current_call() is not None  # вызов НЕ сброшен
+    assert CALL_STATE_ENDED not in _call_states(controller._hass)
+
+
+def test_fcm_ended_clears_held_call_when_not_in_call(controller):
+    # Ответили НЕ в HA (in_call=False, держим held) → FCM `ended` (answered_elsewhere)
+    # корректно завершает наш держимый вызов (гвард A-90 не мешает).
+    controller.handle_signal(_ring(call_id="c1"))
+    mgr = MagicMock()
+    mgr.in_call = False
+    mgr.holding = True
+    controller._manager = mgr
+    controller.handle_signal(_ended(call_id="c1"))
+    assert controller.current_call() is None
+
+
 async def test_answer_refused_without_active_call(controller):
     assert await controller.async_answer() is False
     controller._api.mint_sip_device.assert_not_called()
