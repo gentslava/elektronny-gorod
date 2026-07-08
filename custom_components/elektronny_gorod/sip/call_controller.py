@@ -144,6 +144,15 @@ class DoorbellCallController:
         """SIGNAL_DOORBELL: `ring` → запомнить + держать SIP; `ended` → снять."""
         event_type = payload.get("event_type")
         attrs = payload.get("attributes") or {}
+        # Диагностика гонки двух звонков (какой `ended` какой вызов трогает).
+        if event_type in ("ring", "ended"):
+            LOGGER.debug(
+                "SIP signal %s: call_id=%s place=%s ac=%s (active call_id=%s ac=%s)",
+                event_type, attrs.get("call_id"), payload.get("place_id"),
+                payload.get("access_control_id"),
+                self._active.call_id if self._active else None,
+                self._active.access_control_id if self._active else None,
+            )
         if event_type == "ring":
             if self._manager is not None:
                 # Уже держим/в разговоре (фикс-порты) — игнор параллельного ring.
