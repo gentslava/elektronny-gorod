@@ -102,6 +102,17 @@
       },
       "days_to_block": {
         "name": "Days to block"
+      },
+      "call_state": {
+        "name": "Call state",
+        "state": {
+          "idle": "No call",
+          "ringing": "Incoming call",
+          "connecting": "Connecting",
+          "active": "In call",
+          "ended": "Ended",
+          "error": "Error"
+        }
       }
     },
     "binary_sensor": {

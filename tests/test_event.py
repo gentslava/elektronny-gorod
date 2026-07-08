@@ -27,9 +27,14 @@ from custom_components.elektronny_gorod.const import (
     CONF_OPERATOR_ID,
     CONF_REFRESH_TOKEN,
     CONF_USER_AGENT,
+    DOORBELL_CALL_WINDOW_FALLBACK_SEC,
     DOMAIN,
     SIGNAL_DOORBELL,
+    SIP_DATA,
 )
+
+# call_controller (A-72): ring fallback + grace + idle reset после `ended`
+_CALL_TIMER_DRAIN_SEC = int(DOORBELL_CALL_WINDOW_FALLBACK_SEC + 3 + 6 + 2)
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
 _UID = "elektronny_gorod_event_doorbell_P1_AC1"
@@ -87,6 +92,32 @@ async def _setup(hass: HomeAssistant) -> str:
     return entity_id
 
 
+def _cancel_call_controller_loop_timers(hass: HomeAssistant) -> None:
+    """Отменить `loop.call_later` watchdog'и A-72 — они не привязаны к HA time.
+
+    `async_fire_time_changed` снимает только datetime-таймеры event.py; на CI
+    verify_cleanup всё равно ловит `_on_idle_reset` / `_on_ring_expired`.
+    """
+    for controller in hass.data.get(SIP_DATA, {}).values():
+        controller._cancel_ring_timeout()
+        controller._cancel_idle_timeout()
+        controller._cancel_call_timeout()
+        controller._cancel_hold_timeout()
+
+
+async def _drain_call_controller_timers(hass: HomeAssistant) -> None:
+    """Снять таймеры call_controller: ring watchdog и idle reset после `ended`.
+
+    event.py и call_controller слушают один SIGNAL_DOORBELL; после A-72 teardown
+    теста без дренажа pytest ловит lingering timer (_on_ring_expired / _on_idle_reset).
+    """
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=_CALL_TIMER_DRAIN_SEC)
+    )
+    await hass.async_block_till_done()
+    _cancel_call_controller_loop_timers(hass)
+
+
 async def test_doorbell_event_entity_created(hass: HomeAssistant, mock_api):
     """Одна event-сущность на домофон создаётся из coordinator.data['locks']."""
     entity_id = await _setup(hass)
@@ -117,10 +148,7 @@ async def test_ring_event_fires(hass: HomeAssistant, mock_api):
     assert state.attributes["event_type"] == "ring"
     assert state.attributes["call_id"] == "C1"
     assert state.attributes["gate_name"] == "Подъезд 1"
-    # снять взведённый авто-end-таймер (нет call_invalidated → fallback 35с),
-    # иначе verify_cleanup поймает lingering timer на teardown
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=40))
-    await hass.async_block_till_done()
+    await _drain_call_controller_timers(hass)
 
 
 async def test_ended_event_fires(hass: HomeAssistant, mock_api):
@@ -132,6 +160,7 @@ async def test_ended_event_fires(hass: HomeAssistant, mock_api):
     })
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).attributes["event_type"] == "ended"
+    await _drain_call_controller_timers(hass)
 
 
 async def test_other_ac_ignored(hass: HomeAssistant, mock_api):
@@ -144,6 +173,7 @@ async def test_other_ac_ignored(hass: HomeAssistant, mock_api):
     })
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == before
+    await _drain_call_controller_timers(hass)
 
 
 async def test_other_place_same_ac_ignored(hass: HomeAssistant, mock_api):
@@ -156,6 +186,7 @@ async def test_other_place_same_ac_ignored(hass: HomeAssistant, mock_api):
     })
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == before
+    await _drain_call_controller_timers(hass)
 
 
 async def test_ring_auto_ends_on_call_invalidated(hass: HomeAssistant, mock_api):
@@ -181,6 +212,7 @@ async def test_ring_auto_ends_on_call_invalidated(hass: HomeAssistant, mock_api)
     assert state.attributes["event_type"] == "ended"
     assert state.attributes["reason"] == "timeout"
     assert state.attributes["call_id"] == "C1"
+    await _drain_call_controller_timers(hass)
 
 
 async def test_real_ended_cancels_auto_end(hass: HomeAssistant, mock_api):
@@ -205,6 +237,7 @@ async def test_real_ended_cancels_auto_end(hass: HomeAssistant, mock_api):
     state = hass.states.get(entity_id)
     assert state.attributes["event_type"] == "ended"
     assert state.attributes["reason"] == "answered_elsewhere"
+    await _drain_call_controller_timers(hass)
 
 
 async def test_apartment_fallback_keeps_push_value(hass: HomeAssistant, mock_api):
@@ -218,8 +251,7 @@ async def test_apartment_fallback_keeps_push_value(hass: HomeAssistant, mock_api
     })
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).attributes["apartment"] == "0009777"
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=40))
-    await hass.async_block_till_done()
+    await _drain_call_controller_timers(hass)
 
 
 async def test_auto_end_call_invalidated_in_past(hass: HomeAssistant, mock_api):
@@ -236,6 +268,7 @@ async def test_auto_end_call_invalidated_in_past(hass: HomeAssistant, mock_api):
     state = hass.states.get(entity_id)
     assert state.attributes["event_type"] == "ended"
     assert state.attributes["reason"] == "timeout"
+    await _drain_call_controller_timers(hass)
 
 
 async def test_apartment_canonical_from_place_address(hass: HomeAssistant, mock_api):
@@ -249,9 +282,7 @@ async def test_apartment_canonical_from_place_address(hass: HomeAssistant, mock_
     })
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).attributes["apartment"] == "57"
-    # снять взведённый авто-end-таймер (нет call_invalidated → fallback 35с)
-    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=40))
-    await hass.async_block_till_done()
+    await _drain_call_controller_timers(hass)
 
 
 async def test_auto_end_fallback_on_invalid_call_invalidated(hass: HomeAssistant, mock_api):
@@ -272,3 +303,4 @@ async def test_auto_end_fallback_on_invalid_call_invalidated(hass: HomeAssistant
     state = hass.states.get(entity_id)
     assert state.attributes["event_type"] == "ended"
     assert state.attributes["reason"] == "timeout"
+    await _drain_call_controller_timers(hass)

@@ -9,11 +9,14 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
+from aiohttp import ClientTimeout
+
 from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.core import Event, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import DOMAIN, GO2RTC_RTSP_PORT, LOGGER
+from .const import CALL_STATE_ACTIVE, DOMAIN, EVENT_CALL_STATE, GO2RTC_RTSP_PORT, LOGGER
 from .go2rtc import upsert_audio_stream
 from .sip.call_controller import CALL_STREAM_NAME, DoorbellCallController
 
@@ -46,6 +49,82 @@ class ElektronnyGorodCallCamera(Camera):
             identifiers={(DOMAIN, f"{entry_id}_intercom_call")}, name="Вызов домофона"
         )
 
+    async def async_added_to_hass(self) -> None:
+        """Слушать смену фазы вызова, чтобы обновлять `available`/снапшот в UI.
+
+        `available` этой сущности зависит от активного вызова, но HA не узнает об
+        изменении без записи состояния. Контроллер шлёт `EVENT_CALL_STATE` на
+        каждой смене фазы (ringing/active/ended/…) — по нему пишем state, тогда
+        фронтенд видит камеру доступной во время разговора и запрашивает стрим
+        (иначе весь звонок висит «Видео недоступно» и видео не запрашивается)."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_CALL_STATE, self._on_call_state)
+        )
+
+    @callback
+    def _on_call_state(self, event: Event) -> None:
+        """Фаза вызова изменилась → обновить state; на `active` — прогреть стрим."""
+        self.async_write_ha_state()
+        if (getattr(event, "data", None) or {}).get("state") == CALL_STATE_ACTIVE:
+            self.hass.async_create_task(self._warm_up())
+
+    async def _warm_up(self) -> None:
+        """Anti-delay: на answer заранее собрать `eg_intercom_call` и поднять
+        producer (первый keyframe) ДО открытия карточки — иначе видео вызова
+        поднимается с ~3с задержкой (сборка стрима + первый keyframe в момент
+        открытия). Идемпотентно с последующим `stream_source()` от фронтенда."""
+        try:
+            url = await self.stream_source()  # строит eg_intercom_call в go2rtc
+            if not url:
+                return
+            # Нудж go2rtc поднять producer (и первый keyframe) — GET frame.jpeg.
+            session = async_get_clientsession(self.hass)
+            probe = f"{self._base_url}/api/frame.jpeg?src={CALL_STREAM_NAME}"
+            async with session.get(
+                probe, headers=self._headers, timeout=ClientTimeout(total=8)
+            ) as resp:
+                await resp.read()
+            LOGGER.debug("call-camera warm-up: producer прогрет (keyframe запрошен)")
+        except Exception:  # noqa: BLE001 — прогрев best-effort, не влияет на вызов
+            LOGGER.debug("call-camera warm-up не удался", exc_info=True)
+
+    @property
+    def available(self) -> bool:
+        """Доступна ТОЛЬКО во время активного вызова.
+
+        Вне вызова HA не должен пытаться стримить/снимать эту сущность: иначе
+        HA Stream worker бесконечно ретраит мёртвый `rtsp://…/eg_intercom_call`
+        (404, спам в логе), а снапшот-запросы валятся. Пока `active_call_media`
+        None — entity `unavailable`, карточка показывает чистый плейсхолдер."""
+        controller = self._controller_getter()
+        return controller is not None and controller.active_call_media() is not None
+
+    def _active_doorbell(self) -> Camera | None:
+        """Камера домофона активного вызова (для снапшота), либо None."""
+        controller = self._controller_getter()
+        if controller is None:
+            return None
+        media = controller.active_call_media()
+        if media is None:
+            return None
+        camera_id, _bridge = media
+        return self._doorbell_lookup(camera_id)
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """Снимок/постер экрана вызова = снапшот камеры домофона.
+
+        Базовый `Camera.camera_image()` кидает `NotImplementedError` — раньше это
+        валило постер `ha-camera-stream` и любой снапшот (серый прямоугольник +
+        спам ошибок в логе). Делегируем на камеру домофона активного вызова; вне
+        вызова — None (нет кадра, без ошибки)."""
+        doorbell = self._active_doorbell()
+        if doorbell is None:
+            return None
+        return await doorbell.async_camera_image(width, height)
+
     async def stream_source(self) -> str | None:
         """Активный вызов → свежий combined-стрим eg_intercom_call → RTSP; иначе None."""
         controller = self._controller_getter()
@@ -63,9 +142,19 @@ class ElektronnyGorodCallCamera(Camera):
         if not video_rtsp:
             return None
         srcs = [f"{video_rtsp}#video=copy", bridge.go2rtc_src]
-        await upsert_audio_stream(
-            self._base_url, CALL_STREAM_NAME, srcs,
-            async_get_clientsession(self.hass), self._headers,
-        )
+        try:
+            await upsert_audio_stream(
+                self._base_url, CALL_STREAM_NAME, srcs,
+                async_get_clientsession(self.hass), self._headers,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Стрим не создан в go2rtc (напр. раздутый конфиг, A-84) — НЕ отдаём
+            # мёртвый RTSP-URL, иначе HA Stream worker ловит 404 и спамит. Лучше
+            # None → сущность без видео (карточка покажет плейсхолдер).
+            LOGGER.warning(
+                "Стрим вызова не создан в go2rtc (%s) — видео вызова недоступно",
+                type(exc).__name__,
+            )
+            return None
         LOGGER.debug("Стрим вызова собран (HA-native): %s", CALL_STREAM_NAME)
         return f"rtsp://{self._rtsp_host}:{GO2RTC_RTSP_PORT}/{CALL_STREAM_NAME}"

@@ -19,12 +19,23 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LOGGER
+from .const import (
+    AREA_INTERCOM,
+    CALL_STATE_ACTIVE,
+    CALL_STATE_CONNECTING,
+    CALL_STATE_ENDED,
+    CALL_STATE_ERROR,
+    CALL_STATE_IDLE,
+    CALL_STATE_RINGING,
+    DOMAIN,
+    EVENT_CALL_STATE,
+    LOGGER,
+)
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
 
@@ -42,6 +53,21 @@ async def async_setup_entry(
         place_id = balance_info["place_id"]
         entities.append(ElektronnyGorodBalanceSensor(coordinator, place_id))
         entities.append(ElektronnyGorodDaysToBlockSensor(coordinator, place_id))
+
+    # call_state — одна сущность на домофон (дедуп по (place_id, access_control_id),
+    # как event.py: FCM-payload несёт AccessControlId, не entrance). Push-driven
+    # через EVENT_CALL_STATE (sip/call_controller.py) — единый источник фазы вызова.
+    locks = (coordinator.data or {}).get("locks") or []
+    by_ac: dict[tuple, dict] = {}
+    for lk in locks:
+        key = (lk.get("place_id"), lk.get("access_control_id"))
+        if None in key:
+            continue
+        cur = by_ac.get(key)
+        if cur is None or str(lk.get("entrance_id") or "") < str(cur.get("entrance_id") or ""):
+            by_ac[key] = lk
+    entities.extend(ElektronnyGorodCallStateSensor(lk) for lk in by_ac.values())
+
     async_add_entities(entities)
 
 
@@ -222,3 +248,81 @@ class ElektronnyGorodDaysToBlockSensor(
     @callback
     def _handle_coordinator_update(self) -> None:
         self.async_write_ha_state()
+
+
+class ElektronnyGorodCallStateSensor(SensorEntity):
+    """Фаза вызова домофона (idle/ringing/connecting/active/ended/error).
+
+    Единый источник истины для карточки вызова и автоматизаций. Push-driven:
+    слушает bus-событие `EVENT_CALL_STATE` (его шлёт DoorbellCallController на
+    каждом переходе). НЕ CoordinatorEntity — состояние не из coordinator.data,
+    а из realtime-сигнала; coordinator используется лишь при setup (lock_info).
+    Device — общий с lock/event/intercom-camera того же домофона.
+    """
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "call_state"
+    _attr_icon = "mdi:phone-ring-outline"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [
+        CALL_STATE_IDLE,
+        CALL_STATE_RINGING,
+        CALL_STATE_CONNECTING,
+        CALL_STATE_ACTIVE,
+        CALL_STATE_ENDED,
+        CALL_STATE_ERROR,
+    ]
+
+    def __init__(self, lock_info: dict[str, Any]) -> None:
+        self._place_id: str = lock_info["place_id"]
+        self._access_control_id: str = lock_info["access_control_id"]
+        self._entrance_id = lock_info.get("entrance_id")
+        self._name: str = lock_info["name"]
+        self._attr_native_value = CALL_STATE_IDLE
+        self._extra: dict[str, Any] = {}
+        self._attr_unique_id = (
+            f"{DOMAIN}_call_state_{self._place_id}_{self._access_control_id}"
+        )
+        # Тот же device, что у lock/event/intercom-camera этого домофона (см. event.py).
+        device_uid = (
+            f"entrance_{self._place_id}_{self._access_control_id}_"
+            f"{self._entrance_id or 'main'}"
+        )
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_uid)},
+            name=self._name,
+            manufacturer="Электронный город",
+            model="Intercom",
+            suggested_area=AREA_INTERCOM,
+            via_device=(DOMAIN, f"place_{self._place_id}"),
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Подписка на realtime-фазу вызова (EVENT_CALL_STATE)."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_CALL_STATE, self._handle_call_state)
+        )
+
+    @callback
+    def _handle_call_state(self, event: Event) -> None:
+        """Bus-callback: обновить state, если фаза относится к нашему домофону."""
+        data = event.data
+        if (
+            str(data.get("access_control_id")) != str(self._access_control_id)
+            or str(data.get("place_id")) != str(self._place_id)
+        ):
+            return
+        self._attr_native_value = data.get("state", CALL_STATE_IDLE)
+        self._extra = {
+            "call_id": data.get("call_id"),
+            "intercom_name": self._name,
+            "started_at": data.get("started_at"),
+            "access_control_id": self._access_control_id,
+            "place_id": self._place_id,
+        }
+        self.async_write_ha_state()
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        return self._extra

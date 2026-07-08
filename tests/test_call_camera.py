@@ -85,3 +85,70 @@ async def test_stream_source_none_when_doorbell_stream_source_empty():
         result = await cam.stream_source()
     assert result is None
     upsert.assert_not_awaited()
+
+
+async def test_stream_source_none_when_upsert_fails():
+    """upsert стрима упал (напр. раздутый go2rtc-конфиг) → None, а не мёртвый URL (404)."""
+    bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=aac"
+    c = MagicMock(); c.active_call_media.return_value = ("5593590", bridge)
+    doorbell = MagicMock()
+    doorbell.stream_source = AsyncMock(return_value="rtsp://127.0.0.1:8554/eg_5593590")
+    upsert = AsyncMock(side_effect=RuntimeError("go2rtc audio PUT failed: HTTP 400"))
+    cam = _cam(c, lambda cid: doorbell)
+    with patch(f"{_CC}.upsert_audio_stream", new=upsert), patch(
+        f"{_CC}.async_get_clientsession", return_value=MagicMock()
+    ):
+        cam.hass = MagicMock()
+        result = await cam.stream_source()
+    assert result is None
+
+
+async def test_available_only_during_active_call():
+    """available=True только при активном вызове (иначе HA не стримит → нет вечных 404)."""
+    c = MagicMock()
+    c.active_call_media.return_value = None
+    cam = _cam(c, lambda cid: None)
+    assert cam.available is False
+    c.active_call_media.return_value = ("5593590", MagicMock())
+    assert cam.available is True
+
+
+async def test_available_false_when_controller_none():
+    cam = ElektronnyGorodCallCamera(
+        controller_getter=lambda: None,
+        go2rtc_base_url="http://g:1984",
+        go2rtc_headers={}, rtsp_host="127.0.0.1",
+        doorbell_lookup=lambda cid: None,
+        entry_id="e1",
+    )
+    assert cam.available is False
+
+
+async def test_camera_image_delegates_to_doorbell_snapshot():
+    """async_camera_image → снапшот камеры домофона (не NotImplementedError)."""
+    c = MagicMock()
+    c.active_call_media.return_value = ("5593590", MagicMock())
+    doorbell = MagicMock()
+    doorbell.async_camera_image = AsyncMock(return_value=b"jpeg-bytes")
+    cam = _cam(c, lambda cid: doorbell if cid == "5593590" else None)
+    img = await cam.async_camera_image(300, 200)
+    assert img == b"jpeg-bytes"
+    doorbell.async_camera_image.assert_awaited_once_with(300, 200)
+
+
+async def test_camera_image_none_without_active_call():
+    """Вне вызова — None (нет кадра), без NotImplementedError."""
+    c = MagicMock()
+    c.active_call_media.return_value = None
+    cam = _cam(c, lambda cid: None)
+    assert await cam.async_camera_image() is None
+
+
+def test_on_call_state_writes_ha_state():
+    """EVENT_CALL_STATE → запись состояния (чтобы фронт увидел смену available)."""
+    c = MagicMock()
+    c.active_call_media.return_value = None
+    cam = _cam(c, lambda cid: None)
+    cam.async_write_ha_state = MagicMock()
+    cam._on_call_state(MagicMock())
+    cam.async_write_ha_state.assert_called_once()

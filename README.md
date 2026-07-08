@@ -192,6 +192,47 @@ automation:
 - **Видео + звук гостя одной карточкой** — на время активного вызова появляется сущность `camera.<домофон>_intercom_call` (HA-native WebRTC: видео домофона + звук гостя, работает на 4G без экспозиции go2rtc). Вне вызова сущность недоступна — карточку прячьте `conditional`-карточкой.
 - **Говорить (микрофон браузера → домофон)** — Lovelace-карта `custom:eg-intercom-mic-card` с кнопкой «🎤 Говорить». Микрофон едет в домофон по тому же авторизованному WebSocket Home Assistant — без go2rtc/TURN.
 
+### Карточка экрана вызова
+
+Готовая Lovelace-карта `custom:eg-intercom-call-card` — весь вызов одним экраном: видео гостя, «Открыть дверь» защищённым жестом, принять/завершить, микрофон. Ведётся по `sensor.<домофон>_call_state`, облик — на theme-токенах Home Assistant (тёмная/светлая), адаптив от телефона до настенной панели.
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/incoming.png" alt="Входящий вызов" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/active.png" alt="Разговор" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/light-theme.png" alt="Светлая тема" width="100%"/></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Входящий вызов</b><br/><sub>видео до принятия, окно ответа, slide-to-open</sub></td>
+    <td align="center"><b>Разговор</b><br/><sub>LIVE, таймер, микрофон / звук / завершить</sub></td>
+    <td align="center"><b>Светлая тема</b><br/><sub>из коробки, на токенах HA</sub></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/mic-permission.png" alt="Нет доступа к микрофону" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/connection-lost.png" alt="Связь прервана" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/idle.png" alt="Нет активного вызова" width="100%"/></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Нет доступа к микрофону</b><br/><sub>баннер + «Разрешить»</sub></td>
+    <td align="center"><b>Связь прервана</b><br/><sub>плейсхолдер + «Повторить»</sub></td>
+    <td align="center"><b>Нет активного вызова</b><br/><sub>заглушка + точки доступа</sub></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/features/intercom-two-way-audio/screenshots/wall-panel.png" alt="Настенная панель / десктоп" width="760"/><br/><b>Настенная панель / десктоп</b> — 2 колонки: видео-герой + контролы (слайдер по центру, кнопки по нижней кромке)</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/features/intercom-two-way-audio/screenshots/compact.png" alt="Компактная карточка" width="440"/><br/><b>Компактная карточка</b> (<code>layout: compact</code>) — одна строка: мини-превью + статус + быстрые кнопки</td>
+  </tr>
+</table>
+
+> Установка карты — см. [`call-card-install.md`](docs/features/intercom-two-way-audio/call-card-install.md). UX-контракт и раскладки — [`call-card-ux-production.md`](docs/features/intercom-two-way-audio/call-card-ux-production.md).
+
 ### Карта микрофона
 
 Карта раздаётся интеграцией статикой. Добавьте её как Lovelace-ресурс (**Настройки → Панели → ⋮ → Управление ресурсами → Добавить**, тип *JavaScript-модуль*):

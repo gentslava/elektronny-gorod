@@ -81,3 +81,8 @@ custom_components/elektronny_gorod/elektronny_gorod.zip
 
 # Playwright MCP runtime artifacts (console-*.log, page-*.yml snapshots)
 .playwright-mcp/
+
+# Frontend (Lovelace card) build — исходники в frontend/src, бандл коммитим в
+# custom_components/.../www/ (HACS не собирает). Игнорируем только node_modules/кеши.
+frontend/node_modules/
+frontend/*.tsbuildinfo

@@ -12,12 +12,38 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from custom_components.elektronny_gorod.const import (
+    CALL_STATE_ACTIVE,
+    CALL_STATE_CONNECTING,
+    CALL_STATE_ENDED,
+    CALL_STATE_ERROR,
+    CALL_STATE_IDLE,
+    CALL_STATE_RINGING,
+    EVENT_CALL_STATE,
+)
 from custom_components.elektronny_gorod.sip.call_controller import (
     EVENT_SIP_CALL,
     DoorbellCallController,
 )
 
 _MGR_PATH = "custom_components.elektronny_gorod.sip.call_controller.SipManager"
+
+
+def _call_states(hass_mock) -> list[str]:
+    """Состояния, опубликованные на EVENT_CALL_STATE (через hass.bus.async_fire)."""
+    return [
+        call.args[1]["state"]
+        for call in hass_mock.bus.async_fire.call_args_list
+        if call.args and call.args[0] == EVENT_CALL_STATE
+    ]
+
+
+def _call_state_payloads(hass_mock) -> list[dict]:
+    return [
+        call.args[1]
+        for call in hass_mock.bus.async_fire.call_args_list
+        if call.args and call.args[0] == EVENT_CALL_STATE
+    ]
 
 
 def _hass() -> MagicMock:
@@ -508,3 +534,186 @@ async def test_uplink_sink_cleared_when_accept_fails():
 
     assert ok is False
     assert c._uplink_sink is None
+
+
+# ---- Slice 3a: публикация состояния вызова (EVENT_CALL_STATE) ----
+def test_call_state_ringing_emitted_on_ring():
+    c = DoorbellCallController(_hass(), MagicMock(), lambda: "TOK")
+    c.handle_signal(_ring(place="P", ac="A", call_id="c1"))
+    payloads = _call_state_payloads(c._hass)
+    assert payloads, "EVENT_CALL_STATE не опубликован на ring"
+    last = payloads[-1]
+    assert last["state"] == CALL_STATE_RINGING
+    assert last["access_control_id"] == "A"
+    assert last["place_id"] == "P"
+    assert last["call_id"] == "c1"
+
+
+def test_call_state_ended_emitted_on_fcm_ended():
+    c = DoorbellCallController(_hass(), MagicMock(), lambda: "TOK")
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    c.handle_signal(_ended(ac="A", call_id="c1"))
+    assert _call_states(c._hass)[-1] == CALL_STATE_ENDED
+
+
+async def test_call_state_connecting_then_active_on_answer(controller):
+    controller.handle_signal(_ring())
+    with patch(_MGR_PATH) as MgrCls:
+        mgr = MgrCls.return_value
+        mgr.in_call = False
+        mgr.holding = False
+        mgr.async_answer = AsyncMock(return_value=True)
+        ok = await controller.async_answer()
+    assert ok is True
+    states = _call_states(controller._hass)
+    assert CALL_STATE_CONNECTING in states
+    assert states[-1] == CALL_STATE_ACTIVE
+    active = [p for p in _call_state_payloads(controller._hass)
+              if p["state"] == CALL_STATE_ACTIVE][-1]
+    assert active["started_at"] is not None  # таймер длительности отсчитывается отсюда
+
+
+async def test_call_state_ended_on_hangup(controller):
+    controller.handle_signal(_ring())
+    controller._manager = MagicMock()
+    controller._manager.async_hangup = AsyncMock()
+    await controller.async_hangup()
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+
+
+async def test_call_state_error_emitted_when_accept_raises():
+    c = _go2rtc_controller()
+    c.handle_signal(_ring())
+    held = MagicMock()
+    held.holding = True
+    held.in_call = False
+    held.accept = AsyncMock(side_effect=ValueError("malformed SDP"))
+    c._manager = held
+    with patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
+        f"{_CC}.detect_lan_ip", return_value="1.2.3.4"
+    ), patch(f"{_CC}.remove_audio_stream", new=AsyncMock()), patch(
+        f"{_CC}.async_get_clientsession"
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock()
+        bridge.stop = AsyncMock()
+        ok = await c.async_answer()
+    assert ok is False
+    assert CALL_STATE_ERROR in _call_states(c._hass)
+
+
+def test_call_state_dedup_consecutive_ended():
+    # Несколько terminal-путей (ended FCM → release held) не плодят дубль ended.
+    c = DoorbellCallController(_hass(), MagicMock(), lambda: "TOK")
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    c.handle_signal(_ended(ac="A", call_id="c1"))
+    ended_count = _call_states(c._hass).count(CALL_STATE_ENDED)
+    assert ended_count == 1
+
+
+# ---- ring-таймаут окна ответа + сброс терминальных фаз в idle (A-72) ----
+# Баг: `ringing` держится, пока не придёт FCM `ended`. Если held не поднялся
+# (degrade) или `ended` не пришёл (неотвеченный звонок / протухший реплей
+# FCM-очереди после рестарта HA) — фаза залипает. Плюс `ended`/`error` не
+# возвращаются в `idle` (терминал висит). Диагностика: логи прод-HA 2026-07-06.
+
+
+def test_ring_schedules_answer_window_timeout(controller):
+    # На `ring` планируется страховочный таймаут окна ответа.
+    controller.handle_signal(_ring())
+    controller._hass.loop.call_later.assert_called()
+    delay = controller._hass.loop.call_later.call_args.args[0]
+    # ≈ окно ответа (35с) + грейс; в любом случае положительный.
+    assert delay > 0
+
+
+def test_ring_expiry_ends_unanswered_ringing(controller):
+    # Окно ответа истекло, никто не ответил, held не поднят → таймаут завершает
+    # зависший `ringing` (ended), current_call сбрасывается.
+    controller.handle_signal(_ring())
+    assert _call_states(controller._hass)[-1] == CALL_STATE_RINGING
+    controller._on_ring_expired()
+    assert CALL_STATE_ENDED in _call_states(controller._hass)
+    assert controller.current_call() is None
+
+
+def test_ring_expiry_noop_after_answered(controller):
+    # Если вызов уже отвечен (active) — таймаут окна ответа ничего не завершает.
+    controller.handle_signal(_ring())
+    controller._call_state = CALL_STATE_ACTIVE  # эмулируем состоявшийся ответ
+    before = _call_states(controller._hass).count(CALL_STATE_ENDED)
+    controller._on_ring_expired()
+    assert _call_states(controller._hass).count(CALL_STATE_ENDED) == before
+
+
+def test_stale_ring_past_deadline_ignored(controller):
+    # Протухший `ring` (дедлайн уже в прошлом — реплей FCM-очереди после рестарта)
+    # игнорируется: фаза `ringing` не публикуется, current_call пуст.
+    past = (datetime.now(timezone.utc) - timedelta(seconds=1)).isoformat()
+    controller.handle_signal(_ring(invalidated=past))
+    assert CALL_STATE_RINGING not in _call_states(controller._hass)
+    assert controller.current_call() is None
+
+
+def test_ended_resets_to_idle(controller):
+    # `ended` не залипает: по таймеру состояние возвращается в `idle`.
+    controller.handle_signal(_ring())
+    controller.handle_signal(_ended())
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+    controller._on_idle_reset()
+    assert _call_states(controller._hass)[-1] == CALL_STATE_IDLE
+    assert controller.current_call() is None
+
+
+def test_new_ring_cancels_pending_idle_reset(controller):
+    # Новый звонок отменяет отложенный idle-reset прошлого — не клобберит `ringing`.
+    controller.handle_signal(_ring(call_id="c1"))
+    controller.handle_signal(_ended(call_id="c1"))
+    controller.handle_signal(_ring(call_id="c2"))
+    assert _call_states(controller._hass)[-1] == CALL_STATE_RINGING
+    controller._on_idle_reset()  # state=ringing → no-op
+    assert _call_states(controller._hass)[-1] == CALL_STATE_RINGING
+    assert controller.current_call() is not None
+
+
+# ---- cross-call guard (гонка двух звонков, прод 2026-07-08) ----
+# Баг: один контроллер обслуживает все домофоны; запоздавший `ended` первого
+# (сброшенного по таймауту) звонка приходил во время второго → снимал активный
+# вызов другого домофона → «Завершён» на живом разговоре («Говорите» на панели).
+
+
+def test_ended_for_other_doorbell_does_not_end_active(controller):
+    # Активный вызов домофона B; прилетает `ended` домофона A (другой call_id+ac).
+    controller.handle_signal(_ring(call_id="c2", ac="B"))
+    assert _call_states(controller._hass)[-1] == CALL_STATE_RINGING
+    before = _call_states(controller._hass).count(CALL_STATE_ENDED)
+    controller.handle_signal(_ended(call_id="c1", ac="A"))
+    # Активный вызов B не завершён чужим `ended`.
+    assert _call_states(controller._hass).count(CALL_STATE_ENDED) == before
+    assert controller.current_call() is not None
+
+
+def test_ended_matching_call_id_ends_active(controller):
+    controller.handle_signal(_ring(call_id="c1", ac="A"))
+    controller.handle_signal(_ended(call_id="c1", ac="A"))
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+    assert controller.current_call() is None
+
+
+def test_ended_null_call_id_same_doorbell_still_ends(controller):
+    # `ended` без call_id, но тот же домофон (ac совпал) → завершает (одиночный кейс не сломан).
+    controller.handle_signal(_ring(call_id="c1", ac="A"))
+    controller.handle_signal(
+        {"event_type": "ended", "place_id": "P", "access_control_id": "A", "attributes": {}}
+    )
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+    assert controller.current_call() is None
+
+
+async def test_hangup_clears_active_immediately(controller):
+    # `_active` сбрасывается сразу на hangup (не висит до idle-reset → не путает след. звонок).
+    controller.handle_signal(_ring())
+    controller._manager = MagicMock()
+    controller._manager.async_hangup = AsyncMock()
+    await controller.async_hangup()
+    assert controller.current_call() is None

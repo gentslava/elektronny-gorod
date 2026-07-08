@@ -81,7 +81,8 @@ elektronny-gorod/
 │   │   └── call_controller.py     ← DoorbellCallController: трекинг FCM-вызова + answer/hangup + UplinkSink
 │   ├── uplink_ws.py               ← WS-команда intercom_uplink: микрофон → SIP-uplink (ADR-0013)
 │   ├── www/                       ← static Lovelace-ресурсы (зарегистрированы из uplink_ws.py)
-│   │   └── eg-intercom-mic-card.js ← карта микрофона домофона: getUserMedia → HA-WS (ADR-0013)
+│   │   ├── eg-intercom-mic-card.js ← карта микрофона домофона: getUserMedia → HA-WS (ADR-0013)
+│   │   └── eg-intercom-call-card.js ← карта экрана вызова (бандл из frontend/, Slice 3b)
 │   ├── services.yaml              ← сервисы answer / hangup (A-81)
 │   ├── go2rtc.py                  ← go2rtc валидация / upsert
 │   ├── entity_migration.py        ← стабильные unique_id + registry migration
@@ -158,7 +159,7 @@ elektronny-gorod/
 |---|---|---|
 | [`camera.py`](../../custom_components/elektronny_gorod/camera.py) | `camera` | `CoordinatorEntity`, stable `unique_id=elektronny_gorod_camera_{id}`, STREAM + опциональный proxy через go2rtc, intercom-камера группируется с lock через entrance_uid |
 | [`lock.py`](../../custom_components/elektronny_gorod/lock.py) | `lock` | `CoordinatorEntity`, stable `unique_id=elektronny_gorod_lock_{place}_{ac}_{eid\|main}`, synthetic state через `async_call_later` (без блокировки event loop) |
-| [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | (1) `balance` — `device_class=MONETARY` + long-term statistics. (2) `days_to_block` (A-57) — `device_class=DURATION` + `unit=d` |
+| [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | (1) `balance` — `device_class=MONETARY` + long-term statistics. (2) `days_to_block` (A-57) — `device_class=DURATION` + `unit=d`. (3) `call_state` (Slice 3a) — `device_class=ENUM` (idle/ringing/connecting/active/ended/error), push-driven из `EVENT_CALL_STATE`, на каждый домофон |
 | [`switch.py`](../../custom_components/elektronny_gorod/switch.py) | `switch` | Do Not Disturb (mirror «Мой Дом» → Настройки → Уведомления). 3 entity per place: master `dnd_root` + 2 dependent (`dnd_intercom_calls`, `dnd_management_company_calls`). Dependent `_attr_available = root.status` — HA нативно красит серым при master OFF |
 | [`binary_sensor.py`](../../custom_components/elektronny_gorod/binary_sensor.py) | `binary_sensor` | `blocked` (A-57): `device_class=PROBLEM`, `True` когда `blocked=True` в `/finance`. Реюзает balance device через identifier `(DOMAIN, place_{id})` |
 | [`event.py`](../../custom_components/elektronny_gorod/event.py) | `event` | Doorbell call (ADR-0011): `device_class=DOORBELL`, типы `ring`/`ended`. Одна сущность на домофон `(place_id, access_control_id)`, дедуп по AC (min entrance), device общий с lock/intercom-camera. Ловит `SIGNAL_DOORBELL` из `fcm.py` через dispatcher, стреляет `_trigger_event` с атрибутами (gate/apartment/call_id/allow_open/…). Открытие двери — существующий `lock`, видео — go2rtc |
@@ -194,6 +195,8 @@ elektronny-gorod/
 | [`call_camera.py`](../../custom_components/elektronny_gorod/call_camera.py) | `ElektronnyGorodCallCamera` — camera-сущность `camera.intercom_call`; `stream_source()` пересобирает `eg_intercom_call` при активном вызове; вне вызова → `None` |
 | [`uplink_ws.py`](../../custom_components/elektronny_gorod/uplink_ws.py) | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): микрофон из Lovelace-карты → `DoorbellCallController.feed_uplink`; static-регистрация JS-карты (`async_register_uplink_ws_command` / `async_register_uplink_card`, зовутся из `__init__.py`) (ADR-0013) |
 | [`www/eg-intercom-mic-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-mic-card.js) | Lovelace-карта микрофона домофона: `getUserMedia` + AudioWorklet → Int16 PCM по авторизованному HA-WebSocket (ADR-0013) |
+| [`www/eg-intercom-call-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js) | Карта экрана вызова (Slice 3b) — собранный бандл из `frontend/` (Lit+TS). Не редактировать вручную |
+| [`frontend/`](../../frontend/) | Исходники карточки вызова (Lit+TS, esbuild→`www/`, vitest). `src/eg-intercom-call-card.ts` (оркестратор) + `theme/tokens.ts` (токен-слой `--eg-*`→HA) + `components/` (eg-icon — lucide-иконки, call-stage — видео+оверлеи, call-video, open-control — слайдер, mic-controller) + `state-machine.ts`; перевёрстка по `design.pen` (см. [plan-call-card-reverstka](../features/intercom-two-way-audio/plan-call-card-reverstka.md)); `node_modules` в .gitignore |
 | [`services.yaml`](../../custom_components/elektronny_gorod/services.yaml) | сервисы `answer` / `hangup` |
 
 ### Diagnostics / безопасность
@@ -232,6 +235,7 @@ elektronny-gorod/
 | [`tests/test_visibility.py`](../../tests/test_visibility.py) | hidden_by sync (first_add, USER override, un-hide, re-add) |
 | [`tests/test_visibility_real.py`](../../tests/test_visibility_real.py) | production-replica (реальные HAR-данные) + migration v2 |
 | [`tests/test_event.py`](../../tests/test_event.py) | doorbell `event`-сущность (ADR-0011): дедуп по AC, фильтр SIGNAL по `(place_id, ac_id)`, `_trigger_event` на `ring`/`ended`, игнор чужого/неизвестного event_type |
+| [`tests/test_sensor_call_state.py`](../../tests/test_sensor_call_state.py) | `sensor.*_call_state` (Slice 3a): создание, дефолт `idle`, отражение `EVENT_CALL_STATE` (ringing/active + `started_at`/`call_id`), сброс `started_at` на `ended`, игнор чужого AC |
 | [`tests/test_api_push.py`](../../tests/test_api_push.py) | `register_push_device` / `unregister_push_device`: тело-зеркало (POST с `pushToken` на `device-installations` + `subscriberNotifications`, DELETE без `pushToken`), graceful False на ошибке |
 | [`tests/test_fcm.py`](../../tests/test_fcm.py) | `DoorbellFcmListener`: парсинг `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → SIGNAL, graceful degradation при недоступной `firebase-messaging` / сбое start, персист FCM-creds в `entry.data` |
 | [`tests/test_sip_audio.py`](../../tests/test_sip_audio.py) | G.711 PCMU/PCMA ↔ PCM (A-81) |
