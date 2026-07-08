@@ -87,6 +87,22 @@ async def test_stream_source_none_when_doorbell_stream_source_empty():
     upsert.assert_not_awaited()
 
 
+async def test_stream_source_none_when_upsert_fails():
+    """upsert стрима упал (напр. раздутый go2rtc-конфиг) → None, а не мёртвый URL (404)."""
+    bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=aac"
+    c = MagicMock(); c.active_call_media.return_value = ("5593590", bridge)
+    doorbell = MagicMock()
+    doorbell.stream_source = AsyncMock(return_value="rtsp://127.0.0.1:8554/eg_5593590")
+    upsert = AsyncMock(side_effect=RuntimeError("go2rtc audio PUT failed: HTTP 400"))
+    cam = _cam(c, lambda cid: doorbell)
+    with patch(f"{_CC}.upsert_audio_stream", new=upsert), patch(
+        f"{_CC}.async_get_clientsession", return_value=MagicMock()
+    ):
+        cam.hass = MagicMock()
+        result = await cam.stream_source()
+    assert result is None
+
+
 async def test_available_only_during_active_call():
     """available=True только при активном вызове (иначе HA не стримит → нет вечных 404)."""
     c = MagicMock()

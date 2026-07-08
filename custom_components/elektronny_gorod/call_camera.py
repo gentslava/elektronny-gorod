@@ -99,9 +99,19 @@ class ElektronnyGorodCallCamera(Camera):
         if not video_rtsp:
             return None
         srcs = [f"{video_rtsp}#video=copy", bridge.go2rtc_src]
-        await upsert_audio_stream(
-            self._base_url, CALL_STREAM_NAME, srcs,
-            async_get_clientsession(self.hass), self._headers,
-        )
+        try:
+            await upsert_audio_stream(
+                self._base_url, CALL_STREAM_NAME, srcs,
+                async_get_clientsession(self.hass), self._headers,
+            )
+        except Exception as exc:  # noqa: BLE001
+            # Стрим не создан в go2rtc (напр. раздутый конфиг, A-84) — НЕ отдаём
+            # мёртвый RTSP-URL, иначе HA Stream worker ловит 404 и спамит. Лучше
+            # None → сущность без видео (карточка покажет плейсхолдер).
+            LOGGER.warning(
+                "Стрим вызова не создан в go2rtc (%s) — видео вызова недоступно",
+                type(exc).__name__,
+            )
+            return None
         LOGGER.debug("Стрим вызова собран (HA-native): %s", CALL_STREAM_NAME)
         return f"rtsp://{self._rtsp_host}:{GO2RTC_RTSP_PORT}/{CALL_STREAM_NAME}"
