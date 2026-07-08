@@ -142,3 +142,13 @@ async def test_camera_image_none_without_active_call():
     c.active_call_media.return_value = None
     cam = _cam(c, lambda cid: None)
     assert await cam.async_camera_image() is None
+
+
+def test_on_call_state_writes_ha_state():
+    """EVENT_CALL_STATE → запись состояния (чтобы фронт увидел смену available)."""
+    c = MagicMock()
+    c.active_call_media.return_value = None
+    cam = _cam(c, lambda cid: None)
+    cam.async_write_ha_state = MagicMock()
+    cam._on_call_state(MagicMock())
+    cam.async_write_ha_state.assert_called_once()

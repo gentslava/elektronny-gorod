@@ -10,10 +10,11 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
+from homeassistant.core import Event, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import DOMAIN, GO2RTC_RTSP_PORT, LOGGER
+from .const import DOMAIN, EVENT_CALL_STATE, GO2RTC_RTSP_PORT, LOGGER
 from .go2rtc import upsert_audio_stream
 from .sip.call_controller import CALL_STREAM_NAME, DoorbellCallController
 
@@ -45,6 +46,24 @@ class ElektronnyGorodCallCamera(Camera):
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry_id}_intercom_call")}, name="Вызов домофона"
         )
+
+    async def async_added_to_hass(self) -> None:
+        """Слушать смену фазы вызова, чтобы обновлять `available`/снапшот в UI.
+
+        `available` этой сущности зависит от активного вызова, но HA не узнает об
+        изменении без записи состояния. Контроллер шлёт `EVENT_CALL_STATE` на
+        каждой смене фазы (ringing/active/ended/…) — по нему пишем state, тогда
+        фронтенд видит камеру доступной во время разговора и запрашивает стрим
+        (иначе весь звонок висит «Видео недоступно» и видео не запрашивается)."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.hass.bus.async_listen(EVENT_CALL_STATE, self._on_call_state)
+        )
+
+    @callback
+    def _on_call_state(self, _event: Event) -> None:
+        """Фаза вызова изменилась → переоценить available/state в UI."""
+        self.async_write_ha_state()
 
     @property
     def available(self) -> bool:
