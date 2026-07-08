@@ -46,6 +46,42 @@ class ElektronnyGorodCallCamera(Camera):
             identifiers={(DOMAIN, f"{entry_id}_intercom_call")}, name="Вызов домофона"
         )
 
+    @property
+    def available(self) -> bool:
+        """Доступна ТОЛЬКО во время активного вызова.
+
+        Вне вызова HA не должен пытаться стримить/снимать эту сущность: иначе
+        HA Stream worker бесконечно ретраит мёртвый `rtsp://…/eg_intercom_call`
+        (404, спам в логе), а снапшот-запросы валятся. Пока `active_call_media`
+        None — entity `unavailable`, карточка показывает чистый плейсхолдер."""
+        controller = self._controller_getter()
+        return controller is not None and controller.active_call_media() is not None
+
+    def _active_doorbell(self) -> Camera | None:
+        """Камера домофона активного вызова (для снапшота), либо None."""
+        controller = self._controller_getter()
+        if controller is None:
+            return None
+        media = controller.active_call_media()
+        if media is None:
+            return None
+        camera_id, _bridge = media
+        return self._doorbell_lookup(camera_id)
+
+    async def async_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """Снимок/постер экрана вызова = снапшот камеры домофона.
+
+        Базовый `Camera.camera_image()` кидает `NotImplementedError` — раньше это
+        валило постер `ha-camera-stream` и любой снапшот (серый прямоугольник +
+        спам ошибок в логе). Делегируем на камеру домофона активного вызова; вне
+        вызова — None (нет кадра, без ошибки)."""
+        doorbell = self._active_doorbell()
+        if doorbell is None:
+            return None
+        return await doorbell.async_camera_image(width, height)
+
     async def stream_source(self) -> str | None:
         """Активный вызов → свежий combined-стрим eg_intercom_call → RTSP; иначе None."""
         controller = self._controller_getter()
