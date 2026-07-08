@@ -187,9 +187,9 @@ Ready-to-use Lovelace card `custom:eg-intercom-call-card` — the whole call on 
 
 <table>
   <tr>
-    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/incoming.png" alt="Incoming call" width="100%"/></td>
-    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/active.png" alt="In call" width="100%"/></td>
-    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/light-theme.png" alt="Light theme" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/en/incoming.png" alt="Incoming call" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/en/active.png" alt="In call" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/en/light-theme.png" alt="Light theme" width="100%"/></td>
   </tr>
   <tr>
     <td align="center"><b>Incoming call</b><br/><sub>video before answering, answer window, slide-to-open</sub></td>
@@ -200,7 +200,23 @@ Ready-to-use Lovelace card `custom:eg-intercom-call-card` — the whole call on 
 
 <table>
   <tr>
-    <td align="center"><img src="docs/features/intercom-two-way-audio/screenshots/wall-panel.png" alt="Wall panel / desktop" width="760"/><br/><b>Wall panel / desktop</b> — two columns: video hero + controls (slider centered, buttons pinned to the bottom)</td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/en/mic-permission.png" alt="No microphone access" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/en/connection-lost.png" alt="Connection lost" width="100%"/></td>
+    <td align="center" width="33%"><img src="docs/features/intercom-two-way-audio/screenshots/en/idle.png" alt="No active call" width="100%"/></td>
+  </tr>
+  <tr>
+    <td align="center"><b>No microphone access</b><br/><sub>banner + “Allow”</sub></td>
+    <td align="center"><b>Connection lost</b><br/><sub>placeholder + “Retry”</sub></td>
+    <td align="center"><b>No active call</b><br/><sub>placeholder + access points</sub></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/features/intercom-two-way-audio/screenshots/en/wall-panel.png" alt="Wall panel / desktop" width="760"/><br/><b>Wall panel / desktop</b> — two columns: video hero + controls (slider centered, buttons pinned to the bottom)</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/features/intercom-two-way-audio/screenshots/en/compact.png" alt="Compact card" width="440"/><br/><b>Compact card</b> (<code>layout: compact</code>) — single row: mini-preview + status + quick buttons</td>
   </tr>
 </table>
 

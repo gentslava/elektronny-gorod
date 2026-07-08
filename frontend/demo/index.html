@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>eg-intercom-call-card — demo harness</title>
+  <!--
+    Демо-харнесс для скриншотов карточки вызова (RU/EN) БЕЗ живого Home Assistant.
+    Заглушает ha-card и ha-camera-stream (HA-элементы), даёт mock hass. Сценарий —
+    через query: ?state=&lang=&theme=&layout=&w=&h=. Скриншоты — Playwright MCP.
+    Раздавать из корня репо: python3 -m http.server → /frontend/demo/index.html.
+  -->
+  <style>
+    @font-face { font-family: "Roboto"; src: local("Roboto"); }
+    html, body { margin: 0; padding: 0; }
+    body {
+      font-family: "Roboto", "Helvetica Neue", Arial, sans-serif;
+      /* HA default dark theme (значения близки к HA Backend/Default Theme). */
+      --primary-color: #03a9f4;
+      --success-color: #43a047;
+      --error-color: #e45e65;
+      --warning-color: #ff9800;
+      --primary-text-color: #e8e8e8;
+      --secondary-text-color: #a6a6a6;
+      --disabled-text-color: #787878;
+      --secondary-background-color: #2a2a2a;
+      --card-background-color: #1c1c1c;
+      --ha-card-background: #1c1c1c;
+      --divider-color: rgba(225, 225, 225, 0.12);
+      --text-primary-color: #ffffff;
+      color: var(--primary-text-color);
+    }
+    body.light {
+      --primary-text-color: #212121;
+      --secondary-text-color: #6b6b6b;
+      --disabled-text-color: #9b9b9b;
+      --secondary-background-color: #eeeeee;
+      --card-background-color: #ffffff;
+      --ha-card-background: #ffffff;
+      --divider-color: rgba(0, 0, 0, 0.12);
+    }
+    /* Страница HA — снаружи кадра; в PNG не попадает. */
+    html,
+    body {
+      background: #111111;
+    }
+    body.light {
+      background: #fafafa;
+    }
+    /* Кадр = карточка: фон + скругление здесь; ha-card внутри без «квадратной» подложки. */
+    #stage {
+      box-sizing: border-box;
+      background: var(--card-background-color);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    eg-intercom-call-card {
+      display: block;
+      height: 100%;
+    }
+  </style>
+</head>
+<body>
+  <div id="stage"></div>
+  <script type="module">
+    const GUEST = "/pencil/images/generated-1783162323121.png";
+
+    // --- заглушки HA-элементов (в реальном HA их даёт фронт HA) ---
+    class HaCard extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return;
+        const s = this.attachShadow({ mode: "open" });
+        s.innerHTML = "<style>:host{display:block}</style><slot></slot>";
+      }
+    }
+    customElements.define("ha-card", HaCard);
+
+    class HaCameraStream extends HTMLElement {
+      connectedCallback() {
+        if (this.shadowRoot) return;
+        const s = this.attachShadow({ mode: "open" });
+        s.innerHTML =
+          "<style>:host{display:block;width:100%;height:100%}"
+          + "img{width:100%;height:100%;object-fit:cover;display:block}</style>"
+          + `<img src="${GUEST}" alt="" />`;
+      }
+    }
+    customElements.define("ha-camera-stream", HaCameraStream);
+
+    await import("/custom_components/elektronny_gorod/www/eg-intercom-call-card.js");
+
+    // --- сценарий из query ---
+    const p = new URLSearchParams(location.search);
+    const state = p.get("state") || "ringing"; // ringing|active|connecting|ended|error|idle|mic
+    const lang = p.get("lang") === "en" ? "en" : "ru";
+    const theme = p.get("theme") === "light" ? "light" : "dark";
+    const layout = p.get("layout") === "compact" ? "compact" : "full";
+    const w = Number(p.get("w") || 390);
+    const h = p.get("h") ? Number(p.get("h")) : null;
+    document.body.className = theme;
+
+    const L = lang === "en"
+      ? { name: "Entrance 2", addr: "1 Example St" }
+      : { name: "Подъезд 2", addr: "ул. Примерная, 1" };
+
+    // phase для sensor: mic-сценарий = active, idle = idle
+    const sensorState = state === "mic" ? "active" : state;
+    const camState = state === "error" ? "unavailable" : "streaming";
+    const talkSec = Number(p.get("talk_sec") || 24); // active: 00:24 на стопватче
+    const ringElapsedSec = Number(p.get("ring_elapsed") || 9); // ringing: 9с → 0:21
+    const started = new Date(Date.now() - talkSec * 1000).toISOString();
+
+    const hass = {
+      states: {
+        "sensor.intercom_call_state": {
+          state: sensorState,
+          attributes: { intercom_name: L.name, started_at: started },
+        },
+        "camera.intercom_call": { state: camState, attributes: {} },
+        "camera.doorbell": { state: camState, attributes: {} },
+        "lock.intercom": { state: "locked", attributes: {} },
+      },
+      locale: { language: lang },
+      language: lang,
+      callService: async () => {},
+      connection: {},
+    };
+
+    const stage = document.getElementById("stage");
+    stage.style.width = w + "px";
+    if (h) stage.style.height = h + "px";
+    // scale: рендерим широкую раскладку в полном размере (layout не меняется —
+    // container-query видит реальную ширину), но визуально ужимаем под окно.
+    const scale = Number(p.get("scale") || 1);
+    if (scale !== 1) {
+      stage.style.transform = `scale(${scale})`;
+      stage.style.transformOrigin = "top left";
+    }
+
+    const openAction = p.get("open") || "slide"; // эталон = slide-пилюля
+    const card = document.createElement("eg-intercom-call-card");
+    card.setConfig({
+      camera: "camera.intercom_call",
+      layout,
+      open_action: openAction,
+      doorbells: [{
+        call_state: "sensor.intercom_call_state",
+        doorbell_camera: "camera.doorbell",
+        lock: "lock.intercom",
+        name: L.name,
+        address: L.addr,
+      }],
+    });
+    // error-фаза сама гаснет по таймеру (контракт 3a) — для кадра отключаем dismiss.
+    if (state === "error") {
+      try { card._scheduleErrDismiss = () => {}; } catch (e) { /* noop */ }
+    }
+    card.hass = hass;
+    stage.appendChild(card);
+    await card.updateComplete;
+    // willUpdate → _onPhase(ringing) сбрасывает _ringingSince в Date.now() — правим после paint.
+    if (state === "ringing") {
+      card._ringingSince = Date.now() - ringElapsedSec * 1000;
+      card._now = Date.now();
+      card.requestUpdate();
+      await card.updateComplete;
+    }
+    card.shadowRoot?.querySelector(".window .fill")
+      ?.style.setProperty("transition", "none");
+
+    // Детерминизм кадра: в headless нет user-gesture → автоплей-со-звуком «заблокирован»
+    // и появляется CTA «включить звук». В реальном ответе на вызов жест был — гасим.
+    setTimeout(() => {
+      try {
+        card._audioBlocked = false;
+        // mic-баннер: форсируем состояние «нет доступа» (denied) — красная кнопка
+        // «Нет доступа» + баннер «Доступ запрещён»/«Повторить». Детерминированно.
+        if (state === "mic") card._micPerm = "denied";
+        card.requestUpdate();
+      } catch (e) { /* noop */ }
+    }, 350);
+
+    // сигнал готовности для Playwright (кадр можно снимать).
+    window.__egReady = false;
+    setTimeout(() => { window.__egReady = true; }, state === "mic" ? 900 : 600);
+  </script>
+</body>
+</html>
