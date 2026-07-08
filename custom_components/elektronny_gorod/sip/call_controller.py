@@ -168,12 +168,27 @@ class DoorbellCallController:
             self._hass.async_create_task(self._async_hold_current())
         elif event_type == "ended" and self._active is not None:
             cid = attrs.get("call_id")
-            if cid is None or cid == self._active.call_id:
-                self._emit_call_state(CALL_STATE_ENDED)  # до сброса _active (читает ids)
-                self._active = None
-                # CANCEL мог не прийти (ответ на др. устройстве) — снять держимый сами.
-                if self._manager is not None and self._manager.holding:
-                    self._hass.async_create_task(self._async_release_held())
+            ac = str(payload.get("access_control_id") or "")
+            # Cross-call guard: `ended` от ДРУГОГО домофона/вызова не должен завершать
+            # текущий активный вызов. Один контроллер обслуживает все домофоны, а
+            # запоздавший `ended` первого (сброшенного) звонка мог прийти уже во время
+            # второго → «Завершён» на живом разговоре (прод 2026-07-08). Завершаем
+            # только если НЕТ доказательств, что событие про иной вызов: не совпал
+            # call_id, либо не совпал access_control_id (когда они присутствуют).
+            if (cid is not None and cid != self._active.call_id) or (
+                ac and ac != self._active.access_control_id
+            ):
+                LOGGER.info(
+                    "SIP: `ended` относится к другому вызову (cid=%s ac=%s) — "
+                    "активный вызов не трогаем",
+                    cid, ac,
+                )
+                return
+            self._emit_call_state(CALL_STATE_ENDED)  # до сброса _active (читает ids)
+            self._active = None
+            # CANCEL мог не прийти (ответ на др. устройстве) — снять держимый сами.
+            if self._manager is not None and self._manager.holding:
+                self._hass.async_create_task(self._async_release_held())
 
     def _compute_deadline(self, invalidated: str | None) -> datetime:
         """Дедлайн ответа: операторское `call_invalidated` или fallback-окно."""
@@ -301,6 +316,7 @@ class DoorbellCallController:
                 await manager.async_hangup()
                 self._emit_call_state(CALL_STATE_ENDED)
                 self._fire_call_state(False)
+            self._active = None  # вызов окончен — не оставляем висеть до idle-reset
             await self._teardown_audio_bridge(bridge)
 
     async def _async_release_held(self) -> None:
@@ -313,6 +329,7 @@ class DoorbellCallController:
             self._clear_uplink_sink()
             await manager.async_hangup()
             self._emit_call_state(CALL_STATE_ENDED)
+            self._active = None  # держимый снят — вызов окончен
             self._fire_call_state(False)
 
     async def _mint(self, call: ActiveCall) -> dict[str, Any]:
@@ -372,6 +389,7 @@ class DoorbellCallController:
         self._manager = None
         self._clear_uplink_sink()
         self._emit_call_state(CALL_STATE_ENDED)
+        self._active = None  # CANCEL — вызов окончен, не путаем следующий
         self._fire_call_state(False)
 
     @callback
@@ -525,6 +543,7 @@ class DoorbellCallController:
         bridge, self._bridge = self._bridge, None
         self._clear_uplink_sink()
         self._emit_call_state(CALL_STATE_ENDED)
+        self._active = None  # remote BYE — разговор окончен
         self._fire_call_state(False)
         if bridge is not None:
             self._hass.async_create_task(self._teardown_audio_bridge(bridge))

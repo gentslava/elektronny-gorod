@@ -674,3 +674,46 @@ def test_new_ring_cancels_pending_idle_reset(controller):
     controller._on_idle_reset()  # state=ringing → no-op
     assert _call_states(controller._hass)[-1] == CALL_STATE_RINGING
     assert controller.current_call() is not None
+
+
+# ---- cross-call guard (гонка двух звонков, прод 2026-07-08) ----
+# Баг: один контроллер обслуживает все домофоны; запоздавший `ended` первого
+# (сброшенного по таймауту) звонка приходил во время второго → снимал активный
+# вызов другого домофона → «Завершён» на живом разговоре («Говорите» на панели).
+
+
+def test_ended_for_other_doorbell_does_not_end_active(controller):
+    # Активный вызов домофона B; прилетает `ended` домофона A (другой call_id+ac).
+    controller.handle_signal(_ring(call_id="c2", ac="B"))
+    assert _call_states(controller._hass)[-1] == CALL_STATE_RINGING
+    before = _call_states(controller._hass).count(CALL_STATE_ENDED)
+    controller.handle_signal(_ended(call_id="c1", ac="A"))
+    # Активный вызов B не завершён чужим `ended`.
+    assert _call_states(controller._hass).count(CALL_STATE_ENDED) == before
+    assert controller.current_call() is not None
+
+
+def test_ended_matching_call_id_ends_active(controller):
+    controller.handle_signal(_ring(call_id="c1", ac="A"))
+    controller.handle_signal(_ended(call_id="c1", ac="A"))
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+    assert controller.current_call() is None
+
+
+def test_ended_null_call_id_same_doorbell_still_ends(controller):
+    # `ended` без call_id, но тот же домофон (ac совпал) → завершает (одиночный кейс не сломан).
+    controller.handle_signal(_ring(call_id="c1", ac="A"))
+    controller.handle_signal(
+        {"event_type": "ended", "place_id": "P", "access_control_id": "A", "attributes": {}}
+    )
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+    assert controller.current_call() is None
+
+
+async def test_hangup_clears_active_immediately(controller):
+    # `_active` сбрасывается сразу на hangup (не висит до idle-reset → не путает след. звонок).
+    controller.handle_signal(_ring())
+    controller._manager = MagicMock()
+    controller._manager.async_hangup = AsyncMock()
+    await controller.async_hangup()
+    assert controller.current_call() is None
