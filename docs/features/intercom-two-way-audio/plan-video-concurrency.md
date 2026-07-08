@@ -1,0 +1,135 @@
+# Видео-конкурентность вызова — Implementation Plan (A-88 / A-89)
+
+> **For agentic workers:** этот план — единый источник контекста для ветки
+> `feat/intercom-video-concurrency`. Задачи размечены чекбоксами (`- [ ]` /
+> `- [x]`). Источник findings — [`project-audit.md`](../../audit/project-audit.md)
+> A-88 / A-89; строки плана — [`roadmap.md`](../../roadmap.md) Итерация 4.
+
+**Ветка:** `feat/intercom-video-concurrency` (от `feat/intercom-call-ui` после
+UI-части). Перед продолжением: подтянуть master (там уже A-21/73/74 + merge PR #68).
+
+**Scope = Phase A (A-88, видео anti-churn) + Phase B (A-89, мульти-вызов).**
+Фаза B — отдельная, начинается только после стабильной A.
+
+---
+
+## Контекст: как устроено видео вызова (проверено в коде + прод 2026-07-08)
+
+- Видео вызова = **copy c общей forpost-камеры домофона**: `eg_intercom_call`
+  **вложен** в `rtsp://127.0.0.1:8554/eg_<id>#video=copy` + аудио-мост (downlink
+  G.711 → ffmpeg → mpegts/aac → go2rtc). SIP от панели несёт **только аудио**;
+  видео берётся из camera-API оператора (одноразовый forpost-URL).
+- `call_camera.py` (`camera.intercom_call`) — HA-native entity активного вызова:
+  `available` только во время звонка, `stream_source()` строит `eg_intercom_call`,
+  `_warm_up()` на `CALL_STATE_ACTIVE` прогревает продюсер (keyframe).
+- go2rtc серверно **отдаёт валидный кадр** (`frame.jpeg` = 65 КБ, `ff d8 ff`,
+  H264) — серверный пайплайн исправен.
+
+## Проблема (A-88, P1)
+
+Видео вызова нестабильно у пользователя: «на ноуте нет — на телефоне есть»,
+задержка 3/5/иногда 20 с, иногда только картинка без видео.
+
+**Root cause:** при нескольких консьюмерах (ноут + телефон, ringing-превью +
+стрим вызова) каждое открытие камеры **пере-фетчит одноразовый operator-URL и
+пере-собирает продюсер** → `eg_<id>` `Error opening (Invalid data)` / `Operation
+timed out`, у части клиентов WebRTC не успевает декодировать keyframe (браузерный
+хук: `frames=0 0x0`). После звонка HA Stream worker `camera.*_intercom_call`
+**не гасится** → `404 eg_intercom_call` каждые ~60–90 с в течение 9+ минут.
+
+## Проблема (A-89, P2 — UX)
+
+Пока 1-й вызов held (ещё не отвечен), `ring` со 2-го домофона **игнорируется**
+(`handle_signal` ring-guard: `if self._manager is not None`). Требование
+пользователя: НЕ одновременные разговоры, а **смена активного звонящего** — если
+курьер позвонил в один домофон, потом в другой (пока не открыли), экран должен
+**переключиться** на новый.
+
+---
+
+## Что уже сделано (в этой ветке)
+
+- [x] **anti-churn dedup** — `call_camera.stream_source` кэширует
+  `(id(bridge), rtsp_url)` активного вызова: повторные открытия камеры отдают
+  готовый URL без повторного upsert в go2rtc. Кэш сбрасывается при `media is
+  None` (конец звонка) и на новом `bridge`. Тесты в `tests/test_call_camera.py`.
+  _(commit `feat(call-camera): anti-churn … (A-88)`)_
+- [x] **warm-up на answer** — `_warm_up()` строит стрим один раз на
+  `CALL_STATE_ACTIVE` и пробит `frame.jpeg`, чтобы keyframe был готов к моменту
+  открытия клиентами (anti-delay). _(перенесено из UI-ветки, commit `75fe655`)_
+
+---
+
+## Phase A — A-88 остаток
+
+### Task A1: Teardown стрима + остановка HA Stream worker на `ended`
+**Files:** `custom_components/elektronny_gorod/call_camera.py`,
+`custom_components/elektronny_gorod/sip/call_controller.py` (событие фазы),
+`tests/test_call_camera.py`.
+
+Цель — убрать вечные `404 eg_intercom_call` после завершения вызова.
+
+- [ ] На `CALL_STATE_ENDED`: `remove_audio_stream(eg_intercom_call)` из go2rtc
+      (см. `go2rtc.py`), сбросить `_call_stream_cache`.
+- [ ] Погасить HA Stream worker камеры вызова (перевести `available`→False уже
+      сделано; убедиться, что HA действительно закрывает worker — проверить, не
+      держит ли фронт открытым `camera.intercom_call` после `ended`).
+- [ ] Тест: после `ended` `stream_source()` → `None`, `remove_audio_stream`
+      вызван один раз, повторный `ended` идемпотентен.
+
+### Task A2: PATCH-only обновления (не PUT) — не убивать живой продюсер (A-71)
+**Files:** `go2rtc.py` (`upsert_audio_stream`), `tests/test_go2rtc.py`.
+
+- [ ] Убедиться, что upsert стрима вызова использует **PATCH** при существующем
+      продюсере (PUT пересоздаёт → рвёт живых консьюмеров). Свериться с A-71.
+- [ ] Тест: повторный upsert того же src не шлёт PUT.
+
+### Task A3: Не давать вызову второй operator-pull
+**Files:** `call_camera.py`, `camera.py` (общий `eg_<id>`).
+
+- [ ] Вызов делит **единый продюсер** камеры домофона (`eg_<id>`), не открывает
+      вторую operator-сессию к той же камере (оператор рвёт одну из двух).
+- [ ] Проверить на проде: ноут + телефон одновременно во время звонка → оба видят
+      видео, `frames>0` в обоих браузерах.
+
+### Verification A
+- [ ] Прод-сценарий: звонок, открыть карту на 2 устройствах → видео на обоих,
+      без `Invalid data` / `Operation timed out` в go2rtc-логах.
+- [ ] После `ended` — нет `404 eg_intercom_call` в HA-логе.
+- [ ] `PYTHONPATH=. .venv/bin/pytest tests/test_call_camera.py tests/test_go2rtc.py -q` зелёные.
+
+---
+
+## Phase B — A-89 мульти-вызов (смена звонящего)
+
+### Task B1: Ветвление ring-guard holding vs in_call
+**Files:** `sip/call_controller.py` (`handle_signal` на `ring`),
+`tests/test_sip_call_controller.py`.
+
+- [ ] Различать **holding** (ещё не ответили) vs **in_call** (идёт разговор).
+- [ ] holding + новый `ring` с другого домофона → снять старый held (release
+      SIP/RTP-порты) и захватить новый вызов (переключение звонящего домофона).
+- [ ] in_call + новый `ring` → оставить текущий (одновременный разговор вне scope;
+      возможно — очередь/индикатор «ещё звонок»).
+- [ ] Обновить `sensor.*_call_state` / `EVENT_CALL_STATE` так, чтобы карта
+      переключилась на новый звонящий домофон.
+- [ ] Тесты: held→release+re-hold нового; in_call не прерывается.
+
+### Verification B
+- [ ] Прод: звонок в домофон №1 (не отвечать) → звонок в №2 → карта показывает №2,
+      №1 корректно снят; принять №2 → разговор идёт.
+
+---
+
+## Rollback
+
+Всё в git-коммитах; прод-файлы восстанавливаются из git + `docker cp`. Каждая
+задача — отдельный коммит, откат по одному.
+
+## Связанные документы
+
+- [`project-audit.md`](../../audit/project-audit.md) — A-88 / A-89 (findings,
+  evidence, severity).
+- [`roadmap.md`](../../roadmap.md) — Итерация 4, фазы A/B.
+- [ADR-0009](../../decisions/0009-camera-stream-auto-recovery.md) — go2rtc
+  stream lifecycle / auto-recovery (контекст PUT vs PATCH, A-71).
