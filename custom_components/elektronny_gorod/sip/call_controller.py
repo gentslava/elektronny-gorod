@@ -137,6 +137,8 @@ class DoorbellCallController:
         self._last_place_id: str | None = None
         self._last_call_id: str | None = None
         self._call_started_at: str | None = None
+        # DIAG: дедуп причины active_call_media None (иначе спам — зовётся часто).
+        self._acm_last: str = ""
 
     # ---- трекинг активного вызова (из SIGNAL_DOORBELL) ----
     @callback
@@ -493,18 +495,33 @@ class DoorbellCallController:
         """Активный отвеченный вызов → (camera_id, bridge) для camera.intercom_call.
 
         None, если нет активного разговора / нет моста / камера не разрешилась."""
+        reason: str | None = None
         if self._bridge is None or self._manager is None or not self._manager.in_call:
-            return None
-        call = self.current_call()
-        if call is None:
-            return None
-        cam_id = (
-            self._camera_resolver(call.access_control_id)
-            if self._camera_resolver else None
-        )
-        if not cam_id:
-            return None
-        return cam_id, self._bridge
+            reason = (
+                f"bridge={self._bridge is not None} mgr={self._manager is not None} "
+                f"in_call={self._manager.in_call if self._manager else None}"
+            )
+        else:
+            call = self.current_call()
+            if call is None:
+                reason = "current_call=None (deadline?)"
+            else:
+                cam_id = (
+                    self._camera_resolver(call.access_control_id)
+                    if self._camera_resolver else None
+                )
+                if not cam_id:
+                    reason = f"cam_id=None ac={call.access_control_id}"
+                else:
+                    if self._acm_last != "OK":
+                        LOGGER.debug("active_call_media OK cam_id=%s", cam_id)
+                        self._acm_last = "OK"
+                    return cam_id, self._bridge
+        # DIAG: логируем причину None только при смене (дедуп).
+        if reason != self._acm_last:
+            LOGGER.debug("active_call_media None: %s", reason)
+            self._acm_last = reason
+        return None
 
     # ---- аудио-мост downlink ----
     async def _setup_audio_bridge(

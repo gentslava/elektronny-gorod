@@ -44,6 +44,7 @@ class ElektronnyGorodCallCamera(Camera):
         self._rtsp_host = rtsp_host
         # camera_id → entity домофона (для рефреша её source); из camera-платформы.
         self._doorbell_lookup = doorbell_lookup
+        self._last_available: bool | None = None  # DIAG: лог смены available
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_intercom_call"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry_id}_intercom_call")}, name="Вызов домофона"
@@ -98,7 +99,11 @@ class ElektronnyGorodCallCamera(Camera):
         (404, спам в логе), а снапшот-запросы валятся. Пока `active_call_media`
         None — entity `unavailable`, карточка показывает чистый плейсхолдер."""
         controller = self._controller_getter()
-        return controller is not None and controller.active_call_media() is not None
+        v = controller is not None and controller.active_call_media() is not None
+        if v != self._last_available:
+            LOGGER.debug("call-camera available: %s -> %s", self._last_available, v)
+            self._last_available = v
+        return v
 
     def _active_doorbell(self) -> Camera | None:
         """Камера домофона активного вызова (для снапшота), либо None."""
