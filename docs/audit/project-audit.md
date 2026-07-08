@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-08 (feat/intercom-call-ui: card-UI + mic-fix + call-camera fixes 2a/2b/4 + cross-call guard + anti-delay — UI-часть готова; A-88 видео-конкурентность/anti-churn и A-89 мульти-вызов заведены как фазы A/B на след. ветках. Master: A-73 ✅/A-74 ✅ RESOLVED — тесты `3a60b15`/`362237b`; A-21 🟡 PARTIALLY — ClientTimeout `3885bb0`, retry follow-up; A-86 ✅ RESOLVED merged PR #66; A-85 uplink-микрофон ADR-0013 live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref feat/intercom-uplink-mic; 14 sip/-модулей включая uplink.py)
+Last reviewed: 2026-07-08 (PR #68 `feat/intercom-call-ui` merged в master: карточка + i18n ru/en + A-87 ring/idle watchdog + cross-call guard + call-camera polish; дальше — `feat/intercom-video-concurrency` фазы A/B. Master: A-87 ✅ RESOLVED merged PR #68; A-73 ✅/A-74 ✅ RESOLVED — тесты `3a60b15`/`362237b`; A-21 🟡 PARTIALLY — ClientTimeout `3885bb0`, retry follow-up; A-86 ✅ RESOLVED merged PR #66; A-85 uplink-микрофон ADR-0013 live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref feat/intercom-uplink-mic; A-88/A-89 🔴 OPEN — ветка `feat/intercom-video-concurrency`)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1142,9 +1142,8 @@ Quality gates:
 
 ### A-87. Фаза вызова залипает в `ringing`/`ended` без FCM `ended` (ring-таймаут)
 
-- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-call-ui`)**.
+- **Status:** ✅ **RESOLVED** — merged PR #68 (`feat/intercom-call-ui`, merge `424cd1a`).
   Bug-fix. Root cause подтверждён runtime-evidence (прод logbook/logger 2026-07-06).
-  После merge → RESOLVED.
 - **Severity:** P2 (карточка/сенсор показывают фантомный «Входящий вызов»
   бесконечно; статус интеграции `loaded`, реального звонка нет).
 - **Area:** `sip/call_controller.py` (`handle_signal` / `_emit_call_state` /
@@ -1168,7 +1167,8 @@ Quality gates:
 - **Evidence:** прод logbook (`kalitka_2_call_state` — единственное `→ ringing`
   20:34:43) + сверка кода (`_schedule_hold_timeout` под `held=True`). 6 тестов
   `test_sip_call_controller.py` (ring-таймаут expiry/noop-after-answer/schedule,
-  протухший ring, ended→idle, new-ring отменяет idle-reset). 333 теста зелёные.
+  протухший ring, ended→idle, new-ring отменяет idle-reset) + `test_event.py`
+  (drain/cancel loop-таймеров call_controller после A-72). 367 тестов зелёные.
 - **Связь:** [ADR-0011](../decisions/0011-doorbell-fcm-channel.md) (FCM-канал),
   [ADR-0012](../decisions/0012-register-on-ring.md) (register-on-ring / окно).
 
@@ -1442,7 +1442,7 @@ Quality gates:
 | 🟢 A-85 (uplink-микрофон ADR-0013: HA WS-binary #1, дрейф-фикс rtp.py, Lovelace-карта; live-прод 2026-06-24, pending merge `feat/intercom-uplink-mic`) — завершает two-way audio (говорить гостю) | Итерация 4 (two-way audio: uplink-микрофон; #2/#3/#4 эмпирически отвергнуты) |
 | 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) + 🔴 A-84 (go2rtc config bloat P2 — стрим дописывается, не мёржится; через DIAG + R7) | backlog (tech-debt из рефактор-оценки 2026-06-23 + A-84 найден пользователем; не блокирует two-way audio) |
 | ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
-| 🔴 A-88 (видео вызова: anti-churn при конкурентных клиентах + teardown стрима/worker) | Итерация 4 (фаза A — ветка `feat/intercom-video-concurrency`; первично после UI) |
+| ✅ A-87 (ring/idle watchdog — фаза не залипает без FCM `ended`, merged PR #68) + 🔴 A-88 (видео вызова: anti-churn + teardown стрима/worker) | Итерация 4 (UI merged PR #68; фаза A — ветка `feat/intercom-video-concurrency`) |
 | 🔴 A-89 (мульти-вызов: смена звонящего домофона на новый ring во время held) | Итерация 4 (фаза B — отдельная ветка, после A) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |

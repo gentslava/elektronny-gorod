@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-07 (A-73 ✅/A-74 ✅ RESOLVED — тесты в master; A-21 🟡 timeout закрыт (retry follow-up); A-86 ✅ RESOLVED; исправлена stale-пометка про A-21)
+Last reviewed: 2026-07-08 (PR #68 merged: call-card UI + i18n + A-87; A-88/A-89 → `feat/intercom-video-concurrency`)
 
 Source files:
 - весь репозиторий — это сжатый обзор
