@@ -152,3 +152,45 @@ def test_on_call_state_writes_ha_state():
     cam.async_write_ha_state = MagicMock()
     cam._on_call_state(MagicMock())
     cam.async_write_ha_state.assert_called_once()
+
+
+async def test_stream_source_dedup_same_call_no_rebuild():
+    """A-88: повторный stream_source в пределах одного звонка НЕ пересобирает стрим
+    (второй клиент/WebRTC re-offer подключается к тому же продюсеру)."""
+    bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus"
+    c = MagicMock(); c.active_call_media.return_value = ("5593590", bridge)
+    doorbell = MagicMock()
+    doorbell.stream_source = AsyncMock(return_value="rtsp://127.0.0.1:8554/eg_5593590")
+    upsert = AsyncMock()
+    cam = _cam(c, lambda cid: doorbell)
+    with patch(f"{_CC}.upsert_audio_stream", new=upsert), patch(
+        f"{_CC}.async_get_clientsession", return_value=MagicMock()
+    ):
+        cam.hass = MagicMock()
+        url1 = await cam.stream_source()
+        url2 = await cam.stream_source()  # тот же звонок (тот же bridge)
+    assert url1 == url2 == "rtsp://127.0.0.1:8554/eg_intercom_call"
+    assert upsert.await_count == 1  # собрано ОДИН раз
+    assert doorbell.stream_source.await_count == 1  # operator-URL не пере-фетчен
+
+
+async def test_stream_source_rebuilds_on_new_call():
+    """Новый звонок (новый bridge) → пересборка; кэш сбрасывается между звонками."""
+    b1 = MagicMock(); b1.go2rtc_src = "ffmpeg:a"
+    b2 = MagicMock(); b2.go2rtc_src = "ffmpeg:b"
+    c = MagicMock()
+    doorbell = MagicMock()
+    doorbell.stream_source = AsyncMock(return_value="rtsp://127.0.0.1:8554/eg_5593590")
+    upsert = AsyncMock()
+    cam = _cam(c, lambda cid: doorbell)
+    with patch(f"{_CC}.upsert_audio_stream", new=upsert), patch(
+        f"{_CC}.async_get_clientsession", return_value=MagicMock()
+    ):
+        cam.hass = MagicMock()
+        c.active_call_media.return_value = ("5593590", b1)
+        await cam.stream_source()
+        c.active_call_media.return_value = None  # звонок кончился → сброс кэша
+        await cam.stream_source()
+        c.active_call_media.return_value = ("5593590", b2)  # новый звонок
+        await cam.stream_source()
+    assert upsert.await_count == 2  # пересобрано на новый звонок, не на каждое открытие

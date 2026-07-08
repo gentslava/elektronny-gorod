@@ -45,6 +45,9 @@ class ElektronnyGorodCallCamera(Camera):
         # camera_id → entity домофона (для рефреша её source); из camera-платформы.
         self._doorbell_lookup = doorbell_lookup
         self._last_available: bool | None = None  # DIAG: лог смены available
+        # A-88 anti-churn: (id(bridge), rtsp_url) собранного стрима текущего звонка.
+        # Сбор — один раз на звонок; последующие открытия отдают этот URL.
+        self._call_stream_cache: tuple[int, str] | None = None
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_intercom_call"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry_id}_intercom_call")}, name="Вызов домофона"
@@ -137,8 +140,16 @@ class ElektronnyGorodCallCamera(Camera):
             return None
         media = controller.active_call_media()
         if media is None:
+            self._call_stream_cache = None  # звонок кончился → сброс кэша
             return None
         camera_id, bridge = media
+        # A-88 anti-churn: собрать стрим ОДИН раз на звонок. Последующие открытия
+        # (второй клиент, WebRTC re-offer, повторный stream_source) отдают уже
+        # собранный URL и подключаются к тому же go2rtc-продюсеру — БЕЗ пересборки.
+        # Иначе пере-фетч одноразового operator-URL пере-собирал общий forpost-
+        # продюсер → у второго клиента видео пустое / рвётся.
+        if self._call_stream_cache is not None and self._call_stream_cache[0] == id(bridge):
+            return self._call_stream_cache[1]
         doorbell = self._doorbell_lookup(camera_id)
         if doorbell is None:
             return None
@@ -161,5 +172,7 @@ class ElektronnyGorodCallCamera(Camera):
                 type(exc).__name__,
             )
             return None
+        url = f"rtsp://{self._rtsp_host}:{GO2RTC_RTSP_PORT}/{CALL_STREAM_NAME}"
+        self._call_stream_cache = (id(bridge), url)  # anti-churn: собрано на звонок
         LOGGER.debug("Стрим вызова собран (HA-native): %s", CALL_STREAM_NAME)
-        return f"rtsp://{self._rtsp_host}:{GO2RTC_RTSP_PORT}/{CALL_STREAM_NAME}"
+        return url
