@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-07 (A-86 → ✅ RESOLVED merged PR #66; A-73/A-74 формализованы из summary в audit; A-85 uplink-микрофон ADR-0013: HA WS-binary #1, live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref приведён к feat/intercom-uplink-mic; 14 sip/-модулей включая uplink.py)
+Last reviewed: 2026-07-07 (A-73 ✅/A-74 ✅ RESOLVED — тесты в master `3a60b15`/`362237b`; A-21 🟡 PARTIALLY — ClientTimeout `3885bb0`, retry follow-up; A-86 → ✅ RESOLVED merged PR #66; A-85 uplink-микрофон ADR-0013: HA WS-binary #1, live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref приведён к feat/intercom-uplink-mic; 14 sip/-модулей включая uplink.py)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -193,9 +193,15 @@ Quality gates:
 
 ### A-21. Нет timeout/retry/backoff
 
+- **Status:** 🟡 **PARTIALLY RESOLVED** — timeout закрыт (merged в master,
+  commit `3885bb0`): `http.py` шлёт явный `ClientTimeout` (`_REST_TIMEOUT`
+  total=30/connect=10; `_BINARY_TIMEOUT` total=60/connect=10 для snapshot).
+  **Остаётся открытым:** retry/backoff (вынесен в follow-up — POST/login/
+  open_lock не идемпотентны, ADR-0006 mirror-app). Тесты — `tests/test_http.py`.
 - **Area:** Reliability
 - **Evidence:** `http.py`, `api.py`
-- **Recommended fix:** `ClientTimeout(total=30)` + helper для retry с backoff.
+- **Recommended fix (остаток):** helper для retry с backoff только для
+  идемпотентных GET (5xx / connection errors).
 
 ### A-22. Поведение при 401 (auto-refresh — unknown)
 
@@ -1283,8 +1289,10 @@ Quality gates:
 
 ### A-73. config_flow + `async_migrate_entry` без тестов (Bronze IQS gate)
 
-- **Status:** 🔴 **OPEN**. (ID ранее жил только в `summary.md` — формализован
-  в audit 2026-07-07.)
+- **Status:** ✅ **RESOLVED** — merged в master, commit `3a60b15`
+  (`tests/test_config_flow.py` — 3 ветки auth + go2rtc + abort/reauth;
+  `tests/test_init.py` — миграции v1→2→3). Bronze config-flow gate закрыт.
+  (ID ранее жил только в `summary.md` — формализован в audit 2026-07-07.)
 - **Severity:** P1 — заявленный `quality_scale: "bronze"` формально **не
   defensible**; регрессии в 3-веточном flow и в миграциях ловятся только руками.
 - **Area:** `config_flow.py` (user / contract / sms / password / advanced +
@@ -1304,8 +1312,10 @@ Quality gates:
 
 ### A-74. `helpers.py` crypto без golden vectors (тихий breakage auth)
 
-- **Status:** 🔴 **OPEN**. (ID ранее жил только в `summary.md` — формализован
-  в audit 2026-07-07.)
+- **Status:** ✅ **RESOLVED** — merged в master, commit `362237b`
+  (`tests/test_helpers.py` — golden vectors для hash_password /
+  hash_password_timestamp + list-utils). (ID ранее жил только в `summary.md` —
+  формализован в audit 2026-07-07.)
 - **Severity:** P1 — правка формулы или смена схемы бэкендом молча ломает login,
   CI это не поймает.
 - **Area:** `helpers.py` — `hash_password` (SHA1 → base64),
@@ -1342,7 +1352,7 @@ Quality gates:
 | 🟢 A-81 (register-on-ring ADR-0012 + downlink AudioBridge + call_camera.py, pending merge `feat/intercom-uplink-mic`) — закрывает практическую часть A-49 (`sipdevices` используется) | Итерация 4 (two-way audio: приём вызова + downlink-вывод + экран вызова) |
 | 🟢 A-85 (uplink-микрофон ADR-0013: HA WS-binary #1, дрейф-фикс rtp.py, Lovelace-карта; live-прод 2026-06-24, pending merge `feat/intercom-uplink-mic`) — завершает two-way audio (говорить гостю) | Итерация 4 (two-way audio: uplink-микрофон; #2/#3/#4 эмпирически отвергнуты) |
 | 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) + 🔴 A-84 (go2rtc config bloat P2 — стрим дописывается, не мёржится; через DIAG + R7) | backlog (tech-debt из рефактор-оценки 2026-06-23 + A-84 найден пользователем; не блокирует two-way audio) |
-| 🔴 A-73 (config_flow/миграции без тестов — Bronze gate) + 🔴 A-74 (helpers crypto без golden vectors) | Итерация 3 (test-debt; ранее только в summary, формализованы 2026-07-07) |
+| ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 

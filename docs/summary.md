@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-07 (A-86 → RESOLVED/merged PR #66; A-73/A-74 формализованы в audit; исправлена stale-пометка про A-21)
+Last reviewed: 2026-07-07 (A-73 ✅/A-74 ✅ RESOLVED — тесты в master; A-21 🟡 timeout закрыт (retry follow-up); A-86 ✅ RESOLVED; исправлена stale-пометка про A-21)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -44,7 +44,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | HACS validation CI | ✅ зелёный |
 | pytest CI | ✅ есть (`python-tests.yaml`, matrix HA 2024.10 + 2026.5) |
 | Реальные тесты | ✅ 117 тестов, ~61% coverage (но config_flow/api/helpers — gaps) |
-| Integration Quality Scale | 🟡 Bronze заявлен в manifest, но не defensible: нет config_flow-тестов (A-73) |
+| Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
 | Документация для пользователя | ⚠️ есть, но с битыми ссылками (A-27/A-28) |
 | AIDD документация для агентов | ✅ развёрнута; ⚠️ часть docs отставала, синхронизирована 2026-05-30 |
@@ -69,12 +69,12 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 > Все исторические P0 token-leaks **закрыты** (verified по коду). Текущие
 > открытые риски — reliability + test-debt, не утечки секретов.
 
-### P1 — важные (открыты)
+### P1 — важные
 
-1. **Нет `ClientTimeout` на основном operator API** — [`http.py:111-116`](../custom_components/elektronny_gorod/http.py#L111-L116). Зависший/медленный запрос к `myhome.proptech.ru` тормозит coordinator tick (refresh сериальный, ~6 HTTP на place) и первый `setup` — на время дефолтного aiohttp-таймаута (~5 мин на запрос); явного контроля/ретраев нет. Точечный митигатор есть только для латентно-критичного SIP-mint (`asyncio.timeout(8с)` в `call_controller.py`, см. A-81) — глобальный `ClientTimeout` остаётся открытым. `ha-compatibility.md` при этом **корректно** помечает это `🔴 нет ClientTimeout` (строка 116) — прежняя пометка «ошибочно fixed» была stale. (A-21 / S-09)
-2. **config_flow + миграции v1→2→3 без тестов** — `config_flow.py` 15% coverage, `async_migrate_entry` не покрыт. Bronze IQS требует config-flow-test-coverage → заявленный `quality_scale: bronze` пока не defensible. (A-73)
-3. **`helpers.py` crypto без golden vectors** — изменение формата бэкенда молча сломает auth. (A-74)
-4. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold).
+1. 🟡 **`ClientTimeout` на operator API — timeout закрыт, retry остаётся.** `http.py` теперь шлёт явный `ClientTimeout` (REST 30с / binary 60с, connect 10с) — commit `3885bb0`. Осталось: retry/backoff для идемпотентных GET (follow-up, POST/login/open_lock не идемпотентны — ADR-0006). (A-21 / S-09)
+2. ✅ **config_flow + миграции v1→2→3 — покрыты тестами** (`3a60b15`): `test_config_flow.py` (3 ветки auth + go2rtc + abort/reauth) + `test_init.py` (миграции). Bronze config-flow gate закрыт. (A-73)
+3. ✅ **`helpers.py` crypto — golden vectors добавлены** (`362237b`, `test_helpers.py`): регрессия ловит тихий breakage формулы. (A-74)
+4. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold) — остаётся открытым.
 
 ✅ Закрыто в 3.3.0: `diagnostics.py` с redaction (A-23 / S-08; S-16 mitigated) —
 SECURITY_OK разблокирован.
@@ -89,12 +89,14 @@ SECURITY_OK разблокирован.
 
 ## Первое, что нужно сделать
 
-Reliability-слайс одним PR (отдельно от A-71 camera-работы):
+Оставшийся reliability / quality-долг (по убыванию ценности):
 
-1. `ClientTimeout(total=30)` в [`http.py:110,112`](../custom_components/elektronny_gorod/http.py#L110-L112) + `ClientTimeout(total=10)` в [`go2rtc.py`](../custom_components/elektronny_gorod/go2rtc.py) (A-21/A-72).
-2. Создать [`diagnostics.py`](../custom_components/elektronny_gorod/) с `async_redact_data` + `TO_REDACT` (access_token, refresh_token, user_agent, go2rtc_password) — закрывает S-08/S-16, разблокирует SECURITY_OK (A-23).
-3. Написать `tests/test_config_flow.py` (happy path + abort `already_configured`) + `tests/test_init_migration.py` (v1→2→3) — Bronze gate (A-73).
-4. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
+1. `ClientTimeout(total=10)` в [`go2rtc.py`](../custom_components/elektronny_gorod/go2rtc.py) (A-72) — по аналогии с уже сделанным `http.py` (A-21 timeout, `3885bb0`).
+2. Retry/backoff helper для идемпотентных GET (5xx / connection errors) — остаток A-21.
+3. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
+4. Native reauth / reconfigure flow (A-25/A-26 — Silver).
+
+✅ Сделано в этом цикле: `http.py` ClientTimeout (A-21 timeout, `3885bb0`), `test_config_flow.py` + `test_init.py` (A-73, `3a60b15`), `test_helpers.py` golden vectors (A-74, `362237b`). `diagnostics.py` (A-23) закрыт ещё в 3.3.0.
 
 ## AIDD-структура
 
