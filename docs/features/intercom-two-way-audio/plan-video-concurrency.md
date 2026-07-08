@@ -77,6 +77,9 @@ Cross-call guard (fix 3) не ловит — это тот же `call_id`/`ac`, 
   готовый URL без повторного upsert в go2rtc. Кэш сбрасывается при `media is
   None` (конец звонка) и на новом `bridge`. Тесты в `tests/test_call_camera.py`.
   _(commit `feat(call-camera): anti-churn … (A-88)`)_
+- [x] **shared producer (A3)** — `camera.async_go2rtc_video_rtsp()`: reuse
+  `eg_<id>` RTSP без второго operator-pull; bootstrap только если producer пуст.
+  _(Phase A Task A3)_
 - [x] **teardown на ended** — `call_camera._teardown_call_stream()` по
   `CALL_STATE_ENDED`/`error`: `remove_audio_stream(eg_intercom_call)` + сброс кэша.
   _(Phase A Task A1)_
@@ -113,8 +116,9 @@ Cross-call guard (fix 3) не ловит — это тот же `call_id`/`ac`, 
 ### Task A3: Не давать вызову второй operator-pull
 **Files:** `call_camera.py`, `camera.py` (общий `eg_<id>`).
 
-- [ ] Вызов делит **единый продюсер** камеры домофона (`eg_<id>`), не открывает
-      вторую operator-сессию к той же камере (оператор рвёт одну из двух).
+- [x] Вызов делит **единый продюсер** камеры домофона (`eg_<id>`): `call_camera`
+      зовёт `ElektronnyGorodCamera.async_go2rtc_video_rtsp()` — локальный RTSP
+      если producer уже в go2rtc; иначе один bootstrap через `stream_source()`.
 - [ ] Проверить на проде: ноут + телефон одновременно во время звонка → оба видят
       видео, `frames>0` в обоих браузерах.
 

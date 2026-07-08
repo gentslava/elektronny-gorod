@@ -180,8 +180,13 @@ class ElektronnyGorodCallCamera(Camera):
         doorbell = self._doorbell_lookup(camera_id)
         if doorbell is None:
             return None
-        # рефреш видео-источника домофона (свежий operator-URL → свежий eg_<camera> RTSP)
-        video_rtsp = await doorbell.stream_source()
+        # A-88 A3: видео = copy с уже поднятого eg_<id>, не второй operator-pull.
+        from .camera import ElektronnyGorodCamera
+
+        if isinstance(doorbell, ElektronnyGorodCamera):
+            video_rtsp = await doorbell.async_go2rtc_video_rtsp()
+        else:
+            video_rtsp = await doorbell.stream_source()
         if not video_rtsp:
             return None
         srcs = [f"{video_rtsp}#video=copy", bridge.go2rtc_src]

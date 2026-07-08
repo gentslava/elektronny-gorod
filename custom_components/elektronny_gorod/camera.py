@@ -352,6 +352,26 @@ class ElektronnyGorodCamera(
             f"{self._go2rtc_stream_name}"
         )
 
+    async def async_go2rtc_video_rtsp(self) -> str | None:
+        """RTSP видео для composite-стрима вызова (A-88 A3).
+
+        Если `eg_<id>` уже поднят в go2rtc (ringing-превью / другой viewer) —
+        отдаём локальный RTSP **без** второго HTTP к operator (оператор рвёт
+        параллельные forpost-сессии). Иначе один bootstrap через `stream_source()`.
+        """
+        if not self._use_go2rtc:
+            return await self.stream_source()
+        info = await self._fetch_go2rtc_stream_info()
+        if info is not None:
+            producers, _consumers = info
+            if producers:
+                LOGGER.debug(
+                    "Camera %s (%s): reuse go2rtc producer %s for call video",
+                    self._name, self._id, self._go2rtc_stream_name,
+                )
+                return self._rtsp_url()
+        return await self.stream_source()
+
     def _rtsp_url_redacted(self) -> str:
         """RTSP URL с замаскированными credentials — для логов."""
         if not self._go2rtc_rtsp_host:

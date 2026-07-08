@@ -51,7 +51,7 @@ async def test_stream_source_builds_fresh_combined_and_returns_rtsp():
     ):
         cam.hass = MagicMock()
         url = await cam.stream_source()
-    doorbell.stream_source.assert_awaited_once()  # рефреш видео-источника
+    doorbell.stream_source.assert_awaited_once()  # bootstrap видео-источника (mock doorbell)
     # eg_intercom_call собран: свежее видео (copy) + аудио моста
     srcs = upsert.await_args.args[2]
     assert srcs == [
@@ -284,3 +284,28 @@ async def test_on_call_state_schedules_teardown_on_error():
         cam._on_call_state(Event(EVENT_CALL_STATE, {"state": CALL_STATE_ERROR}))
         assert len(created) == 1
         await created[0]
+
+
+async def test_stream_source_uses_shared_go2rtc_rtsp_not_operator_pull():
+    """A-88 A3: call stream берёт RTSP eg_<id> через async_go2rtc_video_rtsp."""
+    from custom_components.elektronny_gorod.camera import ElektronnyGorodCamera
+
+    bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus"
+    c = MagicMock(); c.active_call_media.return_value = ("5593590", bridge)
+    doorbell = ElektronnyGorodCamera.__new__(ElektronnyGorodCamera)
+    doorbell.async_go2rtc_video_rtsp = AsyncMock(
+        return_value="rtsp://127.0.0.1:8554/eg_5593590"
+    )
+    doorbell.stream_source = AsyncMock()
+    upsert = AsyncMock()
+    cam = _cam(c, lambda cid: doorbell if cid == "5593590" else None)
+    with patch(f"{_CC}.upsert_audio_stream", new=upsert), patch(
+        f"{_CC}.async_get_clientsession", return_value=MagicMock()
+    ):
+        cam.hass = MagicMock()
+        url = await cam.stream_source()
+    doorbell.async_go2rtc_video_rtsp.assert_awaited_once()
+    doorbell.stream_source.assert_not_awaited()
+    srcs = upsert.await_args.args[2]
+    assert srcs[0] == "rtsp://127.0.0.1:8554/eg_5593590#video=copy"
+    assert url == "rtsp://127.0.0.1:8554/eg_intercom_call"
