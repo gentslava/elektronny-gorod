@@ -38,6 +38,27 @@ async def test_async_go2rtc_video_rtsp_bootstraps_when_no_producer():
     cam.stream_source.assert_awaited_once()
 
 
+async def test_async_go2rtc_video_rtsp_bootstraps_when_producer_has_no_traffic():
+    """A-88: producer есть, но `bytes_recv`==0 (пустой/handshake) → НЕ reuse,
+    иначе переиспользуем мёртвую operator-сессию → замороженное видео (A-71)."""
+    cam = _bare_camera()
+    cam._fetch_go2rtc_stream_info = AsyncMock(return_value=([{"bytes_recv": 0}], []))
+    cam.stream_source = AsyncMock(return_value="rtsp://127.0.0.1:8554/eg_5593590")
+    url = await cam.async_go2rtc_video_rtsp()
+    assert url == "rtsp://127.0.0.1:8554/eg_5593590"
+    cam.stream_source.assert_awaited_once()  # bootstrap, не reuse
+
+
+async def test_async_go2rtc_video_rtsp_bootstraps_when_bytes_recv_missing():
+    """Producer без поля `bytes_recv` (нестандартный ответ) → НЕ reuse (bootstrap)."""
+    cam = _bare_camera()
+    cam._fetch_go2rtc_stream_info = AsyncMock(return_value=([{}], []))
+    cam.stream_source = AsyncMock(return_value="rtsp://127.0.0.1:8554/eg_5593590")
+    url = await cam.async_go2rtc_video_rtsp()
+    assert url == "rtsp://127.0.0.1:8554/eg_5593590"
+    cam.stream_source.assert_awaited_once()
+
+
 async def test_async_go2rtc_video_rtsp_without_go2rtc_uses_stream_source():
     cam = _bare_camera(use_go2rtc=False)
     cam.stream_source = AsyncMock(return_value="https://operator/flv")

@@ -1321,7 +1321,7 @@ Quality gates:
 
 ### A-88. Видео вызова рвётся при конкурентных клиентах / пересборка стрима (anti-churn)
 
-- **Status:** 🔴 **OPEN / PLANNED** (ветка `feat/intercom-video-concurrency`, фаза A).
+- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-video-concurrency`)** — фаза A закрыта в коде (осталась прод-верификация «2 устройства одновременно»).
 - **Severity:** **P1** — видео вызова нестабильно у пользователя («на ноуте нет —
   на телефоне есть», задержка 3/5/иногда 20с, иногда только картинка).
 - **Area:** `call_camera.py` (`stream_source`), `sip/call_controller.py`
@@ -1354,7 +1354,42 @@ Quality gates:
      → оператор рвёт одну) — делить единый продюсер камеры домофона.
 - **First step:** дедуп сборки в пределах звонка в `call_camera.stream_source` +
   teardown стрима/worker на `ended`.
+- **Resolution (branch `feat/intercom-video-concurrency`):**
+  1. ✅ Сборка стрима **один раз на звонок** — кэш `(bridge, url)` по объекту
+     `bridge` (`call_camera.stream_source`), повторные открытия отдают готовый URL.
+  2. ✅ **Dedup конкурентных первых открытий** — in-flight future (warm-up +
+     фронтенд одновременно не пере-собирают, зеркалит A-68 в `camera`).
+  3. ✅ **Shared producer** — `camera.async_go2rtc_video_rtsp()`: reuse `eg_<id>`
+     без второго operator-pull, **только если продюсер живой** (`bytes_recv` > 0).
+  4. ✅ **PATCH-first** upsert стрима вызова (`go2rtc.upsert_audio_stream`, A-71).
+  5. ✅ **Teardown** `eg_intercom_call` на `ended`/`error` (`_teardown_call_stream`).
+  Тесты: `test_call_camera.py`, `test_camera_call_video_rtsp.py`, `test_go2rtc_audio.py`.
+  **Остаток:** прод-верификация «2 устройства одновременно → видео на обоих, без
+  `Invalid data`; после `ended` нет 404».
 - **Rollback:** всё в git-коммитах; прод-файлы восстанавливаются из git + docker cp.
+
+### A-90. Живой разговор гаснет по FCM-пушу `ended` (авто-сброс принятого вызова)
+
+- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-video-concurrency`)**.
+- **Severity:** **P1** — карта «Вызов завершён» на живом разговоре (домофон
+  продолжает говорить), пользователь теряет управление вызовом.
+- **Area:** `sip/call_controller.py` `handle_signal` (ветка `ended`).
+- **Evidence (прод 2026-07-08 20:57):** оператор при «Принять» снимает
+  ring-уведомление со ВСЕХ устройств → шлёт FCM `ended` (`reason=answered_elsewhere`)
+  через ~0.7с после ответа, хотя SIP-диалог жив (реальный BYE — на ~6с позже).
+  `handle_signal("ended")` принимал push за hangup и гасил `sensor.*_call_state`.
+  Cross-call guard (A-88-серия) не ловит — тот же `call_id`/`ac`, не чужой вызов.
+- **Root cause:** для принятого в HA вызова FCM `ended` — не сигнал завершения
+  (это лишь снятие ring-уведомления), но код трактовал его как hangup.
+- **Fix:** для уже принятого вызова (`self._manager.in_call`) FCM `ended`
+  игнорируется — источник истины о завершении принятого разговора это SIP
+  (BYE→`_schedule_audio_cleanup`, CANCEL→`_on_ring_cancelled`, `hangup`, страховка
+  `_MAX_CALL_SEC`). Для неотвеченного (`holding`/`ringing`, `in_call`=False) FCM
+  `ended` по-прежнему завершает (ответ был не в HA). Guard стоит **после**
+  cross-call guard. Тесты — `test_sip_call_controller.py`
+  (`test_fcm_ended_ignored_during_active_call`, `test_fcm_ended_clears_held_call_when_not_in_call`).
+- **Известный tradeoff:** при потерянном SIP BYE экран «активен» до `_MAX_CALL_SEC`
+  (120с) — приемлемо (BYE обычно приходит), backstop задокументирован.
 
 ### A-89. Мульти-вызов: смена звонящего домофона (не одновременные разговоры)
 

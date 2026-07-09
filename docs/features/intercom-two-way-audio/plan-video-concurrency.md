@@ -86,6 +86,18 @@ Cross-call guard (fix 3) не ловит — это тот же `call_id`/`ac`, 
 - [x] **warm-up на answer** — `_warm_up()` строит стрим один раз на
   `CALL_STATE_ACTIVE` и пробит `frame.jpeg`, чтобы keyframe был готов к моменту
   открытия клиентами (anti-delay). _(перенесено из UI-ветки, commit `75fe655`)_
+- [x] **dedup конкурентных первых открытий (review-driven)** — `call_camera.stream_source`
+  получил in-flight future (зеркало A-68 из `camera`): warm-up + открытие карточки
+  фронтендом одновременно больше не пере-собирают стрим (double upsert). Ключ
+  anti-churn кэша заменён с `id(bridge)` на объект `bridge` (сравнение `is`) —
+  устраняет теоретический id-reuse footgun. Тест `test_stream_source_concurrent_opens_deduped`.
+- [x] **reuse продюсера только по живости (review-driven)** — `async_go2rtc_video_rtsp`
+  переиспользует `eg_<id>` только если `bytes_recv > 0` (не пустой/handshake/мёртвая
+  operator-сессия A-71); иначе честный bootstrap. Тесты в `test_camera_call_video_rtsp.py`.
+- [x] **чистка hot-path (review-driven)** — `active_call_media` возвращён к чистой
+  guard-цепочке (убран eager f-string reason-аккумулятор и `_acm_last`); property
+  `available` очищен от side-effect (`_last_available`). DIAG-лог `handle_signal`
+  ring/ended оставлен осознанно (low-freq, полезен для Phase B).
 
 ---
 

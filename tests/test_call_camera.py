@@ -1,4 +1,5 @@
 # tests/test_call_camera.py
+import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 from custom_components.elektronny_gorod.call_camera import ElektronnyGorodCallCamera
 from custom_components.elektronny_gorod.const import (
@@ -177,6 +178,35 @@ async def test_stream_source_dedup_same_call_no_rebuild():
         url2 = await cam.stream_source()  # тот же звонок (тот же bridge)
     assert url1 == url2 == "rtsp://127.0.0.1:8554/eg_intercom_call"
     assert upsert.await_count == 1  # собрано ОДИН раз
+    assert doorbell.stream_source.await_count == 1  # operator-URL не пере-фетчен
+
+
+async def test_stream_source_concurrent_opens_deduped():
+    """A-88: два ОДНОВРЕМЕННЫХ первых открытия (warm-up + фронтенд) собирают стрим
+    один раз — второй ждёт in-flight future, а не пере-собирает (double upsert)."""
+    bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:audio"
+    c = MagicMock(); c.active_call_media.return_value = ("5593590", bridge)
+    gate = asyncio.Event()
+
+    async def slow_stream_source():
+        await gate.wait()  # держим первую сборку, пока не войдёт вторая
+        return "rtsp://127.0.0.1:8554/eg_5593590"
+
+    doorbell = MagicMock()
+    doorbell.stream_source = AsyncMock(side_effect=slow_stream_source)
+    upsert = AsyncMock()
+    cam = _cam(c, lambda cid: doorbell)
+    with patch(f"{_CC}.upsert_audio_stream", new=upsert), patch(
+        f"{_CC}.async_get_clientsession", return_value=MagicMock()
+    ):
+        cam.hass = MagicMock()
+        t1 = asyncio.create_task(cam.stream_source())
+        t2 = asyncio.create_task(cam.stream_source())
+        await asyncio.sleep(0.01)  # оба вошли: t1 занял future, t2 ждёт его
+        gate.set()
+        url1, url2 = await asyncio.gather(t1, t2)
+    assert url1 == url2 == "rtsp://127.0.0.1:8554/eg_intercom_call"
+    assert upsert.await_count == 1  # собрано ОДИН раз, второй ждал future
     assert doorbell.stream_source.await_count == 1  # operator-URL не пере-фетчен
 
 
