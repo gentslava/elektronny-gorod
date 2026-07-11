@@ -148,18 +148,29 @@ Cross-call guard (fix 3) не ловит — это тот же `call_id`/`ac`, 
 **Files:** `sip/call_controller.py` (`handle_signal` на `ring`),
 `tests/test_sip_call_controller.py`.
 
-- [ ] Различать **holding** (ещё не ответили) vs **in_call** (идёт разговор).
-- [ ] holding + новый `ring` с другого домофона → снять старый held (release
-      SIP/RTP-порты) и захватить новый вызов (переключение звонящего домофона).
-- [ ] in_call + новый `ring` → оставить текущий (одновременный разговор вне scope;
-      возможно — очередь/индикатор «ещё звонок»).
-- [ ] Обновить `sensor.*_call_state` / `EVENT_CALL_STATE` так, чтобы карта
-      переключилась на новый звонящий домофон.
-- [ ] Тесты: held→release+re-hold нового; in_call не прерывается.
+- [x] Различать **holding** (ещё не ответили) vs **in_call** (идёт разговор) —
+      `handle_signal` на `ring`: ветвление по `self._manager.in_call`.
+- [x] holding + новый `ring` с другого домофона → снять старый held (release
+      SIP/RTP-порты) и захватить новый вызов — `_async_switch_caller(old_manager)`:
+      `old_manager.async_hangup()` под `_answer_lock`, затем `_async_hold_current`
+      поднимает новый. `self._manager` обнуляется синхронно в `handle_signal`
+      (иначе hold нового вернётся рано); дедуп повторного ring того же `call_id`.
+- [x] in_call + новый `ring` → оставить текущий (одновременный разговор вне scope).
+- [x] Обновить `EVENT_CALL_STATE` так, чтобы карта переключилась на новый звонящий:
+      `self._active`=новый + `RINGING` эмитится синхронно (без промежуточного
+      `ENDED` — карта не мигает «Завершён»).
+- [x] Тесты: switch held→release+re-hold нового; same-caller дедуп; in_call не
+      прерывается; orchestrator release+rehold (`tests/test_sip_call_controller.py`).
 
 ### Verification B
 - [ ] Прод: звонок в домофон №1 (не отвечать) → звонок в №2 → карта показывает №2,
       №1 корректно снят; принять №2 → разговор идёт.
+- [ ] **P2-C (code-review, прод-риск):** rebind фикс-портов SIP 5066 / RTP 40016
+      сразу после release старого — asyncio закрывает сокет отложенно, повторный bind
+      может дать `EADDRINUSE`. Не крашит (гвард в `_async_hold_current` → degrade,
+      held=False → fallback register-on-answer при «Принять»), но hold №2 молча
+      деградирует. Проверить на живом железе; при воспроизведении — SO_REUSEADDR или
+      small-delay/retry на rebind.
 
 ---
 

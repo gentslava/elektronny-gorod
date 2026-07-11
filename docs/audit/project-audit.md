@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-08 (PR #68 `feat/intercom-call-ui` merged в master: карточка + i18n ru/en + A-87 ring/idle watchdog + cross-call guard + call-camera polish; дальше — `feat/intercom-video-concurrency` фазы A/B. Master: A-87 ✅ RESOLVED merged PR #68; A-73 ✅/A-74 ✅ RESOLVED — тесты `3a60b15`/`362237b`; A-21 🟡 PARTIALLY — ClientTimeout `3885bb0`, retry follow-up; A-86 ✅ RESOLVED merged PR #66; A-85 uplink-микрофон ADR-0013 live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref feat/intercom-uplink-mic; A-88/A-89 🔴 OPEN — ветка `feat/intercom-video-concurrency`)
+Last reviewed: 2026-07-08 (PR #68 `feat/intercom-call-ui` merged в master: карточка + i18n ru/en + A-87 ring/idle watchdog + cross-call guard + call-camera polish; дальше — `feat/intercom-video-concurrency` фазы A/B. Master: A-87 ✅ RESOLVED merged PR #68; A-73 ✅/A-74 ✅ RESOLVED — тесты `3a60b15`/`362237b`; A-21 🟡 PARTIALLY — ClientTimeout `3885bb0`, retry follow-up; A-86 ✅ RESOLVED merged PR #66; A-85 uplink-микрофон ADR-0013 live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref feat/intercom-uplink-mic; A-88 🟢/A-89 🟢 resolved-in-branch — ветка `feat/intercom-video-concurrency`, pending merge + прод-верификация)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1393,10 +1393,31 @@ Quality gates:
 
 ### A-89. Мульти-вызов: смена звонящего домофона (не одновременные разговоры)
 
-- **Status:** 🔴 **OPEN / PLANNED** (фаза B, отдельная ветка).
+- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-video-concurrency`)**
+  — Phase B закрыта в коде (осталась прод-верификация «звонок №1 не отвечать → звонок
+  №2 → карта показывает №2 → принять №2»).
 - **Severity:** **P2** — UX. Текущее поведение — by-design single concurrent call.
 - **Area:** `sip/call_controller.py` `handle_signal` (ring-guard
   `if self._manager is not None: игнор параллельного ring`).
+- **Fix (реализовано):** ring-guard ветвится по `self._manager.in_call` vs
+  `holding`. `in_call` → игнор (одновременный второй вне scope). `holding` +
+  `ring` другого домофона → `_async_switch_caller(old_manager)`: `old_manager.
+  async_hangup()` под `_answer_lock` (release SIP/RTP) → `_async_hold_current`
+  поднимает новый held; `self._manager` обнуляется синхронно в `handle_signal`
+  (иначе hold нового вернётся рано на живом старом), повторный `ring` того же
+  `call_id` — дедуп. Карта переключается синхронно (`self._active`=новый + `RINGING`,
+  без промежуточного `ENDED`). **Два P1-фикса из code-review до merge:** (1)
+  `_emit_call_state` дедуп сделан **identity-aware** (`state==_call_state` И тот же
+  `call_id`) — иначе RINGING→RINGING при смене глушился, sensor №2 не получал события,
+  карта не переключалась; (2) `SipManager.detach()` синхронно снимает колбэки старого
+  manager при switch — иначе поздний CANCEL/BYE №1 в окне до `async_hangup` затирал
+  вызов №2 (cross-call порча + утечка портов). Тесты — `test_sip_call_controller.py`
+  (`test_ring_switches_caller_while_holding` с проверкой ids №2 в payload,
+  `test_ring_same_held_caller_ignored`, `test_ring_ignored_during_active_call`,
+  `test_switch_caller_releases_old_and_reholds_new`, `test_switch_detaches_old_manager_callbacks`).
+- **Прод-риск (P2-C, не блокер):** rebind фикс-портов SIP/RTP сразу после release —
+  asyncio-close отложен → возможен `EADDRINUSE`, hold №2 молча деградирует в
+  register-on-answer. Проверить на живом железе (см. Verification B в плане).
 - **Evidence (прод):** пока 1-й вызов held (ещё не отвечен), `ring` со 2-го
   домофона **игнорируется** → 2-й домофон не появляется, принять нельзя, пока 1-й
   не завершится.
@@ -1478,7 +1499,7 @@ Quality gates:
 | 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) + 🔴 A-84 (go2rtc config bloat P2 — стрим дописывается, не мёржится; через DIAG + R7) | backlog (tech-debt из рефактор-оценки 2026-06-23 + A-84 найден пользователем; не блокирует two-way audio) |
 | ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
 | ✅ A-87 (ring/idle watchdog — фаза не залипает без FCM `ended`, merged PR #68) + 🔴 A-88 (видео вызова: anti-churn + teardown стрима/worker) | Итерация 4 (UI merged PR #68; фаза A — ветка `feat/intercom-video-concurrency`) |
-| 🔴 A-89 (мульти-вызов: смена звонящего домофона на новый ring во время held) | Итерация 4 (фаза B — отдельная ветка, после A) |
+| 🟢 A-89 (мульти-вызов: смена звонящего домофона на новый ring во время held — `_async_switch_caller`, pending merge `feat/intercom-video-concurrency`) | Итерация 4 (фаза B — код закрыт, осталась прод-верификация) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 

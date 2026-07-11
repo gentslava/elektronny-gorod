@@ -118,6 +118,13 @@ class SipManager:
     def holding(self) -> bool:
         return self._held is not None
 
+    def detach(self) -> None:
+        """Отвязать колбэки контроллера (A-89 switch): поздний BYE/CANCEL этого
+        (уже смещённого) держимого вызова не должен дёргать контроллер и трогать
+        новый активный вызов. Sync — закрывает окно до `async_hangup`."""
+        self._on_ended = None
+        self._on_cancelled = None
+
     async def register_and_hold(self, mint_creds: Callable[[], Awaitable[dict]]) -> bool:
         """На ring: REGISTER → forked INVITE → 100 Trying, держим. True при успехе."""
         if self._active is not None or self._held is not None:

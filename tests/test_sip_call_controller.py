@@ -133,6 +133,94 @@ def test_fcm_ended_clears_held_call_when_not_in_call(controller):
     assert controller.current_call() is None
 
 
+# --- Phase B (A-89): смена активного звонящего при держимом вызове ---
+
+
+def test_ring_switches_caller_while_holding(controller):
+    # Держим вызов домофона №1 (ещё не ответили, holding). Приходит ring с ДРУГОГО
+    # домофона №2 → активный звонящий переключается на №2 (требование: не два
+    # разговора, а смена звонящего). Карта показывает №2 (RINGING на новых ids).
+    controller.handle_signal(_ring(call_id="c1", place="P1", ac="A1"))
+    mgr = MagicMock()
+    mgr.in_call = False
+    mgr.holding = True
+    controller._manager = mgr
+    controller.handle_signal(_ring(call_id="c2", place="P2", ac="A2"))
+    active = controller.current_call()
+    assert active is not None
+    assert active.call_id == "c2"
+    assert active.access_control_id == "A2"
+    # Карта звонящего №2 поднимается только по СОБСТВЕННОМУ EVENT_CALL_STATE
+    # (sensor фильтрует по своим ac/place) — дедуп фазы не должен его проглотить.
+    switched = [
+        p
+        for p in _call_state_payloads(controller._hass)
+        if p["state"] == CALL_STATE_RINGING and p["access_control_id"] == "A2"
+    ]
+    assert switched, "нет EVENT_CALL_STATE с ids звонящего №2 — карта не переключится"
+    assert switched[-1]["place_id"] == "P2"
+    assert switched[-1]["call_id"] == "c2"
+
+
+def test_ring_same_held_caller_ignored(controller):
+    # Повторный ring того же держимого вызова (реплей FCM) — дедуп, не пере-hold.
+    controller.handle_signal(_ring(call_id="c1", place="P1", ac="A1"))
+    mgr = MagicMock()
+    mgr.in_call = False
+    mgr.holding = True
+    controller._manager = mgr
+    controller.handle_signal(_ring(call_id="c1", place="P1", ac="A1"))
+    assert controller.current_call().call_id == "c1"
+    assert controller._manager is mgr  # тот же manager, не переустановлен
+
+
+def test_ring_ignored_during_active_call(controller):
+    # Идёт разговор (in_call) — ring другого домофона НЕ рвёт текущий (одновременный
+    # второй разговор вне scope A-89).
+    controller.handle_signal(_ring(call_id="c1", place="P1", ac="A1"))
+    mgr = MagicMock()
+    mgr.in_call = True
+    mgr.holding = False
+    controller._manager = mgr
+    controller.handle_signal(_ring(call_id="c2", place="P2", ac="A2"))
+    assert controller.current_call().call_id == "c1"
+    assert controller._manager is mgr
+
+
+async def test_switch_caller_releases_old_and_reholds_new(controller):
+    # Orchestrator: снять старый держимый (BYE/release) и поднять held нового вызова.
+    controller.handle_signal(_ring(call_id="c1", place="P1", ac="A1"))
+    old = MagicMock()
+    old.in_call = False
+    old.holding = True
+    old.async_hangup = AsyncMock()
+    controller._manager = old
+    # ring нового домофона: sync-часть переставила _active→c2 и запланировала switch
+    # (в hass-моке корутина закрыта) — прогоняем orchestrator напрямую.
+    controller.handle_signal(_ring(call_id="c2", place="P2", ac="A2"))
+    assert controller._manager is None  # sync-часть обнулила старый manager
+    assert controller.current_call().call_id == "c2"  # _active уже под новый вызов
+    with patch(_MGR_PATH) as MgrCls:
+        newmgr = MgrCls.return_value
+        newmgr.register_and_hold = AsyncMock(return_value=True)
+        await controller._async_switch_caller(old)
+    old.async_hangup.assert_awaited_once()  # старый held снят
+    assert controller._manager is newmgr  # новый вызов держим
+
+
+def test_switch_detaches_old_manager_callbacks(controller):
+    # P1-B: поздний CANCEL/BYE старого держимого не должен затирать новый вызов.
+    # Колбэки старого manager снимаются СИНХРОННО при детаче (окно между sync-детачем
+    # и `async_hangup` в таске, где old._held ещё жив, закрыто).
+    controller.handle_signal(_ring(call_id="c1", place="P1", ac="A1"))
+    old = MagicMock()
+    old.in_call = False
+    old.holding = True
+    controller._manager = old
+    controller.handle_signal(_ring(call_id="c2", place="P2", ac="A2"))
+    old.detach.assert_called_once()  # колбэки on_ended/on_cancelled старого сняты
+
+
 async def test_answer_refused_without_active_call(controller):
     assert await controller.async_answer() is False
     controller._api.mint_sip_device.assert_not_called()

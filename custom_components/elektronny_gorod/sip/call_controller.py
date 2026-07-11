@@ -154,10 +154,6 @@ class DoorbellCallController:
                 self._active.access_control_id if self._active else None,
             )
         if event_type == "ring":
-            if self._manager is not None:
-                # Уже держим/в разговоре (фикс-порты) — игнор параллельного ring.
-                LOGGER.info("SIP: уже держим/в разговоре — игнор параллельного ring")
-                return
             active = ActiveCall(
                 call_id=attrs.get("call_id"),
                 place_id=str(payload.get("place_id") or ""),
@@ -170,11 +166,39 @@ class DoorbellCallController:
             if dt_util.utcnow() >= active.deadline:
                 LOGGER.info("SIP: протухший ring (дедлайн в прошлом) — игнор")
                 return
+            if self._manager is not None:
+                # A-89: уже держим/в разговоре. Различаем разговор vs держимый.
+                if self._manager.in_call:
+                    # Идёт разговор — одновременный второй вне scope, не рвём текущий.
+                    LOGGER.info("SIP: идёт разговор — игнор ring другого домофона")
+                    return
+                same_call = self._active is not None and (
+                    active.call_id == self._active.call_id
+                    and active.access_control_id == self._active.access_control_id
+                )
+                if same_call:
+                    # Повторный ring того же держимого вызова — дедуп, не пере-hold.
+                    LOGGER.info("SIP: повторный ring держимого вызова — игнор")
+                    return
+                # holding + другой домофон → смена активного звонящего (A-89):
+                # снять старый held и захватить новый (карта переключится на новый).
+                # `self._manager` обнуляем сразу — иначе `_async_hold_current` увидит
+                # ещё-живого старого и не поднимет новый. ENDED не эмитим: карта не
+                # должна мигать «Завершён» — сразу RINGING нового (ниже).
+                LOGGER.info("SIP: смена звонящего — снимаю держимый, захватываю новый")
+                old_manager, self._manager = self._manager, None
+                # Синхронно снять колбэки старого: поздний CANCEL/BYE №1 в окне до
+                # `async_hangup` иначе дёрнул бы `_on_ring_cancelled` → обнулил бы уже
+                # поднятый новый manager / стёр вызов №2 (cross-call порча).
+                old_manager.detach()
+                task = self._async_switch_caller(old_manager)
+            else:
+                # register-on-ring: держим SIP сразу (зеркало приложения, ADR-0012).
+                task = self._async_hold_current()
             self._active = active
             self._emit_call_state(CALL_STATE_RINGING)
             self._schedule_ring_timeout()  # страховка залипшего ringing (нет `ended`)
-            # register-on-ring: держим SIP сразу (зеркало приложения, ADR-0012).
-            self._hass.async_create_task(self._async_hold_current())
+            self._hass.async_create_task(task)
         elif event_type == "ended" and self._active is not None:
             cid = attrs.get("call_id")
             ac = str(payload.get("access_control_id") or "")
@@ -354,6 +378,24 @@ class DoorbellCallController:
             self._active = None  # держимый снят — вызов окончен
             self._fire_call_state(False)
 
+    async def _async_switch_caller(self, old_manager: SipManager) -> None:
+        """A-89: смена активного звонящего. Снимаем СТАРЫЙ держимый (release SIP/RTP-
+        порты) и поднимаем held нового вызова. `self._active`/`self._manager` уже
+        выставлены под новый вызов в `handle_signal` (active=новый, manager=None),
+        поэтому здесь трогаем только `old_manager` по ссылке, а затем `_async_hold_
+        current` mint'ит новый held под новые ids. Оба шага берут `_answer_lock`
+        последовательно (не вложенно) — self-deadlock'а нет. В окне release→hold
+        `self._manager is None`, поэтому параллельный ring уходит в else-ветку
+        `_async_hold_current`, а не в switch; дубль-hold отсекается гвардом в начале
+        `_async_hold_current` (`if self._manager is not None: return`)."""
+        async with self._answer_lock:
+            self._cancel_hold_timeout()  # старый hold-таймаут снят — новый переставит
+            try:
+                await old_manager.async_hangup()
+            except Exception:  # noqa: BLE001 — release старого не должен блокировать новый
+                LOGGER.warning("SIP switch: release старого held упал", exc_info=True)
+        await self._async_hold_current()
+
     async def _mint(self, call: ActiveCall) -> dict[str, Any]:
         """mint SIP-device для вызова с жёстким таймаутом (http.py без ClientTimeout)."""
         async with asyncio.timeout(_MINT_TIMEOUT_SEC):
@@ -371,8 +413,13 @@ class DoorbellCallController:
         Параллельно EVENT_SIP_CALL (тот гоняет input_boolean dismiss). Bus-event,
         а не dispatcher — консистентно с `_fire_call_state` и работает с MagicMock-hass
         в юнит-тестах. Дедуп одинаковых подряд: несколько terminal-путей дают один `ended`.
+        Дедуп **identity-aware** (A-89): та же фаза, но ДРУГОЙ вызов (смена звонящего
+        holding→ring другого домофона: RINGING→RINGING) обязан эмититься — иначе
+        sensor нового домофона (фильтр по своим ac/place) не получит событие.
         """
-        if state == self._call_state:
+        if state == self._call_state and (
+            self._active is None or self._active.call_id == self._last_call_id
+        ):
             return
         call = self._active
         if call is not None:
