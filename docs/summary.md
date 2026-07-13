@@ -1,6 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-08 (PR #68 merged: call-card UI + i18n + A-87; A-88/A-89 → `feat/intercom-video-concurrency`)
+Last reviewed: 2026-07-13 (PR #69 merged: A-88/A-89/A-90/A-91;
+stock pre-answer SIP profile подтверждён Android PCAP; suite 392 passed)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -27,7 +28,8 @@ Quality gates:
 
 Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/elektronny_gorod/manifest.json) для российских операторов «Электронный город» (Новотелеком) и «Дом.ру».
 
-- **Платформы:** `camera`, `lock` (домофоны), `sensor` (баланс ЛС).
+- **Платформы:** `camera`, `lock`, `sensor`, `binary_sensor`, `switch`, `event`;
+  realtime FCM/SIP-контроллер и Lovelace-карта вызова.
 - **Дистрибуция:** HACS (`hacs.json`, GitHub Releases zip).
 - **API:** `myhome.proptech.ru` (закрытое API мобильного приложения «Мой дом», эмуляция Android-клиента).
 - **Опция:** прокси видео через [go2rtc](https://github.com/AlexxIT/go2rtc) для получения звука и RTSP, с Basic Auth (username/password) для go2rtc API.
@@ -35,7 +37,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - **Codeowner:** [@gentslava](https://github.com/gentslava).
 - **PR pre-release:** workflow [`prerelease.yaml`](../.github/workflows/prerelease.yaml) выкатывает pre-release zip для каждого открытого PR.
 
-## Состояние (на 2026-05-30)
+## Состояние (на 2026-07-13)
 
 | Аспект | Статус |
 |---|---|
@@ -43,11 +45,11 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | HA hassfest CI | ✅ зелёный |
 | HACS validation CI | ✅ зелёный |
 | pytest CI | ✅ есть (`python-tests.yaml`, matrix HA 2024.10 + 2026.5) |
-| Реальные тесты | ✅ 117 тестов, ~61% coverage (но config_flow/api/helpers — gaps) |
+| Реальные тесты | ✅ 392 теста зелёные на merge PR #69; coverage-процент в этом цикле не пересчитывался |
 | Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
 | Документация для пользователя | ⚠️ есть, но с битыми ссылками (A-27/A-28) |
-| AIDD документация для агентов | ✅ развёрнута; ⚠️ часть docs отставала, синхронизирована 2026-05-30 |
+| AIDD документация для агентов | ✅ синхронизирована с master после PR #69 |
 
 ## Главные сильные стороны
 
@@ -58,13 +60,17 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - Локализация ru/en.
 - Автоматизированный release workflow (zip + автокоммит версии).
 
-## Что сделано (история итераций 1-3)
+## Что сделано (история итераций 1-4)
 
 - **Итерация 1 (hotfix security):** закрыты все P0-утечки токенов — redaction через `_logging.py`/`redact()` (A-01..A-04, S-01..S-06), shared `ClientSession` (A-05), bug `c.get("ID")` (A-06).
 - **Итерация 2 (Bronze):** coordinator + `update_interval` (A-08), `CoordinatorEntity` на всех 5 платформах (A-09), стабильный `unique_id` (A-12), sensor MONETARY/RUB (A-14), `async_unsubscribe` (A-16), manifest `bronze`/`hub` (A-34), pytest CI workflow (A-24).
 - **Итерация 3 (Silver feature gaps + runtime polish):** DND switches (A-56), balance attrs + binary_sensor (A-57), double-HTTP fix (A-61), visibility/reload cascade (A-64), log throttling (A-65), go2rtc lifecycle (A-66), concurrent stream dedup (A-68), camera auto-recovery для long-open freeze ~30 мин (A-71, ADR-0009).
+- **Итерация 4 (realtime intercom):** FCM doorbell event, SIP two-way audio
+  (ADR-0012/0013), экран и карточка вызова, uplink-микрофон, video anti-churn,
+  смена звонящего во время held и точное зеркало stock pre-answer
+  `REGISTER → INVITE → 100 Trying` (A-81/A-85/A-88/A-89/A-90/A-91, PR #69).
 
-## Главные риски (на 2026-05-30)
+## Главные риски (на 2026-07-13)
 
 > Все исторические P0 token-leaks **закрыты** (verified по коду). Текущие
 > открытые риски — reliability + test-debt, не утечки секретов.

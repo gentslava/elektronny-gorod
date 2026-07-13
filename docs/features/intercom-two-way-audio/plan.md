@@ -406,15 +406,19 @@ Bite-sized задачи финализируются **после Task 1** (фо
   (из `probe_sip_media.py:377-399`). Тест: 200 OK эхо-ит оба Via и оба Record-Route
   дословно + добавляет To-tag; BYE адресован remote Contact с Route из Record-Route.
 
-### Slice 0-network — следующий слайс (модель **REGISTER-on-answer**, доказано pcap)
-> См. [call-answer-model.md](call-answer-model.md). Held-регистрация — отвергнута.
-- `sip/protocol.py` (`asyncio.DatagramProtocol`): **НЕ держим регистрацию**. По сервису
-  `answer` (в окне `CallInvalidated` ~30с) → `REGISTER` (Expires=30, проприет. push-params:
-  `app-id=com.novotelecom.domophone;pn-type=google;pn-tok=<fcm>`) → приём `INVITE` →
-  `200 OK` **мгновенно** (локальный SDP, G.711, `a=rtcp:<sep>`) → **сразу** RTP uplink +
-  keepalive (активировать latching) → downlink. `SipManager` фасад (`async_answer`/`async_hangup`).
-- **НЕ нужны:** STUN (локальный SDP + FreeSWITCH latching), held-регистрация,
-  183/early-media/session-timers (реверс: приложение их не использует).
+### Slice 0-network — реализованная модель register-on-ring
+> Этот раздел был перепроверен полным Android PCAP 2026-07-13. Ранний вывод
+> register-on-answer отменён; актуальный source of truth —
+> [call-answer-model.md](call-answer-model.md).
+- `sip/protocol.py` (`asyncio.DatagramProtocol`): на FCM ring выполняется короткий
+  `REGISTER` (Expires=30, stock Contact push-params, `Call-Id` из FCM,
+  `Accept: application/sdp`) → `INVITE` → немедленный `100 Trying` и hold.
+- По сервису `answer` в окне `CallInvalidated` отправляется `200 OK` с локальным
+  G.711 SDP → RTP uplink/keepalive активирует latching → приходит downlink.
+- Fallback register-on-answer сохраняется только при провале раннего hold и
+  использует тот же stock REGISTER profile.
+- **Не нужны:** 180/183 early media, session timers, SRTP/ICE; завершение до ответа
+  обрабатывается через `CANCEL` → `487`.
 - Видео при ответе — go2rtc (отдельно), как «подгрузка видео» в приложении.
 
 ### Slice 1 — downlink (прослушка), Фаза B

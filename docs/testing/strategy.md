@@ -1,10 +1,12 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-07-13 (master после PR #69: 392 passed; добавлены точные
+регрессии stock REGISTER/100 Trying, caller switching и video anti-churn)
 
 Source files:
-- `tests/conftest.py`
-- `tests/test_config_flow.py` (🔴 нерабочий stub)
+- `tests/**` (42 test-модуля + `conftest.py`)
+- `.github/workflows/python-tests.yaml`
+- `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
 
 Related docs:
@@ -26,36 +28,42 @@ Quality gates:
 
 ## Текущее состояние
 
-🔴 **Тестов фактически нет.**
+✅ **Suite реально выполняется и покрывает HA lifecycle, entities, FCM/SIP,
+camera/go2rtc и security regressions.**
 
-| Файл | Состояние |
+| Область | Состояние |
 |---|---|
-| `tests/conftest.py` | работоспособная fixture `mock_setup_entry` |
-| `tests/test_config_flow.py` | **stub из HA scaffold** — импортирует несуществующие `CannotConnect`, `InvalidAuth`, `PlaceholderHub`, использует `CONF_HOST`/`CONF_USERNAME`. Никогда не запускался. |
-| CI | hassfest + HACS validate; **pytest отсутствует** |
-| Coverage | 0% |
+| Локальный suite | **392 passed** на финальном review PR #69 (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
+| Test modules | 42 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
+| Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
+| Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
+| Camera / go2rtc | lifecycle, auto-recovery, concurrency, PATCH-first upsert, call-stream teardown |
+| CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
+| Coverage | Процент намеренно не фиксируется без свежего coverage-run; каноническая команда приведена ниже |
 
-**Влияние:**
-- IQS Bronze blocker.
-- Любой рефакторинг рискует ввести regression без обнаружения.
-- Reverse-engineered crypto (`helpers.py`) — особо уязвим к молчаливым breakages.
+Остающиеся gap-и: нет полностью автоматизированного live-теста против оператора и
+физического домофона; часть широкого REST API покрыта точечными контрактными
+тестами. Live/PCAP evidence хранится отдельно в `research/intercom-call-probe/`.
 
-## Целевая структура
+## Фактическая структура по слоям
 
 ```
 tests/
-├── conftest.py                    # общие fixtures
-├── const.py                       # тестовые константы (моки ответов API)
-├── test_init.py                   # async_setup_entry, async_unload_entry, миграции v1→2→3
-├── test_config_flow.py            # все ветки config flow + abort cases
-├── test_options_flow.py           # go2rtc on/off + валидация URL
-├── test_coordinator.py            # get_*_info / update_*_state
-├── test_api.py                    # API endpoints с mocked aiohttp
-├── test_go2rtc.py                 # validate_go2rtc happy + error paths
-└── test_helpers.py                # find, dedupe_by_id, hash_password
+├── conftest.py                    # PHC fixtures + optional HA-module mocks
+├── test_init.py / test_config_flow.py / test_options_flow_clear_creds.py
+├── test_http.py / test_api_push.py / test_api_sip.py / test_diagnostics.py
+├── test_camera_*.py / test_call_camera.py / test_go2rtc_*.py
+├── test_event.py / test_fcm.py / test_sensor_call_state.py
+├── test_sip_*.py / test_uplink_ws.py
+└── entity, visibility, balance, DND, helpers и migration regressions
 ```
 
-## Test plan по слоям
+## Coverage checklist по слоям
+
+Список ниже — поддерживаемый checklist сценариев. Точные имена и фактический
+inventory всегда берутся из `tests/test_*.py`; новые сетевые контракты должны
+получать отдельный regression-тест до изменения реализации.
 
 ### 1. Config flow (`test_config_flow.py`)
 
@@ -85,7 +93,7 @@ tests/
 - `test_missing_phone_abort` — переход в password без phone → abort `missing_phone`.
 - `test_missing_contract_abort` → abort `missing_contract`.
 
-### 2. Options flow (`test_options_flow.py`)
+### 2. Options flow (`test_options_flow_clear_creds.py`)
 
 - `test_options_enable_go2rtc_valid_url` — happy path.
 - `test_options_enable_go2rtc_invalid_url` → errors.
@@ -99,7 +107,7 @@ tests/
 - `test_migration_chained_v1_to_v3` — v1 → v3 одним проходом.
 - `test_unload_releases_coordinator` — после unload `coordinator.async_unsubscribe` должен быть вызван (после фикса).
 
-### 4. Coordinator (`test_coordinator.py`)
+### 4. Coordinator (`test_coordinator_no_double_http.py` + entity regressions)
 
 С mocked `ElektronnyGorodAPI`:
 
@@ -111,7 +119,7 @@ tests/
 - `test_update_camera_state_finds_by_id` — этот тест **поймает баг** `c.get("ID")` (см. PROJECT_AUDIT P0 #5).
 - `test_update_lock_state_handles_missing_access_control`.
 
-### 5. API (`test_api.py`)
+### 5. API / HTTP (`test_http.py`, `test_api_push.py`, `test_api_sip.py`)
 
 С mocked aiohttp responses:
 
@@ -126,7 +134,7 @@ tests/
 - `test_query_profile_401_unauthorized`.
 - `test_query_balance_returns_data`.
 
-### 6. go2rtc (`test_go2rtc.py`)
+### 6. go2rtc (`test_go2rtc_validate.py`, `test_go2rtc_upsert.py`, `test_go2rtc_audio.py`)
 
 - `test_validate_go2rtc_happy_path` — GET 200 + PUT 200 + DELETE cleanup.
 - `test_validate_go2rtc_unreachable` — connection error.
@@ -141,26 +149,27 @@ tests/
 - `test_find_returns_first_match`.
 - `test_dedupe_by_id_keeps_first`.
 
-## Тестовые зависимости
+### 8. Realtime intercom (`test_fcm.py`, `test_sip_*.py`, `test_call_camera.py`)
 
-`pyproject.toml` (создать):
+- FCM parse/reconnect/watchdog и dispatcher lifecycle.
+- REGISTER profile: FCM `Call-Id`, `Accept: application/sdp`, Contact push-params
+  без лишнего `transport` parameter.
+- INVITE pre-answer: немедленный `100 Trying`; `200 OK` только в `accept()`.
+- `CANCEL`/`487`, `BYE`, detach/release и malformed-network-input cleanup.
+- Call-ID guards, held caller switching, FCM-ended во время живого разговора.
+- RTP G.711, AudioBridge downlink, UplinkSink/WebSocket uplink.
+- One-build-per-call, concurrent first-open dedup, shared producer и teardown.
 
-```toml
-[tool.pytest.ini_options]
-asyncio_mode = "auto"
-testpaths = ["tests"]
+## Тестовые зависимости и команды
 
-[project]
-name = "elektronny_gorod"
-version = "0.0.0"  # dev only
+Конфигурация хранится в `pytest.ini`, зависимости — в `requirements_test.txt`
+и CI matrix. Канонические локальные команды:
 
-[project.optional-dependencies]
-test = [
-    "pytest",
-    "pytest-asyncio",
-    "pytest-homeassistant-custom-component",
-    "aioresponses",
-]
+```bash
+PYTHONPATH=. .venv/bin/pytest tests/ -q
+PYTHONPATH=. .venv/bin/pytest tests/ \
+  --cov=custom_components/elektronny_gorod \
+  --cov-report=term-missing -q
 ```
 
 ## CI workflow
@@ -196,12 +205,13 @@ test = [
 
 ## Definition of done для TESTS_PASS gate
 
-- [ ] `pytest tests/ -v` зелёный локально.
-- [ ] `.github/workflows/python-tests.yaml` в CI зелёный.
-- [ ] Покрытие config_flow ≥ 90%.
-- [ ] Покрытие coordinator ≥ 70%.
-- [ ] Все миграции v1→2, v2→3, chained — покрыты.
-- [ ] Старый сломанный `tests/test_config_flow.py` удалён или полностью переписан.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 392 passed
+  на финальном review PR #69.
+- [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
+- [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
+- [x] Все миграции v1→2, v2→3, chained покрыты.
+- [x] `tests/test_config_flow.py` — реальные PHC-тесты, scaffold-stub отсутствует.
+- [x] Изменённый SIP-контракт покрыт на register/protocol/manager/controller слоях.
 
 ## Risks
 

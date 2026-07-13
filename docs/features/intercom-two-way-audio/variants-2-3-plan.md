@@ -2,7 +2,7 @@
 
 - **Дата:** 2026-06-24
 - **Статус:** scaffolding готов; live-тест отложен (нет доступа к go2rtc/домофону)
-- **Связь:** [uplink-mic-design.md](uplink-mic-design.md) §4, [ADR-0013](../../docs/decisions/0013-uplink-mic-transport.md)
+- **Связь:** [uplink-mic-design.md](uplink-mic-design.md) §4, [ADR-0013](../../decisions/0013-uplink-mic-transport.md)
 
 ## Контекст
 

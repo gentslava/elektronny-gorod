@@ -1,6 +1,7 @@
 Status: Active
 Owner: Architecture Agent
-Last reviewed: 2026-06-24 (uplink-микрофон ADR-0013: uplink_ws.py, sip/uplink.py, дрейф-фикс rtp.py, Lovelace-карта; 14 sip/-модулей)
+Last reviewed: 2026-07-13 (PR #69: stock pre-answer REGISTER/100 Trying,
+video anti-churn, held caller switching, FCM-ended guard; A-54/A-58/A-81/A-85 в master)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -393,13 +394,22 @@ const + go2rtc ← config_flow, camera
 2. **`available_sections`** игнорируются (`api.query_sections` исторически вызывался без потребления результата; в текущем `coordinator` вызов удалён, но endpoint в `api.py` остался — кандидат на cleanup при следующем touch coordinator).
 3. **Сильная связанность `coordinator` ↔ `api` ↔ `http`** — coordinator unit-тестируется только с mock `aioresponses` (см. `tests/`); inject-абстракции пока нет.
 4. **UA shared state в `user_agent.place_id`** — кросс-слойная связанность через `self._api.http.user_agent.place_id = place_id`. Из-за этого refresh идёт сериально по places (см. async-паттерны). Лучше прокидывать `place_id` через параметры HTTP-вызовов; рефакторинг open.
-5. **Нет `ClientTimeout`** (A-21) — медленный backend может заморозить refresh-тик.
-6. **Лог-spam от временно сломанных камер** (A-65) — `camera.py:stream_source` логирует `WARNING "empty source stream url"` на каждый вызов. Под нагрузкой frigate/webrtc preview одна broken камера даёт десятки одинаковых WARNING. Кандидат на per-camera consecutive-fail throttle (1й WARNING, 2й+ DEBUG, reset на success).
+5. **Нет retry/backoff для идемпотентных GET** (остаток A-21). Явный
+   `ClientTimeout` уже есть; POST/login/open_lock намеренно не ретраятся автоматически.
+6. **FCM опирается на приватные API Google** (A-80) — realtime-вызов работает
+   под graceful degradation, но долгосрочная совместимость не гарантирована.
 
 Добавлено с момента предыдущего ревью (2026-06-24):
 - ✅ **Uplink-микрофон — two-way audio завершён** (A-85, ADR-0013) — `uplink_ws.py` (WS-команда `intercom_uplink` + Lovelace-карта `www/eg-intercom-mic-card.js`), `sip/uplink.py` `UplinkSink`, дрейф-компенсированный RTP-uplink (`sip/rtp.py`). Механизм #1 (HA WebSocket binary-audio) — без go2rtc/TURN/новых зависимостей. Live-прод 2026-06-24 (микрофон дошёл до домофона). #2/#3/#4 эмпирически отвергнуты.
 - ✅ **SIP two-way audio фундамент** (A-81, ADR-0012) — `sip/` пакет (14 модулей), `DoorbellCallController`, `AudioBridge`, `ElektronnyGorodCallCamera`. Приём вызова live + показ экрана вызова (видео + звук гостя) через HA-native WebRTC + downlink.
-- ✅ **FCM-событие вызова** (A-54/A-58, ADR-0011) — `fcm.py`, `event`-сущность DOORBELL, push-регистрация (resolved-in-branch `feat/doorbell-fcm-event`).
+- ✅ **FCM-событие вызова** (A-54/A-58, ADR-0011) — `fcm.py`, `event`-сущность
+  DOORBELL и push-регистрация находятся в master.
+- ✅ **Надёжность вызова PR #69** — один video producer на звонок с concurrent
+  first-open dedup/teardown (A-88), смена звонящего во время held (A-89),
+  игнор FCM `ended` в живом SIP-разговоре (A-90).
+- ✅ **Pre-answer профиль подтверждён полным Android PCAP** (A-91): FCM ring →
+  REGISTER (`Call-Id`, `Accept: application/sdp`, stock Contact) → INVITE →
+  `100 Trying`; `200 OK` только по явному ответу.
 
 Решённые с момента предыдущего ревью архитектуры:
 - ✅ Coordinator имеет `update_interval` + dict-snapshot (A-08, slice 3a).

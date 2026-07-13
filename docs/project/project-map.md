@@ -1,6 +1,7 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-06-24 (A-85 uplink-микрофон ADR-0013: uplink_ws.py + sip/uplink.py + www/eg-intercom-mic-card.js + test_sip_uplink/test_uplink_ws/test_sip_manager; DoorbellCallController; 14 sip/-модулей)
+Last reviewed: 2026-07-13 (PR #69: точный pre-answer REGISTER/100 Trying,
+test_sip_protocol, video anti-churn, multi-call switching; suite 392 passed)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -175,15 +176,19 @@ elektronny-gorod/
 
 Пакет `sip/` — двусторонняя связь (A-81 приём + downlink, A-85 uplink-микрофон, [call-answer-model](../features/intercom-two-way-audio/call-answer-model.md)). Модель **register-on-ring (held-short-window, ADR-0012)**: на FCM `CALL_INCOMING` — сразу `mint → REGISTER → 100 Trying` (hold), по «Ответить» — `200 OK` на held-INVITE + RTP-latching. Сброс с панели приходит как SIP `CANCEL` → мгновенный dismiss экрана. `DoorbellCallController` в `hass.data`, сервисы `answer` / `hangup`. Микрофон (говорить гостю) — `uplink_ws.py` WS-команда `intercom_uplink` → `UplinkSink` → uplink-RTP (ADR-0013). Экран вызова `/doorbell-call/call` собирается из blueprints `doorbell_call_notify` (на дверь) + `doorbell_screen_controller` (на систему) + хелперов + dashboard-примера — гайд [call-screen-setup](../features/intercom-two-way-audio/call-screen-setup.md).
 
-Показ экрана вызова — `call_camera.py`: camera-сущность `camera.intercom_call` показывает активный вызов **видео + звук гостя** через HA-native WebRTC (go2rtc в LAN, 4G без экспозиции). `stream_source()` при активном вызове пересобирает go2rtc-стрим `eg_intercom_call` (СВЕЖИЙ video-RTSP домофона + аудио-мост). Вне вызова → `None`.
+Показ экрана вызова — `call_camera.py`: camera-сущность `camera.intercom_call`
+показывает активный вызов **видео + звук гостя** через HA-native WebRTC
+(go2rtc в LAN, 4G без экспозиции). `eg_intercom_call` собирается один раз на
+вызов, конкурентные первые открытия дедуплицируются, видео переиспользует живой
+общий producer `eg_<camera_id>`, а на terminal-state стрим удаляется. Вне вызова → `None`.
 
 | Файл | Назначение |
 |---|---|
-| [`sip/call_controller.py`](../../custom_components/elektronny_gorod/sip/call_controller.py) | `DoorbellCallController` — HA-glue: трекинг активного FCM-вызова по `Call-ID`, `answer`/`hangup`, mint → hold → accept; lifecycle `AudioBridge` + `UplinkSink`; `feed_uplink()` (микрофон из WS → sink, ADR-0013); `active_call_media()` → camera_id + bridge (узкий интерфейс для `call_camera.py`) |
+| [`sip/call_controller.py`](../../custom_components/elektronny_gorod/sip/call_controller.py) | `DoorbellCallController` — HA-glue: трекинг FCM-вызова по `Call-ID`, register/hold/answer/hangup, смена нового звонящего во время held, FCM-ended guard для живого разговора; lifecycle `AudioBridge` + `UplinkSink`; `active_call_media()` → camera_id + bridge |
 | [`sip/uplink.py`](../../custom_components/elektronny_gorod/sip/uplink.py) | `UplinkSink` — микрофон-PCM → resample 8к → G.711-кадры + джиттер-буфер; `next_frame()` для `SipManager.uplink_provider` (ADR-0013) |
-| [`sip/manager.py`](../../custom_components/elektronny_gorod/sip/manager.py) | `SipManager` — фасад: `register_and_hold`, `accept`, `async_hangup`, `on_downlink` |
-| [`sip/protocol.py`](../../custom_components/elektronny_gorod/sip/protocol.py) | asyncio SIP-транспорт (UDP); разделяет `CANCEL` → `487` + dismiss / `BYE` → on_bye |
-| [`sip/register.py`](../../custom_components/elektronny_gorod/sip/register.py) | REGISTER (Expires=30 + проприетарные push-params в Contact URI) |
+| [`sip/manager.py`](../../custom_components/elektronny_gorod/sip/manager.py) | `SipManager` — фасад: stock-profile `register_and_hold`, `accept`, fallback register-on-answer с тем же `Call-ID`/FCM profile, `async_hangup`, `detach`, `on_downlink` |
+| [`sip/protocol.py`](../../custom_components/elektronny_gorod/sip/protocol.py) | asyncio SIP-транспорт (UDP); на held-INVITE немедленно шлёт `100 Trying`; разделяет `CANCEL` → `487` + dismiss / `BYE` → on_bye |
+| [`sip/register.py`](../../custom_components/elektronny_gorod/sip/register.py) | REGISTER штатного профиля: Expires=30, `Call-Id` из FCM, `Accept: application/sdp`, проприетарные push-params в Contact URI без лишнего `transport` parameter |
 | [`sip/dialog.py`](../../custom_components/elektronny_gorod/sip/dialog.py) | `DialogState` + build 200 OK (эхо Via/Record-Route) + BYE |
 | [`sip/message.py`](../../custom_components/elektronny_gorod/sip/message.py) | SIP message parse (multi-Via / Record-Route) |
 | [`sip/sdp.py`](../../custom_components/elektronny_gorod/sip/sdp.py) | parse INVITE-offer + build G.711 answer (локальный адрес, без STUN/ICE) |
@@ -192,7 +197,7 @@ elektronny-gorod/
 | [`sip/stun.py`](../../custom_components/elektronny_gorod/sip/stun.py) | STUN parse / keepalive (20B бинарь) |
 | [`sip/audio.py`](../../custom_components/elektronny_gorod/sip/audio.py) | G.711 PCMU/PCMA ↔ PCM |
 | [`sip/bridge.py`](../../custom_components/elektronny_gorod/sip/bridge.py) | `AudioBridge` — downlink G.711-кадры → ffmpeg → mpegts/aac → персистентный HTTP-сервер → go2rtc; keepalive-тишина; `detect_lan_ip()` |
-| [`call_camera.py`](../../custom_components/elektronny_gorod/call_camera.py) | `ElektronnyGorodCallCamera` — camera-сущность `camera.intercom_call`; `stream_source()` пересобирает `eg_intercom_call` при активном вызове; вне вызова → `None` |
+| [`call_camera.py`](../../custom_components/elektronny_gorod/call_camera.py) | `ElektronnyGorodCallCamera` — camera-сущность `camera.intercom_call`; one-build-per-call + in-flight dedup, reuse живого `eg_<id>` producer, teardown `eg_intercom_call` на terminal-state; вне вызова → `None` |
 | [`uplink_ws.py`](../../custom_components/elektronny_gorod/uplink_ws.py) | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): микрофон из Lovelace-карты → `DoorbellCallController.feed_uplink`; static-регистрация JS-карты (`async_register_uplink_ws_command` / `async_register_uplink_card`, зовутся из `__init__.py`) (ADR-0013) |
 | [`www/eg-intercom-mic-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-mic-card.js) | Lovelace-карта микрофона домофона: `getUserMedia` + AudioWorklet → Int16 PCM по авторизованному HA-WebSocket (ADR-0013) |
 | [`www/eg-intercom-call-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js) | Карта экрана вызова (Slice 3b) — собранный бандл из `frontend/` (Lit+TS). Не редактировать вручную |
@@ -244,16 +249,17 @@ elektronny-gorod/
 | [`tests/test_sip_sdp.py`](../../tests/test_sip_sdp.py) | parse INVITE-offer + build G.711 answer (A-81) |
 | [`tests/test_sip_message.py`](../../tests/test_sip_message.py) | SIP parse с multi-Via / Record-Route (A-81) |
 | [`tests/test_sip_dialog.py`](../../tests/test_sip_dialog.py) | DialogState + 200 OK + BYE (A-81) |
-| [`tests/test_sip_register.py`](../../tests/test_sip_register.py) | REGISTER + проприетарные push-params (A-81) |
+| [`tests/test_sip_register.py`](../../tests/test_sip_register.py) | Stock REGISTER profile: FCM `Call-Id`, `Accept: application/sdp`, Contact push-params без `transport`, digest/re-register (A-81/A-91) |
+| [`tests/test_sip_protocol.py`](../../tests/test_sip_protocol.py) | Held-INVITE получает `100 Trying` до пользовательского `200 OK`; точный provisional SIP-контракт (A-91) |
 | [`tests/test_sip_rtp.py`](../../tests/test_sip_rtp.py) | RTP G.711 latching (A-81) |
 | [`tests/test_sip_bridge.py`](../../tests/test_sip_bridge.py) | `AudioBridge`: RTP-packetize, go2rtc src-формат, keepalive-логика (A-81) |
 | [`tests/test_api_sip.py`](../../tests/test_api_sip.py) | `api.mint_sip_device` — тело-зеркало (`installationId`) → `{login, password, realm}` (A-81) |
-| [`tests/test_sip_call_controller.py`](../../tests/test_sip_call_controller.py) | `DoorbellCallController`: трекинг по `Call-ID`, answer/hangup, mint timeout, one-concurrent-call guard, `active_call_media`, uplink-sink lifecycle + `feed_uplink` + `uplink_provider` (A-81, ADR-0013) |
-| [`tests/test_sip_manager.py`](../../tests/test_sip_manager.py) | `SipManager.accept()` degrade на malformed SDP из сети (P1-1): release held + return False, без ValueError/IndexError (A-81) |
+| [`tests/test_sip_call_controller.py`](../../tests/test_sip_call_controller.py) | `DoorbellCallController`: Call-ID lifecycle, stock-profile hold/fallback, answer/hangup, held caller switching, FCM-ended guard, media/uplink lifecycle (A-81/A-89/A-90/A-91, ADR-0013) |
+| [`tests/test_sip_manager.py`](../../tests/test_sip_manager.py) | `SipManager`: stock registration profile в hold/fallback, detach/release и degrade malformed SDP без утечки ресурсов (A-81/A-91) |
 | [`tests/test_sip_uplink.py`](../../tests/test_sip_uplink.py) | `UplinkSink`: микрофон-PCM → resample 8к → G.711-кадры + джиттер-буфер (ADR-0013) |
 | [`tests/test_uplink_ws.py`](../../tests/test_uplink_ws.py) | WS-команда `intercom_uplink`: выбор контроллера, binary-handler → `feed_uplink`, no-active-call error, unsub-cleanup, sample_rate range (ADR-0013) |
-| [`tests/test_call_camera.py`](../../tests/test_call_camera.py) | `ElektronnyGorodCallCamera`: `stream_source` активный/нет вызова, рефреш go2rtc (A-81) |
-| [`tests/test_go2rtc_audio.py`](../../tests/test_go2rtc_audio.py) | `upsert_audio_stream` / `remove_audio_stream` — контракт с go2rtc REST (A-81) |
+| [`tests/test_call_camera.py`](../../tests/test_call_camera.py) | `ElektronnyGorodCallCamera`: one-build-per-call, concurrent first-open dedup, rebuild/teardown и terminal lifecycle (A-81/A-88) |
+| [`tests/test_go2rtc_audio.py`](../../tests/test_go2rtc_audio.py) | PATCH-first `upsert_audio_stream` / `remove_audio_stream` — контракт с go2rtc REST (A-81/A-88) |
 | [`pytest.ini`](../../pytest.ini) | `asyncio_mode = auto`, `testpaths = tests` |
 
 ### CI / CD

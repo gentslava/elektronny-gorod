@@ -1,6 +1,8 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-08 (PR #68 `feat/intercom-call-ui` merged в master: карточка + i18n ru/en + A-87 ring/idle watchdog + cross-call guard + call-camera polish; дальше — `feat/intercom-video-concurrency` фазы A/B. Master: A-87 ✅ RESOLVED merged PR #68; A-73 ✅/A-74 ✅ RESOLVED — тесты `3a60b15`/`362237b`; A-21 🟡 PARTIALLY — ClientTimeout `3885bb0`, retry follow-up; A-86 ✅ RESOLVED merged PR #66; A-85 uplink-микрофон ADR-0013 live-прод 2026-06-24, pending merge feat/intercom-uplink-mic; A-81 merge-ref feat/intercom-uplink-mic; A-88 🟢/A-89 🟢 resolved-in-branch — ветка `feat/intercom-video-concurrency`, pending merge + прод-верификация)
+Last reviewed: 2026-07-13 (PR #69 merged в master: A-88 video anti-churn,
+A-89 смена звонящего, A-90 FCM-ended guard, A-91 восстановление точной
+pre-answer SIP-модели; A-81/A-85 также находятся в master; suite 392 passed)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -412,7 +414,8 @@ Quality gates:
 
 ### A-54. FCM-канал и `subscriberNotifications` — реализован как канал события вызова
 
-- **Status:** 🟢 **resolved-in-branch (pending merge `feat/doorbell-fcm-event`)**.
+- **Status:** ✅ **RESOLVED** — реализация находится в master
+  (`b4cece3` event entity, `7244fc4` FCM listener; последующие fixes также merged).
   Переоценено: FCM-канал больше не «за пределами проекта». Эксперимент
   (`research/intercom-call-probe/FINDINGS.md`) доказал, что событие «вызов с
   домофона» приходит **именно по FCM** — реализовано (ADR-0011): `fcm.py`
@@ -420,7 +423,7 @@ Quality gates:
   `api.register_push_device` / `unregister_push_device` (привязка токена через
   `subscriberNotifications` + `device-installations`) + `event`-сущность.
   Публичный Firebase-конфиг (не секрет) — в `const.py`; per-device creds — в
-  `entry.data`. Весь флоу под graceful degradation. После merge → RESOLVED.
+  `entry.data`. Весь флоу под graceful degradation.
 - **Severity:** P3 → стала feature (P1 real-time path).
 - **Evidence:** `POST /rest/v1/subscriberNotifications` + `device-installations`
   отправляют `pushToken` (FCM); FCM data-push несёт `CALL_INCOMING` /
@@ -486,8 +489,8 @@ Quality gates:
      внутри APK (`google-services.json`). Технически возможно зарегистрировать
      HA как FCM-receiver того же project. Latency sub-second. См. R-1..R-5
      в roadmap Итерации 4.
-- **Status:** 🟢 **resolved-in-branch (pending merge `feat/doorbell-fcm-event`)**
-  для **события вызова домофона** — выбран и реализован **FCM-канал** (push
+- **Status:** ✅ **RESOLVED** в master (`b4cece3`, `7244fc4`) для **события
+  вызова домофона** — выбран и реализован **FCM-канал** (push
   primary), не polling. Research R-1..R-5 фактически выполнен экспериментом
   `research/intercom-call-probe/` (live-проверка 3 каналов на прод-аккаунте):
   доказано, что вызов несёт FCM, латентность sub-second. Решение —
@@ -495,7 +498,7 @@ Quality gates:
   гипотетический ADR-0009-event-delivery для этого use-case). Реализация —
   `fcm.py` + `event`-сущность + `api.register_push_device`. Polling
   `/events/search` остаётся возможным fallback/backfill, но для realtime-вызова
-  больше не нужен. После merge → RESOLVED.
+  больше не нужен.
 - **Каверзы:** канал опирается на приватные API Google — долгосрочных гарантий
   нет (см. A-80). Поэтому весь FCM-флоу под graceful degradation.
 - **Scope:** v1 — только NTK/myhome (`myhome.proptech.ru`). Дом.ру (HMS/Huawei
@@ -1067,10 +1070,8 @@ Quality gates:
 
 ### A-81. Приём вызова домофона по SIP + показ экрана вызова (фундамент two-way audio)
 
-- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-uplink-mic`)**.
-  Feature-слайс (не bug-fix). PR #65 `feat/intercom-two-way-audio` складывается
-  в общую merge-ветку `feat/intercom-uplink-mic` (вся two-way-audio фича влитётся
-  оттуда). После merge → RESOLVED.
+- **Status:** ✅ **RESOLVED** — реализация находится в master (включена в историю,
+  влитую PR #69); точная pre-answer модель дополнительно подтверждена A-91.
 - **Severity:** P1 (real-time path для домофонных звонков — двусторонний звук).
 - **Area:** `sip/` (новый пакет, 14 модулей включая `bridge.py` и `uplink.py`), `call_camera.py`
   (новый), `api.mint_sip_device`, `services.yaml` (`answer` / `hangup`),
@@ -1174,10 +1175,9 @@ Quality gates:
 
 ### A-85. Uplink-микрофон — говорить гостю (завершение two-way audio, ADR-0013)
 
-- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-uplink-mic`)**.
-  Feature-слайс (не bug-fix). LIVE-подтверждён в проде **2026-06-24** (микрофон
-  браузера дошёл до домофона, пользователь слышал себя у двери). После merge →
-  RESOLVED.
+- **Status:** ✅ **RESOLVED** — реализация находится в master (включена в историю,
+  влитую PR #69). LIVE-подтверждено в проде **2026-06-24**: микрофон браузера
+  дошёл до домофона, пользователь слышал себя у двери.
 - **Severity:** P1 (закрывает двусторонний звук — последний хоп over A-81 downlink).
 - **Area:** `uplink_ws.py` (новый — WS-команда + регистрация Lovelace-карты),
   `sip/uplink.py` (`UplinkSink`: микрофон-PCM → resample 8к → G.711-кадры),
@@ -1321,7 +1321,8 @@ Quality gates:
 
 ### A-88. Видео вызова рвётся при конкурентных клиентах / пересборка стрима (anti-churn)
 
-- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-video-concurrency`)** — фаза A закрыта в коде (осталась прод-верификация «2 устройства одновременно»).
+- **Status:** ✅ **RESOLVED** — merged PR #69. Прод-верификация сценария
+  «2 устройства одновременно» остаётся эксплуатационной проверкой, не merge-блокером.
 - **Severity:** **P1** — видео вызова нестабильно у пользователя («на ноуте нет —
   на телефоне есть», задержка 3/5/иногда 20с, иногда только картинка).
 - **Area:** `call_camera.py` (`stream_source`), `sip/call_controller.py`
@@ -1354,7 +1355,7 @@ Quality gates:
      → оператор рвёт одну) — делить единый продюсер камеры домофона.
 - **First step:** дедуп сборки в пределах звонка в `call_camera.stream_source` +
   teardown стрима/worker на `ended`.
-- **Resolution (branch `feat/intercom-video-concurrency`):**
+- **Resolution (merged PR #69):**
   1. ✅ Сборка стрима **один раз на звонок** — кэш `(bridge, url)` по объекту
      `bridge` (`call_camera.stream_source`), повторные открытия отдают готовый URL.
   2. ✅ **Dedup конкурентных первых открытий** — in-flight future (warm-up +
@@ -1370,7 +1371,7 @@ Quality gates:
 
 ### A-90. Живой разговор гаснет по FCM-пушу `ended` (авто-сброс принятого вызова)
 
-- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-video-concurrency`)**.
+- **Status:** ✅ **RESOLVED** — merged PR #69.
 - **Severity:** **P1** — карта «Вызов завершён» на живом разговоре (домофон
   продолжает говорить), пользователь теряет управление вызовом.
 - **Area:** `sip/call_controller.py` `handle_signal` (ветка `ended`).
@@ -1393,9 +1394,8 @@ Quality gates:
 
 ### A-89. Мульти-вызов: смена звонящего домофона (не одновременные разговоры)
 
-- **Status:** 🟢 **resolved-in-branch (pending merge `feat/intercom-video-concurrency`)**
-  — Phase B закрыта в коде (осталась прод-верификация «звонок №1 не отвечать → звонок
-  №2 → карта показывает №2 → принять №2»).
+- **Status:** ✅ **RESOLVED** — merged PR #69. Прод-верификация сценария
+  «звонок №1 не отвечать → звонок №2 → карта показывает №2 → принять №2» остаётся.
 - **Severity:** **P2** — UX. Текущее поведение — by-design single concurrent call.
 - **Area:** `sip/call_controller.py` `handle_signal` (ring-guard
   `if self._manager is not None: игнор параллельного ring`).
@@ -1434,8 +1434,8 @@ Quality gates:
 
 ### A-91. Ложная атрибуция «Занято» SIP-механике HA
 
-- **Status:** ✅ **RESOLVED** — причина отделена от интеграции; штатная SIP-модель
-  восстановлена и уточнена по полному PCAP.
+- **Status:** ✅ **RESOLVED** — merged PR #69; причина отделена от интеграции,
+  штатная SIP-модель восстановлена и уточнена по полному PCAP.
 - **Severity:** P1 — диагностическая изоляция временно отключала FCM/SIP и ломала
   реальный сценарий ответа, а исходная гипотеза обвиняла pre-answer hold HA.
 - **Evidence (production + Android PCAP, 2026-07-13):** при полностью отключённых
@@ -1513,13 +1513,13 @@ Quality gates:
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
 | A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR #51 — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
 | ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
-| 🟢 A-58 + 🟢 A-54 (doorbell event via FCM, pending merge `feat/doorbell-fcm-event`, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
-| 🟢 A-81 (register-on-ring ADR-0012 + downlink AudioBridge + call_camera.py, pending merge `feat/intercom-uplink-mic`) — закрывает практическую часть A-49 (`sipdevices` используется) | Итерация 4 (two-way audio: приём вызова + downlink-вывод + экран вызова) |
-| 🟢 A-85 (uplink-микрофон ADR-0013: HA WS-binary #1, дрейф-фикс rtp.py, Lovelace-карта; live-прод 2026-06-24, pending merge `feat/intercom-uplink-mic`) — завершает two-way audio (говорить гостю) | Итерация 4 (two-way audio: uplink-микрофон; #2/#3/#4 эмпирически отвергнуты) |
+| ✅ A-58 + ✅ A-54 (doorbell event via FCM в master, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
+| ✅ A-81 (register-on-ring ADR-0012 + downlink AudioBridge + call_camera.py, master/PR #69) — закрывает практическую часть A-49 (`sipdevices` используется) | Итерация 4 (two-way audio: приём вызова + downlink-вывод + экран вызова) |
+| ✅ A-85 (uplink-микрофон ADR-0013: HA WS-binary #1, дрейф-фикс rtp.py, Lovelace-карта; live-прод 2026-06-24, master/PR #69) — завершает two-way audio (говорить гостю) | Итерация 4 (two-way audio: uplink-микрофон; #2/#3/#4 эмпирически отвергнуты) |
 | 🔴 A-82 (go2rtc-transport вынести из camera.py) + 🔴 A-83 (auto-recovery → `_StreamRecovery`, высокий риск, через ADR) + 🔴 A-84 (go2rtc config bloat P2 — стрим дописывается, не мёржится; через DIAG + R7) | backlog (tech-debt из рефактор-оценки 2026-06-23 + A-84 найден пользователем; не блокирует two-way audio) |
 | ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
-| ✅ A-87 (ring/idle watchdog — фаза не залипает без FCM `ended`, merged PR #68) + 🔴 A-88 (видео вызова: anti-churn + teardown стрима/worker) | Итерация 4 (UI merged PR #68; фаза A — ветка `feat/intercom-video-concurrency`) |
-| 🟢 A-89 (мульти-вызов: смена звонящего домофона на новый ring во время held — `_async_switch_caller`, pending merge `feat/intercom-video-concurrency`) | Итерация 4 (фаза B — код закрыт, осталась прод-верификация) |
+| ✅ A-87 (ring/idle watchdog, PR #68) + ✅ A-88 (video anti-churn) + ✅ A-90 (FCM-ended guard), merged PR #69 | Итерация 4 (UI + надёжность видео/жизненного цикла вызова) |
+| ✅ A-89 (смена звонящего домофона во время held) + ✅ A-91 (штатная pre-answer SIP-модель подтверждена PCAP), merged PR #69 | Итерация 4 (мульти-вызов + production diagnostics) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 

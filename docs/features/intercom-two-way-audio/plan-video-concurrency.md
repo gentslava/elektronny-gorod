@@ -5,7 +5,9 @@
 > `- [x]`). Источник findings — [`project-audit.md`](../../audit/project-audit.md)
 > A-88 / A-89; строки плана — [`roadmap.md`](../../roadmap.md) Итерация 4.
 
-**Ветка:** `feat/intercom-video-concurrency`. Master подтянут (PR #68 merged + docs-sync).
+**Status:** ✅ COMPLETED — merged PR #69 в master 2026-07-13.
+
+**Ветка:** `feat/intercom-video-concurrency` (историческая; удалена после merge).
 
 **Scope = Phase A (A-88, видео anti-churn) + Phase B (A-89, мульти-вызов).**
 Фаза B — отдельная, начинается только после стабильной A.

@@ -1,8 +1,9 @@
 # Feature: Two-way talk по домофону (SIP-аудио)
 
-- **Status:** IN PROGRESS — Slice 0 (SIP-фундамент) + Slice 1 (downlink + экран вызова) реализованы; Slice 2 (uplink/микрофон) в работе.
+- **Status:** IMPLEMENTED IN MASTER — SIP-фундамент, downlink, uplink-микрофон,
+  экран вызова, multi-call switching и video anti-churn реализованы.
 - **Feature-id:** `intercom-two-way-audio`
-- **Branch:** `feat/intercom-two-way-audio` (pending merge → master)
+- **Branch:** `master` (актуальная реализация после PR #69)
 - **Owner:** Vyacheslav Scherbinin
 
 ## Что внутри
@@ -24,12 +25,16 @@
 у двери** (двусторонний звук), как приложение. SIP/RTP-медиа **доказаны рабочими**
 (`probe_sip_media.py`, live 2026-06-22).
 
-**Текущее состояние (ветка `feat/intercom-two-way-audio`):**
-- Приём вызова по SIP — **работает live** (register-on-ring, ADR-0012: FCM `ring` → mint → REGISTER → held-INVITE → по «Ответить» `200 OK` → RTP-latching).
+**Текущее состояние (`master`):**
+- Приём вызова по SIP — **работает live** (register-on-ring, ADR-0012: FCM `ring`
+  → mint → REGISTER → held-INVITE → `100 Trying`; по «Ответить» `200 OK` → RTP-latching).
 - Сброс с панели → SIP `CANCEL` → мгновенный dismiss экрана вызова в HA.
 - Звук гостя (downlink) — **выводится** через `AudioBridge` → go2rtc → HA-native WebRTC.
 - Экран вызова (`camera.intercom_call`) — видео домофона + звук гостя инлайн на дашборде, работает на 4G без экспозиции go2rtc.
-- Микрофон (uplink, говорить гостю) — **следующий слайс** (Slice 2).
+- Микрофон (uplink, говорить гостю) — **реализован и live-подтверждён** через
+  HA WebSocket binary-audio → `UplinkSink` → RTP (ADR-0013).
+- Несколько клиентов делят один video producer вызова; новый неотвеченный ring
+  переключает карточку на нового звонящего (A-88/A-89, PR #69).
 
 ## Использование: экран вызова `/doorbell-call/call`
 
@@ -74,15 +79,17 @@
 - Эталон: [`research/intercom-call-probe/probe_sip_media.py`](../../../research/intercom-call-probe/probe_sip_media.py)
 - Предшествующая фича: FCM-event ([ADR-0011](../../decisions/0011-doorbell-fcm-channel.md))
 - ADR: [ADR-0012](../../decisions/0012-register-on-ring.md) — register-on-ring (held-short-window, CANCEL-dismiss)
-- Audit: [A-81](../../audit/project-audit.md) — finding + resolved-in-branch статус
+- Audit: [A-81/A-85/A-88/A-89/A-90/A-91](../../audit/project-audit.md) — resolved в master
 
 ## Quality gates
 
 - [x] SPEC_READY
 - [x] PLAN_APPROVED (Slice 0–1)
-- [x] TESTS_PASS (suite 234+ passed: test_sip_*.py + test_call_camera.py + test_api_sip.py + test_go2rtc_audio.py)
+- [x] TESTS_PASS (suite 392 passed на merge PR #69; SIP/FCM/camera/go2rtc regressions покрыты)
 - [x] SECURITY_OK (SIP realm/login/password в SENSITIVE_KEYS; no-secret-logs соблюдён)
 - [x] DOCS_UPDATED (project-map, overview, audit A-81, roadmap, ADR-0012)
-- [ ] READY_FOR_RELEASE (pending merge + Slice 2 uplink)
+- [x] MERGED (PR #69)
+- [ ] READY_FOR_RELEASE (нужна обычная release-проверка и релизный артефакт)
 
-**Slice 2 (uplink/микрофон):** PoC go2rtc backchannel с G.711 → `AudioBridge` обратная ветка → `SipManager.uplink_provider`.
+**Оставшийся polish:** DTMF и дальнейшие UX/reliability улучшения ведутся отдельно;
+они не блокируют уже реализованный two-way audio.
