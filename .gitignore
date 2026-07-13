@@ -69,6 +69,7 @@ research/scripts/.baseline-meta
 *.apks
 
 # Local dev artifacts
+.worktrees/
 .env
 .env.local
 local/
