@@ -3,7 +3,8 @@
 Мы НЕ держим долгую регистрацию: REGISTER шлётся в момент FCM-ring (а не «ответить»)
 и триггерит forked `INVITE` от Kazoo, который держим в `100 Trying` до ответа
 пользователя (см. call-answer-model.md, ADR-0012). Зеркалируем формат приложения:
-проприетарные push-params в Contact, Expires=30, `Supported: outbound/gruu/path`.
+FCM Call-ID в push-params Contact, Expires=30, `Accept: application/sdp`,
+`Supported: outbound/gruu/path`.
 """
 from __future__ import annotations
 
@@ -17,11 +18,21 @@ _CRLF = "\r\n"
 REGISTER_EXPIRES = 30  # короткий, как приложение (свежесть регистрации)
 
 
-def build_contact(login: str, host: str, port: int, fcm_token: str) -> str:
+def build_contact(
+    login: str,
+    host: str,
+    port: int,
+    fcm_token: str,
+    *,
+    fcm_call_id: str | None = None,
+    include_transport: bool = True,
+) -> str:
     """Contact с проприетарными push-params приложения (триггерит push-aware флоу)."""
+    call_param = f";Call-Id:%20{fcm_call_id}" if fcm_call_id else ""
+    transport_param = ";transport=udp" if include_transport else ""
     return (
-        f"<sip:{login}@{host}:{port};transport=udp"
-        f";app-id={PUSH_APP_ID};pn-type=google;pn-tok={fcm_token}>"
+        f"<sip:{login}@{host}:{port}{transport_param}"
+        f";app-id={PUSH_APP_ID};pn-type=google{call_param};pn-tok={fcm_token}>"
     )
 
 
@@ -38,6 +49,8 @@ def build_register(
     user_agent: str,
     expires: int = REGISTER_EXPIRES,
     auth: str | None = None,
+    *,
+    accept_sdp: bool = False,
 ) -> str:
     """Сформировать REGISTER-запрос (с опц. Authorization после 401-challenge)."""
     lines = [
@@ -51,8 +64,10 @@ def build_register(
         f"Contact: {contact}",
         f"Expires: {expires}",
         "Supported: replaces, outbound, gruu, path",
-        f"User-Agent: {user_agent}",
     ]
+    if accept_sdp:
+        lines.append("Accept: application/sdp")
+    lines.append(f"User-Agent: {user_agent}")
     if auth:
         lines.append(f"Authorization: {auth}")
     lines += ["Content-Length: 0", "", ""]

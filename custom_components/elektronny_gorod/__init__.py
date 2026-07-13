@@ -82,7 +82,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry.async_on_unload(fcm_listener.async_stop)
 
-    # Two-way audio: контроллер приёма вызова (REGISTER-on-answer). Трекает
+    # Two-way audio: контроллер приёма вызова (REGISTER-on-ring). Трекает
     # активный FCM-вызов (SIGNAL_DOORBELL) и драйвит SipManager по сервису
     # `answer`/`hangup`. FCM-токен берёт у listener (push-params REGISTER).
     sip_controller = DoorbellCallController(

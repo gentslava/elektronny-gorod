@@ -7,7 +7,9 @@ eg_intercom_call (СВЕЖИЙ video-RTSP домофона + аудио-мост
 """
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
+from typing import Any
 
 from aiohttp import ClientTimeout
 
@@ -16,8 +18,16 @@ from homeassistant.core import Event, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.entity import DeviceInfo
 
-from .const import CALL_STATE_ACTIVE, DOMAIN, EVENT_CALL_STATE, GO2RTC_RTSP_PORT, LOGGER
-from .go2rtc import upsert_audio_stream
+from .const import (
+    CALL_STATE_ACTIVE,
+    CALL_STATE_ENDED,
+    CALL_STATE_ERROR,
+    DOMAIN,
+    EVENT_CALL_STATE,
+    GO2RTC_RTSP_PORT,
+    LOGGER,
+)
+from .go2rtc import remove_audio_stream, upsert_audio_stream
 from .sip.call_controller import CALL_STREAM_NAME, DoorbellCallController
 
 
@@ -44,6 +54,17 @@ class ElektronnyGorodCallCamera(Camera):
         self._rtsp_host = rtsp_host
         # camera_id → entity домофона (для рефреша её source); из camera-платформы.
         self._doorbell_lookup = doorbell_lookup
+        # A-88 anti-churn: (bridge, rtsp_url) собранного стрима текущего звонка.
+        # Ключ — сам объект bridge (сравнение через `is`): кэш держит на него
+        # ссылку, поэтому его id не переиспользуется под следующий звонок (в
+        # отличие от id()-ключа). Сбор — один раз на звонок; последующие открытия
+        # отдают готовый URL. Сброс — на конце звонка (`media is None` / teardown).
+        self._call_stream_cache: tuple[Any, str] | None = None
+        # A-88 dedup: future текущей сборки стрима. warm-up (на `answer`) и открытие
+        # карточки фронтендом стартуют почти одновременно — без дедупа оба проходят
+        # окно `cache is None` и пере-собирают стрим (double upsert + double
+        # operator-pull). Зеркалит A-68 future-паттерн из `camera.stream_source`.
+        self._inflight_stream_future: asyncio.Future[str | None] | None = None
         self._attr_unique_id = f"{DOMAIN}_{entry_id}_intercom_call"
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, f"{entry_id}_intercom_call")}, name="Вызов домофона"
@@ -65,9 +86,28 @@ class ElektronnyGorodCallCamera(Camera):
     @callback
     def _on_call_state(self, event: Event) -> None:
         """Фаза вызова изменилась → обновить state; на `active` — прогреть стрим."""
+        state = (getattr(event, "data", None) or {}).get("state")
         self.async_write_ha_state()
-        if (getattr(event, "data", None) or {}).get("state") == CALL_STATE_ACTIVE:
+        if state == CALL_STATE_ACTIVE:
             self.hass.async_create_task(self._warm_up())
+        elif state in (CALL_STATE_ENDED, CALL_STATE_ERROR):
+            # A-88: снять go2rtc-стрим вызова — иначе HA Stream worker ретраит
+            # мёртвый `eg_intercom_call` (404 каждые ~60–90 с после звонка).
+            self.hass.async_create_task(self._teardown_call_stream())
+
+    async def _teardown_call_stream(self) -> None:
+        """Best-effort снятие `eg_intercom_call` из go2rtc + сброс anti-churn кэша."""
+        self._call_stream_cache = None
+        if not self._base_url:
+            return
+        try:
+            session = async_get_clientsession(self.hass)
+            await remove_audio_stream(
+                self._base_url, CALL_STREAM_NAME, session, self._headers
+            )
+            LOGGER.debug("call-camera teardown: стрим %s снят из go2rtc", CALL_STREAM_NAME)
+        except Exception:  # noqa: BLE001 — teardown best-effort
+            LOGGER.debug("call-camera teardown не удался", exc_info=True)
 
     async def _warm_up(self) -> None:
         """Anti-delay: на answer заранее собрать `eg_intercom_call` и поднять
@@ -126,19 +166,61 @@ class ElektronnyGorodCallCamera(Camera):
         return await doorbell.async_camera_image(width, height)
 
     async def stream_source(self) -> str | None:
-        """Активный вызов → свежий combined-стрим eg_intercom_call → RTSP; иначе None."""
+        """Активный вызов → combined-стрим eg_intercom_call → RTSP; иначе None.
+
+        A-88 anti-churn: стрим собирается ОДИН раз на звонок. Повторные открытия
+        (второй клиент, WebRTC re-offer) отдают готовый URL из кэша — подключаются
+        к тому же go2rtc-продюсеру без пересборки. Конкурентные ПЕРВЫЕ открытия
+        (warm-up + фронтенд одновременно) дедуплицируются in-flight future, иначе
+        оба пере-фетчат operator-URL и пере-собирают общий forpost-продюсер → у
+        второго клиента видео пустое / рвётся. Паттерн зеркалит `camera` (A-68).
+        """
         controller = self._controller_getter()
         if controller is None:
             return None
         media = controller.active_call_media()
         if media is None:
+            self._call_stream_cache = None  # звонок кончился → сброс кэша
             return None
         camera_id, bridge = media
+        cached = self._call_stream_cache
+        if cached is not None and cached[0] is bridge:
+            return cached[1]
+        # dedup конкурентных сборок в пределах одного звонка (A-68-паттерн).
+        if self._inflight_stream_future is not None:
+            return await self._inflight_stream_future
+        loop = asyncio.get_running_loop()
+        fut: asyncio.Future[str | None] = loop.create_future()
+        self._inflight_stream_future = fut
+        try:
+            result = await self._build_call_stream(camera_id, bridge)
+            if not fut.done():
+                fut.set_result(result)
+            return result
+        except BaseException as exc:
+            if not fut.done():
+                fut.set_exception(exc)
+            raise
+        finally:
+            # Safety net: unresolved future → cancel, чтобы waiters не зависли.
+            if not fut.done():
+                fut.cancel()
+            self._inflight_stream_future = None
+
+    async def _build_call_stream(self, camera_id: str, bridge: Any) -> str | None:
+        """Собрать `eg_intercom_call` (видео домофона copy + аудио-мост) → RTSP URL.
+
+        Под защитой in-flight future из `stream_source` — не звать напрямую."""
         doorbell = self._doorbell_lookup(camera_id)
         if doorbell is None:
             return None
-        # рефреш видео-источника домофона (свежий operator-URL → свежий eg_<camera> RTSP)
-        video_rtsp = await doorbell.stream_source()
+        # A-88 A3: видео = copy с уже поднятого eg_<id>, не второй operator-pull.
+        from .camera import ElektronnyGorodCamera
+
+        if isinstance(doorbell, ElektronnyGorodCamera):
+            video_rtsp = await doorbell.async_go2rtc_video_rtsp()
+        else:
+            video_rtsp = await doorbell.stream_source()
         if not video_rtsp:
             return None
         srcs = [f"{video_rtsp}#video=copy", bridge.go2rtc_src]
@@ -156,5 +238,7 @@ class ElektronnyGorodCallCamera(Camera):
                 type(exc).__name__,
             )
             return None
+        url = f"rtsp://{self._rtsp_host}:{GO2RTC_RTSP_PORT}/{CALL_STREAM_NAME}"
+        self._call_stream_cache = (bridge, url)  # anti-churn: собрано на звонок
         LOGGER.debug("Стрим вызова собран (HA-native): %s", CALL_STREAM_NAME)
-        return f"rtsp://{self._rtsp_host}:{GO2RTC_RTSP_PORT}/{CALL_STREAM_NAME}"
+        return url

@@ -352,6 +352,36 @@ class ElektronnyGorodCamera(
             f"{self._go2rtc_stream_name}"
         )
 
+    async def async_go2rtc_video_rtsp(self) -> str | None:
+        """RTSP видео для composite-стрима вызова (A-88 A3).
+
+        Если `eg_<id>` уже поднят в go2rtc **живым** producer'ом (ringing-превью /
+        другой viewer) — отдаём локальный RTSP **без** второго HTTP к operator
+        (оператор рвёт параллельные forpost-сессии). «Живой» = producer уже принял
+        байты (`bytes_recv` > 0): по одному снимку `/api/streams` заморозку (A-71,
+        EOF operator-сессии) не отличить, но пустой/handshake producer (`bytes_recv`
+        0 / нет) отсекаем — иначе reuse мёртвой сессии → замороженное видео вызова.
+        Иначе — один bootstrap через `stream_source()` (свежий operator-URL).
+        """
+        if not self._use_go2rtc:
+            return await self.stream_source()
+        info = await self._fetch_go2rtc_stream_info()
+        if info is not None:
+            producers, _consumers = info
+            if producers and self._producer_has_traffic(producers[0]):
+                LOGGER.debug(
+                    "Camera %s (%s): reuse go2rtc producer %s for call video",
+                    self._name, self._id, self._go2rtc_stream_name,
+                )
+                return self._rtsp_url()
+        return await self.stream_source()
+
+    @staticmethod
+    def _producer_has_traffic(producer: dict[str, Any]) -> bool:
+        """Producer уже принял данные (`bytes_recv` > 0) — не пустой/handshake."""
+        recv = producer.get("bytes_recv")
+        return isinstance(recv, int) and recv > 0
+
     def _rtsp_url_redacted(self) -> str:
         """RTSP URL с замаскированными credentials — для логов."""
         if not self._go2rtc_rtsp_host:

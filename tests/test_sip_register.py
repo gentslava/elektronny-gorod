@@ -1,7 +1,8 @@
 """Unit-тесты SIP REGISTER build + Digest auth (sip/register.py).
 
-Модель REGISTER-on-answer (call-answer-model.md): REGISTER с проприетарными
-push-params приложения триггерит INVITE. Expires=30, Supported: outbound/gruu/path.
+Модель register-on-ring (call-answer-model.md): REGISTER с проприетарными
+push-params приложения триггерит INVITE, который держится через `100 Trying`.
+Expires=30, Supported: outbound/gruu/path.
 """
 from __future__ import annotations
 
@@ -20,6 +21,19 @@ def test_build_contact_has_app_push_params() -> None:
     assert "pn-type=google" in c
     assert "pn-tok=FCMTOKEN123" in c
     assert c.endswith(">")
+
+
+def test_build_contact_official_profile_binds_fcm_call_id() -> None:
+    contact = build_contact(
+        "000",
+        "1.2.3.4",
+        5066,
+        "FCMTOKEN123",
+        fcm_call_id="FCM-CALL-42",
+        include_transport=False,
+    )
+    assert "Call-Id:%20FCM-CALL-42" in contact
+    assert ";transport=udp" not in contact
 
 
 def test_build_register_structure() -> None:
@@ -46,6 +60,23 @@ def test_build_register_without_auth_has_no_authorization() -> None:
         cseq=1, contact="<c>", branch="b", user_agent="ua",
     )
     assert "Authorization:" not in reg
+
+
+def test_build_register_accept_sdp_is_opt_in() -> None:
+    base = {
+        "login": "000",
+        "realm": "r",
+        "host": "h",
+        "port": 1,
+        "call_id": "c",
+        "from_tag": "t",
+        "cseq": 1,
+        "contact": "<c>",
+        "branch": "b",
+        "user_agent": "ua",
+    }
+    assert "Accept: application/sdp\r\n" not in build_register(**base)
+    assert "Accept: application/sdp\r\n" in build_register(**base, accept_sdp=True)
 
 
 def test_build_register_with_auth() -> None:

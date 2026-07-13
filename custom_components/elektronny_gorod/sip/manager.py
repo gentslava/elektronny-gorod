@@ -118,7 +118,19 @@ class SipManager:
     def holding(self) -> bool:
         return self._held is not None
 
-    async def register_and_hold(self, mint_creds: Callable[[], Awaitable[dict]]) -> bool:
+    def detach(self) -> None:
+        """Отвязать колбэки контроллера (A-89 switch): поздний BYE/CANCEL этого
+        (уже смещённого) держимого вызова не должен дёргать контроллер и трогать
+        новый активный вызов. Sync — закрывает окно до `async_hangup`."""
+        self._on_ended = None
+        self._on_cancelled = None
+
+    async def register_and_hold(
+        self,
+        mint_creds: Callable[[], Awaitable[dict]],
+        *,
+        fcm_call_id: str | None = None,
+    ) -> bool:
         """На ring: REGISTER → forked INVITE → 100 Trying, держим. True при успехе."""
         if self._active is not None or self._held is not None:
             LOGGER.warning("SIP: уже есть активный/держимый вызов — игнор hold")
@@ -129,8 +141,17 @@ class SipManager:
         local_ip = await loop.run_in_executor(None, _outbound_ip, registrar_ip)
 
         sip_transport, sip = await loop.create_datagram_endpoint(
-            lambda: SipProtocol(creds, local_ip, self._fcm_token, SIP_USER_AGENT,
-                                on_bye=self._on_remote_bye, on_cancel=self._on_remote_cancel),
+            lambda: SipProtocol(
+                creds,
+                local_ip,
+                self._fcm_token,
+                SIP_USER_AGENT,
+                on_bye=self._on_remote_bye,
+                on_cancel=self._on_remote_cancel,
+                fcm_call_id=fcm_call_id,
+                accept_sdp=True,
+                include_contact_transport=False,
+            ),
             local_addr=("0.0.0.0", SIP_LOCAL_PORT), remote_addr=(registrar_ip, SIP_PORT),
         )
         # Узкий except: единственный реальный исход wait_for здесь — timeout (протокол
@@ -200,9 +221,11 @@ class SipManager:
         self,
         mint_creds: Callable[[], Awaitable[dict]],
         on_downlink: Callable[[bytes], None] | None = None,
+        *,
+        fcm_call_id: str | None = None,
     ) -> bool:
         """Fallback register-on-answer: hold+accept одним вызовом (если held-фазы не было)."""
-        if not await self.register_and_hold(mint_creds):
+        if not await self.register_and_hold(mint_creds, fcm_call_id=fcm_call_id):
             return False
         return await self.accept(on_downlink)
 
