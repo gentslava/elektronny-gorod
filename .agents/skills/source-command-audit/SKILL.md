@@ -1,0 +1,61 @@
+---
+name: "source-command-audit"
+description: "Провести глубокий аудит проекта elektronny-gorod (Lead Architect + параллельные subagents)."
+---
+
+# source-command-audit
+
+Use this skill when the user asks to run the migrated source command `audit`.
+
+## Command Template
+
+Ты — Lead Architect. Проведи полный аудит проекта по методологии этого репозитория.
+
+## Шаги
+
+1. **Проверь git state.** Не пытайся работать на устаревшем snapshot — `git log --oneline -5`.
+2. **Перечитай ключевые документы:**
+   - `docs/index.md`
+   - `docs/summary.md`
+   - `docs/audit/project-audit.md`
+   - `docs/audit/security.md`
+2a. **Reconciliation findings↔git (ADR-0010).** Запусти
+   `bash .Codex/hooks/check-audit-reconciliation.sh`. Для каждого `RESOLVED`
+   finding убедись, что его фикс **в master** (`git log master`). Если нет —
+   статус `🟢 resolved-in-branch (pending merge <ref>)`, НЕ `RESOLVED`.
+   Также проверь, что entry-контракты (`AGENTS.md`, `AGENTS.md`, `workflow.md`)
+   не противоречат коду (stale-маркеры).
+3. **Параллельно запусти subagents** для независимых проверок:
+   - `ha-expert` — manifest, config_flow, coordinator, entity, IQS.
+   - `security-auditor` — utечки, headers, diagnostics.
+   - `qa-engineer` — test plan vs реальные тесты, coverage.
+4. **Сравни** результаты с предыдущим audit:
+   - Что закрыто (RESOLVED)?
+   - Что новое (новые A-NN)?
+   - Что осталось неизменным?
+5. **Обнови `docs/audit/project-audit.md`** с новыми findings.
+6. **Обнови `docs/audit/security.md`** если есть security изменения.
+7. **Обнови `docs/summary.md`** — главные риски / прогресс.
+8. **Не правь код** — только аудит.
+
+## Output
+
+```md
+## Audit summary
+- что нового / что закрылось
+- общий статус P0 / P1 / P2 / P3
+
+## Updated documents
+- docs/audit/project-audit.md
+- docs/audit/security.md
+- docs/summary.md
+
+## Recommended next actions
+- 3-5 пунктов priority order
+```
+
+## Constraints
+
+- Не модифицировать `custom_components/*` без отдельного approval.
+- Не закрывать findings без evidence.
+- Не фиксировать версии в тексте (см. conventions.md).

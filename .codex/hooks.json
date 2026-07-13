@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/gentslava/Developer/elektronny-gorod/.codex/hooks/post-edit-redaction-check.sh'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/gentslava/Developer/elektronny-gorod/.codex/hooks/check-audit-reconciliation.sh'"
+          }
+        ]
+      }
+    ]
+  }
+}
