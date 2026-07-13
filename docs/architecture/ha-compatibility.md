@@ -1,6 +1,7 @@
 Status: Active
 Owner: Home Assistant Expert Agent
-Last reviewed: 2026-06-24 (requirements больше не пуст: firebase-messaging>=0.4 ADR-0011 + audioop-lts>=0.2.1 A-81/SIP)
+Last reviewed: 2026-07-13 (release 4.0.0 audit: manifest Bronze fields,
+CoordinatorEntity/polling, HTTP timeouts, diagnostics/services and tests)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
@@ -45,10 +46,10 @@ Quality gates:
 | `issue_tracker` | issues URL | действующая ссылка | ✅ |
 | `requirements` | `firebase-messaging>=0.4`, `audioop-lts>=0.2.1` | все вне HA core, объявлены в manifest | ✅ — `firebase-messaging` для FCM-вызова (ADR-0011), `audioop-lts` для G.711-транскода SIP (A-81; только Python 3.13+, `audioop` удалён из stdlib PEP 594) |
 | `dependencies` | `[]` | HA-интеграции, нужные при старте | ✅ |
-| `iot_class` | `cloud_polling` | соответствие реальности | 🔴 **НЕТ polling в coordinator** |
+| `iot_class` | `cloud_polling` | соответствие реальности | ✅ coordinator polling каждые 5 минут |
 | `config_flow` | `true` | если есть UI flow | ✅ |
-| `integration_type` | ❌ отсутствует | `hub` | 🔴 добавить |
-| `quality_scale` | ❌ отсутствует | `bronze`/`silver`/... | 🔴 добавить (после фиксов — `bronze`) |
+| `integration_type` | `hub` | одна entry → несколько устройств | ✅ |
+| `quality_scale` | `bronze` | не выше подтверждённого gate | ✅ — config-flow/migration tests существуют |
 | `after_dependencies` | ❌ | при необходимости | n/a |
 
 ## HACS / hacs.json
@@ -100,51 +101,51 @@ async_step_user
 | Translations всех steps | ✅ ru/en | `translations/*.json` |
 | **Native reauth step** (`async_step_reauth`) | ❌ — reauth выполняется внутри `get_account` | требуется `async_step_reauth_confirm` |
 | **Reconfigure flow** | ❌ | требуется `async_step_reconfigure` |
-| Tests | 🔴 нет реальных | `tests/test_config_flow.py` — stub |
+| Tests | ✅ реальные config-flow/migration tests | `tests/test_config_flow.py`, `tests/test_init.py` |
 | `show_advanced_options` ветка | ✅ есть | `config_flow.py:111-117` |
 
 ## Coordinator / Data Fetching
 
 | Критерий | Статус | Файл:строка |
 |---|---|---|
-| Использование `DataUpdateCoordinator` | ✅ номинально | `coordinator.py:29` |
-| `name` задано | ✅ `name=DOMAIN` | `coordinator.py:55` |
-| `update_interval` задан | 🔴 **НЕТ** | `coordinator.py:32-55` |
-| `_async_update_data` реализован | ⚠️ да, но грузит места только 1 раз и не возвращает `data` | `coordinator.py:62-69` |
-| Возвращаемое `data` используется entity | ❌ entity ходят через свои `update_*_state` методы | `sensor.py:83-91`, `camera.py:191-193`, `lock.py:117-124` |
-| `UpdateFailed` при ошибке | ✅ | `coordinator.py:69` |
-| Timeout per request | 🔴 нет `ClientTimeout` | `http.py` |
-| Retry / backoff | 🔴 нет | `api.py`, `http.py` |
+| Использование `DataUpdateCoordinator` | ✅ | `coordinator.py:53` |
+| `name` задано | ✅ `name=DOMAIN` | `coordinator.py:78-83` |
+| `update_interval` задан | ✅ 5 минут | `coordinator.py:50,82` |
+| `_async_update_data` реализован | ✅ единый snapshot places/balances/cameras/locks/dnd | `coordinator.py:126+` |
+| Возвращаемое `data` используется entity | ✅ через `CoordinatorEntity` | `camera.py`, `lock.py`, `sensor.py`, `switch.py` |
+| `UpdateFailed` при ошибке | ✅ fatal places; per-place partial data | `coordinator.py:_async_update_data` |
+| Timeout per request | ✅ REST 30с / binary 60с / connect 10с | `http.py:15-22,120-126` |
+| Retry / backoff | 🟡 нет; follow-up только для идемпотентных GET | `api.py`, `http.py`, A-21 |
 | Rate limiting | 🔴 нет | — |
 | Caching | 🔴 нет | — |
-| Никаких blocking ops в loop | ⚠️ `traceback.format_exc` минор | `coordinator.py:68` |
-| `async_unsubscribe` вызывается при unload | 🔴 нет, утечка слушателя | `__init__.py:89-94` vs `coordinator.py:71-74` |
-| Использование `async_get_clientsession(hass)` | 🔴 нет, `ClientSession()` per-request | `http.py:56` |
+| Никаких blocking ops в loop | ✅ async I/O; blocking subprocess не используется | integration code |
+| `async_unsubscribe` вызывается при unload | ✅ через `entry.async_on_unload` | `__init__.py:69-72` |
+| Использование `async_get_clientsession(hass)` | ✅ shared HA session | `http.py:96` |
 
 ## Entities
 
 | Критерий | Camera | Lock | Sensor (balance) |
 |---|---|---|---|
-| Наследует `CoordinatorEntity` | ❌ | ❌ | ❌ |
-| `_attr_has_entity_name` | ❌ | ❌ | ❌ |
-| `_attr_translation_key` | ❌ | ❌ | ❌ |
-| `unique_id` стабилен | ⚠️ `f"{id}_{name}"` | 🔴 содержит `name` | ✅ `f"{DOMAIN}_{place_id}_balance"` |
-| `device_info` | ❌ | ❌ | ❌ |
-| `device_class` | n/a | ❌ нет | 🔴 нет (должен быть `MONETARY`) |
-| `state_class` | n/a | n/a | 🔴 нет (`MEASUREMENT`) |
-| `native_unit_of_measurement` | n/a | n/a | 🔴 `"₽"` (должен `"RUB"` / `CURRENCY_RUBLE`) |
+| Наследует `CoordinatorEntity` | ✅ | ✅ | ✅ |
+| `_attr_has_entity_name` | ✅ | ✅ | ✅ |
+| `_attr_translation_key` | device-level name | device-level name | ✅ `balance` |
+| `unique_id` стабилен | ✅ camera id | ✅ place/access-control/entrance | ✅ place id + balance |
+| `device_info` | ✅ | ✅ shared entrance device | ✅ place device |
+| `device_class` | n/a | lock native | ✅ `MONETARY` |
+| `state_class` | n/a | n/a | ✅ `TOTAL` |
+| `native_unit_of_measurement` | n/a | n/a | ✅ `RUB` |
 | `available` | default | ⚠️ `self._openable` (может быть None) | default |
 | `entity_category` | n/a | n/a | можно `diagnostic` |
-| Корректное обновление через coordinator | ❌ через свой `async_update` | ❌ свой `async_update` + fake-timer | ❌ свой `async_update` |
-| Хардкод русского имени | ✅ (использует `camera_info.name`) | ✅ (использует `lock_info.name`) | 🔴 `"Баланс аккаунта"` |
+| Корректное обновление через coordinator | ✅ | ✅ (+ локальный synthetic unlock timer) | ✅ |
+| Хардкод русского имени | нет | нет | нет — translation key ru/en |
 
 ## Diagnostics / Repairs / Services
 
 | Артефакт | Наличие | Приоритет |
 |---|---|---|
-| `diagnostics.py` | ❌ | P1 — критично, в `entry.data` есть токены |
+| `diagnostics.py` | ✅ redacted | `TO_REDACT ⊇ SENSITIVE_KEYS`, counters-only snapshot |
 | `repairs.py` | ❌ | P2 |
-| `services.yaml` (свои сервисы) | ❌ | n/a |
+| `services.yaml` (свои сервисы) | ✅ `answer` / `hangup` | SIP-вызов |
 | Поддержка `system_health` | ❌ | P3 |
 
 ## Translations
@@ -154,15 +155,16 @@ async_step_user
 | `strings.json` | ✅ source |
 | `translations/ru.json` | ✅ соответствует |
 | `translations/en.json` | ✅ соответствует |
-| **Entity translations** (отдельный раздел в `strings.json:entity`) | ❌ — entity имеют хардкод-имена |
+| **Entity translations** (раздел `strings.json:entity`) | ✅ ru/en |
 
 ## Платформы и manifest dependencies
 
-PLATFORMS: `[CAMERA, LOCK, SENSOR]` ([`__init__.py:25-29`](../../custom_components/elektronny_gorod/__init__.py#L25-L29)).
+PLATFORMS: `[BINARY_SENSOR, CAMERA, EVENT, LOCK, SENSOR, SWITCH]`
+([`__init__.py:46-53`](../../custom_components/elektronny_gorod/__init__.py)).
 
-Зависимости HA-core (`dependencies` в manifest): пусто. Фактически используются:
-- `homeassistant.components.persistent_notification` ([`coordinator.py:8`](../../custom_components/elektronny_gorod/coordinator.py#L8)) — должен быть в `dependencies` или `after_dependencies`.
-- `homeassistant.components.camera`, `lock`, `sensor` — стандартные платформы, явные declarations не нужны.
+Зависимости HA-core (`dependencies` в manifest) пусты. Импортированный helper
+`persistent_notification` и стандартные entity-платформы не требуют отдельного
+порядка setup через `dependencies`/`after_dependencies`.
 
 ## CI / Validation
 
@@ -182,11 +184,11 @@ PLATFORMS: `[CAMERA, LOCK, SENSOR]` ([`__init__.py:25-29`](../../custom_componen
 
 | Категория | Bronze blocker | Silver blocker | Gold blocker |
 |---|---|---|---|
-| Тесты | реальный config_flow test | покрытие core paths | покрытие edge cases |
+| Тесты | ✅ config-flow/migration suite | расширять покрытие core paths | покрытие edge cases |
 | Diagnostics | — | redacted diagnostics | — |
 | Entity model | стабильный unique_id, device_info, translations | reauth flow | расширенные категории |
 | Coordinator | реальный coordinator pattern | parallel_updates | — |
-| Manifest | quality_scale, integration_type | — | — |
+| Manifest | ✅ quality_scale + integration_type | — | — |
 
 Подробности — в [`quality-scale.md`](../architecture/quality-scale.md).
 

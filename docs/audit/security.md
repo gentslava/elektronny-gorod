@@ -1,6 +1,7 @@
 Status: Active
 Owner: Security & Privacy Agent
-Last reviewed: 2026-06-24 (S-19 added: uplink AuthZ accepted-risk + AudioBridge LAN-exposure, ADR-0013/A-85)
+Last reviewed: 2026-07-13 (release 4.0.0 audit: S-08/S-09 current state,
+S-20 historical credential evidence redacted and verified inactive)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -32,11 +33,12 @@ Quality gates:
 > чужой access_token в логах. **По состоянию на 2026-05-30 утечки нет** —
 > верифицировано по коду независимым security-аудитом (см. статусы S-01..S-06).
 
-## Сводка по состоянию на 2026-05-30
+## Сводка по состоянию на 2026-07-13
 
-Независимая проверка по факту кода (ветка `fix/a71-camera-stream-auto-recovery`,
-v3.2.0): grep всех `LOGGER.*` в чувствительных файлах + построчный разбор
-`_logging.py`/`http.py`/`config_flow.py`/`api.py`/`camera.py`/`go2rtc.py`.
+Проверка по текущему `master`: grep всех `LOGGER.*` в чувствительных файлах,
+построчный разбор `_logging.py`/`http.py`/`config_flow.py`/`api.py`/
+`camera.py`/`go2rtc.py`/`diagnostics.py`, а также поиск credential-like
+значений в документации перед релизом.
 
 | ID | Статус | Кратко |
 |---|---|---|
@@ -44,11 +46,13 @@ v3.2.0): grep всех `LOGGER.*` в чувствительных файлах +
 | S-05 | ✅ RESOLVED | shared `async_get_clientsession` |
 | S-06 | ✅ RESOLVED | логируется только `subscriberId`, не contract object |
 | S-A71-01 | ✅ RESOLVED (new) | operator-токен в traceback при go2rtc PUT — оборван `from None` |
-| S-08 | 🔴 OPEN P1 | `diagnostics.py` отсутствует → entry.data дампится целиком |
-| S-09 | 🔴 OPEN P1 | нет `ClientTimeout` на основном operator API (`http.py:110,112`) |
-| S-16 | 🔴 OPEN P1 | go2rtc_password plaintext в entry.data (утечёт через S-08) |
+| S-08 | ✅ RESOLVED | `diagnostics.py` redacts secrets/PII; coordinator snapshot — counters-only |
+| S-09 | ✅ RESOLVED | REST/binary `ClientTimeout` на GET/POST/DELETE operator API |
+| S-10 | 🟡 OPEN P1 | retry/backoff для идемпотентных GET пока не реализован |
+| S-16 | 🟡 MITIGATED P3 | go2rtc credentials redacted в diagnostics; plaintext HA storage остаётся |
 | S-17/S-18 | 🟡 OPEN P3 | сырое логирование body/err в go2rtc.py (не активная утечка) |
 | S-19 | 🟢 ACCEPTED-by-design | uplink AuthZ (любой auth HA-юзер) + AudioBridge `0.0.0.0:40020` LAN-exposure (ADR-0013/A-85) |
+| S-20 | ✅ RESOLVED | production credential-like literal удалён из audit evidence; текущие production credentials не совпадают |
 
 ## P0 — критичные утечки (все RESOLVED)
 
@@ -148,21 +152,34 @@ v3.2.0): grep всех `LOGGER.*` в чувствительных файлах +
 
 ### S-09. Нет timeout на HTTP-запросы
 
-- **Status:** 🔴 **STILL OPEN** (P1) — подтверждено 2026-05-30.
-  `http.py:110` (`session.get`) и `:112` (`session.post`) — без `timeout=`.
-  Grep `ClientTimeout|timeout` в `http.py`/`api.py` → 0. ⚠️ go2rtc-пути
-  (`camera.py:107,641`, но **не** `go2rtc.py` — см. A-72) имеют timeout;
-  основной operator API — нет. См. [audit A-21](project-audit.md).
-- **Файл:** [`http.py:110,112`](../../custom_components/elektronny_gorod/http.py#L110-L112)
-- **Impact:** один зависший запрос к `myhome.proptech.ru` блокирует setup /
-  coordinator tick и может удерживать сокет неограниченно.
-- **Fix:** `ClientTimeout(total=30)` на всех запросах.
+- **Status:** ✅ **RESOLVED**. `http.py` использует `_REST_TIMEOUT`
+  (`total=30`, `connect=10`) и `_BINARY_TIMEOUT` (`total=60`, `connect=10`)
+  и передаёт выбранный timeout во все GET/POST/DELETE запросы.
+- **Файл:** [`http.py:15-22,120-126`](../../custom_components/elektronny_gorod/http.py)
+- **Original Impact:** один зависший запрос к `myhome.proptech.ru` мог надолго
+  задержать setup/coordinator tick.
+- **Остаток:** retry/backoff вынесен в S-10/A-21 и применяется только к
+  потенциально идемпотентным операциям; POST/login/open_lock автоматически
+  ретраить нельзя.
 
 ### S-10. Нет retry / backoff на 5xx / network errors
 
+- **Status:** 🟡 **OPEN** — timeout уже закрыт в S-09; это отдельный остаток.
 - **Файл:** `http.py`, `api.py`
 - **Impact:** временные сбои API → entry не загружается, требуется reload.
 - **Fix:** обернуть critical-запросы в `tenacity`-подобный retry (или ручной exponential backoff).
+
+### S-20. Production credential-like literal в публичном audit evidence
+
+- **Status:** ✅ **RESOLVED** в текущем дереве 2026-07-13: фактическое значение
+  заменено на `[REDACTED]` в `project-audit.md`.
+- **Original Severity:** P0, если credential активен; публичный репозиторий
+  содержит историю файла с production snapshot.
+- **Verification:** SHA-256 отпечаток исторического значения безопасно сравнен
+  с настроенными `go2rtc_password` двух production config entries — совпадений
+  нет (`active_match=false`), само значение не выводилось.
+- **Residual:** старое неактивное значение остаётся в git history. Историю
+  `master` не переписываем; credential нельзя повторно использовать.
 
 ## P2 — желательно
 

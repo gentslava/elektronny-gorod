@@ -122,6 +122,9 @@ Quality gates:
 
 ### A-10. `iot_class: cloud_polling` без реального polling
 
+- **Status:** ✅ **RESOLVED**. Coordinator выполняет реальный cloud polling с
+  `update_interval=timedelta(minutes=5)` и возвращает единый snapshot данных;
+  `manifest.json:iot_class=cloud_polling` соответствует поведению.
 - **Area:** HA-compat / Manifest
 - **Evidence:** [`manifest.json:10`](../../custom_components/elektronny_gorod/manifest.json#L10) vs `coordinator.py`
 - **Recommended fix:** либо включить polling (см. A-08) и оставить `cloud_polling`, либо сменить класс.
@@ -245,17 +248,18 @@ Quality gates:
 
 ### A-27. README.md: битая ссылка `[Русский]` на `/README.ru_RU.md`
 
-- **Evidence:** [`README.md:1`](../../README.md#L1)
-- **Recommended fix:** удалить или создать файл.
+- **Status:** ✅ **RESOLVED**. Языковой переключатель ведёт на существующий
+  `/README.md`; английская версия — `/README.en_EN.md`.
 
 ### A-28. README.md: устаревший пример `electronic_city`
 
-- **Evidence:** [`README.md:41-46`](../../README.md#L41-L46)
-- **Recommended fix:** заменить на `elektronny_gorod`.
+- **Status:** ✅ **RESOLVED**. Инструкция ручной установки использует каталог
+  `custom_components/elektronny_gorod`.
 
 ### A-29. `info.md` / `hacs.json` минимальная HA не совпадает с фактом
 
-- См. A-11.
+- **Status:** ✅ **RESOLVED**. `hacs.json:homeassistant=2024.10.4`, README badge
+  показывает `2024.10+`; см. A-11.
 
 ### A-30. `extra_state_attributes` ключи `Title Case`
 
@@ -269,8 +273,9 @@ Quality gates:
 
 ### A-32. f-string в LOGGER
 
-- **Evidence:** [`sensor.py:90`](../../custom_components/elektronny_gorod/sensor.py#L90), [`lock.py:38`](../../custom_components/elektronny_gorod/lock.py#L38), [`http.py:13`](../../custom_components/elektronny_gorod/http.py#L13) и другие.
-- **Recommended fix:** `%`-форматирование.
+- **Status:** ✅ **RESOLVED**. Release security scan по
+  `LOGGER\.[a-z]+\(f["']` возвращает 0 совпадений; используется ленивое
+  `%`-форматирование.
 
 ### A-33. Magic strings (`"null"`, `"accessControlOpen"`)
 
@@ -282,7 +287,8 @@ Quality gates:
 
 ### A-35. CHANGELOG.md отсутствует
 
-- **Recommended fix:** создать (можно сгенерировать из GitHub Releases).
+- **Status:** ✅ **RESOLVED**. Корневой `CHANGELOG.md` ведётся в формате
+  Keep a Changelog; секция `[Unreleased]` подготовлена к 4.0.0.
 
 ### A-36. CONTRIBUTING.md отсутствует
 
@@ -973,7 +979,7 @@ Quality gates:
   ```
   "options": {
     "go2rtc_username": "admin",
-    "go2rtc_password": "XPzqUkuCTr4639go2rtc",
+    "go2rtc_password": "[REDACTED]",
     ...
   }
   ```
@@ -1091,13 +1097,17 @@ Quality gates:
   принят `200 OK` и перешёл в RTP. Production REGISTER теперь зеркалит Contact
   приложения (`Call-Id` из FCM, без лишнего `transport` parameter) и
   `Accept: application/sdp`. Suite **392 passed**.
-- **Scope этого слайса:** приём вызова (register-on-ring/ADR-0012) + RTP-uplink (latching) + **downlink-вывод звука гостя** (`sip/bridge.py` `AudioBridge`) + **показ экрана вызова** (`call_camera.py` — camera-сущность с видео+звуком гостя через HA-native WebRTC). Uplink-микрофон (говорить гостю) — следующий слайс.
+- **Scope текущего master:** приём вызова (register-on-ring/ADR-0012) +
+  **downlink-вывод звука гостя** (`sip/bridge.py` `AudioBridge`) + показ экрана
+  вызова (`call_camera.py`) + **uplink-микрофон** через HA-WebSocket →
+  `UplinkSink` → SIP-RTP (ADR-0013/A-85).
 - **Deferred (из code-review, by-design на этом слайсе):**
-  1. **A-21 mitigation, не closure.** `mint_sip_device` латентно-критичен
+  1. **A-21 layered timeout.** `mint_sip_device` латентно-критичен
      (REGISTER должен опередить INVITE) — обёрнут точечным
      `asyncio.timeout(8с)` в `call_controller.py` (`_MINT_TIMEOUT_SEC`).
-     Это **точечный** митигатор, **глобальный** `ClientTimeout` на shared
-     `HTTP`/`api.py` остаётся открытым в [A-21](#a-21-нет-timeoutretrybackoff).
+     Shared `HTTP` дополнительно применяет глобальные REST/binary
+     `ClientTimeout`; в [A-21](#a-21-нет-timeoutretrybackoff) остаётся только
+     retry/backoff для идемпотентных GET.
   2. **Single concurrent call (by-design ограничение слайса).** Фиксированные
      порты SIP/RTP + модель **first-answer-wins** → один активный разговор
      одновременно. Guard в `call_controller.py` (два concurrent answer создали

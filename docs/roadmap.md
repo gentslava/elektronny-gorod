@@ -54,14 +54,14 @@ Quality gates:
 **Цель:** довести интеграцию до Bronze. См. [`architecture/quality-scale.md#bronze`](architecture/quality-scale.md).
 
 **Статус:** Bronze IQS shipped. Все обязательные критерии Bronze закрыты;
-осталась одна follow-up задача — CI workflow для pytest (Tests-1).
+pytest CI matrix также работает на минимальной и текущей HA-версиях.
 
 **Acceptance — met:**
 - `manifest.json` содержит `quality_scale: "bronze"` и `integration_type: "hub"` ✓ (A-34);
 - entity имеют `_attr_has_entity_name = True` и стабильный `unique_id` ✓ (A-12, A-13);
 - coordinator имеет `update_interval` и обновляет данные ✓ (A-08, A-09);
-- `pytest tests/` зелёный локально (67 tests pass) ✓ — CI workflow `.github/workflows/python-tests.yaml`
-  всё ещё **не создан**, это Tests-1 follow-up (см. A-24).
+- `pytest tests/` зелёный локально (392 tests pass на release-candidate) ✓;
+- CI workflow `.github/workflows/python-tests.yaml` создан и зелёный ✓.
 
 ### Tasks (closed)
 
@@ -80,26 +80,30 @@ Quality gates:
 
 ### Tasks (deferred → Итерация 3)
 
-- [ ] **A-10** Решить `iot_class`: либо включён реальный polling — оставить `cloud_polling`; либо сменить класс. Зафиксировать в ADR-0003.
+- [x] **A-10** ✅ Реальный polling включён (`update_interval=5 min`),
+  `iot_class: cloud_polling` соответствует поведению; ADR-0003.
 - [x] **A-11** ✅ Поднят `hacs.json:homeassistant` до `2024.10.4` — первая stable HA с `LockState` enum, который импортирует `lock.py`. Та же версия пинится как min в CI matrix (см. python-tests.yaml).
 - [x] **A-12** ✅ slice 3c — stable `unique_id` Camera/Lock + миграция legacy через `entity_registry.async_migrate_entries`.
 - [x] **A-13** ✅ slice 3c — `_attr_has_entity_name = True` + `_attr_translation_key="balance"` (sensor); Camera/Lock — имя в `device_info.name`. Раздел `entity` добавлен в `strings.json` + переводы.
-- [x] **A-14** ✅ slice 3c — Sensor баланса: `device_class=MONETARY`, `state_class=TOTAL`, `unit=CURRENCY_RUBLE`.
+- [x] **A-14** ✅ slice 3c — Sensor баланса: `device_class=MONETARY`, `state_class=TOTAL`, `unit="RUB"`.
 - [x] **A-16** ✅ slice 3a — `coordinator.async_unsubscribe()` зарегистрирован через `entry.async_on_unload` в `async_setup_entry`.
-- [ ] **A-17** Извлечь дубликат логики в `_collect_cameras_for_place(place_id)`.
-- [ ] **A-18** Удалить или использовать `available_sections`.
+- [x] **A-17** ✅ Извлечены `_collect_cameras_for_place` / `_collect_locks_for_place`.
+- [x] **A-18** ✅ Неиспользуемый `query_sections` удалён из coordinator.
 - [ ] **A-19** Сузить `except Exception` в `api.py` до `ClientResponseError`/`ClientError`/`asyncio.TimeoutError`; не использовать `e.args[0]`.
 - [ ] **A-20** Заменить `raise ClientError(response)` на корректное `ClientResponseError`.
-- [ ] **A-21** Добавить `ClientTimeout(total=30)` в HTTP; реализовать простой retry/backoff для 5xx / connection errors.
-- [ ] **A-23 + A-45** Создать `diagnostics.py` с redaction (см. [`audit/security.md#S-08`](audit/security.md), [`S-16`](audit/security.md)). В `TO_REDACT` включить также `go2rtc_username`/`go2rtc_password`.
-- [ ] **A-44** Убрать дублирующий `get_camera_stream` в `async_update` камеры (закрывается через A-09 CoordinatorEntity).
-- [ ] **Tests-1..N** Написать реальные тесты по плану [`testing/strategy.md`](testing/strategy.md): config_flow happy + abort, options_flow, миграции, coordinator, api.
-- [x] **CI-1** ✅ Создан `.github/workflows/python-tests.yaml` с matrix по двум HA-версиям (min 2024.10.4 + current 2026.5.4), pip-cache, coverage artifact. Tests-1..N расширят покрытие — см. ниже.
+- [ ] **A-21** 🟡 Timeout закрыт (REST 30с / binary 60с / connect 10с);
+  остаётся retry/backoff только для идемпотентных GET.
+- [x] **A-23 + A-45** ✅ `diagnostics.py` redacts secrets/PII;
+  `TO_REDACT` покрывает `SENSITIVE_KEYS`, включая go2rtc credentials.
+- [x] **A-44** ✅ Legacy `async_update` камеры удалён при переходе на CoordinatorEntity.
+- [x] **Tests-1..N** ✅ Реальные config-flow/init/migration/coordinator/API/SIP/
+  frontend тесты добавлены; release-candidate suite — 392 backend + 48 frontend.
+- [x] **CI-1** ✅ Создан `.github/workflows/python-tests.yaml` с matrix по двум HA-версиям (min 2024.10.4 + current 2026.5.4), pip-cache и coverage artifact.
 - [x] **A-34** ✅ slice 3c — `quality_scale: "bronze"`, `integration_type: "hub"` в `manifest.json`.
-- [ ] **A-35** Создать `CHANGELOG.md`.
+- [x] **A-35** ✅ `CHANGELOG.md` ведётся и подготовлен к 4.0.0.
 - [ ] **A-36** Создать `CONTRIBUTING.md` со ссылкой на `aidd/contributing.md`.
-- [ ] **A-27..A-29** Поправить README (битая ссылка, `electronic_city → elektronny_gorod`, badge HA-версии).
-- [ ] **ADR-0002** «coordinator pattern: переход на CoordinatorEntity + update_interval» — proposed, требуется promote → accepted.
+- [x] **A-27..A-29** ✅ README links/install path и badge минимальной HA синхронизированы.
+- [x] **ADR-0002** ✅ CoordinatorEntity + update_interval — `accepted`.
 - [ ] **ADR-0004** «token redaction strategy» — proposed, требуется promote → accepted.
 
 **Quality gates achieved:** `SECURITY_OK`, `REVIEW_OK`, `DOCS_UPDATED`. Integration Quality Scale: **Bronze**. `TESTS_PASS` — локально зелёный, CI follow-up в Итерации 3.

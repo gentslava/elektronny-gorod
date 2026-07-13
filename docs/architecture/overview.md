@@ -215,7 +215,8 @@ async_unload_entry:
 - ✅ Lock `async_unlock` использует `async_call_later` для возврата state→LOCKED (без `asyncio.sleep` в event loop).
 - ✅ `LOGGER.exception(...)` вместо блокирующего `traceback.format_exc()` в hot path.
 - ⚠️ **Serial-per-place refresh** в `_async_update_data`: parallelize нельзя без рефакторинга, т.к. `self._api.http.user_agent.place_id` — shared state, читаемое в момент построения HTTP-headers. См. module docstring `coordinator.py`. Race-free, но не оптимально по latency.
-- ⚠️ Нет `ClientTimeout` на запросах (A-21) — ждём от aiohttp дефолта.
+- ✅ Operator API использует явные REST/binary `ClientTimeout` (A-21/S-09);
+  retry/backoff для идемпотентных GET остаётся follow-up.
 
 ## Data flow
 
@@ -344,7 +345,7 @@ HA service call switch.turn_on / turn_off
 | `coordinator._async_update_data` | `UpdateFailed(ex) from ex` на fatal (places); per-place failure — `LOGGER.warning` + partial data |
 | `config_flow` | словарь `errors={key: translation_key}` или `async_abort(reason=...)` |
 | `lock.async_unlock` | `except ClientError` → state = JAMMED + reset через `async_call_later` |
-| Внешние тайм-ауты | ⚠️ не обрабатываются (A-21) — `ClientTimeout` пока отсутствует |
+| Внешние тайм-ауты | ✅ REST 30с / binary 60с, connect 10с (`http.py`, A-21/S-09); retry/backoff остаётся follow-up |
 | 429 rate limit | ловится в `request_sms_code` → `limit_exceeded`; в остальных местах не специально |
 | 401 unauthorized | `query_profile` → `ValueError("unauthorized")` → HA триггерит reauth flow через config_entry. Bearer на pre-auth endpoints больше не отправляется (см. `http.py`), поэтому reauth login проходит без коллизий. Auto-refresh access_token — отложен (см. A-22, [ADR-0006](../decisions/0006-mirror-app-behavior.md)) |
 
