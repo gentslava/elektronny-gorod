@@ -445,6 +445,7 @@ async def test_ring_holds_via_register_and_hold():
         mgr.register_and_hold = AsyncMock(return_value=True)
         await c._async_hold_current()
     mgr.register_and_hold.assert_awaited_once()
+    assert mgr.register_and_hold.await_args.kwargs == {"fcm_call_id": "c1"}
     assert c._manager is mgr  # держим менеджер
     mint_factory = mgr.register_and_hold.await_args.args[0]
     await mint_factory()
@@ -529,6 +530,7 @@ async def test_answer_fallback_passes_uplink_provider_to_manager(controller):
         mgr.async_answer = AsyncMock(return_value=True)
         await controller.async_answer()
     assert MgrCls.call_args.kwargs["uplink_provider"] == controller._pull_uplink
+    assert mgr.async_answer.await_args.kwargs["fcm_call_id"] == "c1"
 
 
 def test_pull_uplink_returns_none_without_sink(controller):

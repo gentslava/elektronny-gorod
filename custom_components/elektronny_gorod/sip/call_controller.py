@@ -272,7 +272,9 @@ class DoorbellCallController:
                 on_cancelled=self._on_ring_cancelled,
             )
             try:
-                held = await manager.register_and_hold(lambda: self._mint(call))
+                held = await manager.register_and_hold(
+                    lambda: self._mint(call), fcm_call_id=call.call_id
+                )
             except Exception:  # noqa: BLE001 — degrade: экран живёт от FCM, dismiss по таймеру
                 LOGGER.warning("SIP hold: REGISTER/hold не удался — degrade", exc_info=True)
                 held = False
@@ -316,7 +318,9 @@ class DoorbellCallController:
                         on_cancelled=self._on_ring_cancelled,
                     )
                     ok = await manager.async_answer(
-                        lambda: self._mint(call), on_downlink=on_downlink
+                        lambda: self._mint(call),
+                        on_downlink=on_downlink,
+                        fcm_call_id=call.call_id,
                     )
                     if ok:
                         self._manager = manager

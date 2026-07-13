@@ -1,9 +1,9 @@
-"""SIP-транспорт REGISTER-on-answer (asyncio.DatagramProtocol).
+"""SIP-транспорт register-on-ring (asyncio.DatagramProtocol).
 
 Склеивает register/message/dialog/sdp в флоу: REGISTER → 401-auth → 200 →
-приём INVITE → 200 OK (мгновенно) → BYE. RTP — отдельно (rtp.py). По модели
-call-answer-model.md (доказано pcap+probe). Сетевой слой — проверяется
-research-пробой/живым звонком, не юнит-тестами.
+приём INVITE → `100 Trying` (held) → 200 OK по явному ответу → BYE.
+RTP — отдельно (rtp.py). По модели call-answer-model.md (доказано pcap+probe).
+Сетевой слой — проверяется research-пробой/живым звонком, не юнит-тестами.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from .sdp import build_g711_answer
 
 
 class SipProtocol(asyncio.DatagramProtocol):
-    """Один SIP-диалог приёма вызова: REGISTER → INVITE → 200 OK → BYE."""
+    """Один SIP-диалог: REGISTER → INVITE → 100 Trying → 200 OK → BYE."""
 
     def __init__(
         self,
@@ -38,6 +38,10 @@ class SipProtocol(asyncio.DatagramProtocol):
         user_agent: str,
         on_bye: Callable[[], None] | None = None,
         on_cancel: Callable[[], None] | None = None,
+        *,
+        fcm_call_id: str | None = None,
+        accept_sdp: bool = False,
+        include_contact_transport: bool = True,
     ) -> None:
         self.login = creds["login"]
         self.password = creds["password"]
@@ -59,6 +63,9 @@ class SipProtocol(asyncio.DatagramProtocol):
         # Держимый INVITE (register-on-ring): для 100 Trying / 487 на CANCEL / accept.
         self._invite_msg = None
         self._invite_addr: tuple | None = None
+        self._fcm_call_id = fcm_call_id
+        self._accept_sdp = accept_sdp
+        self._include_contact_transport = include_contact_transport
 
     # ---- lifecycle ----
     def connection_made(self, transport: asyncio.BaseTransport) -> None:
@@ -74,10 +81,18 @@ class SipProtocol(asyncio.DatagramProtocol):
             return
         self.cseq += 1
         branch = f"z9hG4bK{random.randint(0, 1 << 31)}"
-        contact = build_contact(self.login, self.local_ip, self._lport, self.fcm_token)
+        contact = build_contact(
+            self.login,
+            self.local_ip,
+            self._lport,
+            self.fcm_token,
+            fcm_call_id=self._fcm_call_id,
+            include_transport=self._include_contact_transport,
+        )
         reg = build_register(
             self.login, self.realm, self.local_ip, self._lport, self.call_id,
-            self.from_tag, self.cseq, contact, branch, self.ua, auth=auth,
+            self.from_tag, self.cseq, contact, branch, self.ua,
+            auth=auth, accept_sdp=self._accept_sdp,
         )
         self.transport.sendto(reg.encode())
         LOGGER.debug("SIP: REGISTER отправлен (cseq=%s, auth=%s)", self.cseq, "да" if auth else "нет")

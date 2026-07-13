@@ -1085,11 +1085,11 @@ Quality gates:
   `487` + мгновенный dismiss экрана. Подробности — в
   [`call-answer-model.md`](../features/intercom-two-way-audio/call-answer-model.md)
   + [ADR-0012](../decisions/0012-register-on-ring.md).
-- **Evidence:** pcap-тайминги (REGISTER → INVITE +90мс → 200 OK +80мс →
-  latching) + probe-матрица (6 live-проб подтвердили: held-стратегия рвалась
-  при форкинге; register-on-ring + held-short-window воспроизводит приложение
-  и даёт мгновенный CANCEL-dismiss). Суть — в call-answer-model.md §2/§5. Suite **234 passed** (`test_sip_*.py` + `test_api_sip.py` +
-  `test_sip_call_controller.py`).
+- **Evidence:** полный Android PCAP 2026-07-13: три вызова подряд дали
+  `REGISTER → INVITE → 100 Trying`; два held около 24с до `CANCEL`/`603`, один
+  принят `200 OK` и перешёл в RTP. Production REGISTER теперь зеркалит Contact
+  приложения (`Call-Id` из FCM, без лишнего `transport` parameter) и
+  `Accept: application/sdp`. Suite **392 passed**.
 - **Scope этого слайса:** приём вызова (register-on-ring/ADR-0012) + RTP-uplink (latching) + **downlink-вывод звука гостя** (`sip/bridge.py` `AudioBridge`) + **показ экрана вызова** (`call_camera.py` — camera-сущность с видео+звуком гостя через HA-native WebRTC). Uplink-микрофон (говорить гостю) — следующий слайс.
 - **Deferred (из code-review, by-design на этом слайсе):**
   1. **A-21 mitigation, не closure.** `mint_sip_device` латентно-критичен
@@ -1431,6 +1431,26 @@ Quality gates:
   звонящего домофона); при in_call — оставить текущий (одновременный разговор вне
   scope). Фикс-порты SIP/RTP свободны для held-переключения.
 - **First step:** в ring-guard ветвление holding→release+re-hold нового вызова.
+
+### A-91. Ложная атрибуция «Занято» SIP-механике HA
+
+- **Status:** ✅ **RESOLVED** — причина отделена от интеграции; штатная SIP-модель
+  восстановлена и уточнена по полному PCAP.
+- **Severity:** P1 — диагностическая изоляция временно отключала FCM/SIP и ломала
+  реальный сценарий ответа, а исходная гипотеза обвиняла pre-answer hold HA.
+- **Evidence (production + Android PCAP, 2026-07-13):** при полностью отключённых
+  FCM/SIP механизмах HA штатное приложение воспроизводит «Занято» на связанной
+  панели B во время звонка с A. Панели имеют общий place, но разные
+  access-control id. В PCAP активен один Android Contact; забытых HA/Python SIP
+  процессов и дополнительных registrar bindings не обнаружено. Штатный клиент
+  на каждом звонке выполняет `REGISTER → INVITE → 100 Trying` и держит INVITE.
+- **Fix:** удалена временная push-isolation; основной controller снова делает
+  register-on-ring. Production REGISTER теперь точно передаёт `Call-Id` из FCM,
+  `Accept: application/sdp` и форму Contact без лишнего `transport` parameter.
+  Fallback register-on-answer использует тот же профиль. Suite **392 passed**.
+- **Граница вывода:** доказано, что side effect не уникален для HA. PCAP не раскрывает
+  внутреннюю логику группировки панелей, поэтому более узкая серверная/аппаратная
+  причина не заявляется.
 
 ### A-73. config_flow + `async_migrate_entry` без тестов (Bronze IQS gate)
 
