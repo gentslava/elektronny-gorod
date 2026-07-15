@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import (
@@ -22,6 +22,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
+from custom_components.elektronny_gorod.api import HistoryPage
 from custom_components.elektronny_gorod.const import (
     CONF_ACCESS_TOKEN,
     CONF_OPERATOR_ID,
@@ -32,12 +33,15 @@ from custom_components.elektronny_gorod.const import (
     SIGNAL_DOORBELL,
     SIP_DATA,
 )
+from custom_components.elektronny_gorod.history import SIGNAL_HISTORY_EVENT
 
 # call_controller (A-72): ring fallback + grace + idle reset после `ended`
 _CALL_TIMER_DRAIN_SEC = int(DOORBELL_CALL_WINDOW_FALLBACK_SEC + 3 + 6 + 2)
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
 _UID = "elektronny_gorod_event_doorbell_P1_AC1"
+_HISTORY_AC_UID = "elektronny_gorod_event_history_access_P1_AC1"
+_HISTORY_CAMERA_UID = "elektronny_gorod_event_history_camera_100"
 
 
 @pytest.fixture
@@ -65,6 +69,10 @@ def mock_api():
         inst.query_public_cameras = AsyncMock(return_value=[])
         inst.query_screens_settings = AsyncMock(return_value={"screens": []})
         inst.query_dnd_settings = AsyncMock(return_value=[])
+        inst.query_events = AsyncMock(
+            return_value=HistoryPage(events=(), number=0, last=True)
+        )
+        inst.query_camera_events = AsyncMock(return_value=())
         yield mock_cls
 
 
@@ -122,6 +130,119 @@ async def test_doorbell_event_entity_created(hass: HomeAssistant, mock_api):
     """Одна event-сущность на домофон создаётся из coordinator.data['locks']."""
     entity_id = await _setup(hass)
     assert hass.states.get(entity_id) is not None
+
+
+async def test_history_event_entities_created(hass: HomeAssistant, mock_api):
+    """Verified call and motion streams get separate EventEntity instances."""
+    await _setup(hass)
+    registry = er.async_get(hass)
+    access_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_AC_UID
+    )
+    camera_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_CAMERA_UID
+    )
+
+    assert access_entity_id is not None
+    assert camera_entity_id is not None
+    assert hass.states.get(access_entity_id) is not None
+    assert hass.states.get(camera_entity_id) is not None
+
+
+async def test_access_history_event_routes_sanitized_payload(
+    hass: HomeAssistant, mock_api
+):
+    """Accepted/missed history routes by place + AC and exposes no message."""
+    await _setup(hass)
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "event", DOMAIN, _HISTORY_AC_UID
+    )
+    assert entity_id is not None
+
+    async_dispatcher_send(hass, SIGNAL_HISTORY_EVENT, {
+        "event_type": "call_missed",
+        "event_id": "event-new",
+        "occurred_at": 1700000001,
+        "place_id": "P1",
+        "source_type": "accessControl",
+        "source_id": "AC1",
+        "message": "PII-SENTINEL",
+    })
+    await hass.async_block_till_done()
+
+    state = hass.states.get(entity_id)
+    assert state.attributes["event_type"] == "call_missed"
+    assert state.attributes["event_id"] == "event-new"
+    assert state.attributes["occurred_at"] == 1700000001
+    assert "message" not in state.attributes
+    assert "PII-SENTINEL" not in json.dumps(dict(state.attributes))
+
+
+async def test_camera_history_event_routes_motion_by_requested_camera(
+    hass: HomeAssistant, mock_api
+):
+    """Motion state belongs to the requested camera and exposes availability."""
+    await _setup(hass)
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "event", DOMAIN, _HISTORY_CAMERA_UID
+    )
+    assert entity_id is not None
+
+    async_dispatcher_send(hass, SIGNAL_HISTORY_EVENT, {
+        "event_type": "motion",
+        "event_id": "motion-new",
+        "occurred_at": 1700000001,
+        "camera_id": "100",
+        "duration": 30,
+        "recording_available": False,
+        "message": "PII-SENTINEL",
+    })
+    await hass.async_block_till_done()
+
+    state = hass.states.get(entity_id)
+    assert state.attributes["event_type"] == "motion"
+    assert state.attributes["event_id"] == "motion-new"
+    assert state.attributes["duration"] == 30
+    assert state.attributes["recording_available"] is False
+    assert "message" not in state.attributes
+    assert "PII-SENTINEL" not in json.dumps(dict(state.attributes))
+
+
+async def test_history_manager_follows_config_entry_lifecycle(
+    hass: HomeAssistant, mock_api
+):
+    """History starts after platforms and its timer is cancelled on unload."""
+    managers: list[MagicMock] = []
+
+    def _manager_factory(*_args) -> MagicMock:
+        manager = MagicMock()
+        manager.async_start = AsyncMock()
+        manager.async_stop = MagicMock()
+        managers.append(manager)
+        return manager
+
+    with patch(
+        "custom_components.elektronny_gorod.HistoryManager",
+        side_effect=_manager_factory,
+        create=True,
+    ) as manager_cls:
+        entry = _entry()
+        entry.add_to_hass(hass)
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        # Первый setup может сделать one-time visibility reload; каждый manager
+        # всё равно обязан иметь парный start/stop.
+        assert manager_cls.call_count >= 1
+        assert all(call.args[0] is hass for call in manager_cls.call_args_list)
+        assert all(call.args[1] == entry.entry_id for call in manager_cls.call_args_list)
+        for manager in managers:
+            manager.async_start.assert_awaited_once_with()
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+        for manager in managers:
+            manager.async_stop.assert_called_once_with()
 
 
 async def test_initial_state_baseline_no_call(hass: HomeAssistant, mock_api):

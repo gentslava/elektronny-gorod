@@ -34,6 +34,7 @@ from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .fcm import DoorbellFcmListener
 from .go2rtc import go2rtc_auth_headers
+from .history import HistoryManager
 from .sip.call_controller import DoorbellCallController, Go2RtcConfig
 from .uplink_ws import async_register_uplink_card, async_register_uplink_ws_command
 from .user_agent import UserAgent
@@ -72,6 +73,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(entry.add_update_listener(async_update_options))
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    # Durable REST history is intentionally separate from the five-minute main
+    # coordinator. Event entities are already attached before the first silent
+    # baseline/poll, and the config-entry lifecycle owns both task and timer.
+    history_manager = HistoryManager(hass, entry.entry_id, coordinator)
+    entry.async_on_unload(history_manager.async_stop)
+    entry.async_create_background_task(
+        hass,
+        history_manager.async_start(),
+        name=f"{DOMAIN}_history_manager",
+    )
 
     # Realtime событие вызова домофона — FCM-listener в фоне. Хрупкий флоу
     # (приватные API Google) под graceful degradation в fcm.py; background-task —
