@@ -26,8 +26,8 @@
 
 ### Changed
 
-- **Совместимость с мобильными приложениями 9.9.0.** Обновлена эмуляция клиента
-  до `9.9.0` (`90900020`); live-stream теперь явно запрашивает H.264, а public
+- **Актуальный клиентский профиль API.** Эмулируемый Android User-Agent обновлён
+  до профиля `9.9.0` (`90900020`); live-stream теперь явно запрашивает H.264, а public
   device bootstrap выполняется без Bearer и без `deviceType` — это поле остаётся
   только в post-auth `subscriberNotifications`. Парольный и SMS auth-контракты
   не изменились. Evidence: [APK/HAR/PCAP analysis](research/apk/9.9.0-analysis.md).
