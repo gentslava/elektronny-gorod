@@ -354,7 +354,10 @@ class ElektronnyGorodAPI:
 
     async def query_camera_stream(self, camera_id: str) -> str | None:
         """Query the stream URL for the given camera."""
-        api_url = f"/rest/v1/forpost/cameras/{camera_id}/video?&LightStream=0"
+        api_url = (
+            f"/rest/v1/forpost/cameras/{camera_id}/video"
+            "?LightStream=0&Format=H264"
+        )
 
         try:
             response = await self.http.get(api_url)
@@ -419,11 +422,18 @@ class ElektronnyGorodAPI:
         # None просочится в SipManager и упадёт TypeError на creds["realm"].
         return (payload.get("data") if payload else {}) or {}
 
-    def _push_body(self, fcm_token: str | None = None) -> dict[str, Any]:
+    def _push_body(
+        self,
+        fcm_token: str | None = None,
+        *,
+        include_device_type: bool = True,
+    ) -> dict[str, Any]:
         """Тело device-регистрации — зеркало приложения (FINDINGS §FCM).
 
         С `fcm_token` (POST register) включает `pushToken`; без него
-        (DELETE unregister) — то же тело без `pushToken`, ровно как приложение.
+        (DELETE unregister) — то же тело без `pushToken`. HAR 9.9.0:
+        `deviceType` есть у subscriberNotifications, но отсутствует у public
+        device-installations.
         """
         ua = self.http.user_agent
         body: dict[str, Any] = {
@@ -437,8 +447,9 @@ class ElektronnyGorodAPI:
             "deviceModelName": ua.phone_model,
             "osVersion": ua.android_ver,
             "deviceId": _device_id(ua.uuid),
-            "deviceType": "MOBILE_APPLICATION",
         }
+        if include_device_type:
+            body["deviceType"] = "MOBILE_APPLICATION"
         if fcm_token is not None:
             body["pushToken"] = fcm_token
         return body
@@ -451,10 +462,13 @@ class ElektronnyGorodAPI:
         Возвращает True/False. `pushToken` в логи не пишется (http.py логирует
         только размер тела, см. no-secret-logs).
         """
-        body = json.dumps(self._push_body(fcm_token))
         try:
-            for endpoint in (_DEVICE_INSTALLATIONS, _SUBSCRIBER_NOTIFICATIONS):
-                await self.http.post(endpoint, body)
+            device_body = json.dumps(
+                self._push_body(fcm_token, include_device_type=False)
+            )
+            subscriber_body = json.dumps(self._push_body(fcm_token))
+            await self.http.post(_DEVICE_INSTALLATIONS, device_body)
+            await self.http.post(_SUBSCRIBER_NOTIFICATIONS, subscriber_body)
             return True
         except Exception:
             return False

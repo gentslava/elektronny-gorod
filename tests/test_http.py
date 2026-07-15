@@ -71,6 +71,17 @@ async def test_bearer_omitted_on_preauth_password(http_client, fake_session):
     assert "authorization" not in {k.lower() for k in sent_headers}
 
 
+async def test_bearer_omitted_on_public_device_installation(http_client, fake_session):
+    """Public bootstrap 9.9.0 вызывается до auth и не получает Bearer."""
+    await http_client.post(
+        "/api/mh-customer-device/mobile/public/v1/customers/device-installations",
+        '{"appVersion": "9.9.0"}',
+    )
+
+    sent_headers = fake_session.post.await_args.kwargs["headers"]
+    assert "authorization" not in {k.lower() for k in sent_headers}
+
+
 async def test_bearer_sent_on_post_auth_endpoint(http_client, fake_session):
     """На post-auth endpoint Bearer должен быть отправлен."""
     await http_client.get("/rest/v1/places/12345/accesscontrols")

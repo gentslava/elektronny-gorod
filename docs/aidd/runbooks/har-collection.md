@@ -74,6 +74,11 @@ Cм. [ADR-0007](../../decisions/0007-stateful-emulator-baseline.md).
 
 ### Часть 2: Per-capture (любой сценарий)
 
+Постоянные auth-данные для автоматического ввода можно хранить отдельно в
+gitignored `research/scripts/auth.env` (`AUTH_LOGIN`, `AUTH_PASSWORD`,
+`AUTH_PHONE`). `.env` остаётся только конфигурацией AVD/APK/proxy и может быть
+перегенерирован `00a-detect.sh`. Одноразовый SMS-код в файлы не записывается.
+
 #### Через slash-команду (рекомендуется)
 
 В Claude Code:

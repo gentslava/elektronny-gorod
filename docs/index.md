@@ -1,6 +1,6 @@
 Status: Active
 Owner: Documentation / AIDD Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-07-15 (release 4.0.0 notes and current docs map)
 
 Source files:
 - AIDD-документы в `docs/` (этот каталог и подкаталоги)
@@ -56,7 +56,7 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | Изменить config flow | `architecture/overview.md` → `architecture/ha-compatibility.md` → `testing/strategy.md` |
 | Исправить security issue | `audit/security.md` → `audit/project-audit.md` → `decisions/0004-token-redaction.md` |
 | Добавить тест | `testing/strategy.md` → `aidd/runbooks/testing.md` |
-| Запланировать релиз | `roadmap.md` → `aidd/quality-gates.md` → `aidd/runbooks/release.md` |
+| Запланировать релиз | `roadmap.md` → `aidd/quality-gates.md` → `aidd/runbooks/release.md` → `releases/4.0.0.md` |
 | Найти, где источник правды | `project/source-of-truth.md` |
 | Понять, какой источник использовать для best practices | `aidd/source-base.md` |
 | Принять архитектурное решение | `decisions/README.md` → `aidd/templates/adr.template.md` |
@@ -82,7 +82,7 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | QA / Testing | `testing/strategy.md`, `quality-gates.md` | — |
 | Architecture | `architecture/overview.md`, `source-of-truth.md`, `project-map.md` | `source-base.md` |
 | Documentation | весь каталог | — |
-| Release / DevOps | `roadmap.md`, `quality-gates.md`, `../workflow.md` | — |
+| Release / DevOps | `roadmap.md`, `quality-gates.md`, `../workflow.md` | `releases/4.0.0.md` |
 | Validator | `project-audit.md`, `source-of-truth.md`, все остальные | — |
 
 ## Где не AIDD-документация

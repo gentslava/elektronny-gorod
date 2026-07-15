@@ -22,7 +22,7 @@ from typing import Any
 import aiohttp
 
 BASE_API_URL = "myhome.proptech.ru"
-APP_VERSION = {"name": "9.7.0", "code": "90700000"}
+APP_VERSION = {"name": "9.9.0", "code": "90900020"}
 ANDROID_OS_VER = "16"
 ANDROID_DEVICES = [
     {"manufacturer": "Google", "model": "Pixel 8"},
@@ -97,7 +97,11 @@ class Api:
         if post:
             h["content-type"] = "application/json; charset=UTF-8"
         # Bearer — только на post-auth путях (как в http.py).
-        if self.access_token and not str.startswith(self._last_path or "", "/auth/"):
+        path = self._last_path or ""
+        is_preauth = path.startswith("/auth/") or path.startswith(
+            "/api/mh-customer-device/mobile/public/"
+        )
+        if self.access_token and not is_preauth:
             h["authorization"] = f"Bearer {self.access_token}"
         return h
 

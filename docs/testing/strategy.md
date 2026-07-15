@@ -1,10 +1,10 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-07-13 (master после PR #69: 392 passed; добавлены точные
-регрессии stock REGISTER/100 Trying, caller switching и video anti-churn)
+Last reviewed: 2026-07-15 (394 passed; добавлены HAR-backed regressions 9.9.0
+для public bootstrap auth, push body и explicit H264 live stream)
 
 Source files:
-- `tests/**` (42 test-модуля + `conftest.py`)
+- `tests/**` (43 test-модуля + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
@@ -33,8 +33,8 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **392 passed** на финальном review PR #69 (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
-| Test modules | 42 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **394 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
+| Test modules | 43 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
@@ -52,7 +52,7 @@ camera/go2rtc и security regressions.**
 tests/
 ├── conftest.py                    # PHC fixtures + optional HA-module mocks
 ├── test_init.py / test_config_flow.py / test_options_flow_clear_creds.py
-├── test_http.py / test_api_push.py / test_api_sip.py / test_diagnostics.py
+├── test_http.py / test_api_push.py / test_api_camera.py / test_api_sip.py / test_diagnostics.py
 ├── test_camera_*.py / test_call_camera.py / test_go2rtc_*.py
 ├── test_event.py / test_fcm.py / test_sensor_call_state.py
 ├── test_sip_*.py / test_uplink_ws.py
@@ -205,8 +205,8 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 392 passed
-  на финальном review PR #69.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 394 passed
+  после сверки API-контрактов приложений 9.9.0.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.

@@ -83,7 +83,6 @@ async def bind_token(sess: common.Session, fcm_token: str) -> None:
         "deviceModelName": "Pixel 8",
         "osVersion": common.ANDROID_OS_VER,
         "deviceId": _device_id(sess.install_id),
-        "deviceType": "MOBILE_APPLICATION",
     }
     async with aiohttp.ClientSession() as s:
         api = common.Api(s, sess.user_agent, access_token=sess.access_token, operator=sess.operator_id)
@@ -91,7 +90,10 @@ async def bind_token(sess: common.Session, fcm_token: str) -> None:
             "/api/mh-customer-device/mobile/public/v1/customers/device-installations", body
         )
         log(f"device-installations → {r1.status}")
-        r2 = await api.post("/rest/v1/subscriberNotifications", body)
+        r2 = await api.post(
+            "/rest/v1/subscriberNotifications",
+            {**body, "deviceType": "MOBILE_APPLICATION"},
+        )
         log(f"subscriberNotifications → {r2.status}")
         if not (r1.ok and r2.ok):
             log("⚠️ привязка токена не полностью успешна — пуши могут не прийти")

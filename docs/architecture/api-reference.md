@@ -1,6 +1,6 @@
 Status: Active
 Owner: Reverse Engineer Agent + HA Expert Agent
-Last reviewed: 2026-06-23 (A-81: sipdevices теперь используется — mint_sip_device, register-on-ring ADR-0012)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0: APK diff + password/SMS/main-tabs/camera HAR + PCAP reconciliation)
 
 Source files:
 - `custom_components/elektronny_gorod/api.py` (текущая реализация)
@@ -30,6 +30,19 @@ Quality gates:
 Reverse-engineered API reference для бэкенда `myhome.proptech.ru`, обслуживающего мобильные приложения «Мой Дом» (Электронный город / Новотелеком) и «Умный Дом.ру». Правила заполнения — [ADR-0006: Mirror application behavior](../decisions/0006-mirror-app-behavior.md).
 
 🔴 **Конкретные значения (account_id, place_id, tokens, адреса, телефоны) — placeholders в этом документе.**
+
+## Source captures
+
+| Date | App | Scenario | Evidence |
+|---|---|---|---|
+| 2026-07-15 | Мой Дом 9.9.0 | password auth + bootstrap | decrypted HAR |
+| 2026-07-15 | Мой Дом 9.9.0 | SMS auth + bootstrap | decrypted HAR |
+| 2026-07-15 | Мой Дом 9.9.0 | main tabs, events, balance | decrypted HAR |
+| 2026-07-15 | Мой Дом 9.9.0 | camera events + live stream | decrypted HAR |
+| 2026-07-15 | Мой Дом 9.9.0 | full app network flow | PCAP: DNS/TLS/SIP/video transport; HTTP remains encrypted |
+
+Static diffs for both 9.9.0 flavours are summarized in
+[`research/apk/9.9.0-analysis.md`](../../research/apk/9.9.0-analysis.md).
 
 ## Backends — separate ecosystems
 
@@ -112,8 +125,8 @@ user-agent: <UA-pattern>
 Примеры:
 
 ```
-Nothing A065 | Android 16 | ntk  | 9.7.0 (90700000)  | <account_id> | 1 | <uuid> | <place_id>
-Nothing A065 | Android 16 | erth | 9.3.0 (90300010)  | <account_id> | 1 | <uuid> | <place_id>
+Nothing A065 | Android 16 | ntk  | 9.9.0 (90900020)  | <account_id> | 1 | <uuid> | <place_id>
+Nothing A065 | Android 16 | erth | 9.9.0 (90900020)  | <account_id> | 1 | <uuid> | <place_id>
 ```
 
 Замечания:
@@ -121,7 +134,8 @@ Nothing A065 | Android 16 | erth | 9.3.0 (90300010)  | <account_id> | 1 | <uuid>
 - Для **WebSocket handshake** user-agent содержит `null` в полях account_id и place_id (поля пустые до выбора place).
 - Для **pre-auth** запросов (`device-installations`, `subscriberNotifications`-DELETE, public endpoints) — account_id пустой, place_id может быть пустым или текущим, operator_id может быть `null`.
 - UUID стабилен per-install (один на одно устройство).
-- Актуальная версия приложения «Мой Дом»: **9.7.0 (90700000)** — `APP_VERSION` в `const.py` может отставать.
+- Актуальная версия обоих приложений: **9.9.0 (90900020)**. Runtime
+  `APP_VERSION` синхронизирован с «Мой Дом».
 
 ### `traceparent` header
 
@@ -332,10 +346,10 @@ Response shape:
 Request body shape:
 ```json
 {
-  "appVersionCode": 90700000,
+  "appVersionCode": 90900020,
   "installationId": "<uuid>",          // тот же UUID, что и в UA
   "appId": 2,                          // 2 для «Мой Дом»
-  "appVersion": "9.7.0",
+  "appVersion": "9.9.0",
   "platform": "google",                // именно "google", не "android"
   "isDevelop": false,
   "deviceManufacturer": "Nothing",
@@ -378,6 +392,24 @@ Response shape (с реальными значениями оператора Д
 push-токена (см. [Push-регистрация (FCM)](#push-регистрация-fcm), ADR-0011), но
 **не** для динамического discovery URLs из ответа — `BASE_API_URL` пока
 hardcoded. Динамический discovery поможет при миграции бэкенда. См. [audit A-51](../audit/project-audit.md).
+
+### `POST /api/mh-customer-communication/mobile/v1/communications`
+
+Stories/banner bootstrap, добавленный в 9.9.0. Наблюдался после обоих auth-flow.
+
+Request:
+
+```json
+{
+  "appId": 2,
+  "appVersion": "9.9.0",
+  "appVersionCode": 90900020,
+  "platform": "google"
+}
+```
+
+Response top-level shape: `{banners: [...], stories: [...]}`. Это UI-контент
+мобильного приложения; текущей HA entity-модели не требуется.
 
 ### `GET /rest/v1/subscribers/profiles`
 
@@ -779,7 +811,8 @@ Query: `width={px}&height={px}` (observed: 320x180).
 
 Stream URL.
 
-**Live stream** — `?LightStream=0` (используется нашим кодом).
+**Live stream (9.9.0 HAR)** — `?LightStream=0&Format=H264` (зеркалируется
+нашим кодом).
 
 **Video archive playback:**
 ```
@@ -1202,10 +1235,11 @@ post-push поведение приложения **через polling**:
 
 ### `POST /rest/v1/subscriberNotifications`
 
-Привязка push-токена у оператора. Приложение шлёт **тот же body-shape**, что и
-на `device-installations`. Оба POST идут с одинаковым телом (зеркало приложения).
+Привязка push-токена у оператора. Основные identity-поля совпадают с
+`device-installations`, но HAR 9.9.0 подтвердил одно различие:
+`deviceType: MOBILE_APPLICATION` есть только здесь.
 
-Request body shape (оба POST):
+Common request body shape (оба POST):
 ```json
 {
   "appVersionCode": "number",
@@ -1218,12 +1252,24 @@ Request body shape (оба POST):
   "deviceModelName": "string",
   "osVersion": "string",
   "deviceId": "string",             // стабильный hex, производный от installationId
-  "deviceType": "string",           // "MOBILE_APPLICATION"
   "pushToken": "string"             // 🎯 FCM push token (<sender>:<opaque>)
 }
 ```
 
-Response: 200 (тело отсутствует).
+Дополнительно только для `POST /rest/v1/subscriberNotifications`:
+
+```json
+{"deviceType": "MOBILE_APPLICATION"}
+```
+
+`device-installations` вызывается pre-auth без `Authorization`; bind
+`subscriberNotifications` — после auth с Bearer.
+
+Responses:
+
+- `device-installations`: 200 + bootstrap `{data: ...}` (тот же config response,
+  что описан выше);
+- `subscriberNotifications`: 200, тело отсутствует.
 
 ### `DELETE /rest/v1/subscriberNotifications`
 

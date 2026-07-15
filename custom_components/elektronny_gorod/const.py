@@ -96,8 +96,8 @@ FCM_API_KEY: Final = "AIzaSyB_26K8ZB7iu7qZBpBf5c4NLgvTC3Yrgpk"
 FCM_BUNDLE_ID: Final = "ru.inetra.intercom"
 
 APP_VERSION: Final = {
-    "name": "9.7.0",
-    "code": "90700000"
+    "name": "9.9.0",
+    "code": "90900020"
 }
 
 ANDROID_OS_VER: Final = "16"

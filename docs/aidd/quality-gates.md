@@ -1,6 +1,6 @@
 Status: Active
 Owner: Validator Agent
-Last reviewed: 2026-05-30
+Last reviewed: 2026-07-15 (TESTS_PASS evidence linked to current test strategy)
 
 Source files:
 - весь репозиторий
@@ -91,7 +91,7 @@ Used by agents:
 | Purpose | Тесты зелёные, реально выполнялись |
 | Owner | QA Agent |
 | Required commands | `PYTHONPATH=. .venv/bin/pytest tests/ -q` |
-| Required evidence | вывод pytest, coverage report |
+| Required evidence | свежий вывод pytest; актуальный baseline и состав suite — в [`testing/strategy.md`](../testing/strategy.md) |
 | Pass | все тесты зелёные; config_flow покрыт основными сценариями; нет тестов, маскирующих баги |
 | Fail | падающие тесты; pytest не запускался; тесты «исправлены» под сломанное поведение |
 | Stop | без TESTS_PASS не релизить |

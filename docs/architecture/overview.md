@@ -1,7 +1,7 @@
 Status: Active
 Owner: Architecture Agent
-Last reviewed: 2026-07-13 (PR #69: stock pre-answer REGISTER/100 Trying,
-video anti-churn, held caller switching, FCM-ended guard; A-54/A-58/A-81/A-85 в master)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0: runtime identity,
+pre-auth device bootstrap, push body split and explicit H264 live stream)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -180,8 +180,8 @@ async_unload_entry:
 | **HA integration interface** | `__init__.py`, `config_flow.py` | вход/выход в HA, миграции, entity visibility sync |
 | **Domain coordinator** | `coordinator.py` | оркестрация refresh, snapshot `coordinator.data` |
 | **Entity migration** | `entity_migration.py` | stable `unique_id` для camera/lock (legacy → new) |
-| **API client** | `api.py` | REST-обёртка над эндпоинтами `myhome.proptech.ru`; включая `mint_sip_device` (A-81) |
-| **Transport** | `http.py` | shared HA `ClientSession`, headers, conditional Bearer |
+| **API client** | `api.py` | REST-обёртка над `myhome.proptech.ru`: polling, H264 live stream, push bind и `mint_sip_device` (A-81) |
+| **Transport** | `http.py` | shared HA `ClientSession`, headers, conditional Bearer с узким pre-auth allowlist |
 | **Logging redaction** | `_logging.py` | `redact()` для headers/dict, `redact_path()` для auth URLs |
 | **External integration** | `go2rtc.py` | go2rtc-специфичный код (validate + upsert/cleanup); `upsert_audio_stream` / `remove_audio_stream` для аудио-стрима вызова |
 | **SIP subsystem** | `sip/` (14 модулей) | SIP-UAS: REGISTER-on-ring → held-INVITE → 200 OK → RTP-latching; AudioBridge (downlink → go2rtc); `uplink.py` `UplinkSink` (микрофон-PCM → G.711) + дрейф-компенсированный RTP-uplink (`rtp.py`); ADR-0012, ADR-0013 |
@@ -210,7 +210,9 @@ async_unload_entry:
 
 - ✅ Все методы корректно `async`/`await`.
 - ✅ HTTP через `async_get_clientsession(hass)` ([ADR-0008](../decisions/0008-shared-client-session.md)) — никаких per-request `ClientSession()`.
-- ✅ `Authorization: Bearer` не отправляется на pre-auth paths (`/auth/*`) — иначе backend видит expired Bearer и отдаёт 401 даже на login, блокируя reauth (см. `http.py` `__request`).
+- ✅ `Authorization: Bearer` не отправляется на pre-auth paths (`/auth/*` и
+  public `device-installations`) — иначе backend может отклонить reauth/bootstrap.
+  Узкий allowlist не затрагивает post-auth `/public/cameras` (см. `HTTP.__request`).
 - ✅ Token-redaction: `_logging.redact()` для headers (case + dash-insensitive), `_logging.redact_path()` маскирует PII в `/auth/v*/*/{phone|contract|account_id}` URL-path.
 - ✅ Lock `async_unlock` использует `async_call_later` для возврата state→LOCKED (без `asyncio.sleep` в event loop).
 - ✅ `LOGGER.exception(...)` вместо блокирующего `traceback.format_exc()` в hot path.

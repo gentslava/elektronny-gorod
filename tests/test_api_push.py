@@ -1,7 +1,8 @@
 """Тесты привязки FCM push-токена (api.py register/unregister_push_device).
 
-Проверяем: register шлёт тело-зеркало на оба endpoint с pushToken; на ошибке
-возвращает False; unregister шлёт DELETE.
+Проверяем HAR-контракт 9.9.0: оба POST содержат pushToken, но deviceType
+добавляется только для subscriberNotifications; на ошибке возвращается False;
+unregister шлёт DELETE.
 """
 from __future__ import annotations
 
@@ -55,12 +56,16 @@ async def test_register_posts_both_endpoints_with_push_token(api, fake_session):
     assert any(_DEVICE_INSTALLATIONS in u for u in urls)
     assert any(_SUBSCRIBER_NOTIFICATIONS in u for u in urls)
 
-    body = json.loads(fake_session.post.await_args_list[0].kwargs["data"])
-    assert body["pushToken"] == "FCMTOKEN123"
-    assert body["deviceType"] == "MOBILE_APPLICATION"
-    assert body["platform"] == "google"
-    assert body["appId"] == 2
-    assert "installationId" in body and "deviceId" in body
+    device_body = json.loads(fake_session.post.await_args_list[0].kwargs["data"])
+    subscriber_body = json.loads(fake_session.post.await_args_list[1].kwargs["data"])
+
+    assert device_body["pushToken"] == "FCMTOKEN123"
+    assert "deviceType" not in device_body
+    assert subscriber_body["pushToken"] == "FCMTOKEN123"
+    assert subscriber_body["deviceType"] == "MOBILE_APPLICATION"
+    assert device_body["platform"] == subscriber_body["platform"] == "google"
+    assert device_body["appId"] == subscriber_body["appId"] == 2
+    assert "installationId" in device_body and "deviceId" in device_body
 
 
 async def test_register_returns_false_on_http_error(api, fake_session):

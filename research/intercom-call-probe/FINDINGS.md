@@ -25,9 +25,11 @@ FCM-токен (формата `<sender>:<opaque>`) регистрируется
 - `POST /api/mh-customer-device/mobile/public/v1/customers/device-installations`
 - `POST /rest/v1/subscriberNotifications`
 
-Тело (оба): `{appId:2, appVersion, appVersionCode, platform:"google",
-pushToken:<FCM>, installationId:<uuid>, deviceId:<hex>, deviceType:
-"MOBILE_APPLICATION", deviceManufacturer, deviceModelName, osVersion}`.
+Общие поля обоих POST: `{appId:2, appVersion, appVersionCode,
+platform:"google", pushToken:<FCM>, installationId:<uuid>, deviceId:<hex>,
+deviceManufacturer, deviceModelName, osVersion}`. HAR 9.9.0 уточнил:
+`deviceType:"MOBILE_APPLICATION"` есть только у
+`subscriberNotifications`; public `device-installations` вызывается без Bearer.
 Отписка — `DELETE /rest/v1/subscriberNotifications`.
 
 Серверный приём FCM без Android подтверждён: `firebase-messaging`,

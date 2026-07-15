@@ -21,6 +21,14 @@ from .user_agent import UserAgent
 _REST_TIMEOUT = ClientTimeout(total=30, connect=10)
 _BINARY_TIMEOUT = ClientTimeout(total=60, connect=10)
 
+# Endpoints that the stock 9.9.0 client calls before authentication. Keep this
+# narrow: `/rest/v2/.../public/cameras` contains `public` but still requires a
+# Bearer token.
+_PREAUTH_PATH_PREFIXES = (
+    "/auth/",
+    "/api/mh-customer-device/mobile/public/",
+)
+
 
 def _log_request(url: str, method: str, headers: dict, body_size: int) -> None:
     """Log outgoing request. Headers redacted; body NEVER logged.
@@ -104,10 +112,13 @@ class HTTP:
         # subscriberNotifications-отписки, см. api.unregister_push_device).
         if method == "POST" or (method == "DELETE" and data is not None):
             headers["content-type"] = "application/json; charset=UTF-8"
-        # Bearer НЕ шлём на pre-auth endpoints (/auth/*) — иначе backend видит
-        # expired Bearer и отдаёт 401 даже на login, блокируя reauth flow.
-        # Реальное приложение шлёт Authorization только на post-auth REST.
-        if self.access_token is not None and not is_auth_path(url):
+        # Bearer НЕ шлём на pre-auth endpoints — иначе backend может увидеть
+        # expired Bearer и отклонить reauth/bootstrap. HAR 9.9.0 подтверждает,
+        # что public device-installations также вызывается без Authorization.
+        is_preauth = any(
+            endpoint.startswith(prefix) for prefix in _PREAUTH_PATH_PREFIXES
+        )
+        if self.access_token is not None and not is_preauth:
             headers["authorization"] = f"Bearer {self.access_token}"
         # data может быть str/bytes/None. Размер считаем безопасно.
         if data is None:

@@ -54,6 +54,7 @@ research/apk/*.xapk
 research/apk/*.apks
 research/scripts/.env
 research/scripts/.baseline-meta
+research/scripts/auth.env
 # Глобальные расширения — на случай если файлы окажутся вне research/
 *.har.json
 *.har

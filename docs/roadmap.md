@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-13 (PR #69 merged: A-81/A-85 находятся в master;
-A-88/A-89/A-90/A-91 закрыты; остаются release/live verification и backlog)
+Last reviewed: 2026-07-15 (MyHome/Smart Home 9.9.0 metadata + decrypted
+auth/main-tabs/camera contracts; добавлен reliability finding A-92)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -60,7 +60,7 @@ pytest CI matrix также работает на минимальной и те
 - `manifest.json` содержит `quality_scale: "bronze"` и `integration_type: "hub"` ✓ (A-34);
 - entity имеют `_attr_has_entity_name = True` и стабильный `unique_id` ✓ (A-12, A-13);
 - coordinator имеет `update_interval` и обновляет данные ✓ (A-08, A-09);
-- `pytest tests/` зелёный локально (392 tests pass на release-candidate) ✓;
+- `pytest tests/` зелёный локально (394 tests pass) ✓;
 - CI workflow `.github/workflows/python-tests.yaml` создан и зелёный ✓.
 
 ### Tasks (closed)

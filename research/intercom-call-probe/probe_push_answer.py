@@ -119,14 +119,16 @@ async def bind_token(sess: common.Session, fcm_token: str) -> None:
         "deviceModelName": "Pixel 8",
         "osVersion": common.ANDROID_OS_VER,
         "deviceId": _device_id(sess.install_id),
-        "deviceType": "MOBILE_APPLICATION",
     }
     async with _session() as s:
         api = common.Api(s, sess.user_agent, access_token=sess.access_token, operator=sess.operator_id)
         r1 = await api.post(
             "/api/mh-customer-device/mobile/public/v1/customers/device-installations", body
         )
-        r2 = await api.post("/rest/v1/subscriberNotifications", body)
+        r2 = await api.post(
+            "/rest/v1/subscriberNotifications",
+            {**body, "deviceType": "MOBILE_APPLICATION"},
+        )
         log(f"bind: device-installations={r1.status} subscriberNotifications={r2.status}")
 
 

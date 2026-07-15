@@ -1,7 +1,7 @@
 Status: Active
 Owner: Security & Privacy Agent
-Last reviewed: 2026-07-13 (release 4.0.0 audit: S-08/S-09 current state,
-S-20 historical credential evidence redacted and verified inactive)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0 HTTP/push reconciliation;
+pre-auth public bootstrap verified without Bearer, no new security finding)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -33,7 +33,7 @@ Quality gates:
 > чужой access_token в логах. **По состоянию на 2026-05-30 утечки нет** —
 > верифицировано по коду независимым security-аудитом (см. статусы S-01..S-06).
 
-## Сводка по состоянию на 2026-07-13
+## Сводка по состоянию на 2026-07-15
 
 Проверка по текущему `master`: grep всех `LOGGER.*` в чувствительных файлах,
 построчный разбор `_logging.py`/`http.py`/`config_flow.py`/`api.py`/
@@ -65,9 +65,12 @@ Quality gates:
 
 ### S-02. Утечка headers (Authorization: Bearer) и payload в логи
 
-- **Status:** ✅ **RESOLVED**. `http.py:16-34` `_log_request` использует
-  `redact(headers)` (`_logging.py:52`); body не логируется (только размер /
+- **Status:** ✅ **RESOLVED**. `HTTP._log_request` использует
+  `_logging.redact(headers)`; body не логируется (только размер /
   `<auth-path-redacted>`).
+- **9.9.0 cross-check:** Bearer также не отправляется на pre-auth public
+  `device-installations`; regression покрыта `tests/test_http.py`. Allowlist
+  намеренно не совпадает с post-auth `/public/cameras`.
 - **Original Severity:** P0 — `headers` содержал `Authorization: Bearer`,
   `data` auth-POST содержал пароль/SMS-код.
 

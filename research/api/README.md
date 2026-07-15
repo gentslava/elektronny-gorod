@@ -19,7 +19,7 @@
 | `.flow` | mitmproxy native | ⚠️ нет напрямую, но `mitmdump -nr file.flow --set hardump=file.har` конвертирует | конвертация перед анализом (есть в `05-capture-stop.sh`) |
 | `.chlz` / `.chls` | Charles native (proprietary binary, gzip-of-XML) | ❌ нет | конвертировать в HAR через Charles GUI (см. ниже) |
 | `.saz` | Fiddler | ❌ нет | конвертировать через Fiddler GUI |
-| `.pcap` / `.pcapng` | Wireshark / tcpdump | ❌ нет (низкий уровень) | для проекта избыточно — TLS не расшифрован |
+| `.pcap` / `.pcapng` | Wireshark / PCAPdroid | ⚠️ ограниченно | DNS/TLS hosts, SIP/RTSP и тайминги видны; HTTP method/path требуют TLS-decryption или HAR |
 
 ### Charles `.chlz` → HAR
 

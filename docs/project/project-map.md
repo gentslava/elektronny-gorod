@@ -1,7 +1,7 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-07-13 (PR #69: точный pre-answer REGISTER/100 Trying,
-test_sip_protocol, video anti-churn, multi-call switching; suite 392 passed)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0 metadata/API reconciliation;
+HAR-backed camera/push/http regressions; suite 394 passed)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -236,12 +236,13 @@ elektronny-gorod/
 | [`tests/test_entity_migration.py`](../../tests/test_entity_migration.py) | unit-тесты `_camera_new_uid`/`_lock_new_uid` + golden vector для `lock_unique_id` |
 | [`tests/test_logging_redact.py`](../../tests/test_logging_redact.py) | unit-тесты `_logging.redact()` + `redact_path()` |
 | [`tests/test_diagnostics.py`](../../tests/test_diagnostics.py) | redaction secrets/options, non-sensitive preserved, coordinator counts-only, TO_REDACT ⊇ SENSITIVE_KEYS |
-| [`tests/test_http.py`](../../tests/test_http.py) | Bearer skip на pre-auth, no-leak между запросами, PII redact в error log |
+| [`tests/test_http.py`](../../tests/test_http.py) | Bearer skip на auth + public device bootstrap, no-leak между запросами, PII redact в error log |
 | [`tests/test_visibility.py`](../../tests/test_visibility.py) | hidden_by sync (first_add, USER override, un-hide, re-add) |
 | [`tests/test_visibility_real.py`](../../tests/test_visibility_real.py) | production-replica (реальные HAR-данные) + migration v2 |
 | [`tests/test_event.py`](../../tests/test_event.py) | doorbell `event`-сущность (ADR-0011): дедуп по AC, фильтр SIGNAL по `(place_id, ac_id)`, `_trigger_event` на `ring`/`ended`, игнор чужого/неизвестного event_type |
 | [`tests/test_sensor_call_state.py`](../../tests/test_sensor_call_state.py) | `sensor.*_call_state` (Slice 3a): создание, дефолт `idle`, отражение `EVENT_CALL_STATE` (ringing/active + `started_at`/`call_id`), сброс `started_at` на `ended`, игнор чужого AC |
-| [`tests/test_api_push.py`](../../tests/test_api_push.py) | `register_push_device` / `unregister_push_device`: тело-зеркало (POST с `pushToken` на `device-installations` + `subscriberNotifications`, DELETE без `pushToken`), graceful False на ошибке |
+| [`tests/test_api_push.py`](../../tests/test_api_push.py) | `register_push_device` / `unregister_push_device`: HAR 9.9 body split (`deviceType` только subscriberNotifications), DELETE без `pushToken`, graceful False |
+| [`tests/test_api_camera.py`](../../tests/test_api_camera.py) | HAR 9.9 live-stream contract: `LightStream=0&Format=H264` |
 | [`tests/test_fcm.py`](../../tests/test_fcm.py) | `DoorbellFcmListener`: парсинг `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → SIGNAL, graceful degradation при недоступной `firebase-messaging` / сбое start, персист FCM-creds в `entry.data` |
 | [`tests/test_sip_audio.py`](../../tests/test_sip_audio.py) | G.711 PCMU/PCMA ↔ PCM (A-81) |
 | [`tests/test_sip_stun.py`](../../tests/test_sip_stun.py) | STUN parse / keepalive (A-81) |
@@ -268,10 +269,12 @@ elektronny-gorod/
 |---|---|---|
 | [`hassfest.yaml`](../../.github/workflows/hassfest.yaml) | push / PR | manifest validation |
 | [`hacs.yaml`](../../.github/workflows/hacs.yaml) | push / PR / dispatch | HACS validation |
+| [`python-tests.yaml`](../../.github/workflows/python-tests.yaml) | push / PR | pytest matrix: минимальная и текущая HA |
 | [`prerelease.yaml`](../../.github/workflows/prerelease.yaml) | PR opened / sync | pre-release ZIP с тегом `pr-N` для тестирования |
 | [`release.yaml`](../../.github/workflows/release.yaml) | release published | zip + GH release + автокоммит версии |
 
-🟡 **Отсутствует workflow для pytest** — все 67 тестов проходят локально (`PYTHONPATH=. pytest tests/`), но CI ещё не настроен. Tracking: roadmap → Tests-1.
+Pytest CI настроен; актуальный локальный baseline и состав suite ведутся в
+[`testing/strategy.md`](../testing/strategy.md), без дублирования здесь.
 
 ## Внешние API и зависимости
 

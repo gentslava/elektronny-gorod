@@ -4,110 +4,51 @@
 
 ## Текущий статус
 
-🔴 Существующий `tests/test_config_flow.py` — нерабочий stub из HA scaffold, **не запускать его «как есть»**. Сначала пометить как skip или удалить (см. A-07).
+Suite зелёный; config flow и миграции покрыты реальными PHC-тестами. Точный
+baseline, состав модулей и известные gaps ведутся в
+[`testing/strategy.md`](../../testing/strategy.md), а не дублируются здесь.
 
 ## Установка
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install \
-    pytest \
-    pytest-asyncio \
-    pytest-homeassistant-custom-component \
-    aioresponses
+python3 -m venv .venv
+.venv/bin/pip install pytest-homeassistant-custom-component
+.venv/bin/pip install -r requirements_test.txt
 ```
 
 ## Запуск
 
 ```bash
-# все тесты
-pytest tests/ -v
+# все тесты (канонический локальный gate)
+PYTHONPATH=. .venv/bin/pytest tests/ -q
 
 # конкретный файл
-pytest tests/test_config_flow.py -v
+PYTHONPATH=. .venv/bin/pytest tests/test_config_flow.py -v
 
 # конкретный тест
-pytest tests/test_config_flow.py::test_user_phone_sms_skip_go2rtc -v
+PYTHONPATH=. .venv/bin/pytest \
+    tests/test_config_flow.py::test_user_phone_sms_skip_go2rtc -v
 
 # с покрытием
-pytest tests/ --cov=custom_components.elektronny_gorod --cov-report=term-missing
+PYTHONPATH=. .venv/bin/pytest tests/ \
+    --cov=custom_components/elektronny_gorod --cov-report=term-missing -q
 ```
 
 ## Mock-стратегия
 
 | Что мокаем | Чем | Когда |
 |---|---|---|
-| HTTP к `myhome.proptech.ru` | `aioresponses` | API tests, coordinator tests |
+| HTTP к `myhome.proptech.ru` | `AsyncMock` / `aioresponses` | API и config-flow tests |
 | HA core (`hass`, ConfigEntry) | `pytest-homeassistant-custom-component` | все integration tests |
 | `async_setup_entry` для config-flow | `patch` | как в текущем conftest.py |
 | go2rtc HTTP | `aioresponses` | go2rtc tests |
-| Время / UUID | `freezegun` / `unittest.mock.patch` | для стабильных fixtures |
+| Время / UUID | `unittest.mock.patch` | для стабильных fixtures |
 
-## Минимальный config flow тест (пример)
+## Config flow examples
 
-```python
-"""Test config flow happy path."""
-from unittest.mock import patch
-import pytest
-from aioresponses import aioresponses
-from homeassistant import config_entries
-from homeassistant.data_entry_flow import FlowResultType
-
-from custom_components.elektronny_gorod.const import DOMAIN
-
-
-async def test_user_phone_sms_skip_go2rtc(hass):
-    """phone → contract → SMS → go2rtc skip → CREATE_ENTRY."""
-    with aioresponses() as m:
-        m.get(
-            "https://myhome.proptech.ru/auth/v2/login/+79991112233",
-            status=300,
-            payload=[{"accountId": "A1", "subscriberId": "S1",
-                      "operatorId": 1, "address": "addr", "placeId": "P1"}],
-        )
-        m.post(
-            "https://myhome.proptech.ru/auth/v2/confirmation/+79991112233",
-            status=200,
-        )
-        m.post(
-            "https://myhome.proptech.ru/auth/v3/auth/+79991112233/confirmation",
-            payload={"accessToken": "T1", "refreshToken": "R1", "operatorId": 1},
-        )
-        m.get(
-            "https://myhome.proptech.ru/rest/v1/subscribers/profiles",
-            payload={"data": {"subscriber": {"id": "S1", "accountId": "A1", "name": "Test"}}},
-        )
-
-        result = await hass.config_entries.flow.async_init(
-            DOMAIN, context={"source": config_entries.SOURCE_USER}
-        )
-        assert result["type"] == FlowResultType.FORM
-        assert result["step_id"] == "user"
-
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"phone": "+79991112233"}
-        )
-        assert result["step_id"] == "contract"
-
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"contract": "S1"}
-        )
-        assert result["step_id"] == "sms"
-
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"sms": "123456"}
-        )
-        # Меню go2rtc:
-        assert result["type"] == FlowResultType.MENU
-
-        # Выбираем skip_go2rtc:
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {"next_step_id": "skip_go2rtc"}
-        )
-        assert result["type"] == FlowResultType.CREATE_ENTRY
-        assert result["data"]["account_id"] == "A1"
-```
+Исполняемые примеры находятся в `tests/test_config_flow.py`; миграции — в
+`tests/test_init.py`. Не копируйте fixtures в runbook: тесты являются source of
+truth и проверяются CI.
 
 ## Что НЕ делать
 
@@ -117,7 +58,8 @@ async def test_user_phone_sms_skip_go2rtc(hass):
 
 ## CI
 
-После Итерации 2 — `.github/workflows/python-tests.yaml`.
+`.github/workflows/python-tests.yaml` запускает pytest matrix на минимальной и
+текущей поддерживаемой Home Assistant.
 
 ## Quality gate
 

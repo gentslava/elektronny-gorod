@@ -1,39 +1,85 @@
 #!/usr/bin/env bash
 # check-app-version.sh
 # Сравнивает APP_VERSION в custom_components/.../const.py с версией свежей
-# .apks в research/apk/. Если не совпадает — печатает блок для замены.
+# original APK/APKS в research/apk/. Если не совпадает — печатает блок замены.
 #
-# Apktool M кладёт manifest.json внутрь .apks рядом с base.apk → достаточно
-# unzip + jq. Не требует aapt / Android SDK / androguard.
+# Поддерживает два APKS-варианта:
+# - Apktool M archive с manifest.json (unzip + jq);
+# - bundle, снятый через `adb shell pm path` (aapt по вложенному base.apk).
 
 set -euo pipefail
 
+# shellcheck source=research/scripts/lib.sh
 source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 require_cmd unzip
-require_cmd jq
 
-APKS_GLOB="research/apk/myhome-*-original.apks"
-# shellcheck disable=SC2086
-APKS_FILE=$(ls -1 $APKS_GLOB 2>/dev/null | sort -V | tail -1 || true)
+shopt -s nullglob
+APK_CANDIDATES=(
+    research/apk/myhome-*-original.apk
+    research/apk/myhome-*-original.apks
+)
 
-if [[ -z "${APKS_FILE:-}" ]]; then
-    die "Не найден $APKS_GLOB. Скачай свежий .apks (Aurora Store / APKPure / APKMirror)."
+if [[ ${#APK_CANDIDATES[@]} -eq 0 ]]; then
+    die "Не найден research/apk/myhome-*-original.{apk,apks}."
 fi
 
-MANIFEST=$(unzip -p "$APKS_FILE" manifest.json 2>/dev/null || true)
-if [[ -z "$MANIFEST" ]]; then
-    die ".apks без manifest.json (формат не Apktool M). Используй aapt: aapt dump badging base.apk"
+APK_FILE=$(printf '%s\n' "${APK_CANDIDATES[@]}" | sort -V | tail -1)
+APK_NAME=""
+APK_CODE=""
+
+find_aapt() {
+    if command -v aapt >/dev/null 2>&1; then
+        command -v aapt
+        return 0
+    fi
+
+    local sdk_root candidate
+    for sdk_root in "${ANDROID_HOME:-}" "${ANDROID_SDK_ROOT:-}" "$HOME/Library/Android/sdk"; do
+        [[ -d "$sdk_root/build-tools" ]] || continue
+        candidate=$(find "$sdk_root/build-tools" -maxdepth 2 -type f -name aapt \
+            2>/dev/null | sort -V | tail -1)
+        if [[ -n "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if [[ "$APK_FILE" == *.apks ]]; then
+    MANIFEST=$(unzip -p "$APK_FILE" manifest.json 2>/dev/null || true)
+else
+    MANIFEST=""
 fi
 
-APK_NAME=$(echo "$MANIFEST" | jq -r '.version_name')
-APK_CODE=$(echo "$MANIFEST" | jq -r '.version_code')
+if [[ -n "$MANIFEST" ]]; then
+    require_cmd jq
+    APK_NAME=$(printf '%s' "$MANIFEST" | jq -r '.version_name')
+    APK_CODE=$(printf '%s' "$MANIFEST" | jq -r '.version_code')
+else
+    AAPT=$(find_aapt) || die "Не найден aapt для чтения version из $APK_FILE."
+    APK_TO_INSPECT="$APK_FILE"
+    if [[ "$APK_FILE" == *.apks ]]; then
+        TMP_DIR=$(mktemp -d)
+        trap 'rm -rf "$TMP_DIR"' EXIT
+        unzip -p "$APK_FILE" base.apk > "$TMP_DIR/base.apk"
+        APK_TO_INSPECT="$TMP_DIR/base.apk"
+    fi
+    BADGING=$("$AAPT" dump badging "$APK_TO_INSPECT")
+    APK_NAME=$(printf '%s\n' "$BADGING" | sed -n -E \
+        "s/^package:.*versionName='([^']+)'.*/\\1/p" | head -1)
+    APK_CODE=$(printf '%s\n' "$BADGING" | sed -n -E \
+        "s/^package:.*versionCode='([^']+)'.*/\\1/p" | head -1)
+fi
+
+[[ -n "$APK_NAME" && -n "$APK_CODE" ]] || die "Не удалось прочитать version из $APK_FILE."
 
 CONST_FILE="custom_components/elektronny_gorod/const.py"
 CONST_NAME=$(awk '/^APP_VERSION/,/^}/' "$CONST_FILE" | grep -oE '"[0-9]+\.[0-9]+\.[0-9]+"' | head -1 | tr -d '"')
 CONST_CODE=$(awk '/^APP_VERSION/,/^}/' "$CONST_FILE" | grep -oE '"[0-9]{8,}"' | head -1 | tr -d '"')
 
-echo "APK   $(basename "$APKS_FILE"): name=$APK_NAME code=$APK_CODE"
+echo "APK   $(basename "$APK_FILE"): name=$APK_NAME code=$APK_CODE"
 echo "const.py:                       name=$CONST_NAME code=$CONST_CODE"
 
 if [[ "$APK_NAME" == "$CONST_NAME" && "$APK_CODE" == "$CONST_CODE" ]]; then

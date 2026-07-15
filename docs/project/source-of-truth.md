@@ -1,6 +1,6 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-07-15 (APP_VERSION/coordinator/test/README state reconciled)
 
 Source files:
 - весь репозиторий (это карта)
@@ -45,10 +45,10 @@ Quality gates:
 | UI flow steps | [`config_flow.py:65-365`](../../custom_components/elektronny_gorod/config_flow.py#L65-L365) | разработчик | HA UI |
 | Options flow | [`config_flow.py:374-421`](../../custom_components/elektronny_gorod/config_flow.py#L374-L421) | разработчик | HA UI |
 | API base URL | [`const.py:7`](../../custom_components/elektronny_gorod/const.py#L7) | разработчик | `http.py` |
-| App emulation версии | [`const.py:34-37`](../../custom_components/elektronny_gorod/const.py#L34-L37) | разработчик | `user_agent.py` |
-| Android device pool | [`const.py:41-106`](../../custom_components/elektronny_gorod/const.py#L41-L106) | разработчик | `user_agent.py` |
-| Coordinator state | `coordinator._subscriber_places` (in-memory) | `_async_update_data` | геттеры coordinator |
-| Cameras/Locks/Balances данные | runtime через `coordinator.get_*_info()` | API → coordinator | entity setup |
+| App emulation версии | [`const.py:APP_VERSION`](../../custom_components/elektronny_gorod/const.py#L98) | разработчик | `user_agent.py` |
+| Android device pool | [`const.py:ANDROID_DEVICES`](../../custom_components/elektronny_gorod/const.py#L105) | разработчик | `user_agent.py` |
+| Coordinator state | `ElektronnyGorodUpdateCoordinator.data` | `_async_update_data` | все `CoordinatorEntity` |
+| Cameras/Locks/Balances данные | runtime snapshot в `coordinator.data` | API → coordinator | entity setup/update |
 | go2rtc config (runtime) | `entry.options ↑ entry.data` (fallback) | OptionsFlow → entry | `camera.py:_get_go2rtc_cfg` |
 | UI-строки (source) | [`strings.json`](../../custom_components/elektronny_gorod/strings.json) | разработчик | HA, переводы |
 | Переводы | [`translations/*.json`](../../custom_components/elektronny_gorod/translations/) | разработчик / переводчик | HA UI |
@@ -78,29 +78,31 @@ Quality gates:
 | Источник | Значение |
 |---|---|
 | `manifest.json:10` | `cloud_polling` |
-| `coordinator.py` | НЕТ `update_interval`, нет реального polling |
+| `coordinator.py` | `update_interval=5 min`, реальный polling |
 
-**Резолюция:** либо вводим polling (`update_interval`) и оставляем `cloud_polling`, либо меняем на корректный класс. ADR требуется.
+**Резолюция:** ✅ закрыт. Polling реализован, `cloud_polling` соответствует
+поведению; решение закреплено в [ADR-0003](../decisions/0003-iot-class-strategy.md).
 
 ### Конфликт 3: README.md ↔ файловая система
 
 | Источник | Значение |
 |---|---|
-| `README.md:1` ссылается на | `/README.ru_RU.md` |
-| Файловая система | файла НЕТ |
-| `README.md:41` пример установки | `cp -r custom_components/electronic_city` |
-| Реальный домен | `elektronny_gorod` |
+| `README.md` языковая ссылка | `/README.en_EN.md` существует |
+| Пример установки | `custom_components/elektronny_gorod` |
+| Реальный домен | `elektronny_gorod` — совпадает |
 
-**Резолюция:** удалить битую ссылку, исправить пример имени домена. Или создать `README.ru_RU.md` (раз ссылка есть).
+**Резолюция:** ✅ закрыт. Языковые ссылки и путь ручной установки совпадают с
+файловой системой.
 
 ### Конфликт 4: тесты ↔ реальный config_flow
 
 | Источник | Значение |
 |---|---|
-| `tests/test_config_flow.py:5-7` | импортирует `CannotConnect`, `InvalidAuth`, `PlaceholderHub` |
-| `config_flow.py` | ничего из этого не экспортирует |
+| `tests/test_config_flow.py` | реальные PHC-тесты password/SMS/token, reauth и abort |
+| `tests/test_init.py` | миграции config entry v1→v2→v3 |
 
-**Резолюция:** тесты — заведомо нерабочий stub. Переписать с нуля. См. [`testing/strategy.md`](../testing/strategy.md).
+**Резолюция:** ✅ закрыт. Scaffold-stub заменён реальными тестами; актуальный
+baseline — в [`testing/strategy.md`](../testing/strategy.md).
 
 ## Принципы при разрешении
 

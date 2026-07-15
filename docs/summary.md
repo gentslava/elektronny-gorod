@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-13 (PR #69 merged: A-88/A-89/A-90/A-91;
-stock pre-answer SIP profile подтверждён Android PCAP; suite 392 passed)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0 reconciled against APK/HAR/PCAP;
+APP_VERSION/push/live-video contracts updated; suite 394 passed)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -37,7 +37,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - **Codeowner:** [@gentslava](https://github.com/gentslava).
 - **PR pre-release:** workflow [`prerelease.yaml`](../.github/workflows/prerelease.yaml) выкатывает pre-release zip для каждого открытого PR.
 
-## Состояние (на 2026-07-13)
+## Состояние (на 2026-07-15)
 
 | Аспект | Статус |
 |---|---|
@@ -45,11 +45,11 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | HA hassfest CI | ✅ зелёный |
 | HACS validation CI | ✅ зелёный |
 | pytest CI | ✅ есть (`python-tests.yaml`, matrix HA 2024.10 + 2026.5) |
-| Реальные тесты | ✅ 392 теста зелёные на merge PR #69; coverage-процент в этом цикле не пересчитывался |
+| Реальные тесты | ✅ 394 теста зелёные локально; coverage-процент в этом цикле не пересчитывался |
 | Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
-| Документация для пользователя | ⚠️ есть, но с битыми ссылками (A-27/A-28) |
-| AIDD документация для агентов | ✅ синхронизирована с master после PR #69 |
+| Документация для пользователя | ✅ README language/install links исправлены (A-27/A-28); release notes 4.0.0 актуальны |
+| AIDD документация для агентов | ✅ синхронизирована с mobile-app/API reconciliation 2026-07-15 |
 
 ## Главные сильные стороны
 
@@ -70,7 +70,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
   смена звонящего во время held и точное зеркало stock pre-answer
   `REGISTER → INVITE → 100 Trying` (A-81/A-85/A-88/A-89/A-90/A-91, PR #69).
 
-## Главные риски (на 2026-07-13)
+## Главные риски (на 2026-07-15)
 
 > Все исторические P0 token-leaks **закрыты** (verified по коду). Текущие
 > открытые риски — reliability + test-debt, не утечки секретов.
@@ -89,6 +89,8 @@ SECURITY_OK разблокирован.
 
 - `go2rtc.py` без `ClientTimeout` (A-72).
 - `api.py` — `e.args[0]` antipattern + широкий `except Exception` (A-19/A-20).
+- HTML service-pipe/VPN block пока превращается в generic `ClientError` и
+  может выглядеть как пустой список камер (A-92; нужен воспроизводимый HAR).
 - Cold-start go2rtc warmup (A-67), lock fake-state cosmetic-cycle (A-15 — `asyncio.sleep` уже убран).
 
 Полный список — в [`audit/project-audit.md`](audit/project-audit.md).

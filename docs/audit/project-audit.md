@@ -1,8 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-13 (PR #69 merged в master: A-88 video anti-churn,
-A-89 смена звонящего, A-90 FCM-ended guard, A-91 восстановление точной
-pre-answer SIP-модели; A-81/A-85 также находятся в master; suite 392 passed)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0: static APK diff + decrypted
+password/SMS/main-tabs/camera HAR + PCAP; добавлен A-92)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -397,11 +396,14 @@ Quality gates:
 - **Impact:** история motion-событий / записей с камер. Можно поднять как HA `event` entity или сенсор «последняя запись».
 - **Recommended fix:** новый platform `sensor.last_event` или `event` entity для каждой камеры. Polling с разумным интервалом.
 
-### A-51. Bootstrap config endpoint (`device-installations`) не используется
+### A-51. Bootstrap response (`device-installations`) не используется для discovery
 
 - **Severity:** P2 (зависит от стабильности hardcoded URLs)
 - **Evidence:** `POST /api/mh-customer-device/mobile/public/v1/customers/device-installations` возвращает `{AUTH_PROVIDER, MOBILE_URL.domain.{backend, genesys, stomp, expiredAt}, policy}`.
-- **Impact:** приложение **динамически** получает URLs (включая STOMP). У нас hardcoded `BASE_API_URL = "myhome.proptech.ru"` — если оператор переедет, мы сломаемся.
+- **Impact:** интеграция уже вызывает endpoint при FCM bind, но игнорирует
+  bootstrap response. Приложение **динамически** получает URLs (включая STOMP).
+  У нас hardcoded `BASE_API_URL = "myhome.proptech.ru"` — если оператор
+  переедет, мы сломаемся.
 - **Recommended fix:** вызывать device-installations при первом setup + при истечении `expiredAt`, кэшировать в `entry.data`. Использовать `MOBILE_URL.domain.backend` вместо hardcoded.
 
 ### A-52. Header `traceparent` не отправляется
@@ -1462,6 +1464,28 @@ Quality gates:
   внутреннюю логику группировки панелей, поэтому более узкая серверная/аппаратная
   причина не заявляется.
 
+### A-92. HTML service-pipe/VPN block маскируется под обычную API-ошибку
+
+- **Severity:** P2 — diagnostics/reliability, не regression текущего happy path.
+- **Area:** `http.py` + широкие fallback-ветки `api.py`.
+- **Evidence (static APK diff 9.9.0, 2026-07-15):** stock client распознаёт
+  HTML block-page по `REQUEST-ID` либо блоку `id="info"` с `datetime:`/`ip:`,
+  бросает отдельный `ServicePipeBlockException` и открывает `VpnWarningActivity`.
+  Пользовательский текст явно связывает блокировку с работой вне РФ/VPN.
+  В снятых HAR happy-path block page не встречался — формат подтверждён static,
+  сам runtime-trigger пока не воспроизведён.
+- **Current behavior:** `HTTP.__request` превращает любой non-2xx в generic
+  `ClientError`; `query_cameras`/`query_public_cameras`/`query_sections` и часть
+  settings-методов ловят широкий `Exception` и возвращают пустые коллекции.
+  Геоблок/WAF может выглядеть как «у аккаунта нет камер», а diagnostics не даст
+  операторский request-id.
+- **Recommended fix:** отдельная безопасная классификация block-page без
+  логирования IP/body; сохранять только redacted correlation/request-id и
+  поднимать typed error в coordinator/diagnostics вместо empty-data fallback.
+  Перед реализацией снять HAR с воспроизведённым VPN/block сценарием и закрепить
+  HTML fixture без реальных идентификаторов.
+- **Не делать:** не логировать полный HTML, IP, headers или auth context.
+
 ### A-73. config_flow + `async_migrate_entry` без тестов (Bronze IQS gate)
 
 - **Status:** ✅ **RESOLVED** — merged в master, commit `3a60b15`
@@ -1530,6 +1554,7 @@ Quality gates:
 | ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
 | ✅ A-87 (ring/idle watchdog, PR #68) + ✅ A-88 (video anti-churn) + ✅ A-90 (FCM-ended guard), merged PR #69 | Итерация 4 (UI + надёжность видео/жизненного цикла вызова) |
 | ✅ A-89 (смена звонящего домофона во время held) + ✅ A-91 (штатная pre-answer SIP-модель подтверждена PCAP), merged PR #69 | Итерация 4 (мульти-вызов + production diagnostics) |
+| A-92 (typed diagnostics для HTML service-pipe/VPN block; нужен runtime HAR) | backlog (P2 reliability; не блокирует happy path 9.9.0) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 
