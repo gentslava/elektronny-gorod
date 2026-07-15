@@ -46,6 +46,8 @@ integration. Exact support varies by account, tariff and hardware.
 - [x] Later polls deduplicate by server event ID and emit only explicitly mapped
   event types; unknown types are ignored without copying message/PII.
 - [x] Existing FCM remains the realtime source for doorbell `ring`/`ended`.
+- [x] Previous accepted/missed call rows are browseable on demand in Lovelace;
+  browsing is entity-scoped, paginated and never replays rows into automations.
 - [ ] Camera archive is browseable through HA Media Source by place → camera →
   date/event; browsing uses opaque IDs, not signed URLs.
 - [ ] Playback/download URLs are resolved on demand, expire naturally and never
@@ -93,7 +95,8 @@ integration. Exact support varies by account, tariff and hardware.
 
 ## Affected modules
 
-- Slice 1: `api.py`, new `history.py`, `event.py`, `__init__.py`
+- Slice 1: `api.py`, `history.py`, `history_ws.py`, `event.py`, `__init__.py`,
+  `frontend/src/eg-event-history-card.ts`
 - Slice 2: new `media_source.py`; archive additions in `api.py`
 - potential `number.py`, `select.py`, `switch.py`, `services.yaml`
 - `__init__.py`, `strings.json`, `translations/{ru,en}.json`

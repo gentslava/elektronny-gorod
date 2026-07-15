@@ -1,10 +1,10 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-07-15 (411 passed; добавлены exact history API contracts,
-baseline/dedup/storage lifecycle и access/camera EventEntity regressions)
+Last reviewed: 2026-07-15 (417 backend + 56 frontend passed; добавлены
+entity-scoped history browse, response normalization and pagination regressions)
 
 Source files:
-- `tests/**` (46 test-модулей + `conftest.py`)
+- `tests/**` (47 test-модулей + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
@@ -33,13 +33,14 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **411 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
-| Test modules | 46 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **417 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
+| Test modules | 47 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Frontend | **56 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
 | Camera / go2rtc | lifecycle, auto-recovery, concurrency, PATCH-first upsert, call-stream teardown |
-| Durable history | exact 9.9.0 wire contracts, PII-safe DTO, silent baseline, bounded restart dedup, partial failure, unload/backpressure и EventEntity routing |
+| Durable history | exact 9.9.0 wire contracts, PII-safe DTO, silent baseline, bounded restart dedup, EventEntity routing, entity authorization и on-demand previous-page browse |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Coverage | Процент намеренно не фиксируется без свежего coverage-run; каноническая команда приведена ниже |
 
@@ -55,7 +56,7 @@ tests/
 ├── test_init.py / test_config_flow.py / test_options_flow_clear_creds.py
 ├── test_http.py / test_api_push.py / test_api_camera.py / test_api_history.py / test_api_sip.py / test_diagnostics.py
 ├── test_camera_*.py / test_call_camera.py / test_go2rtc_*.py
-├── test_event.py / test_history.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
+├── test_event.py / test_history.py / test_history_ws.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
 ├── test_sip_*.py / test_uplink_ws.py
 └── entity, visibility, balance, DND, helpers и migration regressions
 ```
@@ -138,7 +139,7 @@ inventory всегда берутся из `tests/test_*.py`; новые сет�
   forpost camera-event query; typed DTO intentionally excludes backend message
   and preserves requested camera identity separately from internal `CameraID`.
 
-### 6. Durable history (`test_history.py`, `test_event.py`, `test_history_translations.py`)
+### 6. Durable history (`test_history.py`, `test_history_ws.py`, `test_event.py`, `test_history_translations.py`)
 
 - Silent first baseline, later newest-first overlap and chronological emit.
 - Per-stream bounded opaque-ID watermark round-trip prevents restart duplicates.
@@ -147,6 +148,10 @@ inventory всегда берутся из `tests/test_*.py`; новые сет�
   overlapping ticks instead of queueing API cycles.
 - Access/camera EventEntity routing uses stable IDs, allowlisted state attrs and
   ru/en translations for every declared history event type.
+- Browse WebSocket verifies EventEntity read permission, config-entry/source
+  binding, page bounds and exact sanitized previous-page response.
+- Frontend model tests exact command shape, untrusted/cross-entity response
+  rejection, overlap dedup, date groups, time formatting and RU/EN labels.
 
 ### 7. go2rtc (`test_go2rtc_validate.py`, `test_go2rtc_upsert.py`, `test_go2rtc_audio.py`)
 
@@ -219,8 +224,8 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 411 passed
-  после реализации durable history Slice 1.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 417 passed.
+- [x] `frontend`: 56 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.

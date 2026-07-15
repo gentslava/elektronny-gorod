@@ -44,6 +44,15 @@ the corresponding spec/capture gate is approved.
   tasks/listeners after config-entry unload. _Audit:_ A-58.
 - [x] **T-023** Add per-camera motion EventEntity only for verified event types.
   _Acceptance:_ declared types/device mapping and translations pass. _Audit:_ A-50.
+- [x] **T-024** Add entity-scoped previous-page WebSocket browse.
+  _Acceptance:_ `POLICY_READ`, source routing, page `0..100`, safe API failure
+  and exact sanitized response are covered. _Audit:_ A-58/S-21.
+- [x] **T-025** Add `custom:eg-event-history-card` to the existing bundle.
+  _Acceptance:_ RU/EN date groups, accepted/missed rows, refresh, load-more,
+  loading/empty/error states and responsive HA-theme styling. _Audit:_ A-58.
+- [x] **T-026** Harden the frontend history boundary. _Acceptance:_ malformed
+  events and cross-entity responses are rejected; page overlap deduplicates by
+  opaque event ID. _Audit:_ S-21.
 
 ## Slice 2 — archive
 

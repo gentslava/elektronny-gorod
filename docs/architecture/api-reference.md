@@ -1378,12 +1378,16 @@ Runtime capture 9.9.0 подтвердил последовательность 
   заканчивается только по `last=true`.
 
 🟢 **Реализовано в `feat/durable-event-history`:**
-[`api.py:query_events`](../../custom_components/elektronny_gorod/api.py) читает
-только page 0, а [`history.py`](../../custom_components/elektronny_gorod/history.py)
-держит silent baseline и bounded per-stream dedup в `Store`. В HA эмитятся
-только `accessControlCallAccepted`/`accessControlCallMissed`; backend `message`
-не входит в DTO, state, storage или logs. Полный browse старого журнала и
-archive media остаются отдельным Slice 2.
+[`history.py`](../../custom_components/elektronny_gorod/history.py) использует
+page 0 для silent baseline и bounded per-stream dedup в `Store`. В HA эмитятся
+только новые `accessControlCallAccepted`/`accessControlCallMissed`.
+[`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) отдельно
+читает запрошенные страницы `0..100` для `custom:eg-event-history-card`: команда
+проверяет HA `POLICY_READ` на выбранную history EventEntity, жёстко связывает её
+с одним place/access-control и возвращает только `event_id`, mapped type и
+timestamp. Browse не вызывает dispatcher и поэтому не воспроизводит старые
+строки как новые automation events. Backend `message` не входит в DTO, state,
+storage, logs или WebSocket response. Archive playback/media остаётся Slice 2.
 
 ## Real-time каналы (несколько одновременно)
 

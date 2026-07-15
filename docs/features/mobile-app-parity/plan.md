@@ -51,6 +51,21 @@ fixtures and capability detection.
   `test_history.py`, `test_event.py` and translation parity tests.
 - **Risk:** medium; wrong baseline can trigger user automations.
 
+### Slice 1b: old-call history browser
+
+- **Status:** implemented in `feat/durable-event-history`.
+- **Files:** `history_ws.py`, `__init__.py`, `frontend/src/history/`,
+  `frontend/src/eg-event-history-card.ts`, focused backend/frontend tests.
+- **Change:** read previous accepted/missed pages only when an authorized
+  Lovelace client requests them. Resolve the selected history EventEntity via
+  registry/config entry, enforce `POLICY_READ`, bind to its exact
+  place/access-control and return only ID/type/timestamp.
+- **Acceptance:** page overlap is deduplicated in the view model; page bounds
+  and entity mismatch are rejected; previous rows never touch dispatcher,
+  EventEntity state or the watermark Store; mobile/desktop loading, empty and
+  error states exist in RU/EN.
+- **Risk:** medium; a global WS command must not bypass per-entity HA access.
+
 ### Slice 2: archive media source
 
 - **Files:** new `media_source.py`, `api.py`, optional authenticated proxy view,
@@ -108,7 +123,7 @@ fixtures and capability detection.
 ## Dependencies
 
 ```text
-HAR fixtures ─► Slice 0 ─┬─► Slice 1 ─► Slice 2
+HAR fixtures ─► Slice 0 ─┬─► Slice 1 ─► Slice 1b ─► Slice 2
                          ├─► Slice 3
                          ├─► Slice 4 ─► Slice 5
                          └─► Slice 6

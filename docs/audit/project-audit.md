@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0: AVD parity inventory and
-implementation-ready history/archive/guest/key/private-camera backlog)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0: durable history polling and
+old-call Lovelace browse implemented; archive/guest/key/private-camera backlog)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -524,7 +524,10 @@ Quality gates:
   устанавливает silent baseline, bounded opaque-ID watermark переживает
   restart, а overlapping poll пропускается. В HA попадают только verified
   accepted/missed call events; старые страницы не переигрываются в automation.
-- **Remaining product scope:** browse полного старого журнала и archive media —
+  `history_ws.py` + `custom:eg-event-history-card` дают постраничный browse
+  старых accepted/missed строк с entity permission/source binding и sanitized
+  allowlist response — также без replay в dispatcher/state.
+- **Remaining product scope:** archive playback/download через Media Source —
   Slice 2, не часть finding о delivery.
 - **Каверзы:** канал опирается на приватные API Google — долгосрочных гарантий
   нет (см. A-80). Поэтому весь FCM-флоу под graceful degradation.

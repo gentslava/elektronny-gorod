@@ -1,6 +1,6 @@
 Status: Active
 Owner: Architecture Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0 and durable REST history Slice 1)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0 and durable REST history browser)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -8,6 +8,7 @@ Source files:
 - `custom_components/elektronny_gorod/coordinator.py`
 - `custom_components/elektronny_gorod/api.py`
 - `custom_components/elektronny_gorod/history.py`
+- `custom_components/elektronny_gorod/history_ws.py`
 - `custom_components/elektronny_gorod/http.py`
 - `custom_components/elektronny_gorod/_logging.py`
 - `custom_components/elektronny_gorod/entity_migration.py`
@@ -135,11 +136,12 @@ async_setup_entry:
        - event.async_setup_entry: realtime doorbell + access/camera history entities
   8. HistoryManager запускается background task после platform setup:
      restore Store → silent baseline/poll → 5-minute interval; unload отменяет interval
-  9. _migrate_legacy_disabled_state (one-time per entry)
-  10. _sync_visibility — `hidden` из `/settings/screens` → entity.hidden_by=INTEGRATION
-  11. async_register_uplink_ws_command(hass) — WS-команда intercom_uplink (ADR-0013)
-  12. await async_register_uplink_card(hass) — static-ресурс Lovelace-карты микрофона
-     (оба идемпотентны, регистрируются один раз на интеграцию — см. `__init__.py:~100`)
+  9. async_register_history_ws_command(hass) — entity-scoped browse старых вызовов
+  10. async_register_uplink_ws_command(hass) — WS-команда intercom_uplink (ADR-0013)
+  11. await async_register_uplink_card(hass) — static bundle call/history cards
+      (команды и static path идемпотентны, регистрируются один раз на интеграцию)
+  12. _migrate_legacy_disabled_state (one-time per entry)
+  13. _sync_visibility — `hidden` из `/settings/screens` → entity.hidden_by=INTEGRATION
 ```
 
 ### Migration
@@ -186,6 +188,7 @@ async_unload_entry:
 | **Entity migration** | `entity_migration.py` | stable `unique_id` для camera/lock (legacy → new) |
 | **API client** | `api.py` | REST-обёртка над `myhome.proptech.ru`: coordinator polling, typed/sanitized history, H264 live stream, push bind и `mint_sip_device` (A-81) |
 | **History subsystem** | `history.py` | отдельный 5-minute poll: page-0 baseline, bounded per-stream dedup, Store schema v1, partial-failure isolation и dispatcher events |
+| **History browse** | `history_ws.py`, `frontend/src/eg-event-history-card.ts` | авторизованный read-only browse предыдущих accepted/missed calls по выбранной EventEntity; on-demand pagination без replay в state/automation |
 | **Transport** | `http.py` | shared HA `ClientSession`, headers, conditional Bearer с узким pre-auth allowlist |
 | **Logging redaction** | `_logging.py` | `redact()` для headers/dict, `redact_path()` для auth URLs |
 | **External integration** | `go2rtc.py` | go2rtc-специфичный код (validate + upsert/cleanup); `upsert_audio_stream` / `remove_audio_stream` для аудио-стрима вызова |
@@ -257,6 +260,13 @@ async_setup_entry
     → первый ответ каждого stream = silent baseline
     → последующие unseen whitelisted IDs → SIGNAL_HISTORY_EVENT → event.py
     → Store.async_save({streams: bounded opaque IDs})
+
+Lovelace custom:eg-event-history-card
+  → HA WebSocket elektronny_gorod/history(entity_id, page)
+  → POLICY_READ + registry/config-entry/source validation
+  → POST /rest/v1/events/search?page=N только для place выбранной entity
+  → exact access-control filter + whitelist accepted/missed
+  → sanitized rows {event_id, event_type, occurred_at}; без dispatcher/state replay
 ```
 
 ### Camera image flow
