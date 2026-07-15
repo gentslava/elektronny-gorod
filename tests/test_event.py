@@ -245,6 +245,23 @@ async def test_history_manager_follows_config_entry_lifecycle(
             manager.async_stop.assert_called_once_with()
 
 
+async def test_history_ws_command_registers_during_config_entry_setup(
+    hass: HomeAssistant, mock_api
+):
+    """The history browser command is available after integration setup."""
+    with patch(
+        "custom_components.elektronny_gorod.async_register_history_ws_command"
+    ) as register:
+        entry = _entry()
+        entry.add_to_hass(hass)
+
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert register.call_count >= 1
+    register.assert_any_call(hass)
+
+
 async def test_initial_state_baseline_no_call(hass: HomeAssistant, mock_api):
     """Первый запуск (нечего восстанавливать) → baseline `ended` = «нет вызова».
 

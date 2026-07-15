@@ -35,6 +35,7 @@ from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .fcm import DoorbellFcmListener
 from .go2rtc import go2rtc_auth_headers
 from .history import HistoryManager
+from .history_ws import async_register_history_ws_command
 from .sip.call_controller import DoorbellCallController, Go2RtcConfig
 from .uplink_ws import async_register_uplink_card, async_register_uplink_ws_command
 from .user_agent import UserAgent
@@ -107,6 +108,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     hass.data.setdefault(_SIP_DATA, {})[entry.entry_id] = sip_controller
     _async_register_sip_services(hass)
+    async_register_history_ws_command(hass)
     # Phase C (ADR-0013): WS-команда uplink-микрофона (браузер → HA-WS → SIP)
     # + раздача Lovelace-карты микрофона статикой.
     async_register_uplink_ws_command(hass)

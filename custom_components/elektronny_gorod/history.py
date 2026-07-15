@@ -28,6 +28,11 @@ HISTORY_POLL_INTERVAL = timedelta(minutes=5)
 SIGNAL_HISTORY_EVENT = f"{DOMAIN}_history_event"
 
 
+def map_general_event_type(event_type: str) -> str | None:
+    """Map one runtime-verified backend call type to its HA event type."""
+    return _GENERAL_EVENT_TYPES.get(event_type)
+
+
 class HistoryWatermark:
     """Bounded per-stream event-ID watermark with a silent first baseline."""
 
@@ -109,7 +114,7 @@ class HistoryPoller:
                     )
                 )
                 for event in reversed(page.events):
-                    mapped_type = _GENERAL_EVENT_TYPES.get(event.event_type)
+                    mapped_type = map_general_event_type(event.event_type)
                     if event.id not in new_ids or mapped_type is None:
                         continue
                     self._emit(
