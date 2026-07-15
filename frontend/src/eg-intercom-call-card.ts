@@ -6,6 +6,7 @@
 import { LitElement, css, html, nothing, type PropertyValues, type TemplateResult } from "lit";
 import { customElement, property, state } from "lit/decorators.js";
 
+import "./eg-event-history-card.js";
 import { type ActionKind, type CallPhase, type CallView, deriveView, toPhase } from "./state-machine.js";
 import { pickCameraEntity } from "./components/call-video.js";
 import { type StageState } from "./components/call-stage.js";
