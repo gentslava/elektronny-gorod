@@ -14,7 +14,7 @@
     "lit": "^3.2.1"
   },
   "devDependencies": {
-    "esbuild": "^0.24.2",
+    "esbuild": "^0.28.1",
     "lucide-static": "^1.23.0",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
