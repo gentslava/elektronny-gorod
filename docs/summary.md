@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0 AVD/API parity package;
-DND/finance/realtime documentation drift reconciled; suite not rerun for docs-only change)
+Last reviewed: 2026-07-16 (durable history isolation, opt-in camera polling,
+partial refresh and current backend/frontend verification synchronized)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -37,7 +37,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - **Codeowner:** [@gentslava](https://github.com/gentslava).
 - **PR pre-release:** workflow [`prerelease.yaml`](../.github/workflows/prerelease.yaml) выкатывает pre-release zip для каждого открытого PR.
 
-## Состояние (на 2026-07-15)
+## Состояние (на 2026-07-16)
 
 | Аспект | Статус |
 |---|---|
@@ -45,10 +45,10 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | HA hassfest CI | ✅ зелёный |
 | HACS validation CI | ✅ зелёный |
 | pytest CI | ✅ есть (`python-tests.yaml`, matrix HA 2024.10 + 2026.5) |
-| Реальные тесты | ✅ 394 теста зелёные локально; coverage-процент в этом цикле не пересчитывался |
+| Реальные тесты | ✅ 432 backend + 62 frontend теста зелёные локально; TypeScript check и production build зелёные |
 | Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
-| Документация для пользователя | ✅ README language/install links исправлены (A-27/A-28); release notes 4.0.0 актуальны |
+| Документация для пользователя | ✅ RU/EN README и HACS info описывают FCM/SIP, экран вызова и durable history 4.0.0; добавлены runtime screenshots |
 | AIDD документация для агентов | ✅ синхронизирована с mobile-app/API reconciliation 2026-07-15 |
 
 ## Главные сильные стороны
@@ -69,8 +69,13 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
   (ADR-0012/0013), экран и карточка вызова, uplink-микрофон, video anti-churn,
   смена звонящего во время held и точное зеркало stock pre-answer
   `REGISTER → INVITE → 100 Trying` (A-81/A-85/A-88/A-89/A-90/A-91, PR #69).
+- **Итерация 5 (durable history):** polling с per-source silent baseline,
+  restart dedup, config-entry-scoped dispatcher, opt-in camera motion,
+  place-scoped EventEntity, авторизованный browse старых вызовов и
+  `custom:eg-event-history-card` для нескольких мест/аккаунтов (A-50/A-58,
+  PR #70).
 
-## Главные риски (на 2026-07-15)
+## Главные риски (на 2026-07-16)
 
 > Все исторические P0 token-leaks **закрыты** (verified по коду). Текущие
 > открытые риски — reliability + test-debt, не утечки секретов.
@@ -95,11 +100,11 @@ SECURITY_OK разблокирован.
 
 ### Mobile-app parity backlog
 
-AVD/HAR/APK analysis 9.9.0 оформлен в отдельный
-[`feature package`](features/mobile-app-parity/README.md): durable event history
-и archive/Media Source (A-50/A-58/A-59), response action гостевого приглашения
-(A-93), ключи доступа (A-94) и настройки личных камер (A-95). История/архив
-имеют wire evidence; guest/key/camera write paths сохраняют обязательный HAR/
+AVD/HAR/APK analysis оформлен в отдельный
+[`feature package`](features/mobile-app-parity/README.md). Durable event history
+реализована в PR #70; в backlog остаются archive/Media Source (A-50/A-59),
+response action гостевого приглашения (A-93), ключи доступа (A-94) и настройки
+личных камер (A-95). Guest/key/camera write paths сохраняют обязательный HAR/
 hardware gate. Guest links, key codes and signed media URLs не допускаются в
 entity state, recorder, diagnostics или логи.
 

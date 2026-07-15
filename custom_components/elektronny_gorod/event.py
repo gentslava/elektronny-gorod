@@ -18,24 +18,37 @@ from typing import Any
 from homeassistant.components.event import EventDeviceClass, EventEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.util import dt as dt_util
+from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
     AREA_INTERCOM,
+    AREA_INDOOR_CAM,
+    AREA_PUBLIC_CAM,
+    CONF_ACCOUNT_ID,
+    CONF_SUBSCRIBER_ID,
     DOMAIN,
     DOORBELL_CALL_WINDOW_FALLBACK_SEC,
     LOGGER,
     SIGNAL_DOORBELL,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
+from .history import (
+    camera_history_unique_id,
+    history_signal,
+    place_display_name,
+)
 
 EVENT_RING = "ring"
 EVENT_ENDED = "ended"
+EVENT_CALL_ACCEPTED = "call_accepted"
+EVENT_CALL_MISSED = "call_missed"
+EVENT_MOTION = "motion"
 
 # Авто-`ended`: оператор присылает `ended` только при «принят на другом
 # устройстве». На сброс у домофона / истечение времени ответа end-пуша нет —
@@ -45,6 +58,64 @@ EVENT_ENDED = "ended"
 # (и снимает таймер через _cancel_auto_end), так что буфер ничего не ловил.
 # Fallback-окно (нет/невалиден call_invalidated) — shared с sip/call_controller.py.
 _AUTO_END_FALLBACK_SEC = DOORBELL_CALL_WINDOW_FALLBACK_SEC
+
+
+def _place_history_unique_id(
+    account_id: str,
+    subscriber_id: str,
+    place_id: str,
+) -> str:
+    """Return the stable registry ID for one place-history stream."""
+    return (
+        f"{DOMAIN}_event_history_place_"
+        f"{account_id}_{subscriber_id}_{place_id}"
+    )
+
+
+def _place_history_entity_id(account_id: str, place_id: str) -> str:
+    """Return an explicit account/place-scoped default entity ID."""
+    return f"event.{slugify(f'account_{account_id}_place_{place_id}_event_history')}"
+
+
+@callback
+def _migrate_single_place_account_history_entity(
+    hass: HomeAssistant,
+    account_id: str,
+    subscriber_id: str,
+    place_ids: list[str],
+) -> None:
+    """Migrate the prerelease account stream when it maps to one place."""
+    if len(place_ids) != 1:
+        return
+    registry = er.async_get(hass)
+    legacy_unique_id = (
+        f"{DOMAIN}_event_history_account_{account_id}_{subscriber_id}"
+    )
+    legacy_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, legacy_unique_id
+    )
+    if legacy_entity_id is None:
+        return
+
+    place_id = place_ids[0]
+    new_unique_id = _place_history_unique_id(
+        account_id,
+        subscriber_id,
+        place_id,
+    )
+    if registry.async_get_entity_id("event", DOMAIN, new_unique_id) is not None:
+        return
+
+    legacy_object_id = legacy_entity_id.split(".", 1)[1]
+    suffix = legacy_object_id.removeprefix("account_event_history")
+    default_entity_id = suffix == "" or (
+        suffix.startswith("_") and suffix[1:].isdigit()
+    )
+    update: dict[str, str] = {"new_unique_id": new_unique_id}
+    new_entity_id = _place_history_entity_id(account_id, place_id)
+    if default_entity_id and registry.async_get(new_entity_id) is None:
+        update["new_entity_id"] = new_entity_id
+    registry.async_update_entity(legacy_entity_id, **update)
 
 
 async def async_setup_entry(
@@ -65,12 +136,295 @@ async def async_setup_entry(
         if None in key:
             continue
         cur = by_ac.get(key)
-        if cur is None or str(lk.get("entrance_id") or "") < str(cur.get("entrance_id") or ""):
+        if cur is None or str(lk.get("entrance_id") or "") < str(
+            cur.get("entrance_id") or ""
+        ):
             by_ac[key] = lk
 
-    async_add_entities(
-        ElektronnyGorodDoorbellEvent(coordinator, lk) for lk in by_ac.values()
+    entities: list[EventEntity] = []
+    entry_history_signal = history_signal(entry.entry_id)
+    account_id = str(entry.data.get(CONF_ACCOUNT_ID) or "")
+    subscriber_id = str(entry.data.get(CONF_SUBSCRIBER_ID) or "")
+    if account_id and subscriber_id:
+        place_ids = sorted({place_id for place_id, _ in by_ac})
+        _migrate_single_place_account_history_entity(
+            hass,
+            account_id,
+            subscriber_id,
+            place_ids,
+        )
+        entities.extend(
+            ElektronnyGorodPlaceHistoryEvent(
+                coordinator,
+                account_id,
+                subscriber_id,
+                place_id,
+                entry_history_signal,
+                [
+                    lock
+                    for (source_place_id, _), lock in by_ac.items()
+                    if source_place_id == place_id
+                ],
+            )
+            for place_id in place_ids
+        )
+    entities.extend(
+        ElektronnyGorodDoorbellEvent(coordinator, lock_info)
+        for lock_info in by_ac.values()
     )
+    entities.extend(
+        ElektronnyGorodAccessHistoryEvent(
+            coordinator,
+            lock_info,
+            entry_history_signal,
+        )
+        for lock_info in by_ac.values()
+    )
+    entities.extend(
+        ElektronnyGorodCameraHistoryEvent(
+            coordinator,
+            camera_info,
+            entry_history_signal,
+        )
+        for camera_info in (coordinator.data or {}).get("cameras") or []
+        if camera_info.get("source") in ("intercom", "public")
+    )
+    async_add_entities(entities)
+
+
+class ElektronnyGorodPlaceHistoryEvent(
+    CoordinatorEntity[ElektronnyGorodUpdateCoordinator], EventEntity
+):
+    """Aggregate accepted/missed-call history for one configured place."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "account_history"
+    _attr_event_types = [EVENT_CALL_ACCEPTED, EVENT_CALL_MISSED]
+
+    def __init__(
+        self,
+        coordinator: ElektronnyGorodUpdateCoordinator,
+        account_id: str,
+        subscriber_id: str,
+        place_id: str,
+        history_dispatch_signal: str,
+        locks: list[dict[str, Any]],
+    ) -> None:
+        super().__init__(coordinator)
+        self._place_id = place_id
+        self._history_signal = history_dispatch_signal
+        self._sources = {
+            (str(lock["place_id"]), str(lock["access_control_id"])): str(
+                lock.get("name") or lock["access_control_id"]
+            )
+            for lock in locks
+        }
+        self._attr_unique_id = _place_history_unique_id(
+            account_id,
+            subscriber_id,
+            place_id,
+        )
+        self.entity_id = _place_history_entity_id(account_id, place_id)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"place_{place_id}")},
+            name=place_display_name(coordinator.data, place_id),
+            manufacturer="Электронный город",
+            model="Place",
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to sanitized durable-history events."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                self._history_signal,
+                self._handle_history,
+            )
+        )
+
+    @callback
+    def _handle_history(self, payload: dict[str, Any]) -> None:
+        """Route one verified account event and retain safe source metadata."""
+        event_type = payload.get("event_type")
+        source_key = (
+            str(payload.get("place_id") or ""),
+            str(payload.get("source_id") or ""),
+        )
+        source_name = self._sources.get(source_key)
+        if (
+            event_type not in self._attr_event_types
+            or payload.get("source_type") != "accessControl"
+            or source_key[0] != self._place_id
+            or source_name is None
+        ):
+            return
+        attributes = {
+            key: payload[key]
+            for key in ("event_id", "occurred_at")
+            if key in payload
+        }
+        attributes.update(
+            {
+                "place_id": source_key[0],
+                "source_id": source_key[1],
+                "source_name": source_name,
+            }
+        )
+        self._trigger_event(event_type, attributes)
+        self.async_write_ha_state()
+
+
+class ElektronnyGorodAccessHistoryEvent(
+    CoordinatorEntity[ElektronnyGorodUpdateCoordinator], EventEntity
+):
+    """Durable accepted/missed-call history for one access control."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "access_history"
+    _attr_event_types = [EVENT_CALL_ACCEPTED, EVENT_CALL_MISSED]
+
+    def __init__(
+        self,
+        coordinator: ElektronnyGorodUpdateCoordinator,
+        lock_info: dict[str, Any],
+        history_dispatch_signal: str,
+    ) -> None:
+        super().__init__(coordinator)
+        place_id = str(lock_info["place_id"])
+        access_control_id = str(lock_info["access_control_id"])
+        self._place_id = place_id
+        self._access_control_id = access_control_id
+        self._history_signal = history_dispatch_signal
+        entrance_id = lock_info.get("entrance_id")
+        self._attr_unique_id = (
+            f"{DOMAIN}_event_history_access_{place_id}_{access_control_id}"
+        )
+        device_uid = (
+            f"entrance_{place_id}_{access_control_id}_{entrance_id or 'main'}"
+        )
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, device_uid)},
+            name=lock_info["name"],
+            manufacturer="Электронный город",
+            model="Intercom",
+            suggested_area=AREA_INTERCOM,
+            via_device=(DOMAIN, f"place_{place_id}"),
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to sanitized durable-history events."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                self._history_signal,
+                self._handle_history,
+            )
+        )
+
+    @callback
+    def _handle_history(self, payload: dict[str, Any]) -> None:
+        """Route one verified access-control event to this entity."""
+        event_type = payload.get("event_type")
+        if (
+            event_type not in self._attr_event_types
+            or payload.get("source_type") != "accessControl"
+            or str(payload.get("place_id")) != self._place_id
+            or str(payload.get("source_id")) != self._access_control_id
+        ):
+            return
+        attributes = {
+            key: payload[key]
+            for key in ("event_id", "occurred_at")
+            if key in payload
+        }
+        self._trigger_event(event_type, attributes)
+        self.async_write_ha_state()
+
+
+class ElektronnyGorodCameraHistoryEvent(
+    CoordinatorEntity[ElektronnyGorodUpdateCoordinator], EventEntity
+):
+    """Durable verified motion history for one forpost camera."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "camera_history"
+    _attr_device_class = EventDeviceClass.MOTION
+    _attr_event_types = [EVENT_MOTION]
+    _attr_entity_registry_enabled_default = False
+
+    def __init__(
+        self,
+        coordinator: ElektronnyGorodUpdateCoordinator,
+        camera_info: dict[str, Any],
+        history_dispatch_signal: str,
+    ) -> None:
+        super().__init__(coordinator)
+        camera_id = str(camera_info["id"])
+        self._camera_id = camera_id
+        self._history_signal = history_dispatch_signal
+        self._attr_unique_id = camera_history_unique_id(camera_id)
+
+        source = camera_info.get("source") or "public"
+        place_id = camera_info.get("place_id")
+        access_control_id = camera_info.get("access_control_id")
+        entrance_id = camera_info.get("entrance_id")
+        if source == "intercom" and place_id and access_control_id:
+            device_uid = (
+                f"entrance_{place_id}_{access_control_id}_{entrance_id or 'main'}"
+            )
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, device_uid)},
+                name=camera_info.get("name") or camera_id,
+                manufacturer="Электронный город",
+                model="Intercom",
+                suggested_area=AREA_INTERCOM,
+                via_device=(DOMAIN, f"place_{place_id}"),
+            )
+        else:
+            model = "Indoor Camera" if source == "place" else "Public Camera"
+            area = AREA_INDOOR_CAM if source == "place" else AREA_PUBLIC_CAM
+            self._attr_device_info = DeviceInfo(
+                identifiers={(DOMAIN, f"camera_{camera_id}")},
+                name=camera_info.get("name") or camera_id,
+                manufacturer="Электронный город",
+                model=model,
+                suggested_area=area,
+            )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to sanitized durable-history events."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                self._history_signal,
+                self._handle_history,
+            )
+        )
+
+    @callback
+    def _handle_history(self, payload: dict[str, Any]) -> None:
+        """Route one verified motion event to this camera entity."""
+        event_type = payload.get("event_type")
+        if (
+            event_type != EVENT_MOTION
+            or str(payload.get("camera_id")) != self._camera_id
+        ):
+            return
+        attributes = {
+            key: payload[key]
+            for key in (
+                "event_id",
+                "occurred_at",
+                "duration",
+                "recording_available",
+            )
+            if key in payload
+        }
+        self._trigger_event(event_type, attributes)
+        self.async_write_ha_state()
 
 
 class ElektronnyGorodDoorbellEvent(

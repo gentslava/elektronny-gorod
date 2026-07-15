@@ -37,20 +37,50 @@
 
 This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) and Dom.ru services. It implements the APIs of the My Home – Elektronny Gorod and Umnyy Dom.ru applications.
 
-Add your **intercoms, cameras and locks** to Home Assistant: watch video and hear audio, open doors and — **in real time** — receive **doorbell call events** (FCM push) for notifications and automations.
+Add your **intercoms, cameras and locks** to Home Assistant: watch video and
+hear audio, open doors, answer calls, talk to visitors and browse answered and
+missed call history.
 
-> 🔔 **New:** the integration now catches **doorbell calls** and exposes them as an `event` entity — send a push with a camera snapshot and an "Open door" button. See [Doorbell call event](#-doorbell-call-event-fcm-push).
+> ✨ **Coming in 4.0.0:** a complete call screen, SIP answering, two-way audio,
+> FCM events and call history.
+> See the [overview below](#whats-new-in-400) or read the full
+> [release notes](docs/releases/4.0.0.md).
 
 ## Contents
 
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [What's new in 4.0.0](#whats-new-in-400)
 - [Features](#features)
 - [Camera connection via go2rtc](#camera-connection-via-go2rtc)
 - [🔔 Doorbell call event (FCM push)](#-doorbell-call-event-fcm-push)
+- [📞 Call screen and two-way audio](#-call-screen-card)
+- [🕘 Event history](#-event-history)
 - [Automation example: balance](#automation-example-balance)
 - [Issues and Contributions](#issues-and-contributions)
 - [License](#license)
+
+## What's new in 4.0.0
+
+- **Calls without polling:** incoming calls arrive through FCM and are
+  immediately available to Home Assistant automations.
+- **Answer and talk:** SIP answer/hangup, guest video and audio, browser
+  microphone uplink, and `elektronny_gorod.answer` / `hangup` services.
+- **Ready-to-use call screen:** `custom:eg-intercom-call-card` combines video,
+  answer controls, microphone, sound and protected door opening across phones,
+  desktops and wall panels.
+- **Event history:** `custom:eg-event-history-card` displays answered and missed
+  calls, groups them by date/device and merges multiple places or accounts.
+- **Automation events:** new answered/missed calls are exposed as HA `event`
+  entities. Camera-motion history is a separate disabled-by-default entity;
+  enabling it starts polling for that camera.
+- **No reconfiguration:** existing Home Assistant entries do not need to be
+  recreated.
+- **Reliability:** FCM reconnect/watchdog, caller replacement, concurrent
+  call-video access and SIP/go2rtc lifecycle handling were hardened.
+
+There are no breaking changes. Upgrade steps, limitations and the complete list
+are available in [`docs/releases/4.0.0.md`](docs/releases/4.0.0.md).
 
 ## Installation
 
@@ -89,9 +119,16 @@ or manually:
 - Get previews and streams from intercoms and cameras.
 - Manage the opening of locks in real time.
 - **Real-time doorbell call events** (FCM push) — an `event` entity for notifications and automations (show the camera, open the door).
-- View your account balance.
+- **Two-way intercom audio** — answer/hang up, guest video and sound in one
+  card, and talk through the browser microphone.
+- **Answered and missed call history** — one entity per place plus a combined
+  Lovelace card with filters and pagination.
+- Account health: balance, days until blocking and blocked status.
+- Do-not-disturb controls for intercom and management-company calls.
 
-Entity types created: `camera` (video/preview), `lock` (open the door), `event` (doorbell call), `sensor` (balance and more), `binary_sensor`, `switch`.
+Entity types created: `camera` (regular and active-call video), `lock` (open the
+door), `event` (calls and history), `sensor` (balance,
+days-to-block and call state), `binary_sensor`, and `switch`.
 
 > **New:** Now you can connect cameras via [go2rtc](https://github.com/AlexxIT/go2rtc) — this method allows you to get audio from cameras and provides faster and more stable video streaming.
 
@@ -219,6 +256,40 @@ Ready-to-use Lovelace card `custom:eg-intercom-call-card` — the whole call on 
     <td align="center"><img src="docs/features/intercom-two-way-audio/screenshots/en/compact.png" alt="Compact card" width="440"/><br/><b>Compact card</b> (<code>layout: compact</code>) — single row: mini-preview + status + quick buttons</td>
   </tr>
 </table>
+
+Installation and HTTPS/go2rtc requirements:
+[`call-card-install.md`](docs/features/intercom-two-way-audio/call-card-install.md).
+
+## 🕘 Event history
+
+Browse answered and missed calls in a dedicated Home Assistant card and use new
+calls in automations.
+
+<p align="center">
+  <img src="docs/features/mobile-app-parity/screenshots/en/history.png" alt="Answered and missed intercom call history card" width="860"/>
+</p>
+
+The history card is included in the same JavaScript bundle as the call screen.
+Add the resource once:
+
+```text
+/elektronny_gorod_static/eg-intercom-call-card.js
+```
+
+Then select the generated place-history entity:
+
+```yaml
+type: custom:eg-event-history-card
+entity: event.account_123456_place_7890_event_history
+title: Events
+```
+
+Use `entities:` to merge multiple places or configured accounts into one
+timeline. Device filters remain account-aware, and operator text or personal
+data is not shown in the card.
+
+Configuration and limitations:
+[`history-card.md`](docs/features/mobile-app-parity/history-card.md).
 
 ## Automation example: balance
 Here is an example of automation for low balance notification:

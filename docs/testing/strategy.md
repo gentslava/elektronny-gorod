@@ -1,10 +1,10 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-07-15 (394 passed; добавлены HAR-backed regressions 9.9.0
-для public bootstrap auth, push body и explicit H264 live stream)
+Last reviewed: 2026-07-16 (durable history entry/source isolation, opt-in
+camera polling and partial frontend refresh regressions)
 
 Source files:
-- `tests/**` (43 test-модуля + `conftest.py`)
+- `tests/**` (47 test-модулей + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
@@ -33,12 +33,14 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **394 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
-| Test modules | 43 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **432 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
+| Test modules | 47 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
 | Camera / go2rtc | lifecycle, auto-recovery, concurrency, PATCH-first upsert, call-stream teardown |
+| Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Coverage | Процент намеренно не фиксируется без свежего coverage-run; каноническая команда приведена ниже |
 
@@ -52,9 +54,9 @@ camera/go2rtc и security regressions.**
 tests/
 ├── conftest.py                    # PHC fixtures + optional HA-module mocks
 ├── test_init.py / test_config_flow.py / test_options_flow_clear_creds.py
-├── test_http.py / test_api_push.py / test_api_camera.py / test_api_sip.py / test_diagnostics.py
+├── test_http.py / test_api_push.py / test_api_camera.py / test_api_history.py / test_api_sip.py / test_diagnostics.py
 ├── test_camera_*.py / test_call_camera.py / test_go2rtc_*.py
-├── test_event.py / test_fcm.py / test_sensor_call_state.py
+├── test_event.py / test_history.py / test_history_ws.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
 ├── test_sip_*.py / test_uplink_ws.py
 └── entity, visibility, balance, DND, helpers и migration regressions
 ```
@@ -119,7 +121,7 @@ inventory всегда берутся из `tests/test_*.py`; новые сет�
 - `test_update_camera_state_finds_by_id` — этот тест **поймает баг** `c.get("ID")` (см. PROJECT_AUDIT P0 #5).
 - `test_update_lock_state_handles_missing_access_control`.
 
-### 5. API / HTTP (`test_http.py`, `test_api_push.py`, `test_api_sip.py`)
+### 5. API / HTTP (`test_http.py`, `test_api_push.py`, `test_api_history.py`, `test_api_sip.py`)
 
 С mocked aiohttp responses:
 
@@ -133,8 +135,28 @@ inventory всегда берутся из `tests/test_*.py`; новые сет�
 - `test_verify_sms_code_406_invalid_format`.
 - `test_query_profile_401_unauthorized`.
 - `test_query_balance_returns_data`.
+- History contract: exact `/events/search` POST body/sort encoding and exact
+  forpost camera-event query; typed DTO intentionally excludes backend message
+  and preserves requested camera identity separately from internal `CameraID`.
 
-### 6. go2rtc (`test_go2rtc_validate.py`, `test_go2rtc_upsert.py`, `test_go2rtc_audio.py`)
+### 6. Durable history (`test_history.py`, `test_history_ws.py`, `test_event.py`, `test_history_translations.py`)
+
+- Silent first baseline per source, later newest-first overlap and chronological
+  emit; discovering another source does not replay its old rows.
+- Per-stream bounded opaque-ID watermark round-trip prevents restart duplicates.
+- General/camera failures degrade independently; private camera source excluded;
+  disabled camera-history entities make no camera API request.
+- `HistoryManager` persists only ID lists, cancels interval on unload and skips
+  overlapping ticks instead of queueing API cycles.
+- Access/camera EventEntity routing uses config-entry-scoped signals, stable IDs,
+  allowlisted state attrs and ru/en translations for every declared event type.
+- Browse WebSocket verifies EventEntity read permission, config-entry/source
+  binding, page bounds and exact sanitized previous-page response.
+- Frontend model tests exact command shape, untrusted/cross-entity response
+  rejection, overlap dedup, partial-refresh feed preservation, date groups,
+  time formatting and RU/EN labels.
+
+### 7. go2rtc (`test_go2rtc_validate.py`, `test_go2rtc_upsert.py`, `test_go2rtc_audio.py`)
 
 - `test_validate_go2rtc_happy_path` — GET 200 + PUT 200 + DELETE cleanup.
 - `test_validate_go2rtc_unreachable` — connection error.
@@ -142,14 +164,14 @@ inventory всегда берутся из `tests/test_*.py`; новые сет�
 - `test_normalize_base_url_strips_slash`.
 - `test_derive_rtsp_host`.
 
-### 7. Helpers (`test_helpers.py`)
+### 8. Helpers (`test_helpers.py`)
 
 - `test_hash_password_matches_known_vector`.
 - `test_hash_password_timestamp_matches_known_vector`.
 - `test_find_returns_first_match`.
 - `test_dedupe_by_id_keeps_first`.
 
-### 8. Realtime intercom (`test_fcm.py`, `test_sip_*.py`, `test_call_camera.py`)
+### 9. Realtime intercom (`test_fcm.py`, `test_sip_*.py`, `test_call_camera.py`)
 
 - FCM parse/reconnect/watchdog и dispatcher lifecycle.
 - REGISTER profile: FCM `Call-Id`, `Accept: application/sdp`, Contact push-params
@@ -205,8 +227,8 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 394 passed
-  после сверки API-контрактов приложений 9.9.0.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 432 passed.
+- [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.

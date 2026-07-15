@@ -1,7 +1,7 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0 metadata/API reconciliation;
-HAR-backed camera/push/http regressions; suite 394 passed)
+Last reviewed: 2026-07-16 (history entry/source isolation, opt-in camera polling
+and partial frontend refresh synchronized)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -46,8 +46,8 @@ elektronny-gorod/
 ├── workflow.md                    ← процесс
 ├── LICENSE                        ← MIT
 ├── README.md                      ← пользовательская документация (RU)
-├── README.en_EN.md                ← минимальная EN-документация
-├── info.md                        ← HACS info card
+├── README.en_EN.md                ← пользовательская документация (EN)
+├── info.md                        ← краткая HACS feature/config card
 ├── hacs.json                      ← HACS manifest
 │
 ├── custom_components/elektronny_gorod/
@@ -64,6 +64,8 @@ elektronny-gorod/
 │   ├── binary_sensor.py           ← account_blocked platform
 │   ├── switch.py                  ← DND switches platform
 │   ├── event.py                   ← doorbell call event platform (ADR-0011)
+│   ├── history.py                 ← durable REST history: baseline, dedup, Store lifecycle
+│   ├── history_ws.py              ← read-only account/per-device browse старых call events
 │   ├── fcm.py                     ← FCM listener для события вызова (ADR-0011)
 │   ├── sip/                       ← SIP-стек two-way audio, 14 модулей (A-81 + A-85 uplink; ADR-0012/0013)
 │   │   ├── __init__.py
@@ -83,7 +85,7 @@ elektronny-gorod/
 │   ├── uplink_ws.py               ← WS-команда intercom_uplink: микрофон → SIP-uplink (ADR-0013)
 │   ├── www/                       ← static Lovelace-ресурсы (зарегистрированы из uplink_ws.py)
 │   │   ├── eg-intercom-mic-card.js ← карта микрофона домофона: getUserMedia → HA-WS (ADR-0013)
-│   │   └── eg-intercom-call-card.js ← карта экрана вызова (бандл из frontend/, Slice 3b)
+│   │   └── eg-intercom-call-card.js ← общий bundle экрана вызова и history card
 │   ├── services.yaml              ← сервисы answer / hangup (A-81)
 │   ├── go2rtc.py                  ← go2rtc валидация / upsert
 │   ├── entity_migration.py        ← стабильные unique_id + registry migration
@@ -128,15 +130,15 @@ elektronny-gorod/
 |---|---|---|
 | [`manifest.json`](../../custom_components/elektronny_gorod/manifest.json) | HA integration manifest: domain, version, iot_class, config_flow | строки 1-14 |
 | [`hacs.json`](../../hacs.json) | HACS publishing: min HA version, zip release, country=RU | строки 1-7 |
-| [`info.md`](../../info.md) | HACS info card | — |
-| [`README.md`](../../README.md) / [`README.en_EN.md`](../../README.en_EN.md) | пользовательская документация | — |
+| [`info.md`](../../info.md) | краткий HACS feature/config overview со ссылкой на README | — |
+| [`README.md`](../../README.md) / [`README.en_EN.md`](../../README.en_EN.md) | полная пользовательская документация RU/EN | — |
 | [`LICENSE`](../../LICENSE) | MIT | — |
 
 ### Entry points
 
 | Файл | Назначение | Evidence |
 |---|---|---|
-| [`__init__.py`](../../custom_components/elektronny_gorod/__init__.py) | `async_setup_entry` (включая старт `DoorbellFcmListener` — ADR-0011), `async_unload_entry`, `async_migrate_entry` (v1→2→3) | — |
+| [`__init__.py`](../../custom_components/elektronny_gorod/__init__.py) | `async_setup_entry` (включая lifecycle `HistoryManager` и старт `DoorbellFcmListener` — ADR-0011), `async_unload_entry`, `async_migrate_entry` (v1→2→3) | — |
 | [`PLATFORMS`](../../custom_components/elektronny_gorod/__init__.py) | BINARY_SENSOR, CAMERA, EVENT, LOCK, SENSOR, SWITCH | — |
 
 ### Config flow
@@ -151,8 +153,10 @@ elektronny-gorod/
 | Файл | Назначение | Особенности |
 |---|---|---|
 | [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) | `DataUpdateCoordinator` | `update_interval=5min`, `_async_update_data` → `{places, balances, cameras, locks}` (ADR-0002) |
-| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, push-registration (`register_push_device` / `unregister_push_device` — привязка FCM-токена у оператора, ADR-0011), `mint_sip_device` (SIP-креды `{login, password, realm}` для приёма вызова, A-81) | использует shared `HTTP` (ADR-0008) |
+| [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, sanitized history DTO (`query_events`, `query_camera_events`), push-registration и SIP credentials | использует shared `HTTP` (ADR-0008); history parsers не сохраняют backend `message` |
 | [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
+| [`history.py`](../../custom_components/elektronny_gorod/history.py) | отдельный polling durable history | silent page-0 baseline per source; bounded ID dedup в HA `Store`; entry-scoped dispatcher; 5-minute interval; camera polling только для enabled motion-history entities; partial failure isolation |
+| [`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) | read-only WebSocket browse старых вызовов | `elektronny_gorod/history`; проверка `POLICY_READ`; place entity охватывает access controls одного места, per-device entity — один access control; page `0..100`; безопасные source metadata |
 
 ### Платформы (entity)
 
@@ -163,7 +167,7 @@ elektronny-gorod/
 | [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | (1) `balance` — `device_class=MONETARY` + long-term statistics. (2) `days_to_block` (A-57) — `device_class=DURATION` + `unit=d`. (3) `call_state` (Slice 3a) — `device_class=ENUM` (idle/ringing/connecting/active/ended/error), push-driven из `EVENT_CALL_STATE`, на каждый домофон |
 | [`switch.py`](../../custom_components/elektronny_gorod/switch.py) | `switch` | Do Not Disturb (mirror «Мой Дом» → Настройки → Уведомления). 3 entity per place: master `dnd_root` + 2 dependent (`dnd_intercom_calls`, `dnd_management_company_calls`). Dependent `_attr_available = root.status` — HA нативно красит серым при master OFF |
 | [`binary_sensor.py`](../../custom_components/elektronny_gorod/binary_sensor.py) | `binary_sensor` | `blocked` (A-57): `device_class=PROBLEM`, `True` когда `blocked=True` в `/finance`. Реюзает balance device через identifier `(DOMAIN, place_{id})` |
-| [`event.py`](../../custom_components/elektronny_gorod/event.py) | `event` | Doorbell call (ADR-0011): `device_class=DOORBELL`, типы `ring`/`ended`. Одна сущность на домофон `(place_id, access_control_id)`, дедуп по AC (min entrance), device общий с lock/intercom-camera. Ловит `SIGNAL_DOORBELL` из `fcm.py` через dispatcher, стреляет `_trigger_event` с атрибутами (gate/apartment/call_id/allow_open/…). Открытие двери — существующий `lock`, видео — go2rtc |
+| [`event.py`](../../custom_components/elektronny_gorod/event.py) | `event` | Realtime doorbell `ring`/`ended` (ADR-0011) плюс durable `call_accepted`/`call_missed` per place и per access control, а также disabled-by-default `motion` per intercom/public camera. Place-history привязана к устройству адреса; default entity ID содержит account/place IDs. History dispatcher изолирован по config entry и маршрутизируется по place/source ID; state attributes заданы allowlist без backend message |
 
 ### Внешние интеграции
 
@@ -200,8 +204,8 @@ elektronny-gorod/
 | [`call_camera.py`](../../custom_components/elektronny_gorod/call_camera.py) | `ElektronnyGorodCallCamera` — camera-сущность `camera.intercom_call`; one-build-per-call + in-flight dedup, reuse живого `eg_<id>` producer, teardown `eg_intercom_call` на terminal-state; вне вызова → `None` |
 | [`uplink_ws.py`](../../custom_components/elektronny_gorod/uplink_ws.py) | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): микрофон из Lovelace-карты → `DoorbellCallController.feed_uplink`; static-регистрация JS-карты (`async_register_uplink_ws_command` / `async_register_uplink_card`, зовутся из `__init__.py`) (ADR-0013) |
 | [`www/eg-intercom-mic-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-mic-card.js) | Lovelace-карта микрофона домофона: `getUserMedia` + AudioWorklet → Int16 PCM по авторизованному HA-WebSocket (ADR-0013) |
-| [`www/eg-intercom-call-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js) | Карта экрана вызова (Slice 3b) — собранный бандл из `frontend/` (Lit+TS). Не редактировать вручную |
-| [`frontend/`](../../frontend/) | Исходники карточки вызова (Lit+TS, esbuild→`www/`, vitest). `src/eg-intercom-call-card.ts` (оркестратор) + `theme/tokens.ts` (токен-слой `--eg-*`→HA) + `components/` (eg-icon — lucide-иконки, call-stage — видео+оверлеи, call-video, open-control — слайдер, mic-controller) + `state-machine.ts`; перевёрстка по `design.pen` (см. [plan-call-card-reverstka](../features/intercom-two-way-audio/plan-call-card-reverstka.md)); `node_modules` в .gitignore |
+| [`www/eg-intercom-call-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js) | Общий собранный бандл `custom:eg-intercom-call-card` и `custom:eg-event-history-card` из `frontend/` (Lit+TS). Не редактировать вручную |
+| [`frontend/`](../../frontend/) | Исходники карточек вызова и истории (Lit+TS, esbuild→`www/`, vitest). History UI объединяет несколько place feeds разных config entry, независимо листает их, фильтрует по составному device key, строго нормализует WS response и группирует строки по локальной дате |
 | [`services.yaml`](../../custom_components/elektronny_gorod/services.yaml) | сервисы `answer` / `hangup` |
 
 ### Diagnostics / безопасность
@@ -240,6 +244,10 @@ elektronny-gorod/
 | [`tests/test_visibility.py`](../../tests/test_visibility.py) | hidden_by sync (first_add, USER override, un-hide, re-add) |
 | [`tests/test_visibility_real.py`](../../tests/test_visibility_real.py) | production-replica (реальные HAR-данные) + migration v2 |
 | [`tests/test_event.py`](../../tests/test_event.py) | doorbell `event`-сущность (ADR-0011): дедуп по AC, фильтр SIGNAL по `(place_id, ac_id)`, `_trigger_event` на `ring`/`ended`, игнор чужого/неизвестного event_type |
+| [`tests/test_api_history.py`](../../tests/test_api_history.py) | точные wire contracts и sanitized typed DTO для general/camera history |
+| [`tests/test_history.py`](../../tests/test_history.py) | per-source silent baseline, bounded dedup/restart, opt-in camera polling, event routing, partial failures, Store/timer lifecycle и backpressure |
+| [`tests/test_history_ws.py`](../../tests/test_history_ws.py) | entity permission, exact source routing, sanitized previous-page response, page bounds и idempotent registration |
+| [`tests/test_history_translations.py`](../../tests/test_history_translations.py) | parity history event types в source/en/ru translations |
 | [`tests/test_sensor_call_state.py`](../../tests/test_sensor_call_state.py) | `sensor.*_call_state` (Slice 3a): создание, дефолт `idle`, отражение `EVENT_CALL_STATE` (ringing/active + `started_at`/`call_id`), сброс `started_at` на `ended`, игнор чужого AC |
 | [`tests/test_api_push.py`](../../tests/test_api_push.py) | `register_push_device` / `unregister_push_device`: HAR 9.9 body split (`deviceType` только subscriberNotifications), DELETE без `pushToken`, graceful False |
 | [`tests/test_api_camera.py`](../../tests/test_api_camera.py) | HAR 9.9 live-stream contract: `LightStream=0&Format=H264` |

@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0: AVD parity inventory and
-implementation-ready history/archive/guest/key/private-camera backlog)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0: durable history polling and
+old-call Lovelace browse implemented; archive/guest/key/private-camera backlog)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -388,20 +388,26 @@ Quality gates:
   `REGISTER → INVITE → 100 Trying → 200 OK → RTP`; FCM даёт ring signal, SIP
   даёт call/media. См. A-81 и ADR-0012/0013.
 
-### A-50. Camera events endpoints не реализованы
+### A-50. Camera motion event stream реализован; archive остаётся
 
-- **Severity:** P2
+- **Status:** ✅ **RESOLVED IN `feat/durable-event-history`** для verified
+  forpost motion stream; Media Source/archive остаётся A-59 / Slice 2.
+- **Original severity:** P2
 - **Evidence:** 
   - `GET /api/mh-camera-personal/mobile/v1/cameras/{id}/events` — `{externalEvents: [{ID, Time, Duration, isAvailable}], recordingDisabledEvents: []}`
   - `GET /rest/v2/forpost/cameras/{id}/events` — альтернативный v2 endpoint
 - **Runtime evidence (9.9.0 AVD):** экран Events открывает archive на точном
   timestamp; archive даёт seek, список clips/duration и download. Signed
   playback/download URL — credential, не entity attribute.
-- **Impact:** нет motion-history и доступа к записи пропущенного события из HA.
-- **Recommended fix:** per-camera `EventEntity` только для новых whitelisted
-  events после baseline + integration `MediaSource` для старого журнала и
-  on-demand archive. Не импортировать месяцы истории в recorder. Полный PRD,
-  security и test matrix —
+- **Resolution evidence:** `api.query_camera_events` использует exact v2 query,
+  parser отбрасывает `Message`, `HistoryManager` делает silent baseline и
+  bounded dedup, а per-camera `EventEntity` принимает только verified
+  `EventSubjectID=126`. Requested camera ID не смешивается с внутренним
+  response `CameraID`; сбой одной камеры изолирован. Motion-history entity
+  disabled-by-default, поэтому camera endpoint опрашивается только после её
+  явного включения пользователем.
+- **Remaining scope:** старый журнал, playback/download и signed URL не входят
+  в entity; это Slice 2 в
   [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
 
 ### A-51. Bootstrap response (`device-installations`) не используется для discovery
@@ -492,7 +498,7 @@ Quality gates:
   5 unit-тестов (TDD strict — RED first, потом GREEN). Translations ru/en.
   См. CHANGELOG.
 
-### A-58. Real-time event delivery resolved; durable REST history remains
+### A-58. Real-time и durable REST history реализованы
 
 - **Severity:** P1 (Silver real-time path для домофонных звонков).
 - **Area:** Feature gap / real-time alternative.
@@ -515,11 +521,28 @@ Quality gates:
   `fcm.py` + `event`-сущность + `api.register_push_device`. Polling
   `/events/search` остаётся возможным fallback/backfill, но для realtime-вызова
   больше не нужен.
-- **Remaining scope (не reopening realtime finding):** durable history/backfill
-  из `/events/search` ещё не реализован. Первый poll обязан установить baseline
-  без emit старых событий; полный журнал следует browse-ить отдельно, а не
-  переигрывать в automation. Implementation package —
-  [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
+- **Durable status:** ✅ **RESOLVED IN `feat/durable-event-history`** — отдельный
+  `HistoryManager` читает page 0 раз в пять минут, первый ответ каждого source
+  устанавливает silent baseline, bounded opaque-ID watermark переживает
+  restart, а overlapping poll пропускается. В HA попадают только verified
+  accepted/missed call events; старые страницы не переигрываются в automation.
+  `history_ws.py` + `custom:eg-event-history-card` дают постраничный browse
+  старых accepted/missed строк. Отдельная history entity создаётся на каждое
+  место и привязывается к устройству адреса; карточка может независимо
+  объединить несколько мест/аккаунтов и фильтровать по составному source key;
+  прежний per-device режим сохранён.
+  Dispatcher signal изолирован по config entry; добавление нового
+  place/access-control не replay-ит его старую историю. Partial frontend
+  refresh сохраняет ранее загруженные строки временно недоступного feed.
+  Наблюдавшийся transient `502` на `events/search` остаётся изолированной
+  деградацией: browse показывает safe unavailable, poller продолжает на
+  следующем интервале без немедленного duplicate POST. History accepted/missed
+  entities не используют несовместимый HA doorbell device class (он
+  зарезервирован за realtime `ring`/`ended` entity).
+  Entity permission/source binding и sanitized allowlist response не допускают
+  replay в dispatcher/state или чтение произвольного аккаунта.
+- **Remaining product scope:** archive playback/download через Media Source —
+  Slice 2, не часть finding о delivery.
 - **Каверзы:** канал опирается на приватные API Google — долгосрочных гарантий
   нет (см. A-80). Поэтому весь FCM-флоу под graceful degradation.
 - **Scope:** v1 — только NTK/myhome (`myhome.proptech.ru`). Дом.ру (HMS/Huawei

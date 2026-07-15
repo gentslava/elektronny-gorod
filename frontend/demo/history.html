@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <title>EG event history card demo</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --primary-text-color: #f3f3f3;
+        --secondary-text-color: #a9a9a9;
+        --primary-color: #03a9f4;
+        --divider-color: #3a3a3a;
+        --card-background-color: #1c1c1c;
+        --ha-card-background: #1c1c1c;
+        --ha-card-border-radius: 20px;
+      }
+
+      body {
+        margin: 0;
+        background: #111;
+        font-family: Roboto, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      #stage {
+        box-sizing: border-box;
+        width: 860px;
+        min-height: 720px;
+        padding: 28px;
+        background: #111;
+      }
+
+      #shadow-output {
+        display: none;
+      }
+    </style>
+  </head>
+  <body>
+    <main id="stage"></main>
+    <script type="module">
+      await import("../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js");
+
+      const lang = new URLSearchParams(location.search).get("lang") === "en" ? "en" : "ru";
+      const copy = lang === "en"
+        ? {
+            title: "Call history",
+            accountOne: "Home",
+            accountTwo: "Country house",
+            entrance: "Entrance 2",
+            gate: "Gate 1",
+          }
+        : {
+            title: "История событий",
+            accountOne: "Квартира",
+            accountTwo: "Загородный дом",
+            entrance: "Подъезд 2",
+            gate: "Калитка 1",
+          };
+      const timestamp = (value) => Date.parse(value) / 1000;
+
+      const card = document.createElement("eg-event-history-card");
+      card.setConfig({
+        entities: ["event.account_one", "event.account_two"],
+        title: copy.title,
+      });
+      card.hass = {
+        locale: { language: lang },
+        states: {},
+        callWS: async ({ entity_id: entityId }) => ({
+          entity_id: entityId,
+          source_name: entityId === "event.account_two" ? copy.accountTwo : copy.accountOne,
+          events: entityId === "event.account_two"
+            ? [
+                {
+                  event_id: "gate-missed",
+                  event_type: "call_missed",
+                  occurred_at: timestamp("2026-07-15T09:03:00+07:00"),
+                  place_id: "1002",
+                  source_id: "3001",
+                  source_name: copy.gate,
+                },
+                {
+                  event_id: "gate-accepted",
+                  event_type: "call_accepted",
+                  occurred_at: timestamp("2026-07-13T20:39:00+07:00"),
+                  place_id: "1002",
+                  source_id: "3001",
+                  source_name: copy.gate,
+                },
+              ]
+            : [
+                {
+                  event_id: "entrance-missed-latest",
+                  event_type: "call_missed",
+                  occurred_at: timestamp("2026-07-15T16:03:00+07:00"),
+                  place_id: "1001",
+                  source_id: "2001",
+                  source_name: copy.entrance,
+                },
+                {
+                  event_id: "entrance-missed",
+                  event_type: "call_missed",
+                  occurred_at: timestamp("2026-07-15T16:02:00+07:00"),
+                  place_id: "1001",
+                  source_id: "2001",
+                  source_name: copy.entrance,
+                },
+                {
+                  event_id: "entrance-accepted",
+                  event_type: "call_accepted",
+                  occurred_at: timestamp("2026-07-15T01:04:00+07:00"),
+                  place_id: "1001",
+                  source_id: "2001",
+                  source_name: copy.entrance,
+                },
+              ],
+          page: 0,
+          last: true,
+        }),
+      };
+      document.querySelector("#stage").append(card);
+      await card.updateComplete;
+      await new Promise((resolve) => setTimeout(resolve, 600));
+      await card.updateComplete;
+      window.__egReady = true;
+
+      const output = document.createElement("pre");
+      output.id = "shadow-output";
+      output.textContent = card.shadowRoot?.textContent ?? "NO_SHADOW_ROOT";
+      document.body.append(output);
+    </script>
+  </body>
+</html>

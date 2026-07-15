@@ -131,6 +131,38 @@
             }
           }
         }
+      },
+      "access_history": {
+        "name": "История вызовов домофона",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "call_accepted": "Вызов принят",
+              "call_missed": "Вызов пропущен"
+            }
+          }
+        }
+      },
+      "account_history": {
+        "name": "История событий",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "call_accepted": "Вызов принят",
+              "call_missed": "Вызов пропущен"
+            }
+          }
+        }
+      },
+      "camera_history": {
+        "name": "История движения",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "motion": "Движение"
+            }
+          }
+        }
       }
     },
     "lock": {

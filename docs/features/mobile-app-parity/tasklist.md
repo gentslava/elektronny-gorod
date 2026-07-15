@@ -1,6 +1,6 @@
 # Tasklist: mobile app parity slices
 
-- **Date:** 2026-07-15
+- **Date:** 2026-07-16
 - **Owner:** @gentslava
 - **Linked plan:** [`plan.md`](plan.md)
 
@@ -28,28 +28,42 @@ the corresponding spec/capture gate is approved.
 
 - [ ] **T-010** Add additive HTTP PUT support and unit tests. _Acceptance:_ JSON
   content type, timeout, auth and redacted logging match POST. _Plan:_ Slice 0.
-- [ ] **T-011** Add typed history/archive API methods. _Acceptance:_ exact HAR
-  fixtures pass, including 11005 and HTTP-200 business error. _Audit:_ A-50/A-59.
+- [x] **T-011** Add typed, sanitized history API methods. _Acceptance:_ exact
+  general/forpost URL, query/body and ID mapping pass; backend message is absent
+  from DTO. Archive/11005 methods remain T-031. _Audit:_ A-50/A-58.
 - [ ] **T-012** Add guest/key/settings methods only when T-001/T-002/T-003
   exists. _Acceptance:_ no guessed request field. _Audit:_ A-93..A-95.
 
 ## Slice 1 — history events
 
-- [ ] **T-020** Implement first-page baseline/watermark. _Acceptance:_ old
-  fixture emits zero events. _Audit:_ A-58.
-- [ ] **T-021** Implement bounded dedup and whitelist mapping. _Acceptance:_ one
+- [x] **T-020** Implement first-page baseline/watermark. _Acceptance:_ old
+  fixture emits zero events; a newly discovered place/access-control gets its
+  own silent baseline without replay. _Audit:_ A-58.
+- [x] **T-021** Implement bounded dedup and whitelist mapping. _Acceptance:_ one
   new event triggers once across overlapping polls/restart. _Audit:_ A-50/A-58.
-- [ ] **T-022** Add/unload dedicated polling lifecycle. _Acceptance:_ no leaked
+- [x] **T-022** Add/unload dedicated polling lifecycle. _Acceptance:_ no leaked
   tasks/listeners after config-entry unload. _Audit:_ A-58.
-- [ ] **T-023** Add per-camera motion EventEntity only for verified event types.
-  _Acceptance:_ declared types/device mapping and translations pass. _Audit:_ A-50.
+- [x] **T-023** Add per-camera motion EventEntity only for verified event types.
+  _Acceptance:_ declared types/device mapping and translations pass; entity is
+  disabled by default and camera API polling starts only when enabled. _Audit:_ A-50.
+- [x] **T-024** Add entity-scoped previous-page WebSocket browse.
+  _Acceptance:_ `POLICY_READ`, source routing, page `0..100`, safe API failure
+  and exact sanitized response are covered. _Audit:_ A-58/S-21.
+- [x] **T-025** Add `custom:eg-event-history-card` to the existing bundle.
+  _Acceptance:_ RU/EN date groups, accepted/missed rows, refresh, load-more,
+  loading/empty/error states and responsive HA-theme styling. _Audit:_ A-58.
+- [x] **T-026** Harden the frontend history boundary. _Acceptance:_ malformed
+  events and cross-entity responses are rejected; page overlap deduplicates by
+  opaque event ID; partial refresh preserves rows of failed feeds. _Audit:_ S-21.
 
 ## Slice 2 — archive
 
 - [ ] **T-030** Implement Media Source browse tree with opaque identifiers.
   _Acceptance:_ no signed URL in browse response. _Audit:_ A-50.
-- [ ] **T-031** Implement on-demand playback/download resolver and retention
-  errors. _Acceptance:_ 11005 and unavailable event are user-readable. _Audit:_ A-59.
+- [ ] **T-031** Add typed archive playback/download methods and on-demand
+  resolver, including retention errors. _Acceptance:_ exact fixtures cover
+  11005, HTTP-200 business error and unavailable event with user-readable
+  mapping. _Audit:_ A-59.
 - [ ] **T-032** Decide/prove direct resolve vs HA proxy, including Range and
   cancellation. _Acceptance:_ security review + streaming test. _Audit:_ A-50.
 - [ ] **T-033** Run caplog/storage/state sentinel scan for signed URL.
@@ -91,11 +105,14 @@ the corresponding spec/capture gate is approved.
 
 ## Finalization
 
-- [ ] **T-070** Update API reference, audit, roadmap, feature docs and release
+- [x] **T-070** Update API reference, audit, roadmap, feature docs and release
   notes in each implementation PR.
-- [ ] **T-071** Run focused/full pytest, markdown link checker, `git diff
-  --check` and secret sentinel scan.
-- [ ] **T-072** Update public README/info only for features actually shipped.
+- [x] **T-071** Run focused/full pytest, markdown link checker, `git diff
+  --check` and secret sentinel scan. _Evidence:_ 47 focused + 432 full backend
+  and 62 frontend tests passed; TypeScript check and production build clean;
+  changed-doc links and diff check clean; global link scan still reports 11
+  pre-existing template/private-memory references outside this slice.
+- [x] **T-072** Update public README/info only for features actually shipped.
 
 ## Dependencies
 
@@ -111,12 +128,12 @@ all implemented slices ─► T-070..T-072
 
 | Status | Count |
 |---|---:|
-| done | 2 |
+| done | 13 |
 | in progress | 0 |
-| pending | 28 |
+| pending | 20 |
 
 ## Quality gates
 
-- `PLAN_APPROVED` before implementation.
+- `PLAN_APPROVED` granted for Slice 1; required separately for later slices.
 - `IMPLEMENTATION_STEP_OK` per slice.
 - `TESTS_PASS`, `SECURITY_OK`, `DOCS_UPDATED` before merge.

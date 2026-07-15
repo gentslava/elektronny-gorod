@@ -1241,6 +1241,13 @@ camera-id из `/rest/v2/places/.../public/cameras`. Это два разных
 истекло retention). На `IsGotoEnabled=1` можно идти за video URL через
 `/rest/v1/forpost/events/{ID}/downloads`.
 
+🟢 **Реализовано в `feat/durable-event-history`:**
+[`api.py:query_camera_events`](../../custom_components/elektronny_gorod/api.py)
+возвращает sanitized `CameraHistoryEvent`; `Message` отбрасывается на parser
+boundary, а entity маршрутизируется по ID из request, не по внутреннему
+`CameraID`. Polling охватывает только intercom/public cameras и verified
+`EventSubjectID=126`; archive/download остаётся Slice 2.
+
 ## Финансы / баланс
 
 ### `GET /api/mh-payment/mobile/v1/finance?placeId={place_id}`
@@ -1282,8 +1289,14 @@ Lovelace `tap_action: url` или mobile notification `OPEN_URL` по атриб
 
 Request body:
 ```json
-{ "placeIds": [<PLACE_ID>] }
+{ "placeIds": [<PLACE_ID_1>, <PLACE_ID_2>] }
 ```
+
+Endpoint не привязан к одному домофону: он возвращает общую ленту выбранных
+мест, а конкретный источник каждой строки задаётся парой
+`placeId + source.type + source.id`. Place-history entity передаёт свой
+`placeId`; per-device представление дополнительно фильтруется локально по
+access control.
 
 Query: `page=<0..N>` (pagination), `sort=occurredAt,DESC` (URL-encoded запятая, `sort=occurredAt%2CDESC`).
 
@@ -1370,7 +1383,17 @@ Runtime capture 9.9.0 подтвердил последовательность 
   повторно эмитить как новые HA events. Не доверять `totalElements`; пагинация
   заканчивается только по `last=true`.
 
-🔵 **У нас не реализован.**
+🟢 **Реализовано в `feat/durable-event-history`:**
+[`history.py`](../../custom_components/elektronny_gorod/history.py) использует
+page 0 для silent baseline и bounded per-stream dedup в `Store`. В HA эмитятся
+только новые `accessControlCallAccepted`/`accessControlCallMissed`.
+[`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) отдельно
+читает запрошенные страницы `0..100` для `custom:eg-event-history-card`: команда
+проверяет HA `POLICY_READ` на выбранную history EventEntity, жёстко связывает её
+с одним place/access-control и возвращает только `event_id`, mapped type и
+timestamp. Browse не вызывает dispatcher и поэтому не воспроизводит старые
+строки как новые automation events. Backend `message` не входит в DTO, state,
+storage, logs или WebSocket response. Archive playback/media остаётся Slice 2.
 
 ## Real-time каналы (несколько одновременно)
 

@@ -1,6 +1,7 @@
 Status: Active
 Owner: Documentation / AIDD Agent
-Last reviewed: 2026-07-15 (9.9.0 mobile-app parity research package and drift reconciliation)
+Last reviewed: 2026-07-16 (history isolation, opt-in camera polling and public
+4.0.0 documentation synchronized)
 
 Source files:
 - AIDD-документы в `docs/` (этот каталог и подкаталоги)
@@ -88,7 +89,9 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 
 ## Где не AIDD-документация
 
-- Пользовательская документация: [`../../README.md`](../README.md), [`../../README.en_EN.md`](../README.en_EN.md).
+- Пользовательская документация: [`../../README.md`](../README.md),
+  [`../../README.en_EN.md`](../README.en_EN.md), включая обзор 4.0.0, экран
+  вызова и карточку истории.
 - HACS: [`../../hacs.json`](../hacs.json), [`../../info.md`](../info.md).
 - CI: [`../../.github/workflows/`](../.github/workflows/).
 

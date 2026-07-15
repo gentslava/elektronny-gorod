@@ -1,0 +1,3 @@
+# Minified Lit runtime contains semantically significant line-end whitespace
+# inside template literals. Source files remain covered by git whitespace checks.
+custom_components/elektronny_gorod/www/eg-intercom-call-card.js -whitespace

@@ -40,13 +40,31 @@ fixtures and capability detection.
 
 ### Slice 1: durable event polling
 
+- **Status:** implemented in `feat/durable-event-history`.
 - **Files:** `api.py`, a dedicated history manager, `event.py`, tests.
 - **Change:** page-0 baseline, bounded ID watermark/dedup, whitelisted event
   mapping. Do not call history from the main coordinator every five minutes if a
   separate interval/task gives clearer lifecycle and backpressure.
 - **Acceptance:** old fixture emits zero events; one new ID emits once; restart
-  and overlapping pages do not duplicate; unload cancels the task.
+  and overlapping pages do not duplicate; unload cancels the interval; a slow
+  poll does not queue another cycle. Covered by `test_api_history.py`,
+  `test_history.py`, `test_event.py` and translation parity tests.
 - **Risk:** medium; wrong baseline can trigger user automations.
+
+### Slice 1b: old-call history browser
+
+- **Status:** implemented in `feat/durable-event-history`.
+- **Files:** `history_ws.py`, `__init__.py`, `frontend/src/history/`,
+  `frontend/src/eg-event-history-card.ts`, focused backend/frontend tests.
+- **Change:** read previous accepted/missed pages only when an authorized
+  Lovelace client requests them. Resolve the selected history EventEntity via
+  registry/config entry, enforce `POLICY_READ`, bind to its exact
+  place/access-control and return only ID/type/timestamp.
+- **Acceptance:** page overlap is deduplicated in the view model; page bounds
+  and entity mismatch are rejected; previous rows never touch dispatcher,
+  EventEntity state or the watermark Store; mobile/desktop loading, empty and
+  error states exist in RU/EN.
+- **Risk:** medium; a global WS command must not bypass per-entity HA access.
 
 ### Slice 2: archive media source
 
@@ -105,7 +123,7 @@ fixtures and capability detection.
 ## Dependencies
 
 ```text
-HAR fixtures ─► Slice 0 ─┬─► Slice 1 ─► Slice 2
+HAR fixtures ─► Slice 0 ─┬─► Slice 1 ─► Slice 1b ─► Slice 2
                          ├─► Slice 3
                          ├─► Slice 4 ─► Slice 5
                          └─► Slice 6
@@ -150,11 +168,11 @@ proxy URL should use authenticated access or `async_sign_path` with a short TTL.
 
 ## Migration and rollback
 
-No config-entry version bump for additive discovered entities/actions. New
-manager tasks must unregister through entry unload. Each feature is a separate
-slice/PR and can be removed without changing stored credentials. If storage is
-introduced for event watermark, version its schema independently and retain
-only opaque event IDs/timestamps.
+No config-entry version bump for additive discovered entities/actions. Slice 1
+uses independent HA `Store` schema v1 under
+`elektronny_gorod.history.{entry_id}` and retains at most 200 opaque IDs per
+stream—no timestamps, messages or signed URLs. Its interval unregisters through
+entry unload. Each later feature remains a separate slice/PR.
 
 ## Open questions
 
@@ -163,4 +181,4 @@ matching task in [`tasklist.md`](tasklist.md) supplies a sanitized fixture.
 
 ## Quality gate
 
-`PLAN_APPROVED` — not yet granted.
+`PLAN_APPROVED` — granted for Slice 1; later slices require their own gate.

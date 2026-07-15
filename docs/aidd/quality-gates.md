@@ -1,6 +1,7 @@
 Status: Active
 Owner: Validator Agent
-Last reviewed: 2026-07-15 (TESTS_PASS evidence linked to current test strategy)
+Last reviewed: 2026-07-16 (TESTS_PASS: 432 backend + 62 frontend, exact API
+contracts, history isolation and background-task lifecycle regressions)
 
 Source files:
 - весь репозиторий
@@ -92,7 +93,7 @@ Used by agents:
 | Owner | QA Agent |
 | Required commands | `PYTHONPATH=. .venv/bin/pytest tests/ -q` |
 | Required evidence | свежий вывод pytest; актуальный baseline и состав suite — в [`testing/strategy.md`](../testing/strategy.md) |
-| Pass | все тесты зелёные; config_flow покрыт основными сценариями; нет тестов, маскирующих баги |
+| Pass | все тесты зелёные; config_flow покрыт основными сценариями; новые external API contracts проверяют exact wire shape; background lifecycle имеет unload/backpressure regressions; нет тестов, маскирующих баги |
 | Fail | падающие тесты; pytest не запускался; тесты «исправлены» под сломанное поведение |
 | Stop | без TESTS_PASS не релизить |
 

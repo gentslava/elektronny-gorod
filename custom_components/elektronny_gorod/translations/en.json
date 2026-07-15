@@ -131,6 +131,38 @@
             }
           }
         }
+      },
+      "access_history": {
+        "name": "Intercom call history",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "call_accepted": "Call accepted",
+              "call_missed": "Call missed"
+            }
+          }
+        }
+      },
+      "account_history": {
+        "name": "Event history",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "call_accepted": "Call accepted",
+              "call_missed": "Call missed"
+            }
+          }
+        }
+      },
+      "camera_history": {
+        "name": "Motion history",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "motion": "Motion"
+            }
+          }
+        }
       }
     },
     "lock": {

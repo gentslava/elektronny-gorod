@@ -6,16 +6,32 @@
 
 ![Logo](https://brands.home-assistant.io/elektronny_gorod/icon.png)
 
-# Elektronny Gorod integration for Home Assistant
+# Elektronny Gorod & Dom.ru for Home Assistant
 
-Elektronny Gorod (Novotelecom) custom integration with Home Assistant.
+Custom integration for the My Home — Elektronny Gorod (Novotelecom) and
+Umnyy Dom.ru mobile services.
 
 ## Features
 
-- View available contracts and add as much as you need.
-- Request and input SMS code or password for authentication.
-- Get camera preview and streams.
-- Control opening locks at real-time.
+- Add multiple available contracts using SMS or password authentication.
+- View intercom/private/public camera previews and live streams with optional
+  go2rtc audio and lower latency.
+- Open intercom doors from Home Assistant.
+- Receive real-time doorbell events through FCM for notifications and
+  automations.
+- Answer and hang up SIP calls, watch and hear the visitor, and talk through a
+  browser microphone using the ready-to-use `eg-intercom-call-card`.
+- Browse answered and missed call history with date/device filters, pagination,
+  and combined timelines for multiple places or accounts.
+- Use new accepted/missed-call events in automations. Camera-motion history is
+  available through a disabled-by-default entity that polls only when enabled.
+- Monitor balance, blocked status and days until blocking.
+- Control do-not-disturb settings for intercom and management-company calls.
+
+The upcoming 4.0.0 release adds call answering, two-way audio and event history.
+Existing config entries do not need to be recreated, and there are no breaking
+changes. See the full [README](README.en_EN.md) and [4.0.0 release
+notes](docs/releases/4.0.0.md).
 
 ## Configuration
 - Use this button:<br>

@@ -1,7 +1,7 @@
 Status: Active
 Owner: Home Assistant Expert Agent
-Last reviewed: 2026-07-13 (release 4.0.0 audit: manifest Bronze fields,
-CoordinatorEntity/polling, HTTP timeouts, diagnostics/services and tests)
+Last reviewed: 2026-07-16 (durable history config-entry/source isolation,
+opt-in camera polling and authenticated browse boundary)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
@@ -11,6 +11,8 @@ Source files:
 - `custom_components/elektronny_gorod/camera.py`
 - `custom_components/elektronny_gorod/lock.py`
 - `custom_components/elektronny_gorod/sensor.py`
+- `custom_components/elektronny_gorod/event.py`
+- `custom_components/elektronny_gorod/history.py`
 - `custom_components/elektronny_gorod/strings.json`
 - `custom_components/elektronny_gorod/translations/*`
 - `hacs.json`
@@ -115,11 +117,13 @@ async_step_user
 | Возвращаемое `data` используется entity | ✅ через `CoordinatorEntity` | `camera.py`, `lock.py`, `sensor.py`, `switch.py` |
 | `UpdateFailed` при ошибке | ✅ fatal places; per-place partial data | `coordinator.py:_async_update_data` |
 | Timeout per request | ✅ REST 30с / binary 60с / connect 10с | `http.py:15-22,120-126` |
-| Retry / backoff | 🟡 нет; follow-up только для идемпотентных GET | `api.py`, `http.py`, A-21 |
+| Retry / backoff | 🟡 нет; history error изолируется до следующего poll/UI refresh | `api.py`, `history.py`, `history_ws.py`, A-21 |
 | Rate limiting | 🔴 нет | — |
 | Caching | 🔴 нет | — |
 | Никаких blocking ops в loop | ✅ async I/O; blocking subprocess не используется | integration code |
 | `async_unsubscribe` вызывается при unload | ✅ через `entry.async_on_unload` | `__init__.py:69-72` |
+| History interval cleanup | ✅ `HistoryManager.async_stop` через config-entry unload; overlapping tick пропускается | `history.py`, `__init__.py` |
+| Camera-history request bound | ✅ motion entities disabled-by-default; API poll выполняется только для enabled registry entries | `__init__.py`, `event.py`, `history.py` |
 | Использование `async_get_clientsession(hass)` | ✅ shared HA session | `http.py:96` |
 
 ## Entities
@@ -139,6 +143,16 @@ async_step_user
 | Корректное обновление через coordinator | ✅ | ✅ (+ локальный synthetic unlock timer) | ✅ |
 | Хардкод русского имени | нет | нет | нет — translation key ru/en |
 
+History `EventEntity` additive и не требует config-entry migration: stable
+unique IDs строятся из place/access-control или camera ID, device identity
+совпадает с существующим intercom/camera device. `_trigger_event` получает
+только allowlisted attributes; backend message не копируется. Durable
+accepted/missed streams не объявляют `device_class=doorbell`, потому что этот
+HA-класс требует поддержку `ring`; doorbell-класс остаётся только у realtime
+сущности вызова. Dispatcher signal включает config-entry ID, baseline хранится
+по source, а camera-motion history по умолчанию отключена и не создаёт API
+нагрузку до явного включения entity.
+
 ## Diagnostics / Repairs / Services
 
 | Артефакт | Наличие | Приоритет |
@@ -156,6 +170,7 @@ async_step_user
 | `translations/ru.json` | ✅ соответствует |
 | `translations/en.json` | ✅ соответствует |
 | **Entity translations** (раздел `strings.json:entity`) | ✅ ru/en |
+| History event types | ✅ `call_accepted`, `call_missed`, `motion` в source/ru/en |
 
 ## Платформы и manifest dependencies
 
