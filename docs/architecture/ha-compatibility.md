@@ -1,7 +1,7 @@
 Status: Active
 Owner: Home Assistant Expert Agent
-Last reviewed: 2026-07-15 (durable history EventEntity lifecycle, Store schema
-and ru/en event translations)
+Last reviewed: 2026-07-16 (durable history config-entry/source isolation,
+opt-in camera polling and authenticated browse boundary)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
@@ -123,6 +123,7 @@ async_step_user
 | Никаких blocking ops в loop | ✅ async I/O; blocking subprocess не используется | integration code |
 | `async_unsubscribe` вызывается при unload | ✅ через `entry.async_on_unload` | `__init__.py:69-72` |
 | History interval cleanup | ✅ `HistoryManager.async_stop` через config-entry unload; overlapping tick пропускается | `history.py`, `__init__.py` |
+| Camera-history request bound | ✅ motion entities disabled-by-default; API poll выполняется только для enabled registry entries | `__init__.py`, `event.py`, `history.py` |
 | Использование `async_get_clientsession(hass)` | ✅ shared HA session | `http.py:96` |
 
 ## Entities
@@ -148,7 +149,9 @@ unique IDs строятся из place/access-control или camera ID, device i
 только allowlisted attributes; backend message не копируется. Durable
 accepted/missed streams не объявляют `device_class=doorbell`, потому что этот
 HA-класс требует поддержку `ring`; doorbell-класс остаётся только у realtime
-сущности вызова.
+сущности вызова. Dispatcher signal включает config-entry ID, baseline хранится
+по source, а camera-motion history по умолчанию отключена и не создаёт API
+нагрузку до явного включения entity.
 
 ## Diagnostics / Repairs / Services
 

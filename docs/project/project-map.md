@@ -1,7 +1,7 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-07-16 (4.0.0 RU/EN README, HACS info and history-card
-screenshots synchronized with implemented features)
+Last reviewed: 2026-07-16 (history entry/source isolation, opt-in camera polling
+and partial frontend refresh synchronized)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -155,7 +155,7 @@ elektronny-gorod/
 | [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) | `DataUpdateCoordinator` | `update_interval=5min`, `_async_update_data` → `{places, balances, cameras, locks}` (ADR-0002) |
 | [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, sanitized history DTO (`query_events`, `query_camera_events`), push-registration и SIP credentials | использует shared `HTTP` (ADR-0008); history parsers не сохраняют backend `message` |
 | [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
-| [`history.py`](../../custom_components/elektronny_gorod/history.py) | отдельный polling durable history | silent page-0 baseline; bounded per-stream ID dedup в HA `Store`; 5-minute interval; overlapping poll skip; partial failure isolation |
+| [`history.py`](../../custom_components/elektronny_gorod/history.py) | отдельный polling durable history | silent page-0 baseline per source; bounded ID dedup в HA `Store`; entry-scoped dispatcher; 5-minute interval; camera polling только для enabled motion-history entities; partial failure isolation |
 | [`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) | read-only WebSocket browse старых вызовов | `elektronny_gorod/history`; проверка `POLICY_READ`; place entity охватывает access controls одного места, per-device entity — один access control; page `0..100`; безопасные source metadata |
 
 ### Платформы (entity)
@@ -167,7 +167,7 @@ elektronny-gorod/
 | [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | (1) `balance` — `device_class=MONETARY` + long-term statistics. (2) `days_to_block` (A-57) — `device_class=DURATION` + `unit=d`. (3) `call_state` (Slice 3a) — `device_class=ENUM` (idle/ringing/connecting/active/ended/error), push-driven из `EVENT_CALL_STATE`, на каждый домофон |
 | [`switch.py`](../../custom_components/elektronny_gorod/switch.py) | `switch` | Do Not Disturb (mirror «Мой Дом» → Настройки → Уведомления). 3 entity per place: master `dnd_root` + 2 dependent (`dnd_intercom_calls`, `dnd_management_company_calls`). Dependent `_attr_available = root.status` — HA нативно красит серым при master OFF |
 | [`binary_sensor.py`](../../custom_components/elektronny_gorod/binary_sensor.py) | `binary_sensor` | `blocked` (A-57): `device_class=PROBLEM`, `True` когда `blocked=True` в `/finance`. Реюзает balance device через identifier `(DOMAIN, place_{id})` |
-| [`event.py`](../../custom_components/elektronny_gorod/event.py) | `event` | Realtime doorbell `ring`/`ended` (ADR-0011) плюс durable `call_accepted`/`call_missed` per place и per access control, а также `motion` per intercom/public camera. Place-history привязана к устройству адреса; default entity ID содержит account/place IDs. History dispatcher маршрутизируется по place/source ID; state attributes заданы allowlist без backend message |
+| [`event.py`](../../custom_components/elektronny_gorod/event.py) | `event` | Realtime doorbell `ring`/`ended` (ADR-0011) плюс durable `call_accepted`/`call_missed` per place и per access control, а также disabled-by-default `motion` per intercom/public camera. Place-history привязана к устройству адреса; default entity ID содержит account/place IDs. History dispatcher изолирован по config entry и маршрутизируется по place/source ID; state attributes заданы allowlist без backend message |
 
 ### Внешние интеграции
 
@@ -245,7 +245,7 @@ elektronny-gorod/
 | [`tests/test_visibility_real.py`](../../tests/test_visibility_real.py) | production-replica (реальные HAR-данные) + migration v2 |
 | [`tests/test_event.py`](../../tests/test_event.py) | doorbell `event`-сущность (ADR-0011): дедуп по AC, фильтр SIGNAL по `(place_id, ac_id)`, `_trigger_event` на `ring`/`ended`, игнор чужого/неизвестного event_type |
 | [`tests/test_api_history.py`](../../tests/test_api_history.py) | точные wire contracts и sanitized typed DTO для general/camera history |
-| [`tests/test_history.py`](../../tests/test_history.py) | silent baseline, bounded dedup/restart, event routing, partial failures, Store/timer lifecycle и backpressure |
+| [`tests/test_history.py`](../../tests/test_history.py) | per-source silent baseline, bounded dedup/restart, opt-in camera polling, event routing, partial failures, Store/timer lifecycle и backpressure |
 | [`tests/test_history_ws.py`](../../tests/test_history_ws.py) | entity permission, exact source routing, sanitized previous-page response, page bounds и idempotent registration |
 | [`tests/test_history_translations.py`](../../tests/test_history_translations.py) | parity history event types в source/en/ru translations |
 | [`tests/test_sensor_call_state.py`](../../tests/test_sensor_call_state.py) | `sensor.*_call_state` (Slice 3a): создание, дефолт `idle`, отражение `EVENT_CALL_STATE` (ringing/active + `started_at`/`call_id`), сброс `started_at` на `ended`, игнор чужого AC |

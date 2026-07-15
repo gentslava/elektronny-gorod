@@ -1,6 +1,7 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-07-16 (4.0.0 RU/EN README and derived HACS info reconciled)
+Last reviewed: 2026-07-16 (4.0.0 RU/EN README and derived HACS info reconciled
+with opt-in camera-history polling)
 
 Source files:
 - весь репозиторий (это карта)

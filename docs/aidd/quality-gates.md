@@ -1,6 +1,6 @@
 Status: Active
 Owner: Validator Agent
-Last reviewed: 2026-07-16 (TESTS_PASS: 429 backend + 61 frontend, exact API
+Last reviewed: 2026-07-16 (TESTS_PASS: 432 backend + 62 frontend, exact API
 contracts, history isolation and background-task lifecycle regressions)
 
 Source files:

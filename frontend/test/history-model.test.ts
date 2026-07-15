@@ -10,6 +10,7 @@ import {
   historyStrings,
   mergeHistoryEvents,
   normalizeHistoryPage,
+  replaceHistoryFeeds,
   resolveHistoryConfig,
   type HistoryEventRow,
 } from "../src/history/model.js";
@@ -129,6 +130,19 @@ describe("history presentation model", () => {
     };
 
     expect(mergeHistoryEvents([ROWS[0]], [secondAccount])).toHaveLength(2);
+  });
+
+  it("preserves stale rows for a feed that failed during refresh", () => {
+    const refreshed = {
+      ...ROWS[0],
+      event_id: "newer",
+      occurred_at: ROWS[0].occurred_at + 60,
+    };
+
+    expect(
+      replaceHistoryFeeds(ROWS, [refreshed], ["event.account_one"])
+        .map((row) => row.event_id),
+    ).toEqual(["newer", "older"]);
   });
 
   it("builds device filters across accounts and filters the merged feed", () => {

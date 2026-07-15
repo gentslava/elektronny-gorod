@@ -34,7 +34,7 @@ from custom_components.elektronny_gorod.const import (
     SIGNAL_DOORBELL,
     SIP_DATA,
 )
-from custom_components.elektronny_gorod.history import SIGNAL_HISTORY_EVENT
+from custom_components.elektronny_gorod import history
 
 # call_controller (A-72): ring fallback + grace + idle reset после `ended`
 _CALL_TIMER_DRAIN_SEC = int(DOORBELL_CALL_WINDOW_FALLBACK_SEC + 3 + 6 + 2)
@@ -79,15 +79,23 @@ def mock_api():
         yield mock_cls
 
 
-def _entry() -> MockConfigEntry:
+def _entry(
+    account_id: str = "A1",
+    subscriber_id: str = "S1",
+) -> MockConfigEntry:
     ua = UserAgent()
     ua.operator_id = "1"
     return MockConfigEntry(
-        domain=DOMAIN, version=3, unique_id="test_S1", title="Test",
+        domain=DOMAIN,
+        version=3,
+        unique_id=f"test_{subscriber_id}",
+        title="Test",
         data={
             CONF_ACCESS_TOKEN: "T1", CONF_REFRESH_TOKEN: "R1", CONF_OPERATOR_ID: "1",
             CONF_USER_AGENT: json.dumps(ua.json()),
-            "account_id": "A1", "subscriber_id": "S1", "use_go2rtc": False,
+            "account_id": account_id,
+            "subscriber_id": subscriber_id,
+            "use_go2rtc": False,
             "go2rtc_base_url": "http://127.0.0.1:1984", "go2rtc_rtsp_host": "127.0.0.1",
         },
     )
@@ -106,6 +114,14 @@ async def _setup(hass: HomeAssistant) -> str:
 async def _setup_entry(hass: HomeAssistant, entry: MockConfigEntry) -> None:
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
+
+
+def _history_signal_for_entity(hass: HomeAssistant, entity_id: str) -> str:
+    """Resolve the config-entry-scoped history signal for a registry entity."""
+    registered = er.async_get(hass).async_get(entity_id)
+    assert registered is not None
+    assert registered.config_entry_id is not None
+    return history.history_signal(registered.config_entry_id)
 
 
 def _cancel_call_controller_loop_timers(hass: HomeAssistant) -> None:
@@ -141,7 +157,7 @@ async def test_doorbell_event_entity_created(hass: HomeAssistant, mock_api):
 
 
 async def test_history_event_entities_created(hass: HomeAssistant, mock_api):
-    """Place, per-intercom and motion streams get EventEntity instances."""
+    """Motion history exists but stays disabled until polling is requested."""
     await _setup(hass)
     registry = er.async_get(hass)
     place_entity_id = registry.async_get_entity_id(
@@ -159,7 +175,50 @@ async def test_history_event_entities_created(hass: HomeAssistant, mock_api):
     assert camera_entity_id is not None
     assert hass.states.get(place_entity_id) is not None
     assert hass.states.get(access_entity_id) is not None
-    assert hass.states.get(camera_entity_id) is not None
+    camera_entry = registry.async_get(camera_entity_id)
+    assert camera_entry is not None
+    assert camera_entry.disabled_by is er.RegistryEntryDisabler.INTEGRATION
+    assert hass.states.get(camera_entity_id) is None
+    mock_api.return_value.query_camera_events.assert_not_awaited()
+
+
+async def test_history_dispatch_is_scoped_to_config_entry(
+    hass: HomeAssistant, mock_api
+):
+    """One contract cannot trigger another contract's history entity."""
+    first = _entry()
+    second = _entry("A2", "S2")
+    first.add_to_hass(hass)
+    await _setup_entry(hass, first)
+    second.add_to_hass(hass)
+    await _setup_entry(hass, second)
+
+    registry = er.async_get(hass)
+    first_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_PLACE_UID
+    )
+    second_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, "elektronny_gorod_event_history_place_A2_S2_P1"
+    )
+    assert first_entity_id is not None
+    assert second_entity_id is not None
+
+    async_dispatcher_send(hass, history.history_signal(first.entry_id), {
+        "event_type": "call_missed",
+        "event_id": "event-first",
+        "occurred_at": 1700000001,
+        "place_id": "P1",
+        "source_type": "accessControl",
+        "source_id": "AC1",
+    })
+    await hass.async_block_till_done()
+
+    first_state = hass.states.get(first_entity_id)
+    second_state = hass.states.get(second_entity_id)
+    assert first_state is not None
+    assert second_state is not None
+    assert first_state.attributes["event_id"] == "event-first"
+    assert second_state.attributes.get("event_id") is None
 
 
 async def test_call_history_entities_do_not_claim_doorbell_device_class(
@@ -303,7 +362,7 @@ async def test_place_history_event_keeps_source_metadata(
     )
     assert entity_id is not None
 
-    async_dispatcher_send(hass, SIGNAL_HISTORY_EVENT, {
+    async_dispatcher_send(hass, _history_signal_for_entity(hass, entity_id), {
         "event_type": "call_missed",
         "event_id": "event-new",
         "occurred_at": 1700000001,
@@ -333,7 +392,7 @@ async def test_access_history_event_routes_sanitized_payload(
     )
     assert entity_id is not None
 
-    async_dispatcher_send(hass, SIGNAL_HISTORY_EVENT, {
+    async_dispatcher_send(hass, _history_signal_for_entity(hass, entity_id), {
         "event_type": "call_missed",
         "event_id": "event-new",
         "occurred_at": 1700000001,
@@ -356,13 +415,21 @@ async def test_camera_history_event_routes_motion_by_requested_camera(
     hass: HomeAssistant, mock_api
 ):
     """Motion state belongs to the requested camera and exposes availability."""
-    await _setup(hass)
-    entity_id = er.async_get(hass).async_get_entity_id(
-        "event", DOMAIN, _HISTORY_CAMERA_UID
+    entry = _entry()
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    registered = registry.async_get_or_create(
+        "event",
+        DOMAIN,
+        _HISTORY_CAMERA_UID,
+        suggested_object_id="enabled_motion_history",
+        config_entry=entry,
     )
-    assert entity_id is not None
+    await _setup_entry(hass, entry)
+    entity_id = registered.entity_id
+    assert hass.states.get(entity_id) is not None
 
-    async_dispatcher_send(hass, SIGNAL_HISTORY_EVENT, {
+    async_dispatcher_send(hass, _history_signal_for_entity(hass, entity_id), {
         "event_type": "motion",
         "event_id": "motion-new",
         "occurred_at": 1700000001,

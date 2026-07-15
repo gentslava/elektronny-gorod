@@ -1,7 +1,7 @@
 Status: Active
 Owner: Documentation / AIDD Agent
-Last reviewed: 2026-07-16 (4.0.0 RU/EN README, HACS info and history-card
-screenshots synchronized)
+Last reviewed: 2026-07-16 (history isolation, opt-in camera polling and public
+4.0.0 documentation synchronized)
 
 Source files:
 - AIDD-документы в `docs/` (этот каталог и подкаталоги)

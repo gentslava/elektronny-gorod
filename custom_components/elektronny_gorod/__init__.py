@@ -193,6 +193,7 @@ def _async_register_sip_services(hass: HomeAssistant) -> None:
 
 
 _MIGRATION_FLAG_KEY = "visibility_migration_v2"
+_CAMERA_HISTORY_UNIQUE_ID_PREFIX = f"{DOMAIN}_event_history_camera_"
 
 
 def _migrate_legacy_disabled_state(
@@ -237,6 +238,10 @@ def _migrate_legacy_disabled_state(
 
     # 1. Entities: disabled_by INTEGRATION/DEVICE/USER → None.
     for entity in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        # Motion history is intentionally opt-in. Its disabled marker is not
+        # legacy visibility state and must survive this one-time migration.
+        if entity.unique_id.startswith(_CAMERA_HISTORY_UNIQUE_ID_PREFIX):
+            continue
         if entity.disabled_by in (
             er.RegistryEntryDisabler.INTEGRATION,
             er.RegistryEntryDisabler.DEVICE,

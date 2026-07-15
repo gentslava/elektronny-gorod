@@ -71,8 +71,9 @@ missed call history.
   desktops and wall panels.
 - **Event history:** `custom:eg-event-history-card` displays answered and missed
   calls, groups them by date/device and merges multiple places or accounts.
-- **Automation events:** new answered/missed calls and available camera-motion
-  events are exposed as HA `event` entities.
+- **Automation events:** new answered/missed calls are exposed as HA `event`
+  entities. Camera-motion history is a separate disabled-by-default entity;
+  enabling it starts polling for that camera.
 - **No reconfiguration:** existing Home Assistant entries do not need to be
   recreated.
 - **Reliability:** FCM reconnect/watchdog, caller replacement, concurrent

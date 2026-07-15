@@ -108,6 +108,68 @@ async def test_poller_baselines_then_emits_sanitized_whitelisted_event() -> None
 
 
 @pytest.mark.asyncio
+async def test_poller_baselines_each_general_source_independently() -> None:
+    """A newly discovered source cannot replay its existing history as new."""
+    history = importlib.import_module(f"custom_components.{DOMAIN}.history")
+    source_a_old = HistoryEvent(
+        id="source-a-old",
+        place_id="1001",
+        event_type="accessControlCallAccepted",
+        timestamp=1700000000,
+        source_type="accessControl",
+        source_id="2001",
+    )
+    source_a_new = HistoryEvent(
+        id="source-a-new",
+        place_id="1001",
+        event_type="accessControlCallMissed",
+        timestamp=1700000002,
+        source_type="accessControl",
+        source_id="2001",
+    )
+    source_b_existing = HistoryEvent(
+        id="source-b-existing",
+        place_id="1002",
+        event_type="accessControlCallMissed",
+        timestamp=1700000001,
+        source_type="accessControl",
+        source_id="3001",
+    )
+    api = SimpleNamespace(
+        query_events=AsyncMock(
+            side_effect=[
+                HistoryPage(events=(source_a_old,), number=0, last=False),
+                HistoryPage(
+                    events=(source_a_new, source_b_existing, source_a_old),
+                    number=0,
+                    last=False,
+                ),
+            ]
+        )
+    )
+    coordinator = SimpleNamespace(
+        api=api,
+        data={
+            "places": [
+                {"place": {"id": "1001"}},
+                {"place": {"id": "1002"}},
+            ],
+            "cameras": [],
+        },
+    )
+    emitted: list[dict] = []
+    poller = history.HistoryPoller(
+        coordinator,
+        history.HistoryWatermark(),
+        emitted.append,
+    )
+
+    assert await poller.async_poll() is True
+    assert await poller.async_poll() is True
+    assert [event["event_id"] for event in emitted] == ["source-a-new"]
+
+
+@pytest.mark.asyncio
 async def test_poller_baselines_then_emits_camera_motion_for_requested_id() -> None:
     """Motion routing uses requested camera ID and never the internal CameraID."""
     history = importlib.import_module(f"custom_components.{DOMAIN}.history")
@@ -152,6 +214,7 @@ async def test_poller_baselines_then_emits_camera_motion_for_requested_id() -> N
         coordinator,
         history.HistoryWatermark(),
         emitted.append,
+        camera_enabled=lambda _camera_id: True,
     )
 
     assert await poller.async_poll() is True
@@ -167,6 +230,34 @@ async def test_poller_baselines_then_emits_camera_motion_for_requested_id() -> N
         "recording_available": True,
     }]
     assert api.query_camera_events.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_poller_skips_camera_history_when_entity_is_disabled() -> None:
+    """Disabled motion-history entities must not generate camera API traffic."""
+    history = importlib.import_module(f"custom_components.{DOMAIN}.history")
+    api = SimpleNamespace(
+        query_events=AsyncMock(
+            return_value=HistoryPage(events=(), number=0, last=True)
+        ),
+        query_camera_events=AsyncMock(return_value=()),
+    )
+    coordinator = SimpleNamespace(
+        api=api,
+        data={
+            "places": [{"place": {"id": "1001"}}],
+            "cameras": [{"id": "camera-public-1", "source": "public"}],
+        },
+    )
+    poller = history.HistoryPoller(
+        coordinator,
+        history.HistoryWatermark(),
+        MagicMock(),
+        camera_enabled=lambda _camera_id: False,
+    )
+
+    assert await poller.async_poll() is True
+    api.query_camera_events.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -210,6 +301,7 @@ async def test_camera_history_failure_does_not_block_general_history() -> None:
         coordinator,
         history.HistoryWatermark(),
         emitted.append,
+        camera_enabled=lambda _camera_id: True,
     )
 
     assert await poller.async_poll() is True
@@ -276,7 +368,11 @@ async def test_manager_loads_saves_and_unsubscribes(hass, monkeypatch) -> None:
 
     store.async_load.assert_awaited_once_with()
     store.async_save.assert_awaited_once_with(
-        {"streams": {"general": ["event-old"]}}
+        {
+            "streams": {
+                "general:1001:accessControl:2001": ["event-old"]
+            }
+        }
     )
     track.assert_called_once()
 

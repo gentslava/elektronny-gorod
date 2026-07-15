@@ -178,6 +178,18 @@ export function mergeHistoryEvents(
   return [...byId.values()].sort((left, right) => right.occurred_at - left.occurred_at);
 }
 
+export function replaceHistoryFeeds(
+  current: readonly HistoryEventRow[],
+  incoming: readonly HistoryEventRow[],
+  refreshedFeedIds: readonly string[],
+): HistoryEventRow[] {
+  const refreshed = new Set(refreshedFeedIds);
+  return mergeHistoryEvents(
+    current.filter((event) => !refreshed.has(event.feed_id)),
+    incoming,
+  );
+}
+
 export function historySources(
   events: readonly HistoryEventRow[],
   includeFeedName = false,

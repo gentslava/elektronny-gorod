@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
@@ -26,6 +27,24 @@ _MAX_STORED_IDS = 200
 
 HISTORY_POLL_INTERVAL = timedelta(minutes=5)
 SIGNAL_HISTORY_EVENT = f"{DOMAIN}_history_event"
+
+
+def history_signal(entry_id: str) -> str:
+    """Return the durable-history dispatcher signal for one config entry."""
+    return f"{SIGNAL_HISTORY_EVENT}_{entry_id}"
+
+
+def camera_history_unique_id(camera_id: str) -> str:
+    """Return the stable registry ID for one camera-history stream."""
+    return f"{DOMAIN}_event_history_camera_{camera_id}"
+
+
+def _general_stream_key(event: Any) -> str:
+    """Return the watermark stream for one general-history source."""
+    return (
+        f"general:{event.place_id}:"
+        f"{event.source_type}:{event.source_id}"
+    )
 
 
 def map_general_event_type(event_type: str) -> str | None:
@@ -105,10 +124,13 @@ class HistoryPoller:
         coordinator: Any,
         watermark: HistoryWatermark,
         emit: Callable[[dict[str, Any]], None],
+        *,
+        camera_enabled: Callable[[str], bool] | None = None,
     ) -> None:
         self._coordinator = coordinator
         self._watermark = watermark
         self._emit = emit
+        self._camera_enabled = camera_enabled or (lambda _camera_id: False)
 
     async def async_poll(self) -> bool:
         """Poll page zero and emit unseen whitelisted events chronologically."""
@@ -130,15 +152,21 @@ class HistoryPoller:
                 )
             else:
                 any_success = True
-                new_ids = set(
-                    self._watermark.ingest(
-                        "general",
-                        (event.id for event in page.events),
-                    )
-                )
+                by_source: dict[str, list[str]] = {}
+                for event in page.events:
+                    stream = _general_stream_key(event)
+                    by_source.setdefault(stream, []).append(event.id)
+                new_events = {
+                    (stream, event_id)
+                    for stream, event_ids in by_source.items()
+                    for event_id in self._watermark.ingest(stream, event_ids)
+                }
                 for event in reversed(page.events):
                     mapped_type = map_general_event_type(event.event_type)
-                    if event.id not in new_ids or mapped_type is None:
+                    if (
+                        (_general_stream_key(event), event.id) not in new_events
+                        or mapped_type is None
+                    ):
                         continue
                     self._emit(
                         {
@@ -159,9 +187,12 @@ class HistoryPoller:
             camera_id = camera.get("id")
             if not camera_id or camera.get("source") not in ("intercom", "public"):
                 continue
+            camera_id = str(camera_id)
+            if not self._camera_enabled(camera_id):
+                continue
             try:
                 camera_events = await self._coordinator.api.query_camera_events(
-                    str(camera_id),
+                    camera_id,
                     lower_date=lower_date,
                     upper_date=upper_date,
                 )
@@ -210,6 +241,7 @@ class HistoryManager:
         coordinator: Any,
     ) -> None:
         self._hass = hass
+        self._entry_id = entry_id
         self._store: Store[dict[str, Any]] = Store(
             hass,
             _STORAGE_VERSION,
@@ -236,15 +268,34 @@ class HistoryManager:
             self._watermark,
             lambda payload: async_dispatcher_send(
                 self._hass,
-                SIGNAL_HISTORY_EVENT,
+                history_signal(self._entry_id),
                 payload,
             ),
+            camera_enabled=self._camera_enabled,
         )
         await self.async_poll()
         self._unsub_interval = async_track_time_interval(
             self._hass,
             self._async_interval,
             HISTORY_POLL_INTERVAL,
+        )
+
+    @callback
+    def _camera_enabled(self, camera_id: str) -> bool:
+        """Return whether this entry's motion-history entity is enabled."""
+        registry = er.async_get(self._hass)
+        entity_id = registry.async_get_entity_id(
+            "event",
+            DOMAIN,
+            camera_history_unique_id(camera_id),
+        )
+        if entity_id is None:
+            return False
+        entry = registry.async_get(entity_id)
+        return (
+            entry is not None
+            and entry.config_entry_id == self._entry_id
+            and entry.disabled_by is None
         )
 
     async def async_poll(self) -> bool:

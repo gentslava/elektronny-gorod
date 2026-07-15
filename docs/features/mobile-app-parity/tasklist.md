@@ -1,6 +1,6 @@
 # Tasklist: mobile app parity slices
 
-- **Date:** 2026-07-15
+- **Date:** 2026-07-16
 - **Owner:** @gentslava
 - **Linked plan:** [`plan.md`](plan.md)
 
@@ -37,13 +37,15 @@ the corresponding spec/capture gate is approved.
 ## Slice 1 — history events
 
 - [x] **T-020** Implement first-page baseline/watermark. _Acceptance:_ old
-  fixture emits zero events. _Audit:_ A-58.
+  fixture emits zero events; a newly discovered place/access-control gets its
+  own silent baseline without replay. _Audit:_ A-58.
 - [x] **T-021** Implement bounded dedup and whitelist mapping. _Acceptance:_ one
   new event triggers once across overlapping polls/restart. _Audit:_ A-50/A-58.
 - [x] **T-022** Add/unload dedicated polling lifecycle. _Acceptance:_ no leaked
   tasks/listeners after config-entry unload. _Audit:_ A-58.
 - [x] **T-023** Add per-camera motion EventEntity only for verified event types.
-  _Acceptance:_ declared types/device mapping and translations pass. _Audit:_ A-50.
+  _Acceptance:_ declared types/device mapping and translations pass; entity is
+  disabled by default and camera API polling starts only when enabled. _Audit:_ A-50.
 - [x] **T-024** Add entity-scoped previous-page WebSocket browse.
   _Acceptance:_ `POLICY_READ`, source routing, page `0..100`, safe API failure
   and exact sanitized response are covered. _Audit:_ A-58/S-21.
@@ -52,7 +54,7 @@ the corresponding spec/capture gate is approved.
   loading/empty/error states and responsive HA-theme styling. _Audit:_ A-58.
 - [x] **T-026** Harden the frontend history boundary. _Acceptance:_ malformed
   events and cross-entity responses are rejected; page overlap deduplicates by
-  opaque event ID. _Audit:_ S-21.
+  opaque event ID; partial refresh preserves rows of failed feeds. _Audit:_ S-21.
 
 ## Slice 2 — archive
 
@@ -106,10 +108,11 @@ the corresponding spec/capture gate is approved.
 - [x] **T-070** Update API reference, audit, roadmap, feature docs and release
   notes in each implementation PR.
 - [x] **T-071** Run focused/full pytest, markdown link checker, `git diff
-  --check` and secret sentinel scan. _Evidence:_ 29 focused + 411 full passed;
+  --check` and secret sentinel scan. _Evidence:_ 47 focused + 432 full backend
+  and 62 frontend tests passed; TypeScript check and production build clean;
   changed-doc links and diff check clean; global link scan still reports 11
   pre-existing template/private-memory references outside this slice.
-- [ ] **T-072** Update public README/info only for features actually shipped.
+- [x] **T-072** Update public README/info only for features actually shipped.
 
 ## Dependencies
 
@@ -125,9 +128,9 @@ all implemented slices ─► T-070..T-072
 
 | Status | Count |
 |---|---:|
-| done | 9 |
+| done | 13 |
 | in progress | 0 |
-| pending | 21 |
+| pending | 20 |
 
 ## Quality gates
 

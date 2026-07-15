@@ -50,7 +50,7 @@ folder. They are access credentials even when short-lived.
 - [x] `RESEARCH_DONE`
 - [x] `SPEC_READY` — Slice 1
 - [x] `PLAN_APPROVED` — Slice 1
-- [x] `TESTS_PASS` — 429 backend + 61 frontend passed
+- [x] `TESTS_PASS` — 432 backend + 62 frontend passed
 - [x] `SECURITY_OK` — history DTO/state/store sentinel boundary reviewed
 - [x] `DOCS_UPDATED`
 

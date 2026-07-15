@@ -1,6 +1,7 @@
 Status: Active
 Owner: Architecture Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0 and durable REST history browser)
+Last reviewed: 2026-07-16 (entry/source-isolated durable history and opt-in
+camera polling)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -133,7 +134,8 @@ async_setup_entry:
        - lock.async_setup_entry:   data["locks"]   → ElektronnyGorodLock
        - sensor.async_setup_entry: data["balances"] → ElektronnyGorodBalanceSensor
        - switch.async_setup_entry: data["dnd"]      → ElektronnyGorodDNDSwitch (×3 per place)
-       - event.async_setup_entry: realtime doorbell + access/camera history entities
+       - event.async_setup_entry: realtime doorbell + access history entities;
+         camera-motion history entities создаются disabled-by-default
   8. HistoryManager запускается background task после platform setup:
      restore Store → silent baseline/poll → 5-minute interval; unload отменяет interval
   9. async_register_history_ws_command(hass) — entity-scoped browse старых вызовов
@@ -156,7 +158,7 @@ async_migrate_entry:
 Параллельно (вызывается из async_setup_entry, не из async_migrate_entry):
 - async_migrate_entity_unique_ids — миграция camera/lock UID на stable формат.
 - _migrate_legacy_disabled_state  — one-time cleanup `disabled_by` markers
-  от legacy visibility-логики (флаг в entry.options).
+  от legacy visibility-логики (флаг в entry.data).
 ```
 
 ### Update options
@@ -187,8 +189,8 @@ async_unload_entry:
 | **Domain coordinator** | `coordinator.py` | оркестрация refresh, snapshot `coordinator.data` |
 | **Entity migration** | `entity_migration.py` | stable `unique_id` для camera/lock (legacy → new) |
 | **API client** | `api.py` | REST-обёртка над `myhome.proptech.ru`: coordinator polling, typed/sanitized history, H264 live stream, push bind и `mint_sip_device` (A-81) |
-| **History subsystem** | `history.py` | отдельный 5-minute poll: page-0 baseline, bounded per-stream dedup, Store schema v1, partial-failure isolation и dispatcher events |
-| **History browse** | `history_ws.py`, `frontend/src/eg-event-history-card.ts` | авторизованный read-only browse предыдущих accepted/missed calls по выбранной EventEntity; on-demand pagination без replay в state/automation |
+| **History subsystem** | `history.py` | отдельный 5-minute poll: page-0 baseline на каждый source, bounded per-stream dedup, Store schema v1, config-entry-scoped dispatcher и opt-in camera polling |
+| **History browse** | `history_ws.py`, `frontend/src/eg-event-history-card.ts` | авторизованный read-only browse предыдущих accepted/missed calls по выбранной EventEntity; on-demand pagination без replay в state/automation; partial refresh сохраняет недоступные feeds |
 | **Transport** | `http.py` | shared HA `ClientSession`, headers, conditional Bearer с узким pre-auth allowlist |
 | **Logging redaction** | `_logging.py` | `redact()` для headers/dict, `redact_path()` для auth URLs |
 | **External integration** | `go2rtc.py` | go2rtc-специфичный код (validate + upsert/cleanup); `upsert_audio_stream` / `remove_audio_stream` для аудио-стрима вызова |
@@ -210,8 +212,8 @@ async_unload_entry:
 | Snapshot всего: `{places, balances, cameras, locks, dnd}` | `coordinator.data` (dict) | обновляется каждые 5 минут |
 | Synthetic lock state cycle | `Lock._state` + `_cancel_reset` (in-memory) | 5 сек на unlock action |
 | Camera last go2rtc src | `Camera._last_src` (in-memory) | сессия |
-| Visibility migration flag | `entry.options["visibility_migration_v2"]` | one-time per entry |
-| History watermarks | HA `Store` `elektronny_gorod.history.{entry_id}`, schema v1 | максимум 200 opaque event IDs на stream; без message/PII |
+| Visibility migration flag | `entry.data["visibility_migration_v2"]` | one-time per entry |
+| History watermarks | HA `Store` `elektronny_gorod.history.{entry_id}`, schema v1 | максимум 200 opaque event IDs на source stream; без message/PII |
 
 Интервал refresh — 5 минут (`UPDATE_INTERVAL` в `coordinator.py`); см. [ADR-0003](../decisions/0003-iot-class-strategy.md).
 
@@ -256,9 +258,10 @@ async_setup_entry
   → HistoryManager.async_start() в config-entry background task
     → Store.async_load() → HistoryWatermark
     → POST /rest/v1/events/search?page=0 (general access history)
-    → GET /rest/v2/forpost/cameras/<id>/events (intercom/public motion)
-    → первый ответ каждого stream = silent baseline
-    → последующие unseen whitelisted IDs → SIGNAL_HISTORY_EVENT → event.py
+    → GET /rest/v2/forpost/cameras/<id>/events только для явно включённых
+      camera-motion history entities
+    → первый ответ каждого source stream = silent baseline
+    → последующие unseen whitelisted IDs → entry-scoped history signal → event.py
     → Store.async_save({streams: bounded opaque IDs})
 
 Lovelace custom:eg-event-history-card
@@ -268,7 +271,8 @@ Lovelace custom:eg-event-history-card
     → error даёт safe unavailable; retry — следующий refresh/poll, не duplicate POST
     → known access-control filter + safe source identity
   → per-device entity: тот же endpoint + exact place/access-control filter
-  → карточка независимо листает и объединяет несколько place feeds
+  → карточка независимо листает и объединяет несколько place feeds;
+    partial refresh не удаляет ранее загруженный failed feed
   → sanitized rows {event_id, event_type, occurred_at, place_id, source_id,
                     source_name}; без dispatcher/state replay
 ```

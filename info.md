@@ -23,8 +23,8 @@ Umnyy Dom.ru mobile services.
   browser microphone using the ready-to-use `eg-intercom-call-card`.
 - Browse answered and missed call history with date/device filters, pagination,
   and combined timelines for multiple places or accounts.
-- Use new accepted/missed-call and supported camera-motion events in
-  automations.
+- Use new accepted/missed-call events in automations. Camera-motion history is
+  available through a disabled-by-default entity that polls only when enabled.
 - Monitor balance, blocked status and days until blocking.
 - Control do-not-disturb settings for intercom and management-company calls.
 

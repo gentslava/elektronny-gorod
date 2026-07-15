@@ -12,6 +12,7 @@ import {
   historySources,
   historyStrings,
   mergeHistoryEvents,
+  replaceHistoryFeeds,
   resolveHistoryConfig,
   type HistoryCardConfig,
   type HistoryEventRow,
@@ -101,6 +102,7 @@ export class EgEventHistoryCard extends LitElement {
       let incoming: HistoryEventRow[] = [];
       let failed = false;
       let succeeded = false;
+      const refreshedFeeds: string[] = [];
       results.forEach((result, index) => {
         if (result.status === "rejected") {
           failed = true;
@@ -110,6 +112,7 @@ export class EgEventHistoryCard extends LitElement {
         incoming = mergeHistoryEvents(incoming, result.value.events);
         const entityId = requests[index]?.entityId;
         if (entityId) {
+          refreshedFeeds.push(entityId);
           this._feedStates.set(entityId, {
             page: result.value.page,
             last: result.value.last,
@@ -118,7 +121,7 @@ export class EgEventHistoryCard extends LitElement {
       });
       if (succeeded) {
         this._events = refresh
-          ? mergeHistoryEvents([], incoming)
+          ? replaceHistoryFeeds(this._events, incoming, refreshedFeeds)
           : mergeHistoryEvents(this._events, incoming);
         const sources = historySources(this._events, entities.length > 1);
         if (

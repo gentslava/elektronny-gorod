@@ -38,7 +38,11 @@ from .const import (
     SIGNAL_DOORBELL,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
-from .history import SIGNAL_HISTORY_EVENT, place_display_name
+from .history import (
+    camera_history_unique_id,
+    history_signal,
+    place_display_name,
+)
 
 EVENT_RING = "ring"
 EVENT_ENDED = "ended"
@@ -138,6 +142,7 @@ async def async_setup_entry(
             by_ac[key] = lk
 
     entities: list[EventEntity] = []
+    entry_history_signal = history_signal(entry.entry_id)
     account_id = str(entry.data.get(CONF_ACCOUNT_ID) or "")
     subscriber_id = str(entry.data.get(CONF_SUBSCRIBER_ID) or "")
     if account_id and subscriber_id:
@@ -154,6 +159,7 @@ async def async_setup_entry(
                 account_id,
                 subscriber_id,
                 place_id,
+                entry_history_signal,
                 [
                     lock
                     for (source_place_id, _), lock in by_ac.items()
@@ -167,11 +173,19 @@ async def async_setup_entry(
         for lock_info in by_ac.values()
     )
     entities.extend(
-        ElektronnyGorodAccessHistoryEvent(coordinator, lock_info)
+        ElektronnyGorodAccessHistoryEvent(
+            coordinator,
+            lock_info,
+            entry_history_signal,
+        )
         for lock_info in by_ac.values()
     )
     entities.extend(
-        ElektronnyGorodCameraHistoryEvent(coordinator, camera_info)
+        ElektronnyGorodCameraHistoryEvent(
+            coordinator,
+            camera_info,
+            entry_history_signal,
+        )
         for camera_info in (coordinator.data or {}).get("cameras") or []
         if camera_info.get("source") in ("intercom", "public")
     )
@@ -193,10 +207,12 @@ class ElektronnyGorodPlaceHistoryEvent(
         account_id: str,
         subscriber_id: str,
         place_id: str,
+        history_dispatch_signal: str,
         locks: list[dict[str, Any]],
     ) -> None:
         super().__init__(coordinator)
         self._place_id = place_id
+        self._history_signal = history_dispatch_signal
         self._sources = {
             (str(lock["place_id"]), str(lock["access_control_id"])): str(
                 lock.get("name") or lock["access_control_id"]
@@ -222,7 +238,7 @@ class ElektronnyGorodPlaceHistoryEvent(
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
-                SIGNAL_HISTORY_EVENT,
+                self._history_signal,
                 self._handle_history,
             )
         )
@@ -272,12 +288,14 @@ class ElektronnyGorodAccessHistoryEvent(
         self,
         coordinator: ElektronnyGorodUpdateCoordinator,
         lock_info: dict[str, Any],
+        history_dispatch_signal: str,
     ) -> None:
         super().__init__(coordinator)
         place_id = str(lock_info["place_id"])
         access_control_id = str(lock_info["access_control_id"])
         self._place_id = place_id
         self._access_control_id = access_control_id
+        self._history_signal = history_dispatch_signal
         entrance_id = lock_info.get("entrance_id")
         self._attr_unique_id = (
             f"{DOMAIN}_event_history_access_{place_id}_{access_control_id}"
@@ -300,7 +318,7 @@ class ElektronnyGorodAccessHistoryEvent(
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
-                SIGNAL_HISTORY_EVENT,
+                self._history_signal,
                 self._handle_history,
             )
         )
@@ -334,16 +352,19 @@ class ElektronnyGorodCameraHistoryEvent(
     _attr_translation_key = "camera_history"
     _attr_device_class = EventDeviceClass.MOTION
     _attr_event_types = [EVENT_MOTION]
+    _attr_entity_registry_enabled_default = False
 
     def __init__(
         self,
         coordinator: ElektronnyGorodUpdateCoordinator,
         camera_info: dict[str, Any],
+        history_dispatch_signal: str,
     ) -> None:
         super().__init__(coordinator)
         camera_id = str(camera_info["id"])
         self._camera_id = camera_id
-        self._attr_unique_id = f"{DOMAIN}_event_history_camera_{camera_id}"
+        self._history_signal = history_dispatch_signal
+        self._attr_unique_id = camera_history_unique_id(camera_id)
 
         source = camera_info.get("source") or "public"
         place_id = camera_info.get("place_id")
@@ -378,7 +399,7 @@ class ElektronnyGorodCameraHistoryEvent(
         self.async_on_remove(
             async_dispatcher_connect(
                 self.hass,
-                SIGNAL_HISTORY_EVENT,
+                self._history_signal,
                 self._handle_history,
             )
         )

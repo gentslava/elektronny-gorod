@@ -1,7 +1,7 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-07-16 (429 backend + 61 frontend passed; добавлены
-place-scoped history/device-class and 502 isolation regressions)
+Last reviewed: 2026-07-16 (durable history entry/source isolation, opt-in
+camera polling and partial frontend refresh regressions)
 
 Source files:
 - `tests/**` (47 test-модулей + `conftest.py`)
@@ -33,14 +33,14 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **429 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
+| Локальный suite | **432 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
 | Test modules | 47 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
-| Frontend | **61 passed**, `tsc --noEmit` и production bundle build |
+| Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
 | Camera / go2rtc | lifecycle, auto-recovery, concurrency, PATCH-first upsert, call-stream teardown |
-| Durable history | exact 9.9.0 wire contracts, PII-safe DTO, silent baseline, bounded restart dedup, EventEntity routing, entity authorization и on-demand previous-page browse |
+| Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Coverage | Процент намеренно не фиксируется без свежего coverage-run; каноническая команда приведена ниже |
 
@@ -141,17 +141,20 @@ inventory всегда берутся из `tests/test_*.py`; новые сет�
 
 ### 6. Durable history (`test_history.py`, `test_history_ws.py`, `test_event.py`, `test_history_translations.py`)
 
-- Silent first baseline, later newest-first overlap and chronological emit.
+- Silent first baseline per source, later newest-first overlap and chronological
+  emit; discovering another source does not replay its old rows.
 - Per-stream bounded opaque-ID watermark round-trip prevents restart duplicates.
-- General/camera failures degrade independently; private camera source excluded.
+- General/camera failures degrade independently; private camera source excluded;
+  disabled camera-history entities make no camera API request.
 - `HistoryManager` persists only ID lists, cancels interval on unload and skips
   overlapping ticks instead of queueing API cycles.
-- Access/camera EventEntity routing uses stable IDs, allowlisted state attrs and
-  ru/en translations for every declared history event type.
+- Access/camera EventEntity routing uses config-entry-scoped signals, stable IDs,
+  allowlisted state attrs and ru/en translations for every declared event type.
 - Browse WebSocket verifies EventEntity read permission, config-entry/source
   binding, page bounds and exact sanitized previous-page response.
 - Frontend model tests exact command shape, untrusted/cross-entity response
-  rejection, overlap dedup, date groups, time formatting and RU/EN labels.
+  rejection, overlap dedup, partial-refresh feed preservation, date groups,
+  time formatting and RU/EN labels.
 
 ### 7. go2rtc (`test_go2rtc_validate.py`, `test_go2rtc_upsert.py`, `test_go2rtc_audio.py`)
 
@@ -224,8 +227,8 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 429 passed.
-- [x] `frontend`: 61 Vitest tests, TypeScript check and production build green.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 432 passed.
+- [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.

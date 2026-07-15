@@ -403,7 +403,9 @@ Quality gates:
   parser отбрасывает `Message`, `HistoryManager` делает silent baseline и
   bounded dedup, а per-camera `EventEntity` принимает только verified
   `EventSubjectID=126`. Requested camera ID не смешивается с внутренним
-  response `CameraID`; сбой одной камеры изолирован.
+  response `CameraID`; сбой одной камеры изолирован. Motion-history entity
+  disabled-by-default, поэтому camera endpoint опрашивается только после её
+  явного включения пользователем.
 - **Remaining scope:** старый журнал, playback/download и signed URL не входят
   в entity; это Slice 2 в
   [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
@@ -520,7 +522,7 @@ Quality gates:
   `/events/search` остаётся возможным fallback/backfill, но для realtime-вызова
   больше не нужен.
 - **Durable status:** ✅ **RESOLVED IN `feat/durable-event-history`** — отдельный
-  `HistoryManager` читает page 0 раз в пять минут, первый ответ каждого stream
+  `HistoryManager` читает page 0 раз в пять минут, первый ответ каждого source
   устанавливает silent baseline, bounded opaque-ID watermark переживает
   restart, а overlapping poll пропускается. В HA попадают только verified
   accepted/missed call events; старые страницы не переигрываются в automation.
@@ -529,6 +531,9 @@ Quality gates:
   место и привязывается к устройству адреса; карточка может независимо
   объединить несколько мест/аккаунтов и фильтровать по составному source key;
   прежний per-device режим сохранён.
+  Dispatcher signal изолирован по config entry; добавление нового
+  place/access-control не replay-ит его старую историю. Partial frontend
+  refresh сохраняет ранее загруженные строки временно недоступного feed.
   Наблюдавшийся transient `502` на `events/search` остаётся изолированной
   деградацией: browse показывает safe unavailable, poller продолжает на
   следующем интервале без немедленного duplicate POST. History accepted/missed
