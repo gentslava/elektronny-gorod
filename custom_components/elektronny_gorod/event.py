@@ -18,12 +18,13 @@ from typing import Any
 from homeassistant.components.event import EventDeviceClass, EventEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
-from homeassistant.util import dt as dt_util
+from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
     AREA_INTERCOM,
@@ -37,7 +38,7 @@ from .const import (
     SIGNAL_DOORBELL,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
-from .history import SIGNAL_HISTORY_EVENT
+from .history import SIGNAL_HISTORY_EVENT, place_display_name
 
 EVENT_RING = "ring"
 EVENT_ENDED = "ended"
@@ -53,6 +54,64 @@ EVENT_MOTION = "motion"
 # (и снимает таймер через _cancel_auto_end), так что буфер ничего не ловил.
 # Fallback-окно (нет/невалиден call_invalidated) — shared с sip/call_controller.py.
 _AUTO_END_FALLBACK_SEC = DOORBELL_CALL_WINDOW_FALLBACK_SEC
+
+
+def _place_history_unique_id(
+    account_id: str,
+    subscriber_id: str,
+    place_id: str,
+) -> str:
+    """Return the stable registry ID for one place-history stream."""
+    return (
+        f"{DOMAIN}_event_history_place_"
+        f"{account_id}_{subscriber_id}_{place_id}"
+    )
+
+
+def _place_history_entity_id(account_id: str, place_id: str) -> str:
+    """Return an explicit account/place-scoped default entity ID."""
+    return f"event.{slugify(f'account_{account_id}_place_{place_id}_event_history')}"
+
+
+@callback
+def _migrate_single_place_account_history_entity(
+    hass: HomeAssistant,
+    account_id: str,
+    subscriber_id: str,
+    place_ids: list[str],
+) -> None:
+    """Migrate the prerelease account stream when it maps to one place."""
+    if len(place_ids) != 1:
+        return
+    registry = er.async_get(hass)
+    legacy_unique_id = (
+        f"{DOMAIN}_event_history_account_{account_id}_{subscriber_id}"
+    )
+    legacy_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, legacy_unique_id
+    )
+    if legacy_entity_id is None:
+        return
+
+    place_id = place_ids[0]
+    new_unique_id = _place_history_unique_id(
+        account_id,
+        subscriber_id,
+        place_id,
+    )
+    if registry.async_get_entity_id("event", DOMAIN, new_unique_id) is not None:
+        return
+
+    legacy_object_id = legacy_entity_id.split(".", 1)[1]
+    suffix = legacy_object_id.removeprefix("account_event_history")
+    default_entity_id = suffix == "" or (
+        suffix.startswith("_") and suffix[1:].isdigit()
+    )
+    update: dict[str, str] = {"new_unique_id": new_unique_id}
+    new_entity_id = _place_history_entity_id(account_id, place_id)
+    if default_entity_id and registry.async_get(new_entity_id) is None:
+        update["new_entity_id"] = new_entity_id
+    registry.async_update_entity(legacy_entity_id, **update)
 
 
 async def async_setup_entry(
@@ -82,13 +141,26 @@ async def async_setup_entry(
     account_id = str(entry.data.get(CONF_ACCOUNT_ID) or "")
     subscriber_id = str(entry.data.get(CONF_SUBSCRIBER_ID) or "")
     if account_id and subscriber_id:
-        entities.append(
-            ElektronnyGorodAccountHistoryEvent(
+        place_ids = sorted({place_id for place_id, _ in by_ac})
+        _migrate_single_place_account_history_entity(
+            hass,
+            account_id,
+            subscriber_id,
+            place_ids,
+        )
+        entities.extend(
+            ElektronnyGorodPlaceHistoryEvent(
                 coordinator,
                 account_id,
                 subscriber_id,
-                list(by_ac.values()),
+                place_id,
+                [
+                    lock
+                    for (source_place_id, _), lock in by_ac.items()
+                    if source_place_id == place_id
+                ],
             )
+            for place_id in place_ids
         )
     entities.extend(
         ElektronnyGorodDoorbellEvent(coordinator, lock_info)
@@ -106,10 +178,10 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class ElektronnyGorodAccountHistoryEvent(
+class ElektronnyGorodPlaceHistoryEvent(
     CoordinatorEntity[ElektronnyGorodUpdateCoordinator], EventEntity
 ):
-    """Aggregate accepted/missed-call history for one configured account."""
+    """Aggregate accepted/missed-call history for one configured place."""
 
     _attr_has_entity_name = True
     _attr_translation_key = "account_history"
@@ -121,17 +193,28 @@ class ElektronnyGorodAccountHistoryEvent(
         coordinator: ElektronnyGorodUpdateCoordinator,
         account_id: str,
         subscriber_id: str,
+        place_id: str,
         locks: list[dict[str, Any]],
     ) -> None:
         super().__init__(coordinator)
+        self._place_id = place_id
         self._sources = {
             (str(lock["place_id"]), str(lock["access_control_id"])): str(
                 lock.get("name") or lock["access_control_id"]
             )
             for lock in locks
         }
-        self._attr_unique_id = (
-            f"{DOMAIN}_event_history_account_{account_id}_{subscriber_id}"
+        self._attr_unique_id = _place_history_unique_id(
+            account_id,
+            subscriber_id,
+            place_id,
+        )
+        self.entity_id = _place_history_entity_id(account_id, place_id)
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, f"place_{place_id}")},
+            name=place_display_name(coordinator.data, place_id),
+            manufacturer="Электронный город",
+            model="Place",
         )
 
     async def async_added_to_hass(self) -> None:
@@ -157,6 +240,7 @@ class ElektronnyGorodAccountHistoryEvent(
         if (
             event_type not in self._attr_event_types
             or payload.get("source_type") != "accessControl"
+            or source_key[0] != self._place_id
             or source_name is None
         ):
             return

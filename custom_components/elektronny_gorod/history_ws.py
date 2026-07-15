@@ -15,7 +15,7 @@ from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
 from .const import CONF_ACCOUNT_ID, CONF_SUBSCRIBER_ID, DOMAIN, LOGGER
-from .history import map_general_event_type
+from .history import map_general_event_type, place_display_name
 
 
 _WS_REGISTERED = f"{DOMAIN}_history_ws_registered"
@@ -55,7 +55,7 @@ def _resolve_target(
     hass: HomeAssistant,
     entity_id: str,
 ) -> HistoryBrowseTarget | None:
-    """Resolve a registered account/access history entity by stable ID."""
+    """Resolve a registered account/place/access history entity by stable ID."""
     registry_entry = er.async_get(hass).async_get(entity_id)
     if (
         registry_entry is None
@@ -89,6 +89,27 @@ def _resolve_target(
                 source_name=entry.title,
                 aggregate=True,
             )
+
+        if account_id and subscriber_id:
+            for place_id in sorted({key[0] for key in source_locks}):
+                place_unique_id = (
+                    f"{DOMAIN}_event_history_place_"
+                    f"{account_id}_{subscriber_id}_{place_id}"
+                )
+                if registry_entry.unique_id != place_unique_id:
+                    continue
+                place_sources = {
+                    key: str(lock.get("name") or key[1])
+                    for key, lock in source_locks.items()
+                    if key[0] == place_id
+                }
+                return HistoryBrowseTarget(
+                    coordinator=coordinator,
+                    place_ids=(place_id,),
+                    sources=place_sources,
+                    source_name=place_display_name(coordinator.data, place_id),
+                    aggregate=True,
+                )
 
     for (place_id, access_control_id), lock_info in source_locks.items():
         expected_unique_id = (

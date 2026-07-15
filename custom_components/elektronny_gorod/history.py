@@ -33,6 +33,29 @@ def map_general_event_type(event_type: str) -> str | None:
     return _GENERAL_EVENT_TYPES.get(event_type)
 
 
+def place_display_name(
+    data: Mapping[str, Any] | None,
+    place_id: str,
+) -> str:
+    """Return the same stable place label used by HA place devices."""
+    for subscriber_place in (data or {}).get("places") or []:
+        place = subscriber_place.get("place") or {}
+        if str(place.get("id") or "") != place_id:
+            continue
+        address = place.get("address")
+        if isinstance(address, dict):
+            visible = address.get("visibleAddress")
+            if isinstance(visible, str) and visible:
+                return visible
+        if isinstance(address, str) and address:
+            return address
+        name = place.get("name")
+        if isinstance(name, str) and name:
+            return name
+        break
+    return f"Place {place_id}"
+
+
 class HistoryWatermark:
     """Bounded per-stream event-ID watermark with a silent first baseline."""
 

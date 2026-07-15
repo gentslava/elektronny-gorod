@@ -1294,8 +1294,9 @@ Request body:
 
 Endpoint не привязан к одному домофону: он возвращает общую ленту выбранных
 мест, а конкретный источник каждой строки задаётся парой
-`placeId + source.type + source.id`. Account history передаёт все места своей
-config entry; per-device представление фильтруется локально по access control.
+`placeId + source.type + source.id`. Place-history entity передаёт свой
+`placeId`; per-device представление дополнительно фильтруется локально по
+access control.
 
 Query: `page=<0..N>` (pagination), `sort=occurredAt,DESC` (URL-encoded запятая, `sort=occurredAt%2CDESC`).
 

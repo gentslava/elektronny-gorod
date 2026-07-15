@@ -20,6 +20,8 @@ _UNIQUE_ID = "elektronny_gorod_event_history_access_1001_2001"
 _ENTITY_ID = "event.test_intercom_call_history"
 _ACCOUNT_UNIQUE_ID = "elektronny_gorod_event_history_account_A1_S1"
 _ACCOUNT_ENTITY_ID = "event.test_account_call_history"
+_PLACE_UNIQUE_ID = "elektronny_gorod_event_history_place_A1_S1_1001"
+_PLACE_ENTITY_ID = "event.account_a1_place_1001_event_history"
 
 
 def _history_module():
@@ -172,6 +174,34 @@ def _setup_account_target(hass) -> tuple[MockConfigEntry, SimpleNamespace]:
     return entry, coordinator
 
 
+def _setup_place_target(hass) -> tuple[MockConfigEntry, SimpleNamespace]:
+    entry, coordinator = _setup_account_target(hass)
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "event",
+        DOMAIN,
+        _PLACE_UNIQUE_ID,
+        suggested_object_id="account_a1_place_1001_event_history",
+        config_entry=entry,
+    )
+    assert registry.async_get(_PLACE_ENTITY_ID) is not None
+    coordinator.data["places"] = [
+        {
+            "place": {
+                "id": "1001",
+                "address": {"visibleAddress": "Test place"},
+            }
+        },
+        {
+            "place": {
+                "id": "1002",
+                "address": {"visibleAddress": "Other place"},
+            }
+        },
+    ]
+    return entry, coordinator
+
+
 @pytest.mark.asyncio
 async def test_history_ws_returns_previous_sanitized_page(hass) -> None:
     """Old rows are browse data, not EventEntity triggers."""
@@ -240,6 +270,38 @@ async def test_history_ws_returns_account_feed_for_all_places(hass) -> None:
         "page": 0,
         "last": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_history_ws_returns_feed_for_one_place(hass) -> None:
+    """A place entity queries and returns only access controls at that place."""
+    history_ws = _history_module()
+    _entry, coordinator = _setup_place_target(hass)
+    connection = _connection()
+
+    await history_ws.async_handle_history(
+        hass,
+        connection,
+        {"id": 11, "entity_id": _PLACE_ENTITY_ID, "page": 0},
+    )
+
+    coordinator.api.query_events.assert_awaited_once_with([1001], page=0)
+    connection.send_result.assert_called_once_with(11, {
+        "entity_id": _PLACE_ENTITY_ID,
+        "source_name": "Test place",
+        "events": [
+            {
+                "event_id": "event-entrance",
+                "event_type": "call_missed",
+                "occurred_at": 1770000200,
+                "place_id": "1001",
+                "source_id": "2001",
+                "source_name": "Подъезд 1",
+            }
+        ],
+        "page": 0,
+        "last": True,
+    })
 
 
 @pytest.mark.asyncio

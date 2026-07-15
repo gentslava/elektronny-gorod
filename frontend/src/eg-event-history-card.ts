@@ -50,7 +50,7 @@ export class EgEventHistoryCard extends LitElement {
   }
 
   public static getStubConfig(): HistoryCardConfig {
-    return { entities: ["event.account_event_history"] };
+    return { entities: ["event.account_123456_place_7890_event_history"] };
   }
 
   protected override updated(changed: PropertyValues): void {

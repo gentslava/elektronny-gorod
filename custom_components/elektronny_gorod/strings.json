@@ -152,7 +152,7 @@
         }
       },
       "account_history": {
-        "name": "Account event history",
+        "name": "Event history",
         "state_attributes": {
           "event_type": {
             "state": {

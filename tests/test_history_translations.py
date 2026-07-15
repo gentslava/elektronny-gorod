@@ -35,3 +35,20 @@ def test_history_event_types_have_translations(relative_path: str) -> None:
     assert set(
         event["camera_history"]["state_attributes"]["event_type"]["state"]
     ) == {"motion"}
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "expected_name"),
+    [
+        ("strings.json", "Event history"),
+        ("translations/en.json", "Event history"),
+        ("translations/ru.json", "История событий"),
+    ],
+)
+def test_account_history_name_uses_place_device_context(
+    relative_path: str, expected_name: str
+) -> None:
+    """Entity name stays concise because the place device supplies context."""
+    payload = json.loads((_INTEGRATION / relative_path).read_text())
+
+    assert payload["entity"]["event"]["account_history"]["name"] == expected_name

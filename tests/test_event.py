@@ -18,6 +18,7 @@ from pytest_homeassistant_custom_component.common import (
 )
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
@@ -40,7 +41,8 @@ _CALL_TIMER_DRAIN_SEC = int(DOORBELL_CALL_WINDOW_FALLBACK_SEC + 3 + 6 + 2)
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
 _UID = "elektronny_gorod_event_doorbell_P1_AC1"
-_HISTORY_ACCOUNT_UID = "elektronny_gorod_event_history_account_A1_S1"
+_HISTORY_PLACE_UID = "elektronny_gorod_event_history_place_A1_S1_P1"
+_HISTORY_PLACE_P2_UID = "elektronny_gorod_event_history_place_A1_S1_P2"
 _HISTORY_AC_UID = "elektronny_gorod_event_history_access_P1_AC1"
 _HISTORY_CAMERA_UID = "elektronny_gorod_event_history_camera_100"
 
@@ -101,6 +103,11 @@ async def _setup(hass: HomeAssistant) -> str:
     return entity_id
 
 
+async def _setup_entry(hass: HomeAssistant, entry: MockConfigEntry) -> None:
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+
 def _cancel_call_controller_loop_timers(hass: HomeAssistant) -> None:
     """Отменить `loop.call_later` watchdog'и A-72 — они не привязаны к HA time.
 
@@ -134,11 +141,11 @@ async def test_doorbell_event_entity_created(hass: HomeAssistant, mock_api):
 
 
 async def test_history_event_entities_created(hass: HomeAssistant, mock_api):
-    """Account, per-intercom and motion streams get EventEntity instances."""
+    """Place, per-intercom and motion streams get EventEntity instances."""
     await _setup(hass)
     registry = er.async_get(hass)
-    account_entity_id = registry.async_get_entity_id(
-        "event", DOMAIN, _HISTORY_ACCOUNT_UID
+    place_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_PLACE_UID
     )
     access_entity_id = registry.async_get_entity_id(
         "event", DOMAIN, _HISTORY_AC_UID
@@ -147,21 +154,126 @@ async def test_history_event_entities_created(hass: HomeAssistant, mock_api):
         "event", DOMAIN, _HISTORY_CAMERA_UID
     )
 
-    assert account_entity_id is not None
+    assert place_entity_id is not None
     assert access_entity_id is not None
     assert camera_entity_id is not None
-    assert hass.states.get(account_entity_id) is not None
+    assert hass.states.get(place_entity_id) is not None
     assert hass.states.get(access_entity_id) is not None
     assert hass.states.get(camera_entity_id) is not None
 
 
-async def test_account_history_event_keeps_source_metadata(
+async def test_place_history_event_attached_to_place_device(
     hass: HomeAssistant, mock_api
 ):
-    """The aggregate stream identifies the intercom without exposing message."""
+    """Aggregate history is grouped under its existing place device."""
     await _setup(hass)
     entity_id = er.async_get(hass).async_get_entity_id(
-        "event", DOMAIN, _HISTORY_ACCOUNT_UID
+        "event", DOMAIN, _HISTORY_PLACE_UID
+    )
+    assert entity_id == "event.account_a1_place_p1_event_history"
+
+    registered_entity = er.async_get(hass).async_get(entity_id)
+    assert registered_entity is not None
+    assert registered_entity.device_id is not None
+
+    place_device = dr.async_get(hass).async_get(registered_entity.device_id)
+    assert place_device is not None
+    assert place_device.identifiers == {(DOMAIN, "place_P1")}
+
+
+async def test_single_place_migrates_prerelease_account_history_entity(
+    hass: HomeAssistant, mock_api
+):
+    """The prerelease account entity becomes the explicit place entity."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    legacy = registry.async_get_or_create(
+        "event",
+        DOMAIN,
+        "elektronny_gorod_event_history_account_A1_S1",
+        suggested_object_id="account_event_history",
+        config_entry=entry,
+    )
+    assert legacy.entity_id == "event.account_event_history"
+
+    await _setup_entry(hass, entry)
+
+    assert registry.async_get("event.account_event_history") is None
+    migrated_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_PLACE_UID
+    )
+    assert migrated_id == "event.account_a1_place_p1_event_history"
+
+
+async def test_single_place_migration_preserves_custom_entity_id(
+    hass: HomeAssistant, mock_api
+):
+    """A user-customized prerelease entity ID is not renamed by migration."""
+    entry = _entry()
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "event",
+        DOMAIN,
+        "elektronny_gorod_event_history_account_A1_S1",
+        suggested_object_id="my_custom_history",
+        config_entry=entry,
+    )
+
+    await _setup_entry(hass, entry)
+
+    migrated = registry.async_get("event.my_custom_history")
+    assert migrated is not None
+    assert migrated.unique_id == _HISTORY_PLACE_UID
+
+
+async def test_multiple_places_get_separate_history_entities(
+    hass: HomeAssistant, mock_api
+):
+    """Every place gets an independently addressable aggregate history entity."""
+    mock_api.return_value.query_places.return_value = [
+        {
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "P1", "address": {"house": "20"}},
+        },
+        {
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "P2", "address": {"house": "22"}},
+        },
+    ]
+
+    await _setup(hass)
+    registry = er.async_get(hass)
+    first_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_PLACE_UID
+    )
+    second_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_PLACE_P2_UID
+    )
+    assert first_entity_id == "event.account_a1_place_p1_event_history"
+    assert second_entity_id == "event.account_a1_place_p2_event_history"
+
+    devices = dr.async_get(hass)
+    first_entity = registry.async_get(first_entity_id)
+    second_entity = registry.async_get(second_entity_id)
+    assert first_entity is not None and first_entity.device_id is not None
+    assert second_entity is not None and second_entity.device_id is not None
+    assert devices.async_get(first_entity.device_id).identifiers == {
+        (DOMAIN, "place_P1")
+    }
+    assert devices.async_get(second_entity.device_id).identifiers == {
+        (DOMAIN, "place_P2")
+    }
+
+
+async def test_place_history_event_keeps_source_metadata(
+    hass: HomeAssistant, mock_api
+):
+    """The place stream identifies the intercom without exposing message."""
+    await _setup(hass)
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "event", DOMAIN, _HISTORY_PLACE_UID
     )
     assert entity_id is not None
 

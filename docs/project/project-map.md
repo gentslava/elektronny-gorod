@@ -156,7 +156,7 @@ elektronny-gorod/
 | [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, sanitized history DTO (`query_events`, `query_camera_events`), push-registration и SIP credentials | использует shared `HTTP` (ADR-0008); history parsers не сохраняют backend `message` |
 | [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
 | [`history.py`](../../custom_components/elektronny_gorod/history.py) | отдельный polling durable history | silent page-0 baseline; bounded per-stream ID dedup в HA `Store`; 5-minute interval; overlapping poll skip; partial failure isolation |
-| [`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) | read-only WebSocket browse старых вызовов | `elektronny_gorod/history`; проверка `POLICY_READ`; account entity охватывает все места config entry, per-device entity — один access control; page `0..100`; безопасные source metadata |
+| [`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) | read-only WebSocket browse старых вызовов | `elektronny_gorod/history`; проверка `POLICY_READ`; place entity охватывает access controls одного места, per-device entity — один access control; page `0..100`; безопасные source metadata |
 
 ### Платформы (entity)
 
@@ -167,7 +167,7 @@ elektronny-gorod/
 | [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | (1) `balance` — `device_class=MONETARY` + long-term statistics. (2) `days_to_block` (A-57) — `device_class=DURATION` + `unit=d`. (3) `call_state` (Slice 3a) — `device_class=ENUM` (idle/ringing/connecting/active/ended/error), push-driven из `EVENT_CALL_STATE`, на каждый домофон |
 | [`switch.py`](../../custom_components/elektronny_gorod/switch.py) | `switch` | Do Not Disturb (mirror «Мой Дом» → Настройки → Уведомления). 3 entity per place: master `dnd_root` + 2 dependent (`dnd_intercom_calls`, `dnd_management_company_calls`). Dependent `_attr_available = root.status` — HA нативно красит серым при master OFF |
 | [`binary_sensor.py`](../../custom_components/elektronny_gorod/binary_sensor.py) | `binary_sensor` | `blocked` (A-57): `device_class=PROBLEM`, `True` когда `blocked=True` в `/finance`. Реюзает balance device через identifier `(DOMAIN, place_{id})` |
-| [`event.py`](../../custom_components/elektronny_gorod/event.py) | `event` | Realtime doorbell `ring`/`ended` (ADR-0011) плюс durable `call_accepted`/`call_missed` per access control и `motion` per intercom/public camera. History dispatcher маршрутизируется по place/source ID; state attributes заданы allowlist без backend message |
+| [`event.py`](../../custom_components/elektronny_gorod/event.py) | `event` | Realtime doorbell `ring`/`ended` (ADR-0011) плюс durable `call_accepted`/`call_missed` per place и per access control, а также `motion` per intercom/public camera. Place-history привязана к устройству адреса; default entity ID содержит account/place IDs. History dispatcher маршрутизируется по place/source ID; state attributes заданы allowlist без backend message |
 
 ### Внешние интеграции
 
@@ -205,7 +205,7 @@ elektronny-gorod/
 | [`uplink_ws.py`](../../custom_components/elektronny_gorod/uplink_ws.py) | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): микрофон из Lovelace-карты → `DoorbellCallController.feed_uplink`; static-регистрация JS-карты (`async_register_uplink_ws_command` / `async_register_uplink_card`, зовутся из `__init__.py`) (ADR-0013) |
 | [`www/eg-intercom-mic-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-mic-card.js) | Lovelace-карта микрофона домофона: `getUserMedia` + AudioWorklet → Int16 PCM по авторизованному HA-WebSocket (ADR-0013) |
 | [`www/eg-intercom-call-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js) | Общий собранный бандл `custom:eg-intercom-call-card` и `custom:eg-event-history-card` из `frontend/` (Lit+TS). Не редактировать вручную |
-| [`frontend/`](../../frontend/) | Исходники карточек вызова и истории (Lit+TS, esbuild→`www/`, vitest). History UI объединяет несколько account feeds, независимо листает их, фильтрует по составному device key, строго нормализует WS response и группирует строки по локальной дате |
+| [`frontend/`](../../frontend/) | Исходники карточек вызова и истории (Lit+TS, esbuild→`www/`, vitest). History UI объединяет несколько place feeds разных config entry, независимо листает их, фильтрует по составному device key, строго нормализует WS response и группирует строки по локальной дате |
 | [`services.yaml`](../../custom_components/elektronny_gorod/services.yaml) | сервисы `answer` / `hangup` |
 
 ### Diagnostics / безопасность
