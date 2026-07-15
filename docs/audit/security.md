@@ -1,7 +1,7 @@
 Status: Active
 Owner: Security & Privacy Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0 HTTP/push reconciliation;
-pre-auth public bootstrap verified without Bearer, no new security finding)
+Last reviewed: 2026-07-15 (9.9.0 parity credential classification;
+stale diagnostics/timeout/MCP gate text reconciled)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -53,6 +53,7 @@ Quality gates:
 | S-17/S-18 | 🟡 OPEN P3 | сырое логирование body/err в go2rtc.py (не активная утечка) |
 | S-19 | 🟢 ACCEPTED-by-design | uplink AuthZ (любой auth HA-юзер) + AudioBridge `0.0.0.0:40020` LAN-exposure (ADR-0013/A-85) |
 | S-20 | ✅ RESOLVED | production credential-like literal удалён из audit evidence; текущие production credentials не совпадают |
+| S-21 | 🟡 DESIGN GATE | guest link, access-key code and signed archive URL for planned parity features |
 
 ## P0 — критичные утечки (все RESOLVED)
 
@@ -184,6 +185,27 @@ Quality gates:
 - **Residual:** старое неактивное значение остаётся в git history. Историю
   `master` не переписываем; credential нельзя повторно использовать.
 
+### S-21. Planned mobile-app parity credential surfaces
+
+- **Status:** 🟡 **DESIGN GATE** — реализации ещё нет; обязательные constraints
+  зафиксированы до кода.
+- **Scope:** [mobile-app-parity](../features/mobile-app-parity/README.md):
+  archive/media, guest invitations, access keys and private-camera controls.
+- **Credential classes:**
+  - guest `link`/invite UUID grants household access;
+  - `accessKeyCode` identifies a physical access credential;
+  - forpost playback/download URL contains a short-lived signed token.
+- **Forbidden sinks:** entity state/attributes, recorder, config-entry data,
+  `Store`, diagnostics, logs, exception text and persistent notifications.
+- **Required controls:** guest link only as response-only action result;
+  `accessKeyCode` discarded at parser boundary and never used as unique ID;
+  signed media URL resolved on demand and preferably hidden behind an
+  authenticated/short-lived HA proxy; sentinel propagation tests for all three.
+- **PII note:** resident names, nicknames and account IDs from place-scoped
+  `subscriber-places` are excluded from entity attributes by default.
+- **Merge gate:** a static-only guest/key/camera write path needs sanitized HAR,
+  security review and caplog/diagnostics/state scan before merge.
+
 ## P2 — желательно
 
 ### S-11. Логирование `Failed to fetch balance: %s` f-string
@@ -281,11 +303,12 @@ go2rtc по LAN.
 
 ## MCP / Tools
 
-Сейчас в репозитории нет `.claude/`, `.cursor/`, `.github/copilot-instructions.md` — следовательно, нет рисков MCP-стороны.
-
-При появлении (Итерация 3) добавить:
-- `docs/aidd/MCP_TOOLS.md` — права и ограничения;
-- pre-commit hook на проверку секретов в diff.
+Репозиторий содержит `.claude/`, `.cursor/` и
+`.github/copilot-instructions.md`; модель прав и запрещённые операции описаны в
+[`aidd/mcp-tools.md`](../aidd/mcp-tools.md). Agent/tool contracts не должны
+читать или выводить ignored `research/scripts/auth.env` и capture artifacts.
+Pre-commit secret hook всё ещё backlog; до него обязательны diff-scoped secret
+scan и review перед коммитом.
 
 ## Dependency vulnerabilities
 
@@ -318,11 +341,17 @@ Google задокументирована в [A-80](project-audit.md)) + `audioo
 - [x] `grep -rE 'LOGGER\..*(token|password|sms|headers|entry\.data)' custom_components/elektronny_gorod/` возвращает 0 реальных утечек (1 совпадение `config_flow.py:93` — redacted-by-design, длина).
 - [x] S-05 (shared ClientSession) — RESOLVED (ADR-0008).
 - [x] S-A71-01 (operator-токен в traceback go2rtc PUT) — RESOLVED (`from None`).
-- [ ] 🔴 **S-08 — `diagnostics.py` с redaction всё ещё ОТСУТСТВУЕТ** (P1, блокирует gate).
-- [ ] 🔴 **S-09 — `ClientTimeout` на основном API всё ещё ОТСУТСТВУЕТ** (P1).
-- [ ] S-16 (go2rtc_password redact) — зависит от S-08.
+- [x] **S-08 — `diagnostics.py` с redaction** (RESOLVED в 3.3.0).
+- [x] **S-09 — `ClientTimeout` на основном API** (RESOLVED; retry отдельно S-10).
+- [x] **S-16 diagnostics mitigation** — go2rtc credentials входят в `TO_REDACT`;
+  plaintext HA storage остаётся accepted backlog.
+- [ ] **S-21** — применить credential constraints и sentinel tests при
+  реализации mobile-app-parity slices.
 - [ ] S-07 (auto-refresh на 401) — Итерация 3 после HAR-сценария истечения.
 - [ ] S-17/S-18 (go2rtc.py raw logging) — P3, defense-in-depth, по мере touch.
+
+S-21 — gate будущего кода и не отменяет текущий `SECURITY_OK`: запрещённые
+credential surfaces пока не реализованы.
 
 ## Next reading
 

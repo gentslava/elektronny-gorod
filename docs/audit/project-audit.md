@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0: static APK diff + decrypted
-password/SMS/main-tabs/camera HAR + PCAP; добавлен A-92)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0: AVD parity inventory and
+implementation-ready history/archive/guest/key/private-camera backlog)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -378,14 +378,15 @@ Quality gates:
 - **Impact:** наша интеграция показывает snapshot **камер**, но не **домофона** — а домофон тоже имеет камеру у двери.
 - **Recommended fix:** добавить в `api.py` метод `query_access_control_snapshot(place_id, ac_id, w, h)`, аналогичный `query_camera_snapshot`. Создать camera entity для каждой `accesscontrols` или дополнительный snapshot endpoint в существующих camera entities.
 
-### A-49. SIP credentials endpoint не используется
+### A-49. SIP credentials endpoint используется call stack
 
-- **Severity:** P1 (потенциал для звонков)
+- **Status:** ✅ **RESOLVED** практической реализацией A-81 / ADR-0012:
+  `api.mint_sip_device` + register-on-ring SIP stack принимают INVITE и медиа.
+- **Original severity:** P1 (потенциал для звонков)
 - **Evidence:** `POST /rest/v1/places/{p}/accesscontrols/{ac}/sipdevices` возвращает `{id, realm, login, password}` — SIP credentials для регистрации в SIP-сервере оператора.
-- **Impact:** приложение использует SIP для приёма входящих звонков от домофонов. Это вероятный механизм real-time доставки «кто-то нажал кнопку у подъезда».
-- **Caverны:** SIP — это RTP/UDP вне HTTP. Charles HAR этого не покажет. Нужно либо отдельный capture (Wireshark + ключ TLS), либо реверс APK для SIP-клиента приложения.
-- **Recommended first step:** spec-фаза с research через документацию SIP-клиентов Android (PjSIP, Linphone) и попытка зарегистрировать SIP-клиент в HA с credentials из `sipdevices` (например, через PJSIP-плагин HA). Затем — реальный звонок и наблюдение.
-- **Связано с A-47** — взаимоисключающие или дополняющие каналы?
+- **Resolution evidence:** production + PCAP подтвердили stock sequence
+  `REGISTER → INVITE → 100 Trying → 200 OK → RTP`; FCM даёт ring signal, SIP
+  даёт call/media. См. A-81 и ADR-0012/0013.
 
 ### A-50. Camera events endpoints не реализованы
 
@@ -393,8 +394,15 @@ Quality gates:
 - **Evidence:** 
   - `GET /api/mh-camera-personal/mobile/v1/cameras/{id}/events` — `{externalEvents: [{ID, Time, Duration, isAvailable}], recordingDisabledEvents: []}`
   - `GET /rest/v2/forpost/cameras/{id}/events` — альтернативный v2 endpoint
-- **Impact:** история motion-событий / записей с камер. Можно поднять как HA `event` entity или сенсор «последняя запись».
-- **Recommended fix:** новый platform `sensor.last_event` или `event` entity для каждой камеры. Polling с разумным интервалом.
+- **Runtime evidence (9.9.0 AVD):** экран Events открывает archive на точном
+  timestamp; archive даёт seek, список clips/duration и download. Signed
+  playback/download URL — credential, не entity attribute.
+- **Impact:** нет motion-history и доступа к записи пропущенного события из HA.
+- **Recommended fix:** per-camera `EventEntity` только для новых whitelisted
+  events после baseline + integration `MediaSource` для старого журнала и
+  on-demand archive. Не импортировать месяцы истории в recorder. Полный PRD,
+  security и test matrix —
+  [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
 
 ### A-51. Bootstrap response (`device-installations`) не используется для discovery
 
@@ -452,7 +460,7 @@ Quality gates:
 > + PR #35 «visibility sync + Bronze entity polish». Все находки подкреплены
 > либо HAR, либо новым кодом в `coordinator.py` / `__init__.py`.
 
-### A-56. DND switches не реализованы
+### A-56. DND switches реализованы
 
 - **Status:** ✅ **RESOLVED** в PR #38 (commit `2dc07ae`). Новая платформа
   `switch.py` с 3 entity per place: master `dnd_root` (всегда available) +
@@ -462,7 +470,7 @@ Quality gates:
   Translation keys в `entity.switch.{key}.name` (ru/en). 4 unit-теста
   (`tests/test_dnd.py`). См. CHANGELOG `[3.2.0]` (TBD).
 
-### A-57. Sensor balance — нет дополнительных attrs из `/finance` response
+### A-57. Finance fields и blocking entities реализованы
 
 - **Status:** ✅ **RESOLVED** — merged в master (commit `e5d9bbd`, PR #39).
   2 entity per place добавлены к существующему balance device:
@@ -484,7 +492,7 @@ Quality gates:
   5 unit-тестов (TDD strict — RED first, потом GREEN). Translations ru/en.
   См. CHANGELOG.
 
-### A-58. Real-time event delivery (polling vs FCM push — research pending)
+### A-58. Real-time event delivery resolved; durable REST history remains
 
 - **Severity:** P1 (Silver real-time path для домофонных звонков).
 - **Area:** Feature gap / real-time alternative.
@@ -507,6 +515,11 @@ Quality gates:
   `fcm.py` + `event`-сущность + `api.register_push_device`. Polling
   `/events/search` остаётся возможным fallback/backfill, но для realtime-вызова
   больше не нужен.
+- **Remaining scope (не reopening realtime finding):** durable history/backfill
+  из `/events/search` ещё не реализован. Первый poll обязан установить baseline
+  без emit старых событий; полный журнал следует browse-ить отдельно, а не
+  переигрывать в automation. Implementation package —
+  [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
 - **Каверзы:** канал опирается на приватные API Google — долгосрочных гарантий
   нет (см. A-80). Поэтому весь FCM-флоу под graceful degradation.
 - **Scope:** v1 — только NTK/myhome (`myhome.proptech.ru`). Дом.ру (HMS/Huawei
@@ -1116,7 +1129,7 @@ Quality gates:
      бы 2 `SipManager` на фикс-портах). Снятие ограничения (динамические порты /
      пул) — будущий слайс, не блокер.
 - **Связанные findings:** [A-49](#a-49-sip-credentials-endpoint-не-используется)
-  (`sipdevices` endpoint — теперь используется), [A-58](#a-58-real-time-event-delivery-polling-vs-fcm-push--research-pending)
+  (`sipdevices` endpoint — теперь используется), [A-58](#a-58-real-time-event-delivery-resolved-durable-rest-history-remains)
   / [A-54](#a-54-fcm-канал-и-subscribernotifications--реализован-как-канал-события-вызова)
   (FCM-канал вызова — триггер для answer), [A-80](#a-80-fcm-приём-вызова--серая-зона-приватных-api-google--новая-зависимость)
   (та же mirror-app серая зона + push-params).
@@ -1486,6 +1499,53 @@ Quality gates:
   HTML fixture без реальных идентификаторов.
 - **Не делать:** не логировать полный HTML, IP, headers или auth context.
 
+### A-93. Guest invitation есть в приложении, но нет HA action
+
+- **Severity:** P2 feature gap; **security-sensitive**.
+- **Evidence:** AVD «Мой Дом» 9.9.0: People → Add guest показывает QR и
+  share-link. APK Retrofit/DTO: `POST /api/mh-auth/mobile/v1/guests/link`
+  с query `placeId`, `app`; response `{data:{link,message}}`. NTK `app=2`,
+  ERTH `app=4`. Runtime link не сохранён, потому что это access credential.
+- **Current behavior:** `query_places(place_id)` уже может получить people
+  relations, но action создания приглашения отсутствует.
+- **Recommended fix:** owner-side response-only action
+  `create_guest_invite`, admin policy, no entity/persistence. Link/message
+  возвращаются только вызывающему клиенту; добавить redaction и sentinel test.
+  Перед кодом обязателен sanitized decrypted HAR самого POST.
+- **Non-goal:** принимать invitation за гостя или публиковать people names/
+  account IDs в entity attributes.
+- **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
+
+### A-94. Access-key inventory/settings отсутствуют
+
+- **Severity:** P2 feature gap; account/tariff-dependent.
+- **Evidence:** одинаковые static Retrofit/DTO contracts в обеих APK 9.9.0:
+  list by `placeId`, lookup, register, delete, rename, reactivate and new
+  notification-status PUT under `mh-access-key`. Current AVD account did not
+  expose the enabled screen, so runtime contract is missing.
+- **Security:** `accessKeyCode` is a physical credential. It must be discarded
+  at the parser boundary and never become `unique_id`, state, attributes, log
+  or diagnostics. Stable identity is server `key_service_id`.
+- **Recommended fix:** after enabled-account HAR, ship read-only inventory
+  disabled by default; notification switch is a later non-optimistic slice.
+  Register/delete/rename/reactivate require separate admin/security approval.
+- **Caveat:** APK labels key-use history “Coming soon”; do not claim support.
+- **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
+
+### A-95. Private-camera controls отсутствуют
+
+- **Severity:** P2 feature gap; private hardware required.
+- **Evidence:** static 9.9.0 contracts for feature-info, motion parameters/
+  sensitivity, event/continuous record mode, microphone/speaker volume, mirror
+  and PTZ. No matching private camera was available on the research account.
+- **Transport gap:** current `HTTP` wrapper has GET/POST/DELETE only; these
+  settings require additive PUT support.
+- **Recommended fix:** hardware HAR first; feature-info gates every entity;
+  response ranges drive `NumberEntity`; writes are non-optimistic and refresh
+  authoritative state. Mirror/record/PTZ wait for exact enum/action capture.
+- **Non-goal:** Wi-Fi provisioning, tariff purchase and firmware update.
+- **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
+
 ### A-73. config_flow + `async_migrate_entry` без тестов (Bronze IQS gate)
 
 - **Status:** ✅ **RESOLVED** — merged в master, commit `3a60b15`
@@ -1543,7 +1603,7 @@ Quality gates:
 | A-08..A-14, A-16..A-21, A-23, A-24, A-44, A-55 | Итерация 2 (Bronze IQS — shipped в 3.1.0) |
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
 | A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
-| ✅ A-56 + ✅ A-57 + ✅ A-61 (shipped 3.2.0 TBD), A-58, A-59, A-62 | Итерация 3 (Silver feature gaps) |
+| ✅ A-56 + ✅ A-57 + ✅ A-61; A-59/A-62 + REST-history remainder A-58 | Итерация 3 (Silver feature gaps) |
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
 | A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR #51 — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
 | ✅ A-71 (long-open video freeze ~30 мин — auto-recovery, ADR-0009) | Итерация 3 (design tradeoff: mirror vs HA-UX) |
@@ -1555,6 +1615,10 @@ Quality gates:
 | ✅ A-87 (ring/idle watchdog, PR #68) + ✅ A-88 (video anti-churn) + ✅ A-90 (FCM-ended guard), merged PR #69 | Итерация 4 (UI + надёжность видео/жизненного цикла вызова) |
 | ✅ A-89 (смена звонящего домофона во время held) + ✅ A-91 (штатная pre-answer SIP-модель подтверждена PCAP), merged PR #69 | Итерация 4 (мульти-вызов + production diagnostics) |
 | A-92 (typed diagnostics для HTML service-pipe/VPN block; нужен runtime HAR) | backlog (P2 reliability; не блокирует happy path 9.9.0) |
+| A-50 + остаток A-58 + A-59 | mobile-app parity: durable history/archive + Media Source |
+| A-93 | mobile-app parity: guest invitation response action (HAR gate) |
+| A-94 | mobile-app parity: access keys (enabled-account HAR gate) |
+| A-95 | mobile-app parity: private-camera settings (hardware HAR gate) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 

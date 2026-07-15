@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0 reconciled against APK/HAR/PCAP;
-APP_VERSION/push/live-video contracts updated; suite 394 passed)
+Last reviewed: 2026-07-15 (mobile apps 9.9.0 AVD/API parity package;
+DND/finance/realtime documentation drift reconciled; suite not rerun for docs-only change)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -93,6 +93,16 @@ SECURITY_OK разблокирован.
   может выглядеть как пустой список камер (A-92; нужен воспроизводимый HAR).
 - Cold-start go2rtc warmup (A-67), lock fake-state cosmetic-cycle (A-15 — `asyncio.sleep` уже убран).
 
+### Mobile-app parity backlog
+
+AVD/HAR/APK analysis 9.9.0 оформлен в отдельный
+[`feature package`](features/mobile-app-parity/README.md): durable event history
+и archive/Media Source (A-50/A-58/A-59), response action гостевого приглашения
+(A-93), ключи доступа (A-94) и настройки личных камер (A-95). История/архив
+имеют wire evidence; guest/key/camera write paths сохраняют обязательный HAR/
+hardware gate. Guest links, key codes and signed media URLs не допускаются в
+entity state, recorder, diagnostics или логи.
+
 Полный список — в [`audit/project-audit.md`](audit/project-audit.md).
 
 ## Первое, что нужно сделать
@@ -103,6 +113,10 @@ SECURITY_OK разблокирован.
 2. Retry/backoff helper для идемпотентных GET (5xx / connection errors) — остаток A-21.
 3. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
 4. Native reauth / reconfigure flow (A-25/A-26 — Silver).
+
+Feature backlog независим от reliability queue; порядок зафиксирован в
+[`mobile-app-parity/tasklist.md`](features/mobile-app-parity/tasklist.md):
+history/archive → guest invite → enabled-account keys → private-camera hardware.
 
 ✅ Сделано в этом цикле: `http.py` ClientTimeout (A-21 timeout, `3885bb0`), `test_config_flow.py` + `test_init.py` (A-73, `3a60b15`), `test_helpers.py` golden vectors (A-74, `362237b`). `diagnostics.py` (A-23) закрыт ещё в 3.3.0.
 

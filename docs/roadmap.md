@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-15 (MyHome/Smart Home 9.9.0 metadata + decrypted
-auth/main-tabs/camera contracts; добавлен reliability finding A-92)
+Last reviewed: 2026-07-15 (9.9.0 AVD parity backlog; completed DND/finance/
+realtime statuses reconciled; history/archive/guest/key/camera plans linked)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -131,12 +131,28 @@ pytest CI matrix также работает на минимальной и те
 
 #### Silver feature gaps (HAR-research findings)
 
-- [ ] **A-56** DND switches (3 entity per place: master + 2 dependent через `/settings/do_not_disturb`). Новая платформа `switch`.
-- [ ] **A-57** Sensor balance — extra entities из `/finance` response (binary_sensor.balance_blocked, sensor.days_to_block, sensor.next_payment_amount/date, button.pay).
-- [ ] **A-58** `/rest/v1/events/search` polling — основа для real-time event detection без STOMP/FCM. Требует **ADR-0009** (см. ниже). Закрывает основной use-case Итерации 4 более простым способом.
+- [x] **A-56** ✅ DND switches: master + 2 dependent через `/settings/do_not_disturb` (`switch.py`, PR #38).
+- [x] **A-57** ✅ Finance: account-blocked + days-to-block entities; payment amount/date/link remain safe balance attributes (PR #39; browser navigation is not a HA Button use-case).
+- [x] **A-58 realtime** ✅ Doorbell event delivery implemented through FCM (ADR-0011); REST polling is not the realtime source.
+- [ ] **A-58 history remainder** `/rest/v1/events/search` durable history/backfill with first-page baseline and ID dedup; do not replay old pages into automations.
 - [ ] **A-59** Video retention helper — `is_within_retention(camera_type, ts)`, проверка перед video URL request. Закрывает ложные 500 для лифт/публичных камер.
-- [ ] **A-61** Двойной HTTP в per-place collectors — вынести `screens` + `access_controls` на уровень `_async_update_data`, передавать как параметры. Perf, не функциональная проблема.
+- [x] **A-61** ✅ Двойной HTTP устранён: `screens` + `access_controls` prefetch per place (commit `71eb4dd`).
 - [ ] **A-62** FAVORITES section в `_extract_hidden_ids` — расширить парсинг с учётом mixed-typed items. Fallback OK, не блокер.
+
+#### Mobile app parity 9.9.0
+
+Единый PRD/research/plan/tasklist:
+[`features/mobile-app-parity/`](features/mobile-app-parity/README.md).
+Static-only write paths не переходят в код без decrypted HAR (ADR-0006).
+
+- [ ] **A-50 + A-59 + A-58 remainder** History/archive: event baseline,
+  per-camera events and Media Source with on-demand signed URL resolution.
+- [ ] **A-93** Guest invitation: NTK `app=2`, response-only admin action; live
+  link never persists. Prerequisite: sanitized POST fixture.
+- [ ] **A-94** Access keys: read-only inventory first, notification switch only
+  after enabled-account HAR; key code is never HA state/ID.
+- [ ] **A-95** Private-camera settings: feature-gated sensitivity/volume first;
+  record/mirror/PTZ after hardware HAR confirms enums/actions.
 
 #### Production-log polish (A-63..A-66 — отдельные PR)
 

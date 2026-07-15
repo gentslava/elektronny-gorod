@@ -14,8 +14,17 @@ docs/features/
 │   ├── research.md
 │   ├── plan.md
 │   └── tasklist.md
-└── <feature-id>/                          ← реальные фичи (создаются по мере появления)
+├── intercom-two-way-audio/                ← реализованный realtime/SIP scope
+├── mobile-app-parity/                     ← 9.9.0 history/archive/guest/key/camera backlog
+└── <feature-id>/                          ← новые фичи
 ```
+
+## Активные feature packages
+
+- [`mobile-app-parity/`](mobile-app-parity/README.md) — implementation hand-off
+  по истории/архиву, гостевым приглашениям, ключам и настройкам личных камер.
+- [`intercom-two-way-audio/`](intercom-two-way-audio/README.md) — реализованный
+  FCM/SIP/two-way audio и call-card scope.
 
 ## Когда заводить feature folder
 

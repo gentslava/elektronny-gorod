@@ -1,6 +1,6 @@
 Status: Active
 Owner: Documentation / AIDD Agent
-Last reviewed: 2026-07-15 (release 4.0.0 notes and current docs map)
+Last reviewed: 2026-07-15 (9.9.0 mobile-app parity research package and drift reconciliation)
 
 Source files:
 - AIDD-документы в `docs/` (этот каталог и подкаталоги)
@@ -67,6 +67,7 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | Понять принцип reverse engineering | `decisions/0006-mirror-app-behavior.md`, `decisions/0007-stateful-emulator-baseline.md` |
 | Разобрать API из HAR | `architecture/api-reference.md` (через subagent `reverse-engineer`) |
 | Спроектировать новую feature | `aidd/runbooks/har-collection.md` → HAR → `aidd/templates/idea.template.md` → `prd.template.md` → `plan.template.md` |
+| Реализовать найденные фичи 9.9.0 | `features/mobile-app-parity/README.md` → `research.md` → `plan.md` → `tasklist.md` |
 | Использовать готовый prompt | `aidd/prompt-library.md` |
 | Выбрать skill для задачи | `aidd/skills.md` |
 | Понять роли агентов | `aidd/multi-agent-workflow.md` |
@@ -117,7 +118,8 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | `aidd/templates/*` | шаблоны |
 | `aidd/runbooks/*` | руководства (вкл. `har-collection.md`) |
 | `features/example/*` | образец |
-| `architecture/api-reference.md` | reverse-engineered API knowledge (stub до первого HAR) |
+| `features/mobile-app-parity/*` | active research/PRD/plan: history, archive, guests, keys, camera settings |
+| `architecture/api-reference.md` | canonical reverse-engineered API knowledge with HAR/runtime/static evidence tiers |
 | `research/api/README.md` | конвенция для HAR-снимков (сама папка — local-only) |
 | `research/apk/README.md` | конвенция для APK (сама папка — local-only) |
 | `research/scripts/README.md` | pipeline для сбора HAR |
