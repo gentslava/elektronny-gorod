@@ -162,6 +162,32 @@ async def test_history_event_entities_created(hass: HomeAssistant, mock_api):
     assert hass.states.get(camera_entity_id) is not None
 
 
+async def test_call_history_entities_do_not_claim_doorbell_device_class(
+    hass: HomeAssistant, mock_api
+):
+    """Accepted/missed history is not a HA doorbell ring event stream."""
+    doorbell_entity_id = await _setup(hass)
+    registry = er.async_get(hass)
+    place_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_PLACE_UID
+    )
+    access_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_AC_UID
+    )
+    assert place_entity_id is not None
+    assert access_entity_id is not None
+
+    place_state = hass.states.get(place_entity_id)
+    access_state = hass.states.get(access_entity_id)
+    doorbell_state = hass.states.get(doorbell_entity_id)
+    assert place_state is not None
+    assert access_state is not None
+    assert doorbell_state is not None
+    assert place_state.attributes.get("device_class") is None
+    assert access_state.attributes.get("device_class") is None
+    assert doorbell_state.attributes["device_class"] == "doorbell"
+
+
 async def test_place_history_event_attached_to_place_device(
     hass: HomeAssistant, mock_api
 ):

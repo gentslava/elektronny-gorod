@@ -1,7 +1,7 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-07-15 (417 backend + 56 frontend passed; добавлены
-entity-scoped history browse, response normalization and pagination regressions)
+Last reviewed: 2026-07-16 (429 backend + 61 frontend passed; добавлены
+place-scoped history/device-class and 502 isolation regressions)
 
 Source files:
 - `tests/**` (47 test-модулей + `conftest.py`)
@@ -33,9 +33,9 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **417 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
+| Локальный suite | **429 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
 | Test modules | 47 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
-| Frontend | **56 passed**, `tsc --noEmit` и production bundle build |
+| Frontend | **61 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
@@ -224,8 +224,8 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 417 passed.
-- [x] `frontend`: 56 Vitest tests, TypeScript check and production build green.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 429 passed.
+- [x] `frontend`: 61 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.

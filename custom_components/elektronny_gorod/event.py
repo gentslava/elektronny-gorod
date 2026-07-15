@@ -185,7 +185,6 @@ class ElektronnyGorodPlaceHistoryEvent(
 
     _attr_has_entity_name = True
     _attr_translation_key = "account_history"
-    _attr_device_class = EventDeviceClass.DOORBELL
     _attr_event_types = [EVENT_CALL_ACCEPTED, EVENT_CALL_MISSED]
 
     def __init__(
@@ -267,7 +266,6 @@ class ElektronnyGorodAccessHistoryEvent(
 
     _attr_has_entity_name = True
     _attr_translation_key = "access_history"
-    _attr_device_class = EventDeviceClass.DOORBELL
     _attr_event_types = [EVENT_CALL_ACCEPTED, EVENT_CALL_MISSED]
 
     def __init__(

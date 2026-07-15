@@ -529,6 +529,11 @@ Quality gates:
   место и привязывается к устройству адреса; карточка может независимо
   объединить несколько мест/аккаунтов и фильтровать по составному source key;
   прежний per-device режим сохранён.
+  Наблюдавшийся transient `502` на `events/search` остаётся изолированной
+  деградацией: browse показывает safe unavailable, poller продолжает на
+  следующем интервале без немедленного duplicate POST. History accepted/missed
+  entities не используют несовместимый HA doorbell device class (он
+  зарезервирован за realtime `ring`/`ended` entity).
   Entity permission/source binding и sanitized allowlist response не допускают
   replay в dispatcher/state или чтение произвольного аккаунта.
 - **Remaining product scope:** archive playback/download через Media Source —

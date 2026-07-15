@@ -6,7 +6,8 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from aiohttp import ClientResponse
+import pytest
+from aiohttp import ClientError, ClientResponse
 
 from custom_components.elektronny_gorod.api import ElektronnyGorodAPI
 from custom_components.elektronny_gorod.user_agent import UserAgent
@@ -41,6 +42,20 @@ async def test_query_events_posts_exact_contract_and_returns_typed_page(hass) ->
     assert page.events[0].source_id == "2001"
     assert page.events[0].timestamp == 1700000001
     assert not hasattr(page.events[0], "message")
+
+
+async def test_query_events_does_not_immediately_retry_502(hass) -> None:
+    """The caller owns recovery after a failed history request."""
+    failed_response = MagicMock(spec=ClientResponse)
+    failed_response.status = 502
+
+    api = ElektronnyGorodAPI(hass, UserAgent())
+    api.http.post = AsyncMock(side_effect=ClientError(failed_response))
+
+    with pytest.raises(ClientError):
+        await api.query_events([1001], page=0)
+
+    api.http.post.assert_awaited_once()
 
 
 async def test_query_camera_events_uses_requested_camera_identity(hass) -> None:

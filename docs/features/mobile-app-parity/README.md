@@ -1,7 +1,7 @@
 # Mobile app parity: history, archive, guests, keys and camera settings
 
-- **Status:** Slice 1 + old-call browser implemented in `feat/durable-event-history`; review pending
-- **Date:** 2026-07-15
+- **Status:** Slice 1 + old-call browser implemented in `feat/durable-event-history`; PR #70 open
+- **Date:** 2026-07-16
 - **Owner:** @gentslava
 - **Apps:** Мой Дом 9.9.0 and Умный Дом.ру 9.9.0
 
@@ -50,7 +50,7 @@ folder. They are access credentials even when short-lived.
 - [x] `RESEARCH_DONE`
 - [x] `SPEC_READY` — Slice 1
 - [x] `PLAN_APPROVED` — Slice 1
-- [x] `TESTS_PASS` — 417 backend + 56 frontend passed
+- [x] `TESTS_PASS` — 429 backend + 61 frontend passed
 - [x] `SECURITY_OK` — history DTO/state/store sentinel boundary reviewed
 - [x] `DOCS_UPDATED`
 

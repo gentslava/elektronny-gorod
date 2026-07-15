@@ -1,7 +1,7 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-07-15 (mobile apps 9.9.0 durable history browser;
-typed API, EventEntity lifecycle, entity-scoped WebSocket and Lovelace card)
+Last reviewed: 2026-07-16 (4.0.0 RU/EN README, HACS info and history-card
+screenshots synchronized with implemented features)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -46,8 +46,8 @@ elektronny-gorod/
 ├── workflow.md                    ← процесс
 ├── LICENSE                        ← MIT
 ├── README.md                      ← пользовательская документация (RU)
-├── README.en_EN.md                ← минимальная EN-документация
-├── info.md                        ← HACS info card
+├── README.en_EN.md                ← пользовательская документация (EN)
+├── info.md                        ← краткая HACS feature/config card
 ├── hacs.json                      ← HACS manifest
 │
 ├── custom_components/elektronny_gorod/
@@ -130,8 +130,8 @@ elektronny-gorod/
 |---|---|---|
 | [`manifest.json`](../../custom_components/elektronny_gorod/manifest.json) | HA integration manifest: domain, version, iot_class, config_flow | строки 1-14 |
 | [`hacs.json`](../../hacs.json) | HACS publishing: min HA version, zip release, country=RU | строки 1-7 |
-| [`info.md`](../../info.md) | HACS info card | — |
-| [`README.md`](../../README.md) / [`README.en_EN.md`](../../README.en_EN.md) | пользовательская документация | — |
+| [`info.md`](../../info.md) | краткий HACS feature/config overview со ссылкой на README | — |
+| [`README.md`](../../README.md) / [`README.en_EN.md`](../../README.en_EN.md) | полная пользовательская документация RU/EN | — |
 | [`LICENSE`](../../LICENSE) | MIT | — |
 
 ### Entry points

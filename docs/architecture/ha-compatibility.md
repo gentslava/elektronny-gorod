@@ -117,7 +117,7 @@ async_step_user
 | Возвращаемое `data` используется entity | ✅ через `CoordinatorEntity` | `camera.py`, `lock.py`, `sensor.py`, `switch.py` |
 | `UpdateFailed` при ошибке | ✅ fatal places; per-place partial data | `coordinator.py:_async_update_data` |
 | Timeout per request | ✅ REST 30с / binary 60с / connect 10с | `http.py:15-22,120-126` |
-| Retry / backoff | 🟡 нет; follow-up только для идемпотентных GET | `api.py`, `http.py`, A-21 |
+| Retry / backoff | 🟡 нет; history error изолируется до следующего poll/UI refresh | `api.py`, `history.py`, `history_ws.py`, A-21 |
 | Rate limiting | 🔴 нет | — |
 | Caching | 🔴 нет | — |
 | Никаких blocking ops в loop | ✅ async I/O; blocking subprocess не используется | integration code |
@@ -145,7 +145,10 @@ async_step_user
 History `EventEntity` additive и не требует config-entry migration: stable
 unique IDs строятся из place/access-control или camera ID, device identity
 совпадает с существующим intercom/camera device. `_trigger_event` получает
-только allowlisted attributes; backend message не копируется.
+только allowlisted attributes; backend message не копируется. Durable
+accepted/missed streams не объявляют `device_class=doorbell`, потому что этот
+HA-класс требует поддержку `ring`; doorbell-класс остаётся только у realtime
+сущности вызова.
 
 ## Diagnostics / Repairs / Services
 

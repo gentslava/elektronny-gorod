@@ -1,6 +1,6 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-07-15 (APP_VERSION/coordinator/test/README state reconciled)
+Last reviewed: 2026-07-16 (4.0.0 RU/EN README and derived HACS info reconciled)
 
 Source files:
 - весь репозиторий (это карта)
@@ -56,7 +56,8 @@ Quality gates:
 | HACS-публикация | [`hacs.json`](../../hacs.json) + GitHub Releases | release workflow | HACS |
 | Release pipeline | [`.github/workflows/release.yaml`](../../.github/workflows/release.yaml) | разработчик | GitHub Actions |
 | Brand assets | brands.home-assistant.io/elektronny_gorod/ | разработчик (через PR в brands repo) | HA UI, README badge |
-| Пользовательская документация | [`README.md`](../../README.md) | разработчик | пользователь |
+| Пользовательская документация | [`README.md`](../../README.md) + [`README.en_EN.md`](../../README.en_EN.md) | разработчик | пользователь |
+| Краткая HACS feature card | [`info.md`](../../info.md), производна от README | разработчик | HACS-пользователь |
 
 ## Известные конфликты
 
@@ -90,6 +91,7 @@ Quality gates:
 | `README.md` языковая ссылка | `/README.en_EN.md` существует |
 | Пример установки | `custom_components/elektronny_gorod` |
 | Реальный домен | `elektronny_gorod` — совпадает |
+| `info.md` | краткое подмножество актуальных возможностей RU/EN README |
 
 **Резолюция:** ✅ закрыт. Языковые ссылки и путь ручной установки совпадают с
 файловой системой.

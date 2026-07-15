@@ -265,6 +265,7 @@ Lovelace custom:eg-event-history-card
   → HA WebSocket elektronny_gorod/history(entity_id, page), один feed на place
   → POLICY_READ + registry/config-entry/source validation
   → place entity: POST /rest/v1/events/search?page=N для одного placeId
+    → error даёт safe unavailable; retry — следующий refresh/poll, не duplicate POST
     → known access-control filter + safe source identity
   → per-device entity: тот же endpoint + exact place/access-control filter
   → карточка независимо листает и объединяет несколько place feeds
