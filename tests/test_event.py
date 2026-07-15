@@ -40,6 +40,7 @@ _CALL_TIMER_DRAIN_SEC = int(DOORBELL_CALL_WINDOW_FALLBACK_SEC + 3 + 6 + 2)
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
 _UID = "elektronny_gorod_event_doorbell_P1_AC1"
+_HISTORY_ACCOUNT_UID = "elektronny_gorod_event_history_account_A1_S1"
 _HISTORY_AC_UID = "elektronny_gorod_event_history_access_P1_AC1"
 _HISTORY_CAMERA_UID = "elektronny_gorod_event_history_camera_100"
 
@@ -133,9 +134,12 @@ async def test_doorbell_event_entity_created(hass: HomeAssistant, mock_api):
 
 
 async def test_history_event_entities_created(hass: HomeAssistant, mock_api):
-    """Verified call and motion streams get separate EventEntity instances."""
+    """Account, per-intercom and motion streams get EventEntity instances."""
     await _setup(hass)
     registry = er.async_get(hass)
+    account_entity_id = registry.async_get_entity_id(
+        "event", DOMAIN, _HISTORY_ACCOUNT_UID
+    )
     access_entity_id = registry.async_get_entity_id(
         "event", DOMAIN, _HISTORY_AC_UID
     )
@@ -143,10 +147,42 @@ async def test_history_event_entities_created(hass: HomeAssistant, mock_api):
         "event", DOMAIN, _HISTORY_CAMERA_UID
     )
 
+    assert account_entity_id is not None
     assert access_entity_id is not None
     assert camera_entity_id is not None
+    assert hass.states.get(account_entity_id) is not None
     assert hass.states.get(access_entity_id) is not None
     assert hass.states.get(camera_entity_id) is not None
+
+
+async def test_account_history_event_keeps_source_metadata(
+    hass: HomeAssistant, mock_api
+):
+    """The aggregate stream identifies the intercom without exposing message."""
+    await _setup(hass)
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "event", DOMAIN, _HISTORY_ACCOUNT_UID
+    )
+    assert entity_id is not None
+
+    async_dispatcher_send(hass, SIGNAL_HISTORY_EVENT, {
+        "event_type": "call_missed",
+        "event_id": "event-new",
+        "occurred_at": 1700000001,
+        "place_id": "P1",
+        "source_type": "accessControl",
+        "source_id": "AC1",
+        "message": "PII-SENTINEL",
+    })
+    await hass.async_block_till_done()
+
+    state = hass.states.get(entity_id)
+    assert state.attributes["event_type"] == "call_missed"
+    assert state.attributes["place_id"] == "P1"
+    assert state.attributes["source_id"] == "AC1"
+    assert state.attributes["source_name"] == "Подъезд 1"
+    assert "message" not in state.attributes
+    assert "PII-SENTINEL" not in json.dumps(dict(state.attributes))
 
 
 async def test_access_history_event_routes_sanitized_payload(

@@ -525,8 +525,11 @@ Quality gates:
   restart, а overlapping poll пропускается. В HA попадают только verified
   accepted/missed call events; старые страницы не переигрываются в automation.
   `history_ws.py` + `custom:eg-event-history-card` дают постраничный browse
-  старых accepted/missed строк с entity permission/source binding и sanitized
-  allowlist response — также без replay в dispatcher/state.
+  старых accepted/missed строк. Account history entity охватывает все места
+  одной config entry, карточка может независимо объединить несколько аккаунтов
+  и фильтровать по составному source key; прежний per-device режим сохранён.
+  Entity permission/source binding и sanitized allowlist response не допускают
+  replay в dispatcher/state или чтение произвольного аккаунта.
 - **Remaining product scope:** archive playback/download через Media Source —
   Slice 2, не часть finding о delivery.
 - **Каверзы:** канал опирается на приватные API Google — долгосрочных гарантий

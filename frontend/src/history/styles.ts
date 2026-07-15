@@ -61,6 +61,27 @@ export const historyCardStyles: CSSResult[] = [
     .content {
       padding: 0 16px 16px;
     }
+    .filters {
+      display: flex;
+      gap: 8px;
+      overflow-x: auto;
+      padding: 0 0 4px;
+      scrollbar-width: thin;
+    }
+    .chip {
+      min-height: 36px;
+      padding: 0 14px;
+      flex: none;
+      color: var(--eg-text-2);
+      background: var(--eg-elevated);
+      font-size: 13px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .chip.active {
+      color: var(--eg-primary);
+      background: var(--eg-primary-bg);
+    }
     section + section {
       margin-top: 20px;
     }

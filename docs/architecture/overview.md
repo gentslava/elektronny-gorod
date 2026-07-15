@@ -262,11 +262,14 @@ async_setup_entry
     → Store.async_save({streams: bounded opaque IDs})
 
 Lovelace custom:eg-event-history-card
-  → HA WebSocket elektronny_gorod/history(entity_id, page)
+  → HA WebSocket elektronny_gorod/history(entity_id, page), один feed на config entry
   → POLICY_READ + registry/config-entry/source validation
-  → POST /rest/v1/events/search?page=N только для place выбранной entity
-  → exact access-control filter + whitelist accepted/missed
-  → sanitized rows {event_id, event_type, occurred_at}; без dispatcher/state replay
+  → account entity: POST /rest/v1/events/search?page=N для всех placeIds config entry
+    → known access-control filter + safe source identity
+  → per-device entity: тот же endpoint + exact place/access-control filter
+  → карточка независимо листает и объединяет несколько account feeds
+  → sanitized rows {event_id, event_type, occurred_at, place_id, source_id,
+                    source_name}; без dispatcher/state replay
 ```
 
 ### Camera image flow

@@ -151,6 +151,17 @@
           }
         }
       },
+      "account_history": {
+        "name": "Account event history",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "call_accepted": "Call accepted",
+              "call_missed": "Call missed"
+            }
+          }
+        }
+      },
       "camera_history": {
         "name": "Motion history",
         "state_attributes": {

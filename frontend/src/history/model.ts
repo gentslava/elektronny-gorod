@@ -7,6 +7,12 @@ export interface HistoryEventRow {
   event_type: HistoryEventType;
   /** Unix timestamp in seconds. */
   occurred_at: number;
+  /** Entity/feed identity keeps opaque event IDs isolated between accounts. */
+  feed_id: string;
+  feed_name: string;
+  /** Stable client-side identity for one account/place/access-control source. */
+  source_key: string;
+  source_name: string;
 }
 
 export interface HistoryPage {
@@ -18,8 +24,23 @@ export interface HistoryPage {
 }
 
 export interface HistoryCardConfig {
-  entity: string;
+  entities: string[];
   title?: string;
+}
+
+export interface HistorySource {
+  key: string;
+  label: string;
+}
+
+export interface HistoryFeedState {
+  page: number;
+  last: boolean;
+}
+
+export interface HistoryPageRequest {
+  entityId: string;
+  page: number;
 }
 
 export interface HistoryDayGroup {
@@ -41,6 +62,8 @@ export interface HistoryStrings {
   refresh: string;
   more: string;
   loading: string;
+  devices: string;
+  allDevices: string;
 }
 
 const STRINGS: Record<Lang, HistoryStrings> = {
@@ -56,6 +79,8 @@ const STRINGS: Record<Lang, HistoryStrings> = {
     refresh: "Обновить",
     more: "Показать ещё",
     loading: "Загрузка истории…",
+    devices: "Устройства",
+    allDevices: "Все устройства",
   },
   en: {
     title: "Events",
@@ -69,6 +94,8 @@ const STRINGS: Record<Lang, HistoryStrings> = {
     refresh: "Refresh",
     more: "Show more",
     loading: "Loading history…",
+    devices: "Devices",
+    allDevices: "All devices",
   },
 };
 
@@ -83,6 +110,8 @@ function isHistoryType(value: unknown): value is HistoryEventType {
 /** Keep only the documented, privacy-safe response shape. */
 export function normalizeHistoryPage(value: unknown): HistoryPage {
   const page = isRecord(value) ? value : {};
+  const entityId = typeof page.entity_id === "string" ? page.entity_id : "";
+  const feedName = typeof page.source_name === "string" ? page.source_name : "";
   const rawEvents = Array.isArray(page.events) ? page.events : [];
   const events = rawEvents.flatMap((raw): HistoryEventRow[] => {
     if (
@@ -95,15 +124,26 @@ export function normalizeHistoryPage(value: unknown): HistoryPage {
     ) {
       return [];
     }
+    const placeId = typeof raw.place_id === "string" ? raw.place_id : "";
+    const sourceId = typeof raw.source_id === "string" ? raw.source_id : "";
+    const sourceName = typeof raw.source_name === "string" && raw.source_name
+      ? raw.source_name
+      : feedName;
     return [{
       event_id: raw.event_id,
       event_type: raw.event_type,
       occurred_at: raw.occurred_at,
+      feed_id: entityId,
+      feed_name: feedName,
+      source_key: placeId && sourceId
+        ? `${entityId}:${placeId}:${sourceId}`
+        : entityId,
+      source_name: sourceName,
     }];
   });
   return {
-    entity_id: typeof page.entity_id === "string" ? page.entity_id : "",
-    source_name: typeof page.source_name === "string" ? page.source_name : "",
+    entity_id: entityId,
+    source_name: feedName,
     events,
     page: Number.isInteger(page.page) && Number(page.page) >= 0 ? Number(page.page) : 0,
     last: page.last === true,
@@ -132,8 +172,49 @@ export function mergeHistoryEvents(
   incoming: readonly HistoryEventRow[],
 ): HistoryEventRow[] {
   const byId = new Map<string, HistoryEventRow>();
-  for (const event of [...current, ...incoming]) byId.set(event.event_id, event);
+  for (const event of [...current, ...incoming]) {
+    byId.set(`${event.feed_id}:${event.event_id}`, event);
+  }
   return [...byId.values()].sort((left, right) => right.occurred_at - left.occurred_at);
+}
+
+export function historySources(
+  events: readonly HistoryEventRow[],
+  includeFeedName = false,
+): HistorySource[] {
+  const sources = new Map<string, HistorySource>();
+  for (const event of events) {
+    const sourceName = event.source_name || event.feed_name;
+    const label = includeFeedName && event.feed_name && event.feed_name !== sourceName
+      ? `${sourceName} · ${event.feed_name}`
+      : sourceName;
+    if (event.source_key && label) {
+      sources.set(event.source_key, { key: event.source_key, label });
+    }
+  }
+  return [...sources.values()].sort((left, right) => left.label.localeCompare(right.label, "ru"));
+}
+
+export function filterHistoryEvents(
+  events: readonly HistoryEventRow[],
+  sourceKey: string,
+): HistoryEventRow[] {
+  return sourceKey
+    ? events.filter((event) => event.source_key === sourceKey)
+    : [...events];
+}
+
+export function historyPageRequests(
+  entities: readonly string[],
+  states: ReadonlyMap<string, HistoryFeedState>,
+  refresh: boolean,
+): HistoryPageRequest[] {
+  return entities.flatMap((entityId) => {
+    if (refresh) return [{ entityId, page: 0 }];
+    const state = states.get(entityId);
+    if (state?.last) return [];
+    return [{ entityId, page: state ? state.page + 1 : 0 }];
+  });
 }
 
 export function groupEventsByDay(
@@ -181,14 +262,22 @@ export function formatHistoryTime(
 }
 
 export function resolveHistoryConfig(value: unknown): HistoryCardConfig {
-  if (!isRecord(value) || typeof value.entity !== "string" || !value.entity) {
-    throw new Error("eg-event-history-card: укажите 'entity'");
+  if (!isRecord(value)) {
+    throw new Error("eg-event-history-card: укажите 'entity' или 'entities'");
   }
-  if (!value.entity.startsWith("event.")) {
-    throw new Error("eg-event-history-card: 'entity' должна быть event-сущностью");
+  const configured = [
+    ...(typeof value.entity === "string" && value.entity ? [value.entity] : []),
+    ...(Array.isArray(value.entities) ? value.entities : []),
+  ];
+  const entities = [...new Set(configured)];
+  if (!entities.length) {
+    throw new Error("eg-event-history-card: укажите 'entity' или 'entities'");
+  }
+  if (entities.some((entity) => typeof entity !== "string" || !entity.startsWith("event."))) {
+    throw new Error("eg-event-history-card: все 'entity' должны быть event-сущностями");
   }
   return {
-    entity: value.entity,
+    entities,
     ...(typeof value.title === "string" && value.title ? { title: value.title } : {}),
   };
 }

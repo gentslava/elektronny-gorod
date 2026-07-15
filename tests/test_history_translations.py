@@ -30,5 +30,8 @@ def test_history_event_types_have_translations(relative_path: str) -> None:
         event["access_history"]["state_attributes"]["event_type"]["state"]
     ) == {"call_accepted", "call_missed"}
     assert set(
+        event["account_history"]["state_attributes"]["event_type"]["state"]
+    ) == {"call_accepted", "call_missed"}
+    assert set(
         event["camera_history"]["state_attributes"]["event_type"]["state"]
     ) == {"motion"}

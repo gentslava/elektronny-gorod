@@ -143,6 +143,17 @@
           }
         }
       },
+      "account_history": {
+        "name": "История событий аккаунта",
+        "state_attributes": {
+          "event_type": {
+            "state": {
+              "call_accepted": "Вызов принят",
+              "call_missed": "Вызов пропущен"
+            }
+          }
+        }
+      },
       "camera_history": {
         "name": "История движения",
         "state_attributes": {

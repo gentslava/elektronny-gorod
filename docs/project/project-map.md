@@ -65,7 +65,7 @@ elektronny-gorod/
 │   ├── switch.py                  ← DND switches platform
 │   ├── event.py                   ← doorbell call event platform (ADR-0011)
 │   ├── history.py                 ← durable REST history: baseline, dedup, Store lifecycle
-│   ├── history_ws.py              ← read-only entity-scoped browse старых call events
+│   ├── history_ws.py              ← read-only account/per-device browse старых call events
 │   ├── fcm.py                     ← FCM listener для события вызова (ADR-0011)
 │   ├── sip/                       ← SIP-стек two-way audio, 14 модулей (A-81 + A-85 uplink; ADR-0012/0013)
 │   │   ├── __init__.py
@@ -156,7 +156,7 @@ elektronny-gorod/
 | [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, sanitized history DTO (`query_events`, `query_camera_events`), push-registration и SIP credentials | использует shared `HTTP` (ADR-0008); history parsers не сохраняют backend `message` |
 | [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
 | [`history.py`](../../custom_components/elektronny_gorod/history.py) | отдельный polling durable history | silent page-0 baseline; bounded per-stream ID dedup в HA `Store`; 5-minute interval; overlapping poll skip; partial failure isolation |
-| [`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) | read-only WebSocket browse старых вызовов | `elektronny_gorod/history`; проверка `POLICY_READ` для выбранной EventEntity; page `0..100`; exact place/access-control routing; ответ содержит только ID/type/timestamp |
+| [`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) | read-only WebSocket browse старых вызовов | `elektronny_gorod/history`; проверка `POLICY_READ`; account entity охватывает все места config entry, per-device entity — один access control; page `0..100`; безопасные source metadata |
 
 ### Платформы (entity)
 
@@ -205,7 +205,7 @@ elektronny-gorod/
 | [`uplink_ws.py`](../../custom_components/elektronny_gorod/uplink_ws.py) | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): микрофон из Lovelace-карты → `DoorbellCallController.feed_uplink`; static-регистрация JS-карты (`async_register_uplink_ws_command` / `async_register_uplink_card`, зовутся из `__init__.py`) (ADR-0013) |
 | [`www/eg-intercom-mic-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-mic-card.js) | Lovelace-карта микрофона домофона: `getUserMedia` + AudioWorklet → Int16 PCM по авторизованному HA-WebSocket (ADR-0013) |
 | [`www/eg-intercom-call-card.js`](../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js) | Общий собранный бандл `custom:eg-intercom-call-card` и `custom:eg-event-history-card` из `frontend/` (Lit+TS). Не редактировать вручную |
-| [`frontend/`](../../frontend/) | Исходники карточек вызова и истории (Lit+TS, esbuild→`www/`, vitest). History UI: `src/eg-event-history-card.ts`, `src/history/model.ts`, `src/history/styles.ts`; модель строго нормализует sanitized WS response, дедуплицирует страницы и группирует строки по локальной дате |
+| [`frontend/`](../../frontend/) | Исходники карточек вызова и истории (Lit+TS, esbuild→`www/`, vitest). History UI объединяет несколько account feeds, независимо листает их, фильтрует по составному device key, строго нормализует WS response и группирует строки по локальной дате |
 | [`services.yaml`](../../custom_components/elektronny_gorod/services.yaml) | сервисы `answer` / `hangup` |
 
 ### Diagnostics / безопасность

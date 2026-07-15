@@ -18,6 +18,8 @@ from custom_components.elektronny_gorod.const import DOMAIN
 
 _UNIQUE_ID = "elektronny_gorod_event_history_access_1001_2001"
 _ENTITY_ID = "event.test_intercom_call_history"
+_ACCOUNT_UNIQUE_ID = "elektronny_gorod_event_history_account_A1_S1"
+_ACCOUNT_ENTITY_ID = "event.test_account_call_history"
 
 
 def _history_module():
@@ -100,6 +102,76 @@ def _setup_target(hass) -> tuple[MockConfigEntry, SimpleNamespace]:
     return entry, coordinator
 
 
+def _setup_account_target(hass) -> tuple[MockConfigEntry, SimpleNamespace]:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        title="Test account",
+        data={"account_id": "A1", "subscriber_id": "S1"},
+    )
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    registry.async_get_or_create(
+        "event",
+        DOMAIN,
+        _ACCOUNT_UNIQUE_ID,
+        suggested_object_id="test_account_call_history",
+        config_entry=entry,
+    )
+    assert registry.async_get(_ACCOUNT_ENTITY_ID) is not None
+
+    page = HistoryPage(
+        events=(
+            HistoryEvent(
+                id="event-entrance",
+                place_id="1001",
+                event_type="accessControlCallMissed",
+                timestamp=1770000200,
+                source_type="accessControl",
+                source_id="2001",
+            ),
+            HistoryEvent(
+                id="event-gate",
+                place_id="1002",
+                event_type="accessControlCallAccepted",
+                timestamp=1770000100,
+                source_type="accessControl",
+                source_id="3001",
+            ),
+            HistoryEvent(
+                id="event-foreign-source",
+                place_id="1001",
+                event_type="accessControlCallMissed",
+                timestamp=1770000000,
+                source_type="accessControl",
+                source_id="9999",
+            ),
+        ),
+        number=0,
+        last=True,
+    )
+    coordinator = SimpleNamespace(
+        api=SimpleNamespace(query_events=AsyncMock(return_value=page)),
+        data={
+            "locks": [
+                {
+                    "place_id": "1001",
+                    "access_control_id": "2001",
+                    "entrance_id": "10",
+                    "name": "Подъезд 1",
+                },
+                {
+                    "place_id": "1002",
+                    "access_control_id": "3001",
+                    "entrance_id": "20",
+                    "name": "Калитка 1",
+                },
+            ]
+        },
+    )
+    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    return entry, coordinator
+
+
 @pytest.mark.asyncio
 async def test_history_ws_returns_previous_sanitized_page(hass) -> None:
     """Old rows are browse data, not EventEntity triggers."""
@@ -127,6 +199,47 @@ async def test_history_ws_returns_previous_sanitized_page(hass) -> None:
     })
     serialized = str(connection.send_result.call_args.args[1])
     assert "message" not in serialized.lower()
+
+
+@pytest.mark.asyncio
+async def test_history_ws_returns_account_feed_for_all_places(hass) -> None:
+    """An account entity returns known intercom events across all its places."""
+    history_ws = _history_module()
+    _entry, coordinator = _setup_account_target(hass)
+    connection = _connection()
+
+    await history_ws.async_handle_history(
+        hass,
+        connection,
+        {"id": 10, "entity_id": _ACCOUNT_ENTITY_ID, "page": 0},
+    )
+
+    coordinator.api.query_events.assert_awaited_once_with([1001, 1002], page=0)
+    result = connection.send_result.call_args.args[1]
+    assert result == {
+        "entity_id": _ACCOUNT_ENTITY_ID,
+        "source_name": "Test account",
+        "events": [
+            {
+                "event_id": "event-entrance",
+                "event_type": "call_missed",
+                "occurred_at": 1770000200,
+                "place_id": "1001",
+                "source_id": "2001",
+                "source_name": "Подъезд 1",
+            },
+            {
+                "event_id": "event-gate",
+                "event_type": "call_accepted",
+                "occurred_at": 1770000100,
+                "place_id": "1002",
+                "source_id": "3001",
+                "source_name": "Калитка 1",
+            },
+        ],
+        "page": 0,
+        "last": True,
+    }
 
 
 @pytest.mark.asyncio

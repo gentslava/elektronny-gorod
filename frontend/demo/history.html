@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <title>EG event history card demo</title>
+  </head>
+  <body>
+    <script type="module">
+      await import("../../custom_components/elektronny_gorod/www/eg-intercom-call-card.js");
+
+      const card = document.createElement("eg-event-history-card");
+      card.setConfig({
+        entities: ["event.account_one", "event.account_two"],
+        title: "События",
+      });
+      card.hass = {
+        locale: { language: "ru" },
+        states: {},
+        callWS: async ({ entity_id: entityId }) => ({
+          entity_id: entityId,
+          source_name: entityId === "event.account_two" ? "Аккаунт 2" : "Аккаунт 1",
+          events: [
+            {
+              event_id: "accepted",
+              event_type: "call_accepted",
+              occurred_at: 1770033600,
+              place_id: entityId === "event.account_two" ? "1002" : "1001",
+              source_id: entityId === "event.account_two" ? "3001" : "2001",
+              source_name: entityId === "event.account_two" ? "Калитка 1" : "Подъезд 1",
+            },
+            {
+              event_id: "missed",
+              event_type: "call_missed",
+              occurred_at: 1770030000,
+              place_id: entityId === "event.account_two" ? "1002" : "1001",
+              source_id: entityId === "event.account_two" ? "3001" : "2001",
+              source_name: entityId === "event.account_two" ? "Калитка 1" : "Подъезд 1",
+            },
+          ],
+          page: 0,
+          last: true,
+        }),
+      };
+      document.body.append(card);
+      await card.updateComplete;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await card.updateComplete;
+
+      const output = document.createElement("pre");
+      output.id = "shadow-output";
+      output.textContent = card.shadowRoot?.textContent ?? "NO_SHADOW_ROOT";
+      document.body.append(output);
+    </script>
+  </body>
+</html>

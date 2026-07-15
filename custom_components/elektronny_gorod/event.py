@@ -29,6 +29,8 @@ from .const import (
     AREA_INTERCOM,
     AREA_INDOOR_CAM,
     AREA_PUBLIC_CAM,
+    CONF_ACCOUNT_ID,
+    CONF_SUBSCRIBER_ID,
     DOMAIN,
     DOORBELL_CALL_WINDOW_FALLBACK_SEC,
     LOGGER,
@@ -71,10 +73,23 @@ async def async_setup_entry(
         if None in key:
             continue
         cur = by_ac.get(key)
-        if cur is None or str(lk.get("entrance_id") or "") < str(cur.get("entrance_id") or ""):
+        if cur is None or str(lk.get("entrance_id") or "") < str(
+            cur.get("entrance_id") or ""
+        ):
             by_ac[key] = lk
 
     entities: list[EventEntity] = []
+    account_id = str(entry.data.get(CONF_ACCOUNT_ID) or "")
+    subscriber_id = str(entry.data.get(CONF_SUBSCRIBER_ID) or "")
+    if account_id and subscriber_id:
+        entities.append(
+            ElektronnyGorodAccountHistoryEvent(
+                coordinator,
+                account_id,
+                subscriber_id,
+                list(by_ac.values()),
+            )
+        )
     entities.extend(
         ElektronnyGorodDoorbellEvent(coordinator, lock_info)
         for lock_info in by_ac.values()
@@ -89,6 +104,76 @@ async def async_setup_entry(
         if camera_info.get("source") in ("intercom", "public")
     )
     async_add_entities(entities)
+
+
+class ElektronnyGorodAccountHistoryEvent(
+    CoordinatorEntity[ElektronnyGorodUpdateCoordinator], EventEntity
+):
+    """Aggregate accepted/missed-call history for one configured account."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "account_history"
+    _attr_device_class = EventDeviceClass.DOORBELL
+    _attr_event_types = [EVENT_CALL_ACCEPTED, EVENT_CALL_MISSED]
+
+    def __init__(
+        self,
+        coordinator: ElektronnyGorodUpdateCoordinator,
+        account_id: str,
+        subscriber_id: str,
+        locks: list[dict[str, Any]],
+    ) -> None:
+        super().__init__(coordinator)
+        self._sources = {
+            (str(lock["place_id"]), str(lock["access_control_id"])): str(
+                lock.get("name") or lock["access_control_id"]
+            )
+            for lock in locks
+        }
+        self._attr_unique_id = (
+            f"{DOMAIN}_event_history_account_{account_id}_{subscriber_id}"
+        )
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to sanitized durable-history events."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            async_dispatcher_connect(
+                self.hass,
+                SIGNAL_HISTORY_EVENT,
+                self._handle_history,
+            )
+        )
+
+    @callback
+    def _handle_history(self, payload: dict[str, Any]) -> None:
+        """Route one verified account event and retain safe source metadata."""
+        event_type = payload.get("event_type")
+        source_key = (
+            str(payload.get("place_id") or ""),
+            str(payload.get("source_id") or ""),
+        )
+        source_name = self._sources.get(source_key)
+        if (
+            event_type not in self._attr_event_types
+            or payload.get("source_type") != "accessControl"
+            or source_name is None
+        ):
+            return
+        attributes = {
+            key: payload[key]
+            for key in ("event_id", "occurred_at")
+            if key in payload
+        }
+        attributes.update(
+            {
+                "place_id": source_key[0],
+                "source_id": source_key[1],
+                "source_name": source_name,
+            }
+        )
+        self._trigger_event(event_type, attributes)
+        self.async_write_ha_state()
 
 
 class ElektronnyGorodAccessHistoryEvent(
