@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import uuid
+from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlencode
 
 from aiohttp import ClientResponse
 
@@ -18,6 +20,41 @@ _DEVICE_INSTALLATIONS = (
     "/api/mh-customer-device/mobile/public/v1/customers/device-installations"
 )
 _SUBSCRIBER_NOTIFICATIONS = "/rest/v1/subscriberNotifications"
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryEvent:
+    """Sanitized event DTO used by the durable-history pipeline."""
+
+    id: str
+    place_id: str
+    event_type: str
+    timestamp: int
+    source_type: str
+    source_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class HistoryPage:
+    """One backend history page without localized message/PII fields."""
+
+    events: tuple[HistoryEvent, ...]
+    number: int
+    last: bool
+
+
+@dataclass(frozen=True, slots=True)
+class CameraHistoryEvent:
+    """Sanitized forpost camera event bound to the requested camera ID."""
+
+    id: str
+    camera_id: str
+    backend_camera_id: str
+    timestamp: int
+    duration: int
+    event_subject_id: int
+    available: bool
+    goto_enabled: bool
 
 
 def _device_id(installation_id: str) -> str:
@@ -200,6 +237,76 @@ class ElektronnyGorodAPI:
         places = await response.json()
         data = places.get("data") if places else []
         return data
+
+    async def query_events(
+        self,
+        place_ids: list[int],
+        *,
+        page: int = 0,
+    ) -> HistoryPage:
+        """Query one page of sanitized durable events for the given places."""
+        api_url = f"/rest/v1/events/search?page={page}&sort=occurredAt%2CDESC"
+        response = await self.http.post(
+            api_url,
+            json.dumps({"placeIds": place_ids}),
+        )
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+
+        payload = await response.json()
+        events = tuple(
+            HistoryEvent(
+                id=str(item["id"]),
+                place_id=str(item["placeId"]),
+                event_type=str(item["eventTypeName"]),
+                timestamp=int(item["timestamp"]),
+                source_type=str((item.get("source") or {})["type"]),
+                source_id=str((item.get("source") or {})["id"]),
+            )
+            for item in (payload or {}).get("content") or []
+        )
+        return HistoryPage(
+            events=events,
+            number=int((payload or {}).get("number") or 0),
+            last=bool((payload or {}).get("last")),
+        )
+
+    async def query_camera_events(
+        self,
+        camera_id: str,
+        *,
+        lower_date: str,
+        upper_date: str,
+    ) -> tuple[CameraHistoryEvent, ...]:
+        """Query sanitized forpost events for one camera and time window."""
+        query = urlencode(
+            {
+                "UpperDate": upper_date,
+                "LowerDate": lower_date,
+                "Count": 100,
+                "orderByTime": "DESC",
+            }
+        )
+        response = await self.http.get(
+            f"/rest/v2/forpost/cameras/{camera_id}/events?{query}"
+        )
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+
+        payload = await response.json()
+        return tuple(
+            CameraHistoryEvent(
+                id=str(item["ID"]),
+                camera_id=str(camera_id),
+                backend_camera_id=str(item.get("CameraID") or ""),
+                timestamp=int(item["Time"]),
+                duration=int(item.get("Duration") or 0),
+                event_subject_id=int(item.get("EventSubjectID") or 0),
+                available=bool(item.get("isAvailable")),
+                goto_enabled=int(item.get("IsGotoEnabled") or 0) == 1,
+            )
+            for item in (payload or {}).get("data") or []
+        )
 
     async def query_access_controls(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of access controls for a place."""
