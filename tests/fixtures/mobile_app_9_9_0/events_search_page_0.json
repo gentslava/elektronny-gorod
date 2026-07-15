@@ -1,0 +1,65 @@
+{
+  "content": [
+    {
+      "id": "event-accepted-001",
+      "placeId": 1001,
+      "eventTypeName": "accessControlCallAccepted",
+      "timestamp": "1700000001",
+      "message": "Fixture accepted intercom call",
+      "source": {
+        "type": "accessControl",
+        "id": 2001
+      },
+      "header": null,
+      "value": {
+        "type": "boolean",
+        "value": true
+      },
+      "eventStatusValue": null,
+      "actions": []
+    },
+    {
+      "id": "event-missed-002",
+      "placeId": 1001,
+      "eventTypeName": "accessControlCallMissed",
+      "timestamp": "1700000000",
+      "message": "Fixture missed intercom call",
+      "source": {
+        "type": "accessControl",
+        "id": 2001
+      },
+      "header": null,
+      "value": {
+        "type": "boolean",
+        "value": false
+      },
+      "eventStatusValue": null,
+      "actions": []
+    }
+  ],
+  "pageable": {
+    "sort": {
+      "empty": false,
+      "sorted": true,
+      "unsorted": false
+    },
+    "offset": 0,
+    "pageNumber": 0,
+    "pageSize": 20,
+    "paged": true,
+    "unpaged": false
+  },
+  "last": false,
+  "totalPages": 2,
+  "totalElements": 3,
+  "size": 20,
+  "number": 0,
+  "sort": {
+    "empty": false,
+    "sorted": true,
+    "unsorted": false
+  },
+  "first": true,
+  "numberOfElements": 2,
+  "empty": false
+}

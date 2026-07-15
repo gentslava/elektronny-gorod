@@ -203,8 +203,10 @@ Quality gates:
   authenticated/short-lived HA proxy; sentinel propagation tests for all three.
 - **PII note:** resident names, nicknames and account IDs from place-scoped
   `subscriber-places` are excluded from entity attributes by default.
-- **Merge gate:** a static-only guest/key/camera write path needs sanitized HAR,
-  security review and caplog/diagnostics/state scan before merge.
+- **Merge gate:** the guest action has a sanitized runtime fixture but still
+  needs security review and caplog/diagnostics/state sentinel scans before
+  merge. Remaining static-only key/camera write paths additionally need a
+  decrypted HAR before implementation.
 
 ## P2 — желательно
 

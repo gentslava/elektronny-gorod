@@ -16,7 +16,7 @@ and what evidence/API information is sufficient to implement each safely?
 | Event list/filtering | yes | yes | yes | high |
 | Archive playback/download | yes | yes | yes | high |
 | People list | yes | existing place query | yes | high |
-| Guest invite generation | yes | not captured | yes | medium |
+| Guest invite generation | yes | yes (NTK `app=2`) | yes | high |
 | Access keys | account-gated | no | yes | medium-low |
 | Private-camera settings | no hardware | no | yes | medium-low |
 | Arming/alarm | no | no | event strings only | insufficient |
@@ -36,6 +36,13 @@ not duplicate live schemas.
 - General history and per-camera event endpoints use different IDs; the
   `CameraID` inside a forpost event is not guaranteed to equal the public camera
   ID used in the request.
+- A clean runtime sequence captured history pages `0 → 1 → 2 → 0`. Adjacent
+  pages did not overlap; the repeated page 0 shared all 20 IDs with the first
+  poll. `totalElements` changed `21 → 41 → 61 → 21`, confirming that it is not
+  a stable total and must not drive polling termination.
+- Runtime general-history types were `accessControlCallAccepted` and
+  `accessControlCallMissed`. Forpost camera-event fixtures cover motion clips;
+  older archive captures cover the HTTP-500/`11005` unavailable range.
 - Retention is rolling: observed defaults are 14 days for intercom sources and
   7 days for other cameras. Backend error `11005` carries the actual boundary.
 
@@ -44,8 +51,11 @@ not duplicate live schemas.
 - The People screen can show owners and guests from place-scoped
   `subscriber-places` data.
 - Add guest produces both QR and share text/link.
-- The captured screen contained a live credential, so it was not decoded or
-  retained. Guest creation is possible, as confirmed by the owner.
+- NTK runtime traffic confirms `POST .../guests/link?placeId&app=2`, no body,
+  HTTP 200 and `{data:{link,message}}`. The same request without Authorization
+  returns HTTP 401 with a short non-JSON text body.
+- The live credential was not copied into commit-safe artifacts; fixtures use
+  `example.invalid` and placeholder text.
 
 ### Keys and private cameras
 
@@ -94,11 +104,10 @@ settings. `HTTP` currently supports GET/POST/DELETE but not PUT.
 
 ## Recommendation
 
-Implement in evidence order: history/archive first, guest invitation after one
-sanitized POST fixture, then keys and private-camera controls only after enabled
+Implement in evidence order: history/archive first, then the now-unblocked NTK
+guest invitation slice. Keys and private-camera controls still wait for enabled
 account/hardware captures. Keep each capability independently degradable.
 
 ## Quality gate
 
 `RESEARCH_DONE` — completed. Static-only slices retain explicit capture gates.
-

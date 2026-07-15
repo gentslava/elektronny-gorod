@@ -148,7 +148,8 @@ Static-only write paths не переходят в код без decrypted HAR (
 - [ ] **A-50 + A-59 + A-58 remainder** History/archive: event baseline,
   per-camera events and Media Source with on-demand signed URL resolution.
 - [ ] **A-93** Guest invitation: NTK `app=2`, response-only admin action; live
-  link never persists. Prerequisite: sanitized POST fixture.
+  link never persists. Sanitized success/401 fixtures captured; implementation
+  waits only for Slice 3 approval and admin/security review.
 - [ ] **A-94** Access keys: read-only inventory first, notification switch only
   after enabled-account HAR; key code is never HA state/ID.
 - [ ] **A-95** Private-camera settings: feature-gated sensitivity/volume first;

@@ -1,0 +1,42 @@
+{
+  "request_sequence": [0, 1, 2, 0],
+  "responses": [
+    {
+      "number": 0,
+      "numberOfElements": 20,
+      "totalElements": 21,
+      "totalPages": 2,
+      "first": true,
+      "last": false
+    },
+    {
+      "number": 1,
+      "numberOfElements": 20,
+      "totalElements": 41,
+      "totalPages": 3,
+      "first": false,
+      "last": false
+    },
+    {
+      "number": 2,
+      "numberOfElements": 20,
+      "totalElements": 61,
+      "totalPages": 4,
+      "first": false,
+      "last": false
+    },
+    {
+      "number": 0,
+      "numberOfElements": 20,
+      "totalElements": 21,
+      "totalPages": 2,
+      "first": true,
+      "last": false
+    }
+  ],
+  "overlap_counts": {
+    "page_0_to_1": 0,
+    "page_1_to_2": 0,
+    "first_page_0_to_repeated_page_0": 20
+  }
+}

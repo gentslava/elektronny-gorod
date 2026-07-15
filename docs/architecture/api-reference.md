@@ -517,7 +517,7 @@ PII: не переносить их в entity state/attributes, recorder, diagno
 логи. Безопасный HA-MVP для guest-фичи — action создания приглашения, а не
 постоянная people entity.
 
-### Guest invitations (runtime UI + static-only contracts)
+### Guest invitations (runtime UI + decrypted NTK contract)
 
 На AVD «Мой Дом» 9.9.0 кнопка добавления гостя открыла QR и share-link.
 Сам QR/link является действующим credential доступа; его значение не
@@ -536,7 +536,7 @@ Body отсутствует. Brand enum из APK:
 | Мой Дом / NTK | `2` |
 | Умный Дом.ру / ERTH | `4` |
 
-Static response DTO:
+Runtime response (`Мой Дом` 9.9.0, `app=2`, HTTP 200):
 
 ```json
 {
@@ -546,6 +546,16 @@ Static response DTO:
   }
 }
 ```
+
+Повтор того же POST без `Authorization` возвращает **HTTP 401** с коротким
+`text/plain` body, а не JSON error envelope. Клиент не должен безусловно
+вызывать JSON parser на auth failure. Commit-safe fixtures:
+[`tests/fixtures/mobile_app_9_9_0`](../../tests/fixtures/mobile_app_9_9_0/README.md).
+
+Для `Умный Дом.ру` значение `app=4` пока подтверждено APK DTO/enum; exact
+runtime POST на доступном аккаунте не получен. Поэтому первый HA slice должен
+быть NTK-only либо выбирать brand только по уже известному operator contract,
+не угадывая его из имени entry.
 
 Принимающая сторона открывает deep link
 `/guest-invite?invite=<secret_token>`. После auth приложение использует:
@@ -561,9 +571,8 @@ Acceptance-flow относится к аккаунту гостя и не вхо
 интеграции нужен только owner-side action `create_guest_invite` с
 `SupportsResponse.ONLY`: вернуть `link`/`message` вызывающему клиенту, не
 создавая entity и не сохраняя ответ. Link/UUID должны войти в redaction и
-никогда не попадать в exception text, service logs или diagnostics. Перед
-реализацией снять HAR самого POST; сейчас endpoint/DTO подтверждены только
-static, а экран — runtime UI.
+никогда не попадать в exception text, service logs или diagnostics. Capture
+gate для NTK закрыт; остаются admin permission и security review action-а.
 
 ### `GET /api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens`
 
@@ -1315,6 +1324,21 @@ Response shape (Spring Pageable):
   "empty":           false
 }
 ```
+
+Runtime capture 9.9.0 подтвердил последовательность страниц `0 → 1 → 2 → 0`:
+
+| Page | `numberOfElements` | `totalElements` | `totalPages` | `last` |
+|---:|---:|---:|---:|---:|
+| 0 | 20 | 21 | 2 | `false` |
+| 1 | 20 | 41 | 3 | `false` |
+| 2 | 20 | 61 | 4 | `false` |
+| 0 (новый poll) | 20 | 21 | 2 | `false` |
+
+Между соседними страницами overlap был 0, а повторный page 0 совпал с первым
+по всем 20 server IDs. Наблюдавшиеся `eventTypeName` — только
+`accessControlCallAccepted` и `accessControlCallMissed`; остальные типы нельзя
+эмитить без отдельного runtime fixture. Санитизированные DTO и capture metadata:
+[`tests/fixtures/mobile_app_9_9_0`](../../tests/fixtures/mobile_app_9_9_0/README.md).
 
 #### Pagination behaviour
 

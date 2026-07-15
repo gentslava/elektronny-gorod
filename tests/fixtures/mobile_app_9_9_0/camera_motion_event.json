@@ -1,0 +1,14 @@
+{
+  "data": [
+    {
+      "isAvailable": true,
+      "ID": 3001,
+      "Time": 1700000000,
+      "Duration": 30,
+      "EventSubjectID": 126,
+      "Message": "Fixture motion clip",
+      "IsGotoEnabled": 1,
+      "CameraID": 4001
+    }
+  ]
+}

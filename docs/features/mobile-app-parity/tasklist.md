@@ -9,18 +9,20 @@ the corresponding spec/capture gate is approved.
 
 ## Capture prerequisites
 
-- [ ] **T-001** Capture and sanitize guest-link POST success + authorization
+- [x] **T-001** Capture and sanitize guest-link POST success + authorization
   failure without retaining the live link. _Acceptance:_ method/query/status and
-  placeholder fixture reproduce parser. _Audit:_ A-93.
+  placeholder fixture reproduce parser. Captured NTK `app=2`: success is HTTP
+  200 JSON; missing auth is HTTP 401 non-JSON text. _Audit:_ A-93.
 - [ ] **T-002** Capture access-key list and notification toggle on an enabled
   account. _Acceptance:_ list wrapper, status enums and toggle request body are
   exact. _Audit:_ A-94.
 - [ ] **T-003** Capture `features/info`, motion, volumes, record/mirror/PTZ on a
   private camera. _Acceptance:_ capability strings, enums and ranges are exact;
   no destructive provisioning action. _Audit:_ A-95.
-- [ ] **T-004** Extend event fixtures with missed/accepted calls, motion,
-  unavailable clip and multi-page overlap. _Acceptance:_ event taxonomy and ID
-  joins are documented. _Audit:_ A-50/A-58.
+- [x] **T-004** Extend event fixtures with missed/accepted calls, motion,
+  unavailable clip and multi-page overlap. _Acceptance:_ sanitized fixtures now
+  cover accepted/missed calls, forpost motion, HTTP-500/11005 and page
+  `0 → 1 → 2 → 0` with a 20-ID repeated-page overlap. _Audit:_ A-50/A-58.
 
 ## Slice 0 — API/transport
 
@@ -109,9 +111,9 @@ all implemented slices ─► T-070..T-072
 
 | Status | Count |
 |---|---:|
-| done | 0 |
+| done | 2 |
 | in progress | 0 |
-| pending | 30 |
+| pending | 28 |
 
 ## Quality gates
 

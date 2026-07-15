@@ -1,0 +1,6 @@
+{
+  "data": {
+    "link": "https://example.invalid/guest-invite?invite=fixture-token",
+    "message": "Fixture guest invitation: https://example.invalid/guest-invite?invite=fixture-token"
+  }
+}

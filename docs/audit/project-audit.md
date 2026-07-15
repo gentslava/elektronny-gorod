@@ -1505,13 +1505,16 @@ Quality gates:
 - **Evidence:** AVD «Мой Дом» 9.9.0: People → Add guest показывает QR и
   share-link. APK Retrofit/DTO: `POST /api/mh-auth/mobile/v1/guests/link`
   с query `placeId`, `app`; response `{data:{link,message}}`. NTK `app=2`,
-  ERTH `app=4`. Runtime link не сохранён, потому что это access credential.
+  ERTH `app=4`. Decrypted runtime capture подтвердил NTK POST без body, HTTP
+  200 response и HTTP 401 non-JSON при отсутствующем Authorization. Runtime
+  link не сохранён, потому что это access credential.
 - **Current behavior:** `query_places(place_id)` уже может получить people
   relations, но action создания приглашения отсутствует.
 - **Recommended fix:** owner-side response-only action
   `create_guest_invite`, admin policy, no entity/persistence. Link/message
   возвращаются только вызывающему клиенту; добавить redaction и sentinel test.
-  Перед кодом обязателен sanitized decrypted HAR самого POST.
+  Capture prerequisite закрыт; commit-safe fixtures лежат в
+  `tests/fixtures/mobile_app_9_9_0/`. ERTH `app=4` остаётся static-only.
 - **Non-goal:** принимать invitation за гостя или публиковать people names/
   account IDs в entity attributes.
 - **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).

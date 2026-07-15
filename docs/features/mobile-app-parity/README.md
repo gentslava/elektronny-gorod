@@ -13,9 +13,9 @@ from static-only APK contracts.
 
 | Feature | Best evidence | Proposed HA surface | Audit | Gate before code |
 |---|---|---|---|---|
-| Durable event history | decrypted HAR + AVD UI | polling baseline + device `event` entities | A-58 / A-50 | event-type fixtures |
+| Durable event history | decrypted HAR + AVD UI | polling baseline + device `event` entities | A-58 / A-50 | captured; approve Slice 1 |
 | Camera archive and clips | decrypted HAR + AVD UI | `media_source.py`, no URL attributes | A-50 / A-59 | playback/download fixtures |
-| Guest invitation | AVD UI + APK Retrofit/DTO | response-only admin action | A-93 | decrypted POST fixture |
+| Guest invitation | decrypted POST + AVD UI + APK DTO | response-only admin action | A-93 | captured; admin/security review |
 | Access keys | APK Retrofit/DTO | read-only inventory, then notification switch | A-94 | enabled-account HAR |
 | Private camera settings | APK Retrofit/DTO | capability-gated `number`/`switch`/`select` | A-95 | private-camera HAR + hardware |
 
@@ -35,6 +35,8 @@ from static-only APK contracts.
   [`api-reference.md`](../../architecture/api-reference.md).
 - APK/HAR/PCAP and AVD conclusions:
   [`9.9.0-analysis.md`](../../../research/apk/9.9.0-analysis.md).
+- Commit-safe response fixtures:
+  [`tests/fixtures/mobile_app_9_9_0`](../../../tests/fixtures/mobile_app_9_9_0/README.md).
 - Priority/status:
   [`project-audit.md`](../../audit/project-audit.md) and
   [`roadmap.md`](../../roadmap.md).
@@ -51,4 +53,3 @@ folder. They are access credentials even when short-lived.
 - [ ] `TESTS_PASS`
 - [ ] `SECURITY_OK`
 - [x] `DOCS_UPDATED`
-
