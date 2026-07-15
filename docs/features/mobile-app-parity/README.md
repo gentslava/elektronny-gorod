@@ -1,6 +1,6 @@
 # Mobile app parity: history, archive, guests, keys and camera settings
 
-- **Status:** Research complete; implementation not started
+- **Status:** Slice 1 implemented in `feat/durable-event-history`; review pending
 - **Date:** 2026-07-15
 - **Owner:** @gentslava
 - **Apps:** Мой Дом 9.9.0 and Умный Дом.ру 9.9.0
@@ -13,7 +13,7 @@ from static-only APK contracts.
 
 | Feature | Best evidence | Proposed HA surface | Audit | Gate before code |
 |---|---|---|---|---|
-| Durable event history | decrypted HAR + AVD UI | polling baseline + device `event` entities | A-58 / A-50 | captured; approve Slice 1 |
+| Durable event history | decrypted HAR + AVD UI | polling baseline + device `event` entities | A-58 / A-50 | implemented in feature branch |
 | Camera archive and clips | decrypted HAR + AVD UI | `media_source.py`, no URL attributes | A-50 / A-59 | playback/download fixtures |
 | Guest invitation | decrypted POST + AVD UI + APK DTO | response-only admin action | A-93 | captured; admin/security review |
 | Access keys | APK Retrofit/DTO | read-only inventory, then notification switch | A-94 | enabled-account HAR |
@@ -48,8 +48,8 @@ folder. They are access credentials even when short-lived.
 
 - [x] `IDEA_CAPTURED`
 - [x] `RESEARCH_DONE`
-- [ ] `SPEC_READY` — owner approves exact MVP slices
-- [ ] `PLAN_APPROVED`
-- [ ] `TESTS_PASS`
-- [ ] `SECURITY_OK`
+- [x] `SPEC_READY` — Slice 1
+- [x] `PLAN_APPROVED` — Slice 1
+- [x] `TESTS_PASS` — 411 passed
+- [x] `SECURITY_OK` — history DTO/state/store sentinel boundary reviewed
 - [x] `DOCS_UPDATED`

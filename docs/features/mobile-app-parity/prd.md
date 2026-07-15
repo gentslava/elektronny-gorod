@@ -2,7 +2,7 @@
 
 - **Date:** 2026-07-15
 - **Owner:** @gentslava
-- **Status:** Draft
+- **Status:** Slice 1 approved and implemented in feature branch
 - **Linked idea:** [`idea.md`](idea.md)
 
 ## Problem
@@ -41,12 +41,11 @@ integration. Exact support varies by account, tariff and hardware.
 
 ### 1. Durable history and archive
 
-- [ ] `events/search` establishes a page-0 watermark on first start without
+- [x] `events/search` establishes a page-0 watermark on first start without
   triggering automations for old events.
-- [ ] Later polls deduplicate by server event ID and emit only explicitly mapped
-  event types; unknown types are ignored safely and counted in debug diagnostics
-  without message/PII.
-- [ ] Existing FCM remains the realtime source for doorbell `ring`/`ended`.
+- [x] Later polls deduplicate by server event ID and emit only explicitly mapped
+  event types; unknown types are ignored without copying message/PII.
+- [x] Existing FCM remains the realtime source for doorbell `ring`/`ended`.
 - [ ] Camera archive is browseable through HA Media Source by place → camera →
   date/event; browsing uses opaque IDs, not signed URLs.
 - [ ] Playback/download URLs are resolved on demand, expire naturally and never
@@ -92,20 +91,21 @@ integration. Exact support varies by account, tariff and hardware.
 - [ ] Mirror/PTZ/record-mode are not added until enum/action values are captured
   from runtime traffic.
 
-## Affected modules when implementation starts
+## Affected modules
 
-- `api.py`, `http.py`, `coordinator.py`
-- new `media_source.py`; existing/new `event.py`
+- Slice 1: `api.py`, new `history.py`, `event.py`, `__init__.py`
+- Slice 2: new `media_source.py`; archive additions in `api.py`
 - potential `number.py`, `select.py`, `switch.py`, `services.yaml`
 - `__init__.py`, `strings.json`, `translations/{ru,en}.json`
 - focused tests and sanitized fixtures under `tests/`
 
 ## Existing config entries
 
-No config-entry migration is expected for capability-discovered entities or
-integration actions. If user options are added (history polling interval,
-feature opt-in), they must default safely for existing entries; increment
-`ConfigFlow.VERSION` only with an explicit migration.
+No config-entry migration is needed for the additive history entities.
+`HistoryManager` owns an independently versioned HA `Store` schema v1 containing
+only bounded opaque event IDs. If user options are later added, they must default
+safely for existing entries; increment `ConfigFlow.VERSION` only with an explicit
+migration.
 
 ## HA Quality Scale impact
 
@@ -123,4 +123,5 @@ new config step/entity translation must exist in both languages.
 
 ## Quality gate
 
-`SPEC_READY` requires owner approval plus fixtures for the first selected slice.
+`SPEC_READY` and `PLAN_APPROVED` are granted for Slice 1. Later slices retain
+their individual capture/security gates.

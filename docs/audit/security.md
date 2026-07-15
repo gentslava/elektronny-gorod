@@ -185,10 +185,10 @@ Quality gates:
 - **Residual:** старое неактивное значение остаётся в git history. Историю
   `master` не переписываем; credential нельзя повторно использовать.
 
-### S-21. Planned mobile-app parity credential surfaces
+### S-21. Mobile-app parity credential surfaces
 
-- **Status:** 🟡 **DESIGN GATE** — реализации ещё нет; обязательные constraints
-  зафиксированы до кода.
+- **Status:** 🟡 **DESIGN GATE** для archive/guest/key/private-camera slices;
+  durable history boundary реализован в `feat/durable-event-history`.
 - **Scope:** [mobile-app-parity](../features/mobile-app-parity/README.md):
   archive/media, guest invitations, access keys and private-camera controls.
 - **Credential classes:**
@@ -203,6 +203,10 @@ Quality gates:
   authenticated/short-lived HA proxy; sentinel propagation tests for all three.
 - **PII note:** resident names, nicknames and account IDs from place-scoped
   `subscriber-places` are excluded from entity attributes by default.
+- **History control implemented:** API dataclasses намеренно не содержат
+  backend `message`; entity attrs заданы allowlist, а HA `Store` schema v1
+  сохраняет только максимум 200 opaque event IDs на stream. Camera response
+  `Message` и general event `message` не доходят до dispatcher/state/storage.
 - **Merge gate:** the guest action has a sanitized runtime fixture but still
   needs security review and caplog/diagnostics/state sentinel scans before
   merge. Remaining static-only key/camera write paths additionally need a

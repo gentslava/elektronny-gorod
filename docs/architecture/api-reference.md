@@ -1241,6 +1241,13 @@ camera-id из `/rest/v2/places/.../public/cameras`. Это два разных
 истекло retention). На `IsGotoEnabled=1` можно идти за video URL через
 `/rest/v1/forpost/events/{ID}/downloads`.
 
+🟢 **Реализовано в `feat/durable-event-history`:**
+[`api.py:query_camera_events`](../../custom_components/elektronny_gorod/api.py)
+возвращает sanitized `CameraHistoryEvent`; `Message` отбрасывается на parser
+boundary, а entity маршрутизируется по ID из request, не по внутреннему
+`CameraID`. Polling охватывает только intercom/public cameras и verified
+`EventSubjectID=126`; archive/download остаётся Slice 2.
+
 ## Финансы / баланс
 
 ### `GET /api/mh-payment/mobile/v1/finance?placeId={place_id}`
@@ -1370,7 +1377,13 @@ Runtime capture 9.9.0 подтвердил последовательность 
   повторно эмитить как новые HA events. Не доверять `totalElements`; пагинация
   заканчивается только по `last=true`.
 
-🔵 **У нас не реализован.**
+🟢 **Реализовано в `feat/durable-event-history`:**
+[`api.py:query_events`](../../custom_components/elektronny_gorod/api.py) читает
+только page 0, а [`history.py`](../../custom_components/elektronny_gorod/history.py)
+держит silent baseline и bounded per-stream dedup в `Store`. В HA эмитятся
+только `accessControlCallAccepted`/`accessControlCallMissed`; backend `message`
+не входит в DTO, state, storage или logs. Полный browse старого журнала и
+archive media остаются отдельным Slice 2.
 
 ## Real-time каналы (несколько одновременно)
 

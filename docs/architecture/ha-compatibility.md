@@ -1,7 +1,7 @@
 Status: Active
 Owner: Home Assistant Expert Agent
-Last reviewed: 2026-07-13 (release 4.0.0 audit: manifest Bronze fields,
-CoordinatorEntity/polling, HTTP timeouts, diagnostics/services and tests)
+Last reviewed: 2026-07-15 (durable history EventEntity lifecycle, Store schema
+and ru/en event translations)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
@@ -11,6 +11,8 @@ Source files:
 - `custom_components/elektronny_gorod/camera.py`
 - `custom_components/elektronny_gorod/lock.py`
 - `custom_components/elektronny_gorod/sensor.py`
+- `custom_components/elektronny_gorod/event.py`
+- `custom_components/elektronny_gorod/history.py`
 - `custom_components/elektronny_gorod/strings.json`
 - `custom_components/elektronny_gorod/translations/*`
 - `hacs.json`
@@ -120,6 +122,7 @@ async_step_user
 | Caching | 🔴 нет | — |
 | Никаких blocking ops в loop | ✅ async I/O; blocking subprocess не используется | integration code |
 | `async_unsubscribe` вызывается при unload | ✅ через `entry.async_on_unload` | `__init__.py:69-72` |
+| History interval cleanup | ✅ `HistoryManager.async_stop` через config-entry unload; overlapping tick пропускается | `history.py`, `__init__.py` |
 | Использование `async_get_clientsession(hass)` | ✅ shared HA session | `http.py:96` |
 
 ## Entities
@@ -139,6 +142,11 @@ async_step_user
 | Корректное обновление через coordinator | ✅ | ✅ (+ локальный synthetic unlock timer) | ✅ |
 | Хардкод русского имени | нет | нет | нет — translation key ru/en |
 
+History `EventEntity` additive и не требует config-entry migration: stable
+unique IDs строятся из place/access-control или camera ID, device identity
+совпадает с существующим intercom/camera device. `_trigger_event` получает
+только allowlisted attributes; backend message не копируется.
+
 ## Diagnostics / Repairs / Services
 
 | Артефакт | Наличие | Приоритет |
@@ -156,6 +164,7 @@ async_step_user
 | `translations/ru.json` | ✅ соответствует |
 | `translations/en.json` | ✅ соответствует |
 | **Entity translations** (раздел `strings.json:entity`) | ✅ ru/en |
+| History event types | ✅ `call_accepted`, `call_missed`, `motion` в source/ru/en |
 
 ## Платформы и manifest dependencies
 

@@ -70,6 +70,7 @@ custom_components/elektronny_gorod/
 ├── binary_sensor.py       # account_blocked
 ├── switch.py              # DND switches (intercom / management calls)
 ├── event.py               # doorbell call event (ADR-0011)
+├── history.py             # durable REST history: baseline, dedup, Store lifecycle
 ├── fcm.py                 # FCM listener для события вызова (ADR-0011)
 ├── sip/                   # SIP-стек two-way audio, register-on-ring (ADR-0012, A-81)
 │   ├── call_controller.py # HA-glue: трекинг вызова + answer/hangup + AudioBridge lifecycle
