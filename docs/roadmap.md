@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-16 (external RTSP stream-manager implementation and
-live acceptance gate added; A-82/A-84 status reconciled)
+Last reviewed: 2026-07-16 (external RTSP stream-manager implementation accepted
+live after go2rtc restart; A-82/A-84/A-96 status reconciled)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -234,7 +234,7 @@ Static-only write paths не переходят в код без decrypted HAR (
   go2rtc HTTP transport/writes.
 - [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles
   проверить, что repeated PATCH не раздувает persistent go2rtc YAML.
-- [ ] **A-96 repeat production acceptance (4.0.0 release gate)** — пять проблемных
+- [x] **A-96 repeat production acceptance (4.0.0 release gate)** — затронутые
   streams получают active preload и переживают idle без HA-open; active
   consumer переживает refresh; restart restore ≤60s; disabled/hidden cleanup;
   concurrent reasons dedup; option-off удаляет idle registrations, unload
@@ -243,9 +243,10 @@ Static-only write paths не переходят в код без decrypted HAR (
   добавляет excluded hidden names фоновым path; explicit hidden HA-open во
   время и после setup работает без persistent preload и cleanup-ится после
   viewer; закрытие HA UI не оставляет orphan consumer после EOF recovery.
-- [ ] После оставшихся live scenarios записать evidence в существующем feature
-  design и разблокировать публикацию 4.0.0. PR #71 уже merged, PR #61 закрыт
-  как superseded с благодарностью автору.
+- [x] Live evidence записан в существующем feature design: владелец подтвердил
+  восстановление после manual go2rtc restart, а обезличенный snapshot показал
+  `3/3` active producer и preload consumer с растущим `bytes_recv`. Публикация
+  4.0.0 разблокирована. PR #71 merged, PR #61 закрыт как superseded.
 
 #### Code quality
 

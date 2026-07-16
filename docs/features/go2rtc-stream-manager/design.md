@@ -1,7 +1,7 @@
 # Design: go2rtc stream manager for external RTSP
 
-- **Status:** merged in PR #71; targeted live regression passed, remaining
-  long-running production acceptance gates release 4.0.0
+- **Status:** implemented, merged in PR #71 and accepted on the owner's live
+  deployment for release 4.0.0
 - **Date:** 2026-07-16
 - **Delivery:** merged PR #71 (`bf5ba9b`)
 - **Origin:** replacement for the superseded/closed PR #61 and
@@ -422,16 +422,22 @@ Before changing the A-71 write boundary, capture a short baseline of active
 consumer refresh/recovery behavior. After implementation, repeat it to show
 behavioral equivalence for active HA streams.
 
-The nine acceptance scenarios in this document gate the 4.0.0 release. In
+The nine acceptance scenarios in this document gated the 4.0.0 release. In
 particular, the idle-over-one-hour external RTSP test and go2rtc restart test
-must run on the user's real go2rtc deployment; mocked tests cannot prove them.
+had to run on the user's real go2rtc deployment; mocked tests could not prove
+them.
 
 Targeted startup-grid acceptance passed on 2026-07-16 after deploying
 `3a3ad02`: explicit lift-camera opens while integration setup was finishing
 created their go2rtc streams, playback worked, and closing the HA UI no longer
-left an extra non-preload consumer. This closes the observed 404/orphan
-regression only; the long-idle, scheduled-refresh and go2rtc-restart scenarios
-above remain separate gates.
+left an extra non-preload consumer. This closed the observed 404/orphan
+regression. The subsequent owner acceptance covered long-running stream
+behavior and a manual go2rtc restart. A read-only post-restart snapshot showed
+three managed streams, each with one active producer and one preload consumer;
+aggregate `bytes_recv` increased by about 4.8 MB over five seconds. Combined
+with the earlier publication-toggle, hidden/on-demand, startup-grid, timing and
+orphan-consumer observations, this closed the 4.0.0 production gate on
+2026-07-16.
 
 ## Rollout and compatibility
 
@@ -453,8 +459,8 @@ above remain separate gates.
 - The pre-visibility gate prevents transient background hidden-camera writes;
   the on-demand path remains valid before and after manager startup so explicit
   HA playback never receives an unregistered RTSP name.
-- Audit A-96 separates automated implementation from live acceptance and
-  cross-references A-82/A-84.
+- Audit A-96 records both automated implementation and the completed owner live
+  acceptance, and cross-references A-82/A-84.
 - Project map, architecture, testing, roadmap and changelog are synchronized
   with the implemented preload revision; ADR-0009 remains active for proven
   A-71 behavior.
@@ -463,8 +469,8 @@ above remain separate gates.
 
 Automated evidence on 2026-07-16: 131 focused preload/manager tests, 151
 related camera/go2rtc/config/visibility regressions and the complete 549-test
-backend suite passed. The targeted startup-grid regression also passed live;
-the remaining long-running acceptance scenarios above gate release 4.0.0.
+backend suite passed. Targeted startup-grid and final post-restart live
+acceptance passed; release 4.0.0 is no longer gated by A-96.
 
 ## Deferred work
 

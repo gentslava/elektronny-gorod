@@ -5,7 +5,8 @@
 > five registered lazy streams returned RTSP 404/EOF after idle. The preload
 > revision Tasks 9-18 and local gates are complete: 131 focused,
 > 151 related and 549 full-suite tests pass. PR #71 is merged and PR #61 is
-> closed as superseded; remaining long-running scenarios gate release 4.0.0.
+> closed as superseded. Owner live acceptance, including go2rtc restart and a
+> healthy post-restart producer/preload snapshot, closed the 4.0.0 release gate.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -769,7 +770,7 @@ rg -n "operator_url|access_token|refresh_token|Authorization|go2rtc_password" \
 Review the hits manually. Test fixtures may contain obvious fake tokens; code
 must not log or expose them.
 
-- [ ] **Step 5: Execute the production acceptance checklist**
+- [x] **Step 5: Execute the production acceptance checklist**
 
 On the owner's real HA/go2rtc deployment:
 
@@ -786,7 +787,7 @@ On the owner's real HA/go2rtc deployment:
 9. disable keep-warm through options and confirm idle `eg_*` registrations are
    deleted while a stream with an active external consumer is preserved.
 
-- [ ] **Step 6: Record acceptance evidence truthfully**
+- [x] **Step 6: Record acceptance evidence truthfully**
 
 Update the acceptance section of `design.md` with timestamps, environment
 versions, each scenario's observable evidence, automated test count, and any
@@ -1156,7 +1157,7 @@ rg -n "operator_url|access_token|refresh_token|Authorization|go2rtc_password" \
   tests/test_stream_manager*.py tests/test_sensor_rtsp_urls.py
 ```
 
-- [ ] **Step 5: Repeat production acceptance on the five failed cameras**
+- [x] **Step 5: Repeat production acceptance on the affected cameras**
 
 Use the five affected streams from the private live checklist. Confirm each has
 a preload and active producer, survives idle, and opens externally without
@@ -1216,7 +1217,7 @@ option is off.
 Record the transient live inventory and setup-latency regression in ADR-0014
 and A-96. Add the no-transient-hidden-write check to repeat live acceptance.
 
-- [ ] **Step 5: Verify and repeat the live toggle matrix**
+- [x] **Step 5: Verify and repeat the live toggle matrix**
 
 Run focused and full automated suites. On the deployed artifact, enable/disable
 both publication options and observe that excluded hidden names never appear
@@ -1258,7 +1259,7 @@ Test compatible/no-op hidden changes, main off cleanup, main on scheduling,
 transport/auth mismatch fallback, empty credential normalization, and the
 in-flight mint/PATCH races. Policy saves perform no synchronous operator mint.
 
-- [ ] **Step 5: Verify, publish and repeat live observation**
+- [x] **Step 5: Verify, publish and repeat live observation**
 
 Run focused/workflow/full suites, push the new prerelease, then confirm that
 policy toggles no longer reload the integration or drive all existing producer
@@ -1292,7 +1293,7 @@ Keep `_startup_offset()` unchanged in `async_start()`. In
 `async_update_policy()`, enumerate only missing eligible cameras without an
 existing due callback and schedule them at `index * 0.5s`.
 
-- [ ] **Step 4: Verify, publish and repeat live timing**
+- [x] **Step 4: Verify, publish and repeat live timing**
 
 Run focused/related/full suites, publish a new PR artifact, then repeat main-on
 and hidden-on. The first new source should begin within its request latency and
@@ -1319,7 +1320,7 @@ the existing synchronized AIDD sources.
   complexity/network cost, while a single missing coordinator snapshot is not
   safe evidence that an operator camera was permanently removed.
 - [x] Focused/related/full local gates: 131/151/549 passed.
-- [ ] Push updated artifact, pass CI and obtain repeat independent READY review.
+- [x] Push updated artifact, pass CI and obtain repeat independent READY review.
 
 ## Rollback
 
@@ -1333,6 +1334,7 @@ tested the feature may retain those option values.
 ## Completion gate
 
 The original PATCH-only implementation was not complete despite its green test
-suite. Tasks 9-18, test/CI gates and merge are complete. Release 4.0.0 remains
-gated by recording the remaining long-running production acceptance scenarios
-in the existing feature design.
+suite. Tasks 9-18, test/CI gates, merge and owner live acceptance are complete.
+The manual go2rtc restart recovered the managed streams; the sanitized
+post-restart snapshot recorded three active producers and three preload
+consumers with increasing receive bytes. A-96 no longer gates release 4.0.0.

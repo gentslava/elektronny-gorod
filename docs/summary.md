@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-16 (external RTSP preload revision, PATCH-only live
-failure, 549-test evidence and repeat acceptance synchronized)
+Last reviewed: 2026-07-16 (external RTSP preload revision accepted live after
+go2rtc restart; 549-test evidence and 4.0.0 release status synchronized)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -106,10 +106,10 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 2. ✅ **config_flow + миграции v1→2→3 — покрыты тестами** (`3a60b15`): `test_config_flow.py` (3 ветки auth + go2rtc + abort/reauth) + `test_init.py` (миграции). Bronze config-flow gate закрыт. (A-73)
 3. ✅ **`helpers.py` crypto — golden vectors добавлены** (`362237b`, `test_helpers.py`): регрессия ловит тихий breakage формулы. (A-74)
 4. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold) — остаётся открытым.
-5. 🟡 **External RTSP after idle (A-96)** — preload revision и 549-test suite
-   готовы в feature-ветке, но пять проблемных камер, `>1h idle → external
-   player`, restart, consumer-preservation и cleanup должны быть повторно
-   записаны на live deployment.
+5. ✅ **External RTSP after idle (A-96)** — preload revision, 549-test suite и
+   live acceptance завершены. После manual go2rtc restart обезличенный snapshot
+   подтвердил `3/3` active producer/preload consumer и рост входящих данных;
+   предыдущие toggle/startup/hidden/orphan-consumer сценарии также пройдены.
 
 ✅ Закрыто в 3.3.0: `diagnostics.py` с redaction (A-23 / S-08; S-16 mitigated) —
 SECURITY_OK разблокирован.
@@ -139,11 +139,9 @@ entity state, recorder, diagnostics или логи.
 
 Оставшийся reliability / quality-долг (по убыванию ценности):
 
-1. Пройти оставшиеся revised live external-RTSP scenarios A-96 и зафиксировать
-   evidence в существующем feature design до публикации 4.0.0.
-2. Retry/backoff helper для идемпотентных operator GET (5xx / connection errors) — остаток A-21.
-3. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
-4. Native reauth / reconfigure flow (A-25/A-26 — Silver).
+1. Retry/backoff helper для идемпотентных operator GET (5xx / connection errors) — остаток A-21.
+2. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
+3. Native reauth / reconfigure flow (A-25/A-26 — Silver).
 
 Feature backlog независим от reliability queue; порядок зафиксирован в
 [`mobile-app-parity/tasklist.md`](features/mobile-app-parity/tasklist.md):
