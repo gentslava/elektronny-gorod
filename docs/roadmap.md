@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-15 (9.9.0 AVD parity backlog; completed DND/finance/
-realtime statuses reconciled; history/archive/guest/key/camera plans linked)
+Last reviewed: 2026-07-16 (external RTSP stream-manager implementation and
+live acceptance gate added; A-82/A-84 status reconciled)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -170,9 +170,9 @@ Static-only write paths не переходят в код без decrypted HAR (
 - [x] **A-64** ✅ Reload cascade + user override (PR #43). Migration flag
   в `entry.data`, sync через `entity.options[DOMAIN]` track per-entity
   user_shown override.
-- [x] **A-66** ✅ go2rtc stale producer URL после long idle (PR #46).
-  `Stream.update_source()` после каждого PUT в go2rtc — forces worker
-  restart с обновлённым ffmpeg producer. Избегает 10-30s retry-backoff.
+- [x] **A-66** ✅ Historical HA Stream stale-source recovery (PR #46),
+  позже расширено A-71. В stream-manager ветке camera больше не
+  владеет write boundary; recovery делегирует PATCH-only manager'у.
 - [x] **A-65** ✅ Log throttling от broken cameras (PR #49). Per-entity
   `_consecutive_empty_count` counter в `ElektronnyGorodCamera`. 1й fail
   → WARNING, 2й+ подряд → DEBUG. Counter сбрасывается на первый success.
@@ -197,6 +197,22 @@ Static-only write paths не переходят в код без decrypted HAR (
   проверены runtime'ом на production-сервере, ни один не убрал видимое
   мигание видео. Hypothesis «ffmpeg cold-start race» оказалась неверной
   (нужна другая diagnostic-сессия). Закрыт без PR'а.
+
+#### External RTSP after idle (A-82/A-84/A-96, ADR-0014)
+
+- [x] **Automated implementation** — per-entry `CameraStreamManager`,
+  PATCH-only `Go2RtcClient`, registry eligibility, 28:30 refresh, capped retry,
+  one-minute go2rtc restart reconcile, consumer-aware cleanup, config-entry
+  lifecycle и credential-free diagnostic sensor.
+- [x] **A-82** 🟢 resolved-in-branch: `camera.py` больше не владеет
+  go2rtc HTTP transport/writes; merge reconciliation открыт.
+- [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles
+  проверить, что repeated PATCH не раздувает persistent go2rtc YAML.
+- [ ] **A-96 production acceptance (merge gate)** — `>1h idle → external
+  RTSP` без HA-open; active consumer переживает refresh; restart restore
+  ≤60s; disabled/hidden cleanup; concurrent reasons dedup; unload без callbacks.
+- [ ] После семи live scenarios записать QA report, merge replacement
+  branch и только потом close/supersede PR #61.
 
 #### Code quality
 

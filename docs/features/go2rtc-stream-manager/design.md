@@ -1,12 +1,11 @@
 # Design: go2rtc stream manager for external RTSP
 
-- **Status:** approved by owner; implementation planned
+- **Status:** implemented in branch; production acceptance pending
 - **Date:** 2026-07-16
 - **Branch:** `feat/go2rtc-stream-manager`
 - **Origin:** replacement for the unmerged PR #61 and
   `feat/go2rtc-keep-warm`
-- **Related:** ADR-0009, audit A-82/A-83/A-84
-- **Planned records:** ADR-0014, audit A-96
+- **Related:** ADR-0009, ADR-0014, audit A-82/A-83/A-84/A-96
 
 ## Problem
 
@@ -313,18 +312,15 @@ must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 - Retaining the old option names preserves settings from installations that
   tested the unmerged branch.
 
-## Documentation updates
+## Documentation status
 
-The implementation series will:
-
-- add ADR-0014 for manager ownership and PATCH-only lifecycle;
-- add audit A-96 for the external-idle RTSP gap and cross-reference A-82/A-84;
-- update the project map, architecture overview, testing strategy, changelog,
-  and decision index;
-- keep ADR-0009 active and describe the manager as an extension of its proven
-  A-71 behavior;
-- close PR #61 only after the replacement passes production acceptance, with
-  credit for the original idea and reused diagnostic/config concepts.
+- ADR-0014 records manager ownership and PATCH-only lifecycle.
+- Audit A-96 separates automated implementation from live acceptance and
+  cross-references A-82/A-84.
+- Project map, architecture, testing, roadmap and changelog describe the new
+  boundary; ADR-0009 remains active for proven A-71 behavior.
+- PR #61 stays open until the replacement passes production acceptance; its
+  opt-in/diagnostic concepts are credited and retained.
 
 ## Deferred work
 

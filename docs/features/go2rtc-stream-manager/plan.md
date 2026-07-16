@@ -1,10 +1,14 @@
 # go2rtc Stream Manager Implementation Plan
 
+> **Status (2026-07-16):** Tasks 1-7 and the Task 8 automated gates are
+> complete: 61 focused tests, 135 related regressions, and the full 499-test
+> suite pass. All seven live production scenarios remain the completion gate.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Keep opt-in Home Assistant camera streams reachable through stable external go2rtc RTSP URLs after long idle periods, without disrupting active viewers or publishing disabled cameras.
 
-**Architecture:** Add one `CameraStreamManager` per config entry as the sole writer of operator camera sources named `eg_<camera_id>`. Camera entities retain the proven A-71 recovery triggers but delegate URL minting, concurrency deduplication, PATCH registration, retry, and background lifecycle to the manager. A focused `Go2RtcClient` owns transport, and a diagnostic sensor reports actual sanitized manager state.
+**Architecture:** Add one `CameraStreamManager` per config entry as the sole writer of operator camera sources named `eg_<camera_id>`. Camera entities retain the proven A-71 recovery triggers but delegate URL minting, concurrency deduplication, PATCH registration, retry, and background lifecycle to the manager. A focused `Go2RtcClient` owns transport, and a diagnostic sensor reports actual sanitized manager state. Recorded in [ADR-0014](../../decisions/0014-go2rtc-stream-manager.md).
 
 **Tech Stack:** Python 3.12+, Home Assistant config entries/entity registry/schedulers, `aiohttp`, `voluptuous`, `pytest`, `pytest-homeassistant-custom-component`.
 
@@ -62,7 +66,7 @@
 - Modify: `custom_components/elektronny_gorod/translations/en.json`
 - Create: `tests/test_config_flow_keep_warm.py`
 
-- [ ] **Step 1: Write failing config-flow tests**
+- [x] **Step 1: Write failing config-flow tests**
 
 Cover these cases with real HA flow setup and `validate_go2rtc` mocked at the
 existing boundary:
@@ -74,7 +78,7 @@ existing boundary:
 - `test_options_flow_defaults_from_entry_data`: with no option overrides,
   apply the returned schema and assert the values stored in entry data.
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_config_flow_keep_warm.py -q
@@ -82,7 +86,7 @@ PYTHONPATH=. .venv/bin/pytest tests/test_config_flow_keep_warm.py -q
 
 Expected failure: the two constants/schema fields do not exist.
 
-- [ ] **Step 3: Add constants without changing config-entry version**
+- [x] **Step 3: Add constants without changing config-entry version**
 
 Add to `const.py`:
 
@@ -96,14 +100,14 @@ STREAM_MANAGER_DATA: Final = f"{DOMAIN}_stream_managers"
 
 Do not increment `ConfigFlow.VERSION`; absent values safely read as `False`.
 
-- [ ] **Step 4: Persist both fields in initial and options flows**
+- [x] **Step 4: Persist both fields in initial and options flows**
 
 Add both booleans to the `go2rtc` form and saved entry data. Add them to the
 options form and saved options, reading defaults with the existing
 `options -> data -> default` precedence. Persist the hidden sub-option even
 when the main option is off, but treat it as ineffective in manager policy.
 
-- [ ] **Step 5: Add source and translated strings**
+- [x] **Step 5: Add source and translated strings**
 
 Use these labels:
 
@@ -120,13 +124,13 @@ Use these labels:
 The description must say that disabled entities are never published and the
 second option works only with the first one.
 
-- [ ] **Step 6: Run config-flow regression tests**
+- [x] **Step 6: Run config-flow regression tests**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_config_flow_keep_warm.py tests/test_config_flow.py -q
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add custom_components/elektronny_gorod/const.py \
@@ -146,7 +150,7 @@ git commit -m "feat(go2rtc): add opt-in stream publishing options"
 - Create: `tests/test_go2rtc_client.py`
 - Modify: `tests/test_go2rtc_upsert.py`
 
-- [ ] **Step 1: Write failing transport tests**
+- [x] **Step 1: Write failing transport tests**
 
 Test the public contract directly with a fake aiohttp session. Use these exact
 test cases: `test_patch_stream_uses_patch_without_put_fallback`,
@@ -161,13 +165,13 @@ The failure-path assertion must inspect both `str(exc)` and `repr(exc)` and
 verify that the operator token, source URL, password, and Authorization value
 are absent.
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_client.py -q
 ```
 
-- [ ] **Step 3: Implement typed transport records and sanitized errors**
+- [x] **Step 3: Implement typed transport records and sanitized errors**
 
 Add these public shapes in `go2rtc.py`:
 
@@ -190,7 +194,7 @@ class Go2RtcRequestError(RuntimeError):
 Never attach a URL, response body, headers, or underlying `ClientError` text
 to the raised exception. Convert exceptions with `raise ... from None`.
 
-- [ ] **Step 4: Implement `Go2RtcClient`**
+- [x] **Step 4: Implement `Go2RtcClient`**
 
 The class constructor receives normalized base URL, RTSP host, shared
 `ClientSession`, and optional HTTP/RTSP credentials. Its operator-stream API is:
@@ -228,13 +232,13 @@ Implementation rules:
 Do not refactor `upsert_audio_stream()` in this task: `eg_intercom_call` is a
 separate lifecycle and its tested PATCH/PUT compatibility behavior remains.
 
-- [ ] **Step 5: Replace camera-level upsert tests with client assertions**
+- [x] **Step 5: Replace camera-level upsert tests with client assertions**
 
 Keep regression proof that PATCH success never invokes PUT and that a PATCH
 failure is sanitized. Delete no test unless its behavior is represented by a
 new test.
 
-- [ ] **Step 6: Run transport and audio regression tests**
+- [x] **Step 6: Run transport and audio regression tests**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_client.py \
@@ -242,7 +246,7 @@ PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_client.py \
   tests/test_go2rtc_audio.py -q
 ```
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add custom_components/elektronny_gorod/go2rtc.py \
@@ -257,7 +261,7 @@ git commit -m "refactor(go2rtc): add sanitized patch-only client"
 - Create: `custom_components/elektronny_gorod/stream_manager.py`
 - Create: `tests/test_stream_manager.py`
 
-- [ ] **Step 1: Write failing core manager tests**
+- [x] **Step 1: Write failing core manager tests**
 
 Use a fake coordinator and fake `Go2RtcClient`; do not rely only on callbacks.
 Implement the exact cases `test_refresh_mints_and_patches_complete_source`,
@@ -277,13 +281,13 @@ coordinator.get_camera_stream(camera_id)
   -> client.rtsp_url(..., include_credentials=True)
 ```
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager.py -q
 ```
 
-- [ ] **Step 3: Implement immutable refresh results and observable state**
+- [x] **Step 3: Implement immutable refresh results and observable state**
 
 Use monotonic time for scheduling and UTC datetimes only for user-visible
 timestamps:
@@ -314,7 +318,7 @@ class ManagedCameraState:
 Expose only copied/immutable diagnostic snapshots. Listeners receive no source
 URL and can only request a state refresh.
 
-- [ ] **Step 4: Implement one in-flight owner per camera**
+- [x] **Step 4: Implement one in-flight owner per camera**
 
 `CameraStreamManager.async_refresh(camera_id, reason)` must:
 
@@ -331,13 +335,13 @@ URL and can only request a state refresh.
 The raw operator URL must not be retained in `ManagedCameraState`, logs,
 diagnostics, or raised errors.
 
-- [ ] **Step 5: Run core manager tests**
+- [x] **Step 5: Run core manager tests**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager.py -q
 ```
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add custom_components/elektronny_gorod/stream_manager.py \
@@ -353,7 +357,7 @@ git commit -m "feat(go2rtc): add camera stream manager core"
 - Create: `tests/test_stream_manager_reconcile.py`
 - Create: `tests/test_stream_manager_scheduler.py`
 
-- [ ] **Step 1: Write the failing registry eligibility matrix**
+- [x] **Step 1: Write the failing registry eligibility matrix**
 
 Test all meaningful combinations against actual HA entity-registry entries:
 
@@ -367,7 +371,7 @@ Test all meaningful combinations against actual HA entity-registry entries:
 
 Also test that API `camera_info["hidden"]` cannot override registry state.
 
-- [ ] **Step 2: Write failing reconcile tests**
+- [x] **Step 2: Write failing reconcile tests**
 
 Implement the exact cases `test_reconcile_uses_one_complete_stream_list_request`,
 `test_missing_eligible_stream_runs_full_refresh_chain`,
@@ -383,7 +387,7 @@ The restart test must first complete a successful PATCH, then replace the fake
 go2rtc stream map with `{}`, invoke reconcile, and assert a new operator request
 and PATCH. Asserting only that a refresh callback was scheduled is insufficient.
 
-- [ ] **Step 3: Write failing scheduler and retry tests**
+- [x] **Step 3: Write failing scheduler and retry tests**
 
 Implement the exact cases
 `test_startup_offsets_are_deterministic_bounded_and_distinct`,
@@ -394,14 +398,14 @@ Implement the exact cases
 `test_registry_update_schedules_one_prompt_reconcile`, and
 `test_stop_cancels_timer_listener_callbacks_and_inflight_tasks`.
 
-- [ ] **Step 4: Run new tests and confirm RED**
+- [x] **Step 4: Run new tests and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager_reconcile.py \
   tests/test_stream_manager_scheduler.py -q
 ```
 
-- [ ] **Step 5: Implement registry-derived desired state**
+- [x] **Step 5: Implement registry-derived desired state**
 
 Resolve each camera entity by stable unique ID
 `elektronny_gorod_camera_<camera_id>`. Eligibility is exactly:
@@ -422,7 +426,7 @@ When the main option is off, do not create background timers, retries, or
 cleanup ownership. When it is on, hidden/disabled streams are outside desired
 state and are cleaned according to consumer count.
 
-- [ ] **Step 6: Implement independent scheduling**
+- [x] **Step 6: Implement independent scheduling**
 
 Keep timing constants local to `stream_manager.py`:
 
@@ -439,7 +443,7 @@ Use a separate `async_call_later` cancellation handle for each camera. A
 successful refresh sets that camera's next due to completion monotonic time +
 1710 seconds. Failures schedule 15, 30, 60, 120, 240, then 300 seconds.
 
-- [ ] **Step 7: Implement one-minute full reconciliation**
+- [x] **Step 7: Implement one-minute full reconciliation**
 
 Every tick calls `client.async_list_streams()` once. For each current
 coordinator camera:
@@ -453,13 +457,13 @@ coordinator camera:
 The entity-registry listener only marks state dirty and coalesces a prompt
 reconcile. Config option changes continue to reload the entry.
 
-- [ ] **Step 8: Implement idempotent stop**
+- [x] **Step 8: Implement idempotent stop**
 
 Cancel the registry listener, one-minute interval, prompt reconcile callback,
 all per-camera due handles, and owned background tasks. Cancel shared futures
 so no waiter can hang. `async_stop()` must be safe when called twice.
 
-- [ ] **Step 9: Run manager suites**
+- [x] **Step 9: Run manager suites**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager.py \
@@ -467,7 +471,7 @@ PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager.py \
   tests/test_stream_manager_scheduler.py -q
 ```
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git add custom_components/elektronny_gorod/stream_manager.py \
@@ -487,7 +491,7 @@ git commit -m "feat(go2rtc): reconcile eligible external rtsp streams"
 - Modify: `tests/test_camera_call_video_rtsp.py`
 - Modify: `tests/test_stream_manager_scheduler.py`
 
-- [ ] **Step 1: Add failing setup/unload integration tests**
+- [x] **Step 1: Add failing setup/unload integration tests**
 
 Prove this exact setup order with mocks/events:
 
@@ -502,7 +506,7 @@ coordinator first refresh
 On unload, assert the manager is stopped and removed from shared data, with no
 scheduled callbacks or owned tasks remaining.
 
-- [ ] **Step 2: Change camera tests to assert manager delegation**
+- [x] **Step 2: Change camera tests to assert manager delegation**
 
 Keep the behavioral assertions from the 35-test baseline:
 
@@ -514,7 +518,7 @@ Keep the behavioral assertions from the 35-test baseline:
 - call-camera live-producer reuse avoids a second operator URL;
 - direct FLV behavior is unchanged when go2rtc is disabled.
 
-- [ ] **Step 3: Run focused tests and confirm RED**
+- [x] **Step 3: Run focused tests and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_camera_stream_dedup.py \
@@ -522,7 +526,7 @@ PYTHONPATH=. .venv/bin/pytest tests/test_camera_stream_dedup.py \
   tests/test_stream_manager_scheduler.py -q
 ```
 
-- [ ] **Step 4: Create and expose the manager before platform forwarding**
+- [x] **Step 4: Create and expose the manager before platform forwarding**
 
 In `async_setup_entry`, after the coordinator first refresh and before
 `async_forward_entry_setups`:
@@ -536,7 +540,7 @@ In `async_setup_entry`, after the coordinator first refresh and before
 After platforms and `_sync_visibility`, call `await manager.async_start()`.
 Temporary go2rtc failure must not fail integration setup.
 
-- [ ] **Step 5: Make camera entities depend on the manager**
+- [x] **Step 5: Make camera entities depend on the manager**
 
 Pass the shared manager to each ordinary `ElektronnyGorodCamera`. Preserve
 existing go2rtc config extraction for `ElektronnyGorodCallCamera` only.
@@ -565,13 +569,13 @@ The proactive path uses reason `active_consumer` and does not call
 `Stream.update_source()`. Stream-info reads delegate to the manager/client and
 remain read-only.
 
-- [ ] **Step 6: Stop and remove the manager during unload**
+- [x] **Step 6: Stop and remove the manager during unload**
 
 Stop before removing shared state. Keep cleanup idempotent because HA may also
 invoke the registered unload callback. Do not delete go2rtc streams merely
 because an entry reloads; eligibility cleanup is reconcile policy.
 
-- [ ] **Step 7: Run the A-71 comparison suite**
+- [x] **Step 7: Run the A-71 comparison suite**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_camera_auto_recovery.py \
@@ -581,7 +585,7 @@ PYTHONPATH=. .venv/bin/pytest tests/test_camera_auto_recovery.py \
 Expected: at least the same 35 behavioral cases pass, with direct transport
 assertions moved to the client tests where appropriate.
 
-- [ ] **Step 8: Run call-camera and visibility regressions**
+- [x] **Step 8: Run call-camera and visibility regressions**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_camera_call_video_rtsp.py \
@@ -589,7 +593,7 @@ PYTHONPATH=. .venv/bin/pytest tests/test_camera_call_video_rtsp.py \
   tests/test_visibility_real.py tests/test_visibility_user_override.py -q
 ```
 
-- [ ] **Step 9: Commit**
+- [x] **Step 9: Commit**
 
 ```bash
 git add custom_components/elektronny_gorod/__init__.py \
@@ -611,7 +615,7 @@ git commit -m "refactor(camera): delegate go2rtc writes to stream manager"
 - Modify: `custom_components/elektronny_gorod/translations/en.json`
 - Create: `tests/test_sensor_rtsp_urls.py`
 
-- [ ] **Step 1: Write failing sensor tests**
+- [x] **Step 1: Write failing sensor tests**
 
 Implement the exact cases
 `test_sensor_counts_only_present_fresh_eligible_streams`,
@@ -621,13 +625,13 @@ Implement the exact cases
 `test_sensor_attributes_never_contain_operator_url_or_token`, and
 `test_sensor_is_absent_when_go2rtc_is_disabled`.
 
-- [ ] **Step 2: Run the focused test and confirm RED**
+- [x] **Step 2: Run the focused test and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_sensor_rtsp_urls.py -q
 ```
 
-- [ ] **Step 3: Implement `ElektronnyGorodRtspUrlsSensor`**
+- [x] **Step 3: Implement `ElektronnyGorodRtspUrlsSensor`**
 
 Add one diagnostic-category sensor only when a manager exists. It is not a
 `CoordinatorEntity`; it subscribes to sanitized manager-state changes.
@@ -645,14 +649,14 @@ Add one diagnostic-category sensor only when a manager exists. It is not a
 Do not expose the authenticated HA RTSP URL. A username/password in config
 must never appear in state attributes.
 
-- [ ] **Step 4: Run sensor and platform regression tests**
+- [x] **Step 4: Run sensor and platform regression tests**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_sensor_rtsp_urls.py \
   tests/test_sensor_call_state.py -q
 ```
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add custom_components/elektronny_gorod/sensor.py \
@@ -678,25 +682,25 @@ git commit -m "feat(sensor): report actual external rtsp readiness"
 - Modify: `docs/features/go2rtc-stream-manager/plan.md`
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step 1: Add ADR-0014**
+- [x] **Step 1: Add ADR-0014**
 
 Record status `accepted`, context (idle 500/EOF), decision (single writer,
 PATCH-only, registry eligibility, one-minute in-memory recovery), alternatives
 (old entity timers, PUT fallback, discard feature), consequences, and links to
 ADR-0009/A-82/A-84/A-96.
 
-- [ ] **Step 2: Add audit A-96**
+- [x] **Step 2: Add audit A-96**
 
 Mark automated implementation status separately from production acceptance.
 Do not claim the idle-over-one-hour path fixed until the live checklist passes.
 
-- [ ] **Step 3: Synchronize maps and testing docs**
+- [x] **Step 3: Synchronize maps and testing docs**
 
 Update stale architecture text that currently describes camera-owned PUT and
 `Camera._last_src`. Document manager state ownership, option defaults,
 transport boundary, test files, and the mandatory live acceptance gate.
 
-- [ ] **Step 4: Run documentation consistency checks**
+- [x] **Step 4: Run documentation consistency checks**
 
 ```bash
 rg -n "camera-owned PUT|_last_src|pending written-spec review|A-96|ADR-0014" docs
@@ -706,7 +710,7 @@ rg -n "TODO|TBD|PLACEHOLDER|</content>" docs/features/go2rtc-stream-manager
 Review every hit; the finished feature package must contain no placeholder or
 false completion claim.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add docs/decisions/0014-go2rtc-stream-manager.md \
@@ -723,7 +727,7 @@ git commit -m "docs(go2rtc): record stream manager architecture"
 
 - Create after live run: `docs/features/go2rtc-stream-manager/qa-report.md`
 
-- [ ] **Step 1: Run focused feature suites**
+- [x] **Step 1: Run focused feature suites**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_config_flow_keep_warm.py \
@@ -732,7 +736,7 @@ PYTHONPATH=. .venv/bin/pytest tests/test_config_flow_keep_warm.py \
   tests/test_stream_manager_scheduler.py tests/test_sensor_rtsp_urls.py -q
 ```
 
-- [ ] **Step 2: Run all go2rtc/camera/config/visibility regressions**
+- [x] **Step 2: Run all go2rtc/camera/config/visibility regressions**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_*.py tests/test_camera_*.py \
@@ -740,13 +744,13 @@ PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_*.py tests/test_camera_*.py \
   tests/test_visibility*.py -q
 ```
 
-- [ ] **Step 3: Run the full suite**
+- [x] **Step 3: Run the full suite**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/ -q
 ```
 
-- [ ] **Step 4: Inspect the final diff and secret surface**
+- [x] **Step 4: Inspect the final diff and secret surface**
 
 ```bash
 git diff --check

@@ -1,7 +1,7 @@
 Status: Active
 Owner: Home Assistant Expert Agent
-Last reviewed: 2026-07-16 (durable history config-entry/source isolation,
-opt-in camera polling and authenticated browse boundary)
+Last reviewed: 2026-07-16 (external RTSP options, per-entry manager lifecycle
+and diagnostic entity translations)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
@@ -9,6 +9,7 @@ Source files:
 - `custom_components/elektronny_gorod/coordinator.py`
 - `custom_components/elektronny_gorod/__init__.py`
 - `custom_components/elektronny_gorod/camera.py`
+- `custom_components/elektronny_gorod/stream_manager.py`
 - `custom_components/elektronny_gorod/lock.py`
 - `custom_components/elektronny_gorod/sensor.py`
 - `custom_components/elektronny_gorod/event.py`
@@ -87,6 +88,7 @@ async_step_user
   │     └── skip_go2rtc → async_step_skip_go2rtc → create_entry
   └── OptionsFlow
         └── async_step_init → validate_go2rtc → update options
+            (`go2rtc_keep_warm`; hidden sub-option depends on main)
 ```
 
 ### Critique
@@ -104,6 +106,7 @@ async_step_user
 | **Native reauth step** (`async_step_reauth`) | ❌ — reauth выполняется внутри `get_account` | требуется `async_step_reauth_confirm` |
 | **Reconfigure flow** | ❌ | требуется `async_step_reconfigure` |
 | Tests | ✅ реальные config-flow/migration tests | `tests/test_config_flow.py`, `tests/test_init.py` |
+| External RTSP options | ✅ default-off + dependency + initial/options tests | `tests/test_config_flow_keep_warm.py` |
 | `show_advanced_options` ветка | ✅ есть | `config_flow.py:111-117` |
 
 ## Coordinator / Data Fetching
@@ -125,6 +128,7 @@ async_step_user
 | History interval cleanup | ✅ `HistoryManager.async_stop` через config-entry unload; overlapping tick пропускается | `history.py`, `__init__.py` |
 | Camera-history request bound | ✅ motion entities disabled-by-default; API poll выполняется только для enabled registry entries | `__init__.py`, `event.py`, `history.py` |
 | Использование `async_get_clientsession(hass)` | ✅ shared HA session | `http.py:96` |
+| External RTSP lifecycle | ✅ HA-managed tasks/timers/listeners; manager stopped on unload | `stream_manager.py`, `__init__.py`, `test_stream_manager_lifecycle.py` |
 
 ## Entities
 
@@ -139,7 +143,7 @@ async_step_user
 | `state_class` | n/a | n/a | ✅ `TOTAL` |
 | `native_unit_of_measurement` | n/a | n/a | ✅ `RUB` |
 | `available` | default | ⚠️ `self._openable` (может быть None) | default |
-| `entity_category` | n/a | n/a | можно `diagnostic` |
+| `entity_category` | n/a | n/a | ✅ `diagnostic` для RTSP readiness sensor |
 | Корректное обновление через coordinator | ✅ | ✅ (+ локальный synthetic unlock timer) | ✅ |
 | Хардкод русского имени | нет | нет | нет — translation key ru/en |
 
@@ -171,6 +175,7 @@ HA-класс требует поддержку `ring`; doorbell-класс ос
 | `translations/en.json` | ✅ соответствует |
 | **Entity translations** (раздел `strings.json:entity`) | ✅ ru/en |
 | History event types | ✅ `call_accepted`, `call_missed`, `motion` в source/ru/en |
+| External RTSP | ✅ options + `go2rtc_rtsp_urls` sensor name в source/ru/en |
 
 ## Платформы и manifest dependencies
 
