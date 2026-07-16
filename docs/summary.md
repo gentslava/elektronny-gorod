@@ -92,8 +92,8 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
   тем же стабильным URL и не оставляя orphan HA worker. Stop дожидается running
   reconcile и снимает pending preload; manager-eligible streams не дублируют
   28:30 entity proactive timer (A-82/A-96, ADR-0014).
-  Повторный production checklist ещё не закрыт, поэтому release/merge status
-  не заявляется.
+  Повторный production checklist ещё не закрыт, поэтому release status пока не
+  заявляется; реализация уже находится в master через PR #71.
 
 ## Главные риски (на 2026-07-16)
 
@@ -139,8 +139,8 @@ entity state, recorder, diagnostics или логи.
 
 Оставшийся reliability / quality-долг (по убыванию ценности):
 
-1. Пройти девять revised live external-RTSP scenarios A-96 и зафиксировать
-   evidence в существующем feature design; до этого не merge/close PR #61.
+1. Пройти оставшиеся revised live external-RTSP scenarios A-96 и зафиксировать
+   evidence в существующем feature design до публикации 4.0.0.
 2. Retry/backoff helper для идемпотентных operator GET (5xx / connection errors) — остаток A-21.
 3. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
 4. Native reauth / reconfigure flow (A-25/A-26 — Silver).

@@ -4,8 +4,8 @@
 > are complete, but live validation disproved the PATCH-only keep-warm model:
 > five registered lazy streams returned RTSP 404/EOF after idle. The preload
 > revision Tasks 9-18 and local gates are complete: 131 focused,
-> 151 related and 549 full-suite tests pass. Updated CI/pre-release and nine
-> repeat live scenarios remain pending.
+> 151 related and 549 full-suite tests pass. PR #71 is merged and PR #61 is
+> closed as superseded; remaining long-running scenarios gate release 4.0.0.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -794,11 +794,11 @@ failure. Change the design status to implemented/verified only after the
 revised nine-scenario gate below passes; the original seven-scenario PATCH-only
 gate was attempted and failed.
 
-- [ ] **Step 7: Close or supersede PR #61 only after live acceptance**
+- [x] **Step 7: Close or supersede PR #61 only after live acceptance**
 
-Reference the replacement branch/PR, credit the original opt-in and diagnostic
-concept, and explain that the old implementation did not prove the full idle
-external-RTSP chain. Do not close it before the replacement evidence exists.
+PR #61 was closed after merge of PR #71 with a thank-you, a link to the merged
+implementation, credit for the opt-in/diagnostic concept and an explanation of
+the completed lifecycle.
 
 ## Preload revision after live failure
 
@@ -1332,7 +1332,7 @@ tested the feature may retain those option values.
 
 ## Completion gate
 
-The original PATCH-only implementation is not complete despite its green test
-suite. Automated implementation is complete when Tasks 9-18 and the full
-test/CI gates pass. The feature is merge-ready only after all nine revised
-production acceptance scenarios are recorded in the existing feature design.
+The original PATCH-only implementation was not complete despite its green test
+suite. Tasks 9-18, test/CI gates and merge are complete. Release 4.0.0 remains
+gated by recording the remaining long-running production acceptance scenarios
+in the existing feature design.

@@ -230,11 +230,11 @@ Static-only write paths не переходят в код без decrypted HAR (
   незарегистрированного RTSP name; background gate сохранён. Proxied EOF recovery больше не вызывает
   `Stream.update_source()` с тем же URL и не оставляет worker через
   fast-restart/idle-stop race.
-- [x] **A-82** 🟢 resolved-in-branch: `camera.py` больше не владеет
-  go2rtc HTTP transport/writes; merge reconciliation открыт.
+- [x] **A-82** ✅ resolved в PR #71 (`bf5ba9b`): `camera.py` больше не владеет
+  go2rtc HTTP transport/writes.
 - [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles
   проверить, что repeated PATCH не раздувает persistent go2rtc YAML.
-- [ ] **A-96 repeat production acceptance (merge gate)** — пять проблемных
+- [ ] **A-96 repeat production acceptance (4.0.0 release gate)** — пять проблемных
   streams получают active preload и переживают idle без HA-open; active
   consumer переживает refresh; restart restore ≤60s; disabled/hidden cleanup;
   concurrent reasons dedup; option-off удаляет idle registrations, unload
@@ -243,8 +243,9 @@ Static-only write paths не переходят в код без decrypted HAR (
   добавляет excluded hidden names фоновым path; explicit hidden HA-open во
   время и после setup работает без persistent preload и cleanup-ится после
   viewer; закрытие HA UI не оставляет orphan consumer после EOF recovery.
-- [ ] После девяти live scenarios записать evidence в существующем feature
-  design, merge replacement branch и только потом close/supersede PR #61.
+- [ ] После оставшихся live scenarios записать evidence в существующем feature
+  design и разблокировать публикацию 4.0.0. PR #71 уже merged, PR #61 закрыт
+  как superseded с благодарностью автору.
 
 #### Code quality
 

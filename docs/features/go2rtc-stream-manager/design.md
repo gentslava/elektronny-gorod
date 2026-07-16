@@ -1,10 +1,10 @@
 # Design: go2rtc stream manager for external RTSP
 
-- **Status:** preload revision implemented and automated gates passed; repeat
-  production acceptance pending
+- **Status:** merged in PR #71; targeted live regression passed, remaining
+  long-running production acceptance gates release 4.0.0
 - **Date:** 2026-07-16
-- **Delivery:** PR #71
-- **Origin:** replacement for the unmerged PR #61 and
+- **Delivery:** merged PR #71 (`bf5ba9b`)
+- **Origin:** replacement for the superseded/closed PR #61 and
   `feat/go2rtc-keep-warm`
 - **Related:** ADR-0009, ADR-0014, audit A-82/A-83/A-84/A-96
 
@@ -422,7 +422,7 @@ Before changing the A-71 write boundary, capture a short baseline of active
 consumer refresh/recovery behavior. After implementation, repeat it to show
 behavioral equivalence for active HA streams.
 
-The nine acceptance scenarios in this document are merge-blocking. In
+The nine acceptance scenarios in this document gate the 4.0.0 release. In
 particular, the idle-over-one-hour external RTSP test and go2rtc restart test
 must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 
@@ -435,8 +435,8 @@ above remain separate gates.
 
 ## Rollout and compatibility
 
-- Continue the replacement branch and PR #71; do not revive or cherry-pick the
-  old keep-warm implementation.
+- Use the implementation merged by PR #71; do not revive or cherry-pick the old
+  keep-warm implementation.
 - Manually reuse its runtime evidence, option keys, translations, diagnostic
   sensor concept, security requirements, and useful test cases.
 - Default-off options make the change inert for existing users.
@@ -458,13 +458,13 @@ above remain separate gates.
 - Project map, architecture, testing, roadmap and changelog are synchronized
   with the implemented preload revision; ADR-0009 remains active for proven
   A-71 behavior.
-- PR #61 stays open until the replacement passes production acceptance; its
-  opt-in/diagnostic concepts are credited and retained.
+- PR #61 is closed as superseded with a thank-you and link to merged PR #71;
+  its opt-in/diagnostic concepts are credited and retained.
 
 Automated evidence on 2026-07-16: 131 focused preload/manager tests, 151
 related camera/go2rtc/config/visibility regressions and the complete 549-test
 backend suite passed. The targeted startup-grid regression also passed live;
-the remaining long-running acceptance scenarios above stay merge-blocking.
+the remaining long-running acceptance scenarios above gate release 4.0.0.
 
 ## Deferred work
 

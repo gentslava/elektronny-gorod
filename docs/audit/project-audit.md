@@ -1290,15 +1290,14 @@ Quality gates:
 > **Reconciliation 2026-07-16:** [ADR-0014](../decisions/0014-go2rtc-stream-manager.md)
 > довёл консолидацию ordinary operator-camera path: `Go2RtcClient`
 > владеет HTTP/RTSP transport, `CameraStreamManager` — write/lifecycle,
-> `camera.py` — HA triggers. Поэтому A-82 resolved-in-branch; A-83
+> `camera.py` — HA triggers. Поэтому A-82 resolved в master через PR #71; A-83
 > остаётся intentional backlog, A-84 только partially mitigated до
 > live persistence check. Security status ведётся отдельно в `security.md`.
 
 ### A-82. go2rtc-transport в `ElektronnyGorodCamera` не вынесен в go2rtc-клиент
 
-- **Status:** 🟢 **resolved-in-branch (pending merge
-  `feat/go2rtc-stream-manager`)**. Live external-RTSP acceptance отдельно
-  трекается в A-96.
+- **Status:** ✅ **RESOLVED** — PR #71, merge commit `bf5ba9b`. Live
+  external-RTSP acceptance отдельно трекается в A-96.
 - **Severity:** **P3 (maintainability)** — не bug, поведение корректно.
 - **Area:** `camera.py` (god-class на 5 ответственностей), `go2rtc.py`.
 - **Implementation evidence:** `go2rtc.py:Go2RtcClient` владеет
@@ -1307,8 +1306,8 @@ Quality gates:
   только HA-specific wrappers/triggers и не делает go2rtc HTTP.
 - **Tests:** `test_go2rtc_client.py`, `test_stream_manager*.py`,
   `test_camera_auto_recovery.py`, `test_camera_call_video_rtsp.py`.
-- **Merge reconciliation:** после merge в master перевести в
-  `✅ RESOLVED` с merged ref; до этого не считать release state.
+- **Merge reconciliation:** transport/write ownership находится в `master`;
+  release readiness оставляет отдельные live-сценарии A-96.
 
 ### A-83. Auto-recovery state machine (A-71) не выделена в отдельный helper
 
@@ -1579,10 +1578,9 @@ Quality gates:
 
 ### A-96. Внешний RTSP после простоя требует предварительного открытия камеры в HA
 
-- **Status:** 🟡 **PARTIALLY RESOLVED** — PATCH-only revision провалила live
-  acceptance; preload revision реализована и проходит automated gates в
-  `feat/go2rtc-stream-manager`, но повторный production run и merge
-  ещё открыты.
+- **Status:** 🟡 **PARTIALLY RESOLVED** — preload revision смержена в PR #71
+  (`bf5ba9b`) и targeted startup-grid прошёл live; long-idle, scheduled refresh
+  и go2rtc-restart остаются release-acceptance перед публикацией 4.0.0.
 - **Severity:** **P1 reliability** для opt-in external RTSP: stable URL
   существует, но после idle не выполняет свой контракт.
 - **Area:** `stream_manager.py`, `go2rtc.py:Go2RtcClient`, camera/config-entry
@@ -1692,7 +1690,7 @@ Quality gates:
     fallback и concurrent late-mint/PATCH guards;
   - `test_sensor_rtsp_urls.py` — preloaded+active+fresh и no-secret attrs;
   - local gates: 131 focused, 151 related regressions, 549 full suite passed.
-- **Production acceptance (repeat merge-blocking):** пять затронутых камер
+- **Production acceptance (repeat release-blocking):** пять затронутых камер
   получают active preload и открываются externally после idle без HA-open;
   active consumer переживает PATCH; go2rtc restart → restore ≤60s;
   disabled/hidden cleanup policy; concurrent reasons → one mint/PATCH/preload;
@@ -1705,7 +1703,7 @@ Quality gates:
   diagnostic RTSP URL без credentials; errors/logs содержат только
   sanitized category/type.
 - **Related:** A-71 остаётся production-proven active-consumer
-  recovery; A-82 закрывается в ветке; A-83 intentionally deferred;
+  recovery; A-82 закрыт в master через PR #71; A-83 intentionally deferred;
   A-84 требует live config-persistence evidence.
 
 ### A-73. config_flow + `async_migrate_entry` без тестов (Bronze IQS gate)
@@ -1772,7 +1770,7 @@ Quality gates:
 | ✅ A-58 + ✅ A-54 (doorbell event via FCM в master, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
 | ✅ A-81 (register-on-ring ADR-0012 + downlink AudioBridge + call_camera.py, master/PR #69) — закрывает практическую часть A-49 (`sipdevices` используется) | Итерация 4 (two-way audio: приём вызова + downlink-вывод + экран вызова) |
 | ✅ A-85 (uplink-микрофон ADR-0013: HA WS-binary #1, дрейф-фикс rtp.py, Lovelace-карта; live-прод 2026-06-24, master/PR #69) — завершает two-way audio (говорить гостю) | Итерация 4 (two-way audio: uplink-микрофон; #2/#3/#4 эмпирически отвергнуты) |
-| 🟢 A-82 (resolved-in-branch) + 🔴 A-83 (A-71 triggers intentionally remain in camera) + 🟡 A-84 (PATCH-only source mitigation, live persistence check open) + 🟡 A-96 (preload revision automated, repeat live scenarios open) | external RTSP stream-manager track, ADR-0014; merge blocked by repeat production acceptance |
+| ✅ A-82 (resolved in PR #71) + 🔴 A-83 (A-71 triggers intentionally remain in camera) + 🟡 A-84 (PATCH-only source mitigation, live persistence check open) + 🟡 A-96 (preload revision automated, repeat live scenarios open) | external RTSP stream-manager track, ADR-0014; release blocked by remaining production acceptance |
 | ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
 | ✅ A-87 (ring/idle watchdog, PR #68) + ✅ A-88 (video anti-churn) + ✅ A-90 (FCM-ended guard), merged PR #69 | Итерация 4 (UI + надёжность видео/жизненного цикла вызова) |
 | ✅ A-89 (смена звонящего домофона во время held) + ✅ A-91 (штатная pre-answer SIP-модель подтверждена PCAP), merged PR #69 | Итерация 4 (мульти-вызов + production diagnostics) |
