@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
 Last reviewed: 2026-07-16 (A-96 PATCH-only live failure, preload revision,
-548-test evidence and repeat production-acceptance status reconciled)
+549-test evidence and repeat production-acceptance status reconciled)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1662,6 +1662,14 @@ Quality gates:
   joined-reason upgrade отклонены как ненаблюдавшаяся сложность/overhead;
   удаление по одному пропавшему coordinator snapshot дополнительно опасно при
   временно неполном operator response.
+- **Startup-grid production finding (2026-07-16):** при открытии трёх enabled
+  hidden лифтов во время завершения setup два `ha_open` получили стабильный
+  RTSP name без operator mint/PATCH и завершились 404; третий успел создать
+  stream, получил upstream EOF и оставил HA-side `Lavf62.3.100` consumer после
+  закрытия UI. Причины разделены и закрыты минимально: on-demand допускается до
+  `manager.start`, background hidden остаётся gated; proxied recovery больше не
+  вызывает `HA Stream.update_source()` с тем же URL и не может пересечься с
+  idle stop через HA `_fast_restart_once`.
 - **Automated evidence in branch:**
   - `test_config_flow_keep_warm.py` — defaults/dependency/persistence;
   - `test_go2rtc_client.py` / `test_go2rtc_upsert.py` — PATCH-only source,
@@ -1670,16 +1678,16 @@ Quality gates:
     `test_stream_manager_scheduler.py`, `test_stream_manager_lifecycle.py` —
     mint/PATCH/preload ordering, dedup/policy/cadence/retry, inactive-producer
     re-arm, restart, preload-first cleanup и unload; pre-visibility hidden gate
-    доказывает zero mint/PATCH/preload и сохраняет user-shown override;
-    post-start hidden HA-open доказывает lazy mint/PATCH без preload при
-    выключенной background publication;
+    доказывает zero background mint/PATCH/preload и сохраняет user-shown
+    override; explicit HA-open до и после startup доказывает lazy mint/PATCH
+    без preload при выключенной background publication;
     unload interleavings покрывают running reconcile и cancellation во время
     preload request;
     in-place options tests доказывают no reload/preload churn, main on/off,
     short interactive ramp при сохранённом cold-start jitter, transport
     fallback и concurrent late-mint/PATCH guards;
   - `test_sensor_rtsp_urls.py` — preloaded+active+fresh и no-secret attrs;
-  - local gates: 130 focused, 151 related regressions, 548 full suite passed.
+  - local gates: 131 focused, 151 related regressions, 549 full suite passed.
 - **Production acceptance (repeat merge-blocking):** пять перечисленных камер
   получают active preload и открываются externally после idle без HA-open;
   active consumer переживает PATCH; go2rtc restart → restore ≤60s;

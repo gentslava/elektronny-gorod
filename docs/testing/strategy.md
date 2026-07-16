@@ -1,7 +1,7 @@
 Status: Active
 Owner: QA / Testing Agent
 Last reviewed: 2026-07-16 (go2rtc preload/producer lifecycle regressions,
-548-test backend suite and revised live acceptance synchronized)
+549-test backend suite and revised live acceptance synchronized)
 
 Source files:
 - `tests/**` (54 test-модуля + `conftest.py`)
@@ -33,7 +33,7 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **548 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-07-16; 130 focused preload/manager tests + 151 related regressions) |
+| Локальный suite | **549 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-07-16; 131 focused preload/manager tests + 151 related regressions) |
 | Test modules | 54 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
@@ -184,11 +184,11 @@ Files: `test_go2rtc_validate.py`, `test_go2rtc_upsert.py`,
 - Publishability/eligibility matrix covers main-off, disabled, hidden and
   hidden-sub-option. Disabled always wins; hidden policy controls only
   background publication and preload ownership.
-- Before visibility sync, an API-hidden request returns the stable RTSP name
-  with zero operator mint, go2rtc PATCH and preload calls; a persisted
-  user-shown override remains publishable. After manager startup, explicit
-  HA-open/recovery for an enabled hidden camera performs lazy mint/PATCH
-  without preload even when background publication is off.
+- Before visibility sync, background work for an API-hidden camera performs
+  zero operator mint, go2rtc PATCH and preload calls; a persisted user-shown
+  override remains publishable. Explicit HA-open/recovery for an enabled
+  hidden camera performs lazy mint/PATCH without preload both during setup and
+  after manager startup, even when background publication is off.
 - Scheduler covers deterministic cold-start jitter, short 0.5-second
   interactive policy-on ramp, 28:30 success cadence, 15..300s retry and
   idempotent stop.
@@ -281,7 +281,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 548 passed (2026-07-16).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 549 passed (2026-07-16).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

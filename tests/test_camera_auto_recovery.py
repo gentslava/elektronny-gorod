@@ -247,7 +247,7 @@ async def test_recovery_empty_url_graceful(hass: HomeAssistant, mock_api):
 
 
 async def test_recovery_go2rtc_path_calls_manager(hass: HomeAssistant, mock_api):
-    """use_go2rtc=True → manager mints, PATCHes and restarts HA Stream."""
+    """Proxied recovery PATCHes go2rtc without restarting the stable HA URL."""
     cam = await _setup_camera(hass, use_go2rtc=True)
     instance = mock_api.return_value
     instance.query_camera_stream.reset_mock()
@@ -265,9 +265,7 @@ async def test_recovery_go2rtc_path_calls_manager(hass: HomeAssistant, mock_api)
 
     assert instance.query_camera_stream.await_count == 1
     mock_patch.assert_awaited_once()
-    stream.update_source.assert_called_once_with(
-        "rtsp://127.0.0.1:8554/eg_100"
-    )
+    stream.update_source.assert_not_called()
 
 
 # ─── A-71 v2: go2rtc producer-health poll (go2rtc/WebRTC-only, лифты) ──────

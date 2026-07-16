@@ -248,7 +248,7 @@ async_unload_entry:
   использует короткий 0.5s stagger.
 - ✅ Background-excluded hidden cameras are gated before operator mint/go2rtc
   PATCH, including the platform-forwarding window before visibility sync;
-  explicit post-start HA playback remains available without preload.
+  explicit HA playback during or after setup remains available without preload.
 - ✅ Compatible publication-policy saves update the current manager in place;
   existing eligible producers and HA platform lifecycle are preserved.
 - ✅ `LOGGER.exception(...)` вместо блокирующего `traceback.format_exc()` в hot path.
@@ -508,8 +508,8 @@ const + go2rtc ← config_flow
 - 🟡 **A-63 — Won't fix** (PR #46 final). Возврат `None` из
   `stream_source()` для hidden cameras несовместим с HA Stream lifecycle
   (worker pin-ится к URL, не пересоздаёт session). ADR-0014 сохраняет stable
-  go2rtc URL и post-start lazy mint/PATCH для enabled hidden camera, но не
-  включает background preload без отдельной опции. Skip оставлен только в
+  go2rtc URL и lazy mint/PATCH во время или после setup для enabled hidden
+  camera, но не включает background preload без отдельной опции. Skip оставлен только в
   `async_camera_image`.
 - 🟢 **go2rtc stream ownership + preload lifecycle в feature-ветке**
   (A-82/A-96, ADR-0014) — camera делегирует manager'у; background-excluded

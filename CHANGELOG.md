@@ -21,12 +21,13 @@
   operator session для eligible `eg_<camera_id>`, чтобы стабильный
   RTSP URL не требовал предварительного открытия камеры в HA.
   Disabled entity никогда не публикуется; hidden entity требует обеих
-  publication options только для background keep-warm. После startup явное
-  открытие enabled hidden camera в HA лениво делает mint/PATCH без preload;
+  publication options только для background keep-warm. Явное открытие enabled
+  hidden camera в HA, в том числе во время завершения setup, лениво делает
+  mint/PATCH без preload;
   при включённом main reconcile stream живёт с viewer и удаляется после него.
-  Setup-time policy проверяется
-  до operator mint/PATCH, поэтому hidden streams не появляются кратковременно
-  во время reload и не замедляют setup лишними запросами. Изменение только
+  Setup-time background policy проверяется до operator mint/PATCH, поэтому
+  hidden streams не появляются от фонового path во время reload и не замедляют
+  setup лишними запросами. Изменение только
   publication flags теперь применяется к текущему manager без config-entry
   reload: existing
   eligible preloads/HA consumers не обнуляются, excluded cleanup выполняется
@@ -40,6 +41,9 @@
   preload, поэтому поздний background consumer не переживает выгрузку.
   Entity proactive timer пропускает background-eligible streams, сохраняя
   staggered manager cadence без синхронного 28:30 burst.
+  Proxied recovery обновляет upstream через PATCH, но не вызывает
+  `HA Stream.update_source()` с тем же стабильным URL: это исключает гонку
+  fast-restart с idle stop и orphan consumer после закрытия карточки.
   Live validation показала, что
   PATCH-only lazy stream
   теряет одноразовый URL до первого viewer; поэтому per-entry manager

@@ -168,7 +168,7 @@ async def test_api_hidden_flag_does_not_override_registry(
 
 
 @pytest.mark.parametrize("keep_warm", [False, True])
-async def test_pre_visibility_api_hidden_refresh_is_not_published(
+async def test_pre_visibility_api_hidden_ha_open_is_published_without_preload(
     hass: HomeAssistant,
     keep_warm: bool,
 ) -> None:
@@ -187,12 +187,38 @@ async def test_pre_visibility_api_hidden_refresh_is_not_published(
 
     assert result.url == "rtsp://go2rtc:8554/eg_100"
     assert result.proxied is True
-    coordinator.get_camera_stream.assert_not_awaited()
-    client.async_patch_stream.assert_not_awaited()
+    coordinator.get_camera_stream.assert_awaited_once_with("100")
+    client.async_patch_stream.assert_awaited_once_with(
+        "eg_100",
+        "ffmpeg:https://operator/100?token=MINT_1"
+        "#video=copy#audio=aac#audio=opus",
+    )
     client.async_enable_preload.assert_not_awaited()
     state = manager.camera_state("100")
     assert state is not None
-    assert state.status == "excluded"
+    assert state.status == "ready"
+    assert state.eligible is False
+
+
+async def test_pre_visibility_api_hidden_background_refresh_is_not_published(
+    hass: HomeAssistant,
+) -> None:
+    manager, coordinator, client, registry, entries = _setup(
+        hass,
+        keep_warm=True,
+        keep_hidden=False,
+        started=False,
+        api_hidden=True,
+    )
+    assert registry.async_get(entries["100"].entity_id).hidden_by is None
+
+    result = await manager.async_refresh("100", "background_due")
+
+    assert result.url == "rtsp://go2rtc:8554/eg_100"
+    assert result.proxied is True
+    coordinator.get_camera_stream.assert_not_awaited()
+    client.async_patch_stream.assert_not_awaited()
+    client.async_enable_preload.assert_not_awaited()
 
 
 async def test_pre_visibility_api_hidden_refresh_is_published_with_suboption(

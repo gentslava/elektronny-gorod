@@ -75,15 +75,16 @@ eligible(camera) =
 6. `background_due` и `reconcile` могут mint/PATCH только
    `background_publishable` camera. Только `eligible` camera получает manager
    preload, periodic scheduling и считается eligible в diagnostics.
-7. После manager startup явные `ha_open`, `active_consumer` и `recovery` могут
-   mint/PATCH любую enabled camera, включая hidden. Background-ineligible hidden
-   camera не получает preload. При включённом background tracking обычный
+7. Явные `ha_open`, `active_consumer` и `recovery` могут mint/PATCH любую
+   enabled camera, включая hidden и короткое окно завершения manager startup.
+   Background-ineligible hidden camera не получает preload. При включённом
+   background tracking обычный
    reconcile сохраняет registration с viewer и удаляет его после ухода
    consumer; при main-off дополнительный polling не устанавливается.
 8. До manager startup coordinator `hidden=true` используется как conservative
-   hint для всех reasons, потому что HA может запросить `stream_source()` до
-   visibility sync. Persistent user-shown override или обе publication options
-   могут разрешить source; иначе setup делает zero mint/PATCH/preload.
+   hint только для background reasons. Он предотвращает transient keep-warm до
+   visibility sync, но не превращает явный HA-open в RTSP URL без созданного
+   go2rtc stream. Persistent user-shown override сохраняется.
 9. Disabled camera запрещена в background и on-demand manager paths.
 
 ### Cleanup and options lifecycle
@@ -109,7 +110,9 @@ eligible(camera) =
 14. `ElektronnyGorodCamera` сохраняет проверенные ADR-0009 recovery triggers,
     но делегирует manager'у operator-camera writes. Entity proactive 28:30
     timer пропускает background-eligible camera: manager preload не считается
-    external viewer, а staggered cadence остаётся у manager.
+    external viewer, а staggered cadence остаётся у manager. Proxied recovery
+    не вызывает `HA Stream.update_source()` с неизменным RTSP URL: после PATCH
+    HA retry-ит тот же URL самостоятельно, без fast-restart/idle-stop race.
 15. Source URL живёт только внутри refresh coroutine/result. Detached state и
     diagnostic sensor содержат только credential-free имя/RTSP URL, sanitized
     status, producer/preload/consumer observations и freshness.
@@ -142,7 +145,8 @@ eligible(camera) =
 - Registry policy, short interactive ramp, cold-start jitter и capped backoff
   ограничивают нагрузку.
 - Consumer-aware cleanup не обрывает активных viewers.
-- Pre-visibility API hint закрывает setup race без запрета post-start HA-open.
+- Pre-visibility API hint блокирует только background setup work: явный
+  HA-open во время или после setup по-прежнему создаёт stream без preload.
 - Live QA остаётся merge gate для idle, restart, consumer preservation и
   hidden/on-demand lifecycle.
 

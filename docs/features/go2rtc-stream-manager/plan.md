@@ -3,8 +3,8 @@
 > **Status (2026-07-16):** Tasks 1-7 and the original Task 8 automated gates
 > are complete, but live validation disproved the PATCH-only keep-warm model:
 > five registered lazy streams returned RTSP 404/EOF after idle. The preload
-> revision Tasks 9-18 and local gates are complete: 130 focused,
-> 151 related and 548 full-suite tests pass. Updated CI/pre-release and nine
+> revision Tasks 9-18 and local gates are complete: 131 focused,
+> 151 related and 549 full-suite tests pass. Updated CI/pre-release and nine
 > repeat live scenarios remain pending.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -29,7 +29,7 @@
   fallback. The preload API intentionally uses `PUT /api/preload?src=<name>`.
 - `disabled_by` always excludes a camera. `hidden_by` excludes background
   publication unless the hidden-camera sub-option is enabled, but explicit
-  post-start HA playback remains available.
+  HA playback remains available during and after setup.
 - With the main keep-warm option off, the manager may serve HA on-demand and
   A-71 recovery calls but must not schedule background operator traffic. Its
   one-shot startup reconcile deletes idle managed registrations while
@@ -1188,24 +1188,28 @@ exists.
 - [x] **Step 1: Reproduce the setup race with RED tests**
 
 Model platform forwarding before `_sync_visibility`: the registry entry is not
-yet hidden while coordinator data already says `hidden=true`. Assert that both
-main-option states make zero operator, PATCH, and preload calls. Add post-sync
-registry-hidden cases and a persisted user-shown override.
+yet hidden while coordinator data already says `hidden=true`. Assert that a
+background reason makes zero operator/PATCH/preload calls, while an explicit
+enabled `ha_open` mints and PATCHes the stream without preload under both main
+option states. Add post-sync registry-hidden cases and a persisted user-shown
+override.
 
 - [x] **Step 2: Separate enabled, background publication, and eligibility**
 
-Use enabled registry state for explicit post-start HA-open/recovery. Retain
+Use enabled registry state for explicit HA-open/recovery before and after
+manager startup. Retain
 `is_camera_publishable` as the background hidden-policy predicate and
 `is_camera_eligible = main option AND publishable` for preload/schedule
 ownership. Disabled remains excluded from both paths.
 
 - [x] **Step 3: Preserve the HA Stream lifecycle without side effects**
 
-Before visibility sync, reject API-hidden setup requests without writes. After
-manager startup, let an explicit HA-open/recovery mint and PATCH an enabled
-hidden camera without preload; reconcile preserves the active viewer and
-deletes the idle registration later. Keep this path available while the main
-background option is off.
+Before visibility sync, reject API-hidden background requests without writes,
+but let an explicit HA-open/recovery mint and PATCH an enabled hidden camera
+without preload. This avoids returning an unregistered stable RTSP name while
+setup is still finishing. Reconcile preserves the active viewer and deletes the
+idle registration later. Keep this path available while the main background
+option is off.
 
 - [x] **Step 4: Synchronize ADR and project documentation**
 
@@ -1306,11 +1310,15 @@ the existing synchronized AIDD sources.
   active background consumer surviving config-entry unload.
 - [x] Skip entity proactive refresh for background-eligible manager streams so
   preload consumers cannot collapse staggered timers into a periodic burst.
+- [x] Production startup-grid follow-up: allow explicit pre-start HA-open while
+  keeping background hidden gated. Proxied EOF recovery no longer calls
+  `HA Stream.update_source()` with the unchanged URL, avoiding its observed
+  fast-restart/idle-stop orphan consumer race.
 - [x] Reject unobserved per-camera cleanup locks/attach lease, main-off polling,
   removed-snapshot cleanup and joined-reason upgrade; the latter mechanisms add
   complexity/network cost, while a single missing coordinator snapshot is not
   safe evidence that an operator camera was permanently removed.
-- [x] Focused/related/full local gates: 130/151/548 passed.
+- [x] Focused/related/full local gates: 131/151/549 passed.
 - [ ] Push updated artifact, pass CI and obtain repeat independent READY review.
 
 ## Rollback

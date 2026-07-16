@@ -352,8 +352,7 @@ class CameraStreamManager:
         if self.is_camera_publishable(camera_id):
             return True
         return (
-            self._started
-            and reason in ON_DEMAND_REFRESH_REASONS
+            reason in ON_DEMAND_REFRESH_REASONS
             and self._enabled_registry_entry(camera_id) is not None
         )
 

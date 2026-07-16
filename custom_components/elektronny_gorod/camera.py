@@ -319,9 +319,8 @@ class ElektronnyGorodCamera(
         к RTSP URL который мы вернули один раз; `stream_source` повторно не
         вызывается. Если мы возвращаем None после того как stream была
         активна, worker зависает в retry-loop на устаревшем RTSP/producer.
-        Лучше всегда возвращать живой URL + полагаться на HA prefetch для
-        обновления go2rtc producer + Stream.update_source() для force restart
-        при изменении src в go2rtc.
+        Лучше всегда возвращать живой URL + обновлять go2rtc producer. HA
+        Stream сам переподключается к стабильному proxy URL после EOF.
         """
         reg = self.registry_entry
         return reg is not None and reg.hidden_by is not None
@@ -345,10 +344,9 @@ class ElektronnyGorodCamera(
 
         A-68: dedup concurrent calls через future-pattern. HA Stream worker +
         Frigate + Lovelace могут одновременно дёргать stream_source — без
-        dedup создаётся N HTTP к operator + N PATCH в go2rtc + N
-        `Stream.update_source()` restart, что приводит к «миганию видео».
+        dedup создаётся N HTTP к operator + N PATCH в go2rtc.
         Concurrent callers wait first in-flight future → получают одинаковый
-        результат → 1 HTTP + 1 PATCH + 1 restart.
+        результат → 1 HTTP + 1 PATCH.
         """
         if self._inflight_stream_future is not None:
             return await self._inflight_stream_future
@@ -462,8 +460,9 @@ class ElektronnyGorodCamera(
     ) -> None:
         """Запланировать recovery, если прошёл cooldown.
 
-        `force_restart=True` (default): event-driven recovery (v1/v2) — worker
-        stuck → дёргаем `Stream.update_source()` для fast restart.
+        `force_restart=True` (default): event-driven recovery (v1/v2). Для
+        direct URL worker получает новый source через `Stream.update_source()`;
+        proxied worker сам retry-ит стабильный RTSP URL после manager PATCH.
 
         `force_restart=False`: proactive (v3) — worker ещё работает; manager
         делает PATCH-only refresh, restart не нужен, transition smooth.
@@ -483,8 +482,8 @@ class ElektronnyGorodCamera(
         Вызывается когда HA Stream worker сигналит unavailable (operator
         forpost session истекла, ~30 мин — см. ADR-0009). Делает те же вызовы,
         что HA на WebRTC re-offer / пользователь при reopen карточки:
-        manager refresh (PATCH go2rtc + `Stream.update_source()`, A-66) либо
-        прямой `update_source` без go2rtc.
+        manager refresh (PATCH go2rtc; HA retry-ит стабильный URL) либо прямой
+        `update_source` без go2rtc.
         """
         # `available` здесь = ElektronnyGorodCamera.available, т.е.
         # `CoordinatorEntity.available` (coordinator.last_update_success) И
@@ -505,16 +504,10 @@ class ElektronnyGorodCamera(
                     self._id,
                 )
                 return
-            if result.proxied and self.stream is not None and force_restart:
-                try:
-                    self.stream.update_source(result.url)
-                except Exception as err:  # noqa: BLE001 - sanitize HA edge
-                    LOGGER.error(
-                        "Camera %s (%s): HA Stream restart failed (%s)",
-                        self._name,
-                        self._id,
-                        type(err).__name__,
-                    )
+            # The proxied RTSP URL is stable: PATCH refreshed its upstream and
+            # HA Stream already retries the same URL after EOF. Calling
+            # update_source() here races HA's idle stop: its one-shot fast
+            # restart can consume the stop signal and orphan the worker.
             return
 
         try:

@@ -212,7 +212,7 @@ Static-only write paths не переходят в код без decrypted HAR (
   `stream_source()` успевал сделать operator mint/PATCH до visibility sync.
   Background-excluded hidden cameras теперь делают zero mint/PATCH/preload;
   API-hidden startup hint не перекрывает persistent user-shown override.
-  После startup explicit HA-open enabled hidden camera по-прежнему лениво
+  Explicit HA-open enabled hidden camera во время или после startup лениво
   делает mint/PATCH без preload и работает на время активного viewer.
 - [x] **Policy update without producer churn** — publication checkboxes больше
   не вызывают full config-entry reload. Existing eligible preloads и HA
@@ -225,6 +225,11 @@ Static-only write paths не переходят в код без decrypted HAR (
   не превращает preload consumers в синхронный 28:30 burst. Теоретические
   per-camera locks/attach lease/main-off polling/removed-snapshot cleanup не
   приняты без production evidence и дополнительной фоновой сети.
+- [x] **Startup-grid production follow-up** — explicit hidden HA-open во время
+  setup теперь выполняет mint/PATCH вместо возврата незарегистрированного RTSP
+  name; background gate сохранён. Proxied EOF recovery больше не вызывает
+  `Stream.update_source()` с тем же URL и не оставляет worker через
+  fast-restart/idle-stop race.
 - [x] **A-82** 🟢 resolved-in-branch: `camera.py` больше не владеет
   go2rtc HTTP transport/writes; merge reconciliation открыт.
 - [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles
@@ -235,8 +240,9 @@ Static-only write paths не переходят в код без decrypted HAR (
   concurrent reasons dedup; option-off удаляет idle registrations, unload
   снимает background consumers; main/hidden toggle не reload-ит integration,
   не обнуляет existing eligible producers и никогда даже кратковременно не
-  добавляет excluded hidden names фоновым path; explicit hidden HA-open
-  работает без persistent preload и cleanup-ится после viewer.
+  добавляет excluded hidden names фоновым path; explicit hidden HA-open во
+  время и после setup работает без persistent preload и cleanup-ится после
+  viewer; закрытие HA UI не оставляет orphan consumer после EOF recovery.
 - [ ] После девяти live scenarios записать evidence в существующем feature
   design, merge replacement branch и только потом close/supersede PR #61.
 

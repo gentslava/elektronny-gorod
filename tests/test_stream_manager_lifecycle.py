@@ -295,7 +295,7 @@ async def test_camera_open_uses_manager_patch_not_legacy_writer(
     legacy_patch.assert_not_awaited()
 
 
-async def test_recovery_delegates_refresh_and_restarts_ha_stream(
+async def test_recovery_refreshes_proxy_without_restarting_stable_ha_stream(
     hass: HomeAssistant,
     mock_api,
 ) -> None:
@@ -320,9 +320,7 @@ async def test_recovery_delegates_refresh_and_restarts_ha_stream(
     await hass.async_block_till_done()
 
     manager.async_refresh.assert_awaited_once_with(CAMERA_ID, "recovery")
-    stream.update_source.assert_called_once_with(
-        "rtsp://127.0.0.1:8554/eg_100"
-    )
+    stream.update_source.assert_not_called()
 
 
 async def test_manager_stream_info_read_is_sanitized(

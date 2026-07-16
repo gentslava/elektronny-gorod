@@ -1,6 +1,6 @@
 Status: Active
 Owner: Validator Agent
-Last reviewed: 2026-07-16 (TESTS_PASS: 548 backend + 62 frontend; external
+Last reviewed: 2026-07-16 (TESTS_PASS: 549 backend + 62 frontend; external
 RTSP preload/producer lifecycle regressions added)
 
 Source files:

@@ -50,9 +50,9 @@ The implementation is accepted only when all of these scenarios pass:
    leave.
 5. A hidden camera is never background-minted, PATCHed, or preloaded unless
    both publication options are on, including the platform-forwarding window
-   before visibility synchronization. After startup, an explicit HA open may
-   lazily register it without a manager preload; when main publication remains
-   enabled, its normal reconcile cleanup follows the viewer.
+   before visibility synchronization. An explicit HA open during or after that
+   window lazily registers it without a manager preload; when main publication
+   remains enabled, its normal reconcile cleanup follows the viewer.
 6. Concurrent background, HA-open, and recovery requests for one camera result
    in one operator request, one go2rtc PATCH, and at most one preload PUT when
    preload is missing.
@@ -84,9 +84,10 @@ that tested it keeps its settings:
 
 Home Assistant registry state is the source of truth after visibility
 synchronization. During platform forwarding, before the manager starts, an API
-`hidden=true` value is used only as a conservative hint to prevent transient
-publication. A persistent `user_shown`/integration-owned marker preserves an
-explicit HA user override through that startup window.
+`hidden=true` value is a conservative hint for background publication only.
+Explicit enabled HA-open remains on-demand so it cannot receive a stable RTSP
+URL for a stream that was never PATCHed. A persistent
+`user_shown`/integration-owned marker preserves an explicit HA user override.
 
 ```text
 enabled(camera) =
@@ -153,16 +154,19 @@ manager method.
 `ElektronnyGorodCamera` retains its HA-specific responsibilities and the proven
 A-71 recovery triggers. It no longer performs go2rtc writes directly.
 
-- `stream_source()` asks the manager for the stable RTSP address. After manager
-  startup an enabled hidden camera may be minted/registered for explicit HA
-  viewing, but receives no preload unless background policy also admits it.
+- `stream_source()` asks the manager for the stable RTSP address. An enabled
+  hidden camera may be minted/registered for explicit HA viewing even while
+  manager startup is finishing, but receives no preload unless background
+  policy also admits it.
 - Event-driven and producer-health recovery ask the manager for a refresh.
 - The active-consumer proactive timer remains an A-71 trigger only for
   on-demand/non-eligible streams. Background-eligible cameras skip it because
   the manager preload is not an external viewer and owns the staggered 28:30
   cadence.
-- Existing active-consumer timing and HA `Stream.update_source()` coordination
-  remain behaviorally unchanged.
+- Proxied recovery PATCHes the upstream and lets HA Stream retry its unchanged
+  stable RTSP URL. It does not call `Stream.update_source()` because HA's
+  one-shot fast restart can race idle stop and orphan the worker. Direct-source
+  fallback keeps its existing `update_source()` path.
 
 This deliberately avoids a wholesale A-83 refactor. The feature extracts the
 write boundary required for single ownership without moving the entire
@@ -392,9 +396,10 @@ and exception type, and keep the scheduler alive.
     coordinator entries alone.
 14. Existing camera auto-recovery, call-camera concurrency, go2rtc audio, config
     flow, and visibility suites remain green.
-15. Before visibility sync, API-hidden cameras perform zero operator mint,
-    PATCH, and preload calls; a persisted user-shown override remains
-    background-publishable.
+15. Before visibility sync, background work for API-hidden cameras performs
+    zero operator mint, PATCH, and preload calls; a persisted user-shown
+    override remains background-publishable. Explicit HA-open/recovery still
+    performs lazy mint/PATCH without preload.
 16. After visibility sync, registry-hidden cameras perform zero background
     writes unless both options admit them. Explicit HA-open/recovery remains
     available for an enabled hidden camera without manager preload; its idle
@@ -438,9 +443,9 @@ must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 - ADR-0014 records the final unified lifecycle: PATCH plus dedicated preload,
   consumer-aware cleanup, the separation of enabled on-demand playback from
   background eligibility, and in-place publication-policy updates.
-- The pre-visibility gate prevents transient hidden-camera writes while the
-  post-start on-demand path preserves the old “hidden camera works while
-  watched in HA” lifecycle.
+- The pre-visibility gate prevents transient background hidden-camera writes;
+  the on-demand path remains valid before and after manager startup so explicit
+  HA playback never receives an unregistered RTSP name.
 - Audit A-96 separates automated implementation from live acceptance and
   cross-references A-82/A-84.
 - Project map, architecture, testing, roadmap and changelog are synchronized
@@ -449,8 +454,8 @@ must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 - PR #61 stays open until the replacement passes production acceptance; its
   opt-in/diagnostic concepts are credited and retained.
 
-Automated evidence on 2026-07-16: 130 focused preload/manager tests, 151
-related camera/go2rtc/config/visibility regressions and the complete 548-test
+Automated evidence on 2026-07-16: 131 focused preload/manager tests, 151
+related camera/go2rtc/config/visibility regressions and the complete 549-test
 backend suite passed. This changes implementation status only; the nine live
 acceptance scenarios above remain merge-blocking.
 
