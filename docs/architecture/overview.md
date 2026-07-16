@@ -186,7 +186,8 @@ async_update_options:
 
 ```text
 async_unload_entry:
-  await CameraStreamManager.async_stop()  # timers/listeners/in-flight tasks
+  await CameraStreamManager.async_stop()  # close scheduling, cancel refresh,
+                                          # await reconcile, remove preloads
   await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
   if unload_ok: remove coordinator + manager from hass.data
   ── coordinator.async_unsubscribe вызывается HA-core автоматически через
@@ -206,7 +207,7 @@ async_unload_entry:
 | **Transport** | `http.py` | shared HA `ClientSession`, headers, conditional Bearer с узким pre-auth allowlist |
 | **Logging redaction** | `_logging.py` | `redact()` для headers/dict, `redact_path()` для auth URLs |
 | **External integration** | `go2rtc.py` | `Go2RtcClient` для sanitized stream/preload API, producer health и RTSP URL; raw producer source не пересекает read/diagnostic boundary; validation/audio helpers остаются отдельными контрактами |
-| **Camera stream ownership** | `stream_manager.py` | per-entry owner `eg_<camera_id>`: separate background/on-demand gates, in-place policy update, registry background eligibility, dedup mint+PATCH+preload, 28:30 non-disruptive PATCH, retry, stream/preload/producer reconcile и preload-first cleanup ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
+| **Camera stream ownership** | `stream_manager.py` | per-entry owner `eg_<camera_id>`: separate background/on-demand gates, per-camera refresh dedup, in-place policy update, 28:30 PATCH, retry, stream/preload/producer reconcile и unload quiescence ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
 | **SIP subsystem** | `sip/` (14 модулей) | SIP-UAS: REGISTER-on-ring → held-INVITE → 200 OK → RTP-latching; AudioBridge (downlink → go2rtc); `uplink.py` `UplinkSink` (микрофон-PCM → G.711) + дрейф-компенсированный RTP-uplink (`rtp.py`); ADR-0012, ADR-0013 |
 | **Uplink transport** | `uplink_ws.py`, `www/eg-intercom-mic-card.js` | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): Int16-PCM микрофона из Lovelace-карты `getUserMedia` → `DoorbellCallController.feed_uplink` → `UplinkSink`; static-регистрация JS-карты (ADR-0013) |
 | **Call camera** | `call_camera.py` | camera-сущность активного вызова: `stream_source()` собирает свежий `eg_intercom_call` (видео + аудио-мост) → RTSP; вне вызова → `None` |
@@ -240,7 +241,8 @@ async_unload_entry:
 - ✅ Token-redaction: `_logging.redact()` для headers (case + dash-insensitive), `_logging.redact_path()` маскирует PII в `/auth/v*/*/{phone|contract|account_id}` URL-path.
 - ✅ Lock `async_unlock` использует `async_call_later` для возврата state→LOCKED (без `asyncio.sleep` в event loop).
 - ✅ Stream manager использует HA-managed task с `eager_start=False`
-  для race-free per-camera dedup; unload отменяет tasks/timers/listeners.
+  для per-camera dedup; unload отменяет tasks/timers/listeners, ждёт running
+  reconcile и снимает pending preload.
 - ✅ External RTSP background traffic default-off; retry capped at 300s,
   cold-start mint распределён deterministic jitter <60s; interactive policy-on
   использует короткий 0.5s stagger.
@@ -334,12 +336,14 @@ Background external RTSP (only `go2rtc_keep_warm=true`):
   policy-on → missing eligible cameras at 0s, 0.5s, 1.0s, ...
   success → next due 28:30; failure → 15..300s backoff
   later 28:30 refresh → mint+PATCH without replacing active preload consumer
+  entity proactive 28:30 skips eligible streams; manager cadence stays staggered
   1-minute reconcile → restore missing stream/preload or inactive producer
   disabled/hidden-ineligible → DELETE preload first, then defer external
   consumers>0 or DELETE stream
   policy toggle → same manager/snapshot; no config-entry reload or producer churn
   option off → remove preloads, DELETE idle streams, preserve HA/viewer consumers
-  unload → remove manager camera preloads without disconnecting viewers
+  unload → wait running reconcile and remove owned/pending manager preloads
+           without disconnecting viewers
 ```
 
 ### Unlock flow

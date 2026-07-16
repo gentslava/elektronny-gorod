@@ -220,6 +220,11 @@ Static-only write paths не переходят в код без decrypted HAR (
   текущий manager. Live follow-up убрал ошибочный cold-start jitter из ручного
   включения: первая missing camera запускается сразу, следующие через 0.5s;
   transport/auth changes сохраняют normal reload fallback.
+- [x] **Independent review lifecycle triage** — stop ждёт running reconcile и
+  снимает pending preload после cancellation ambiguity; entity proactive timer
+  не превращает preload consumers в синхронный 28:30 burst. Теоретические
+  per-camera locks/attach lease/main-off polling/removed-snapshot cleanup не
+  приняты без production evidence и дополнительной фоновой сети.
 - [x] **A-82** 🟢 resolved-in-branch: `camera.py` больше не владеет
   go2rtc HTTP transport/writes; merge reconciliation открыт.
 - [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles
@@ -232,8 +237,8 @@ Static-only write paths не переходят в код без decrypted HAR (
   не обнуляет existing eligible producers и никогда даже кратковременно не
   добавляет excluded hidden names фоновым path; explicit hidden HA-open
   работает без persistent preload и cleanup-ится после viewer.
-- [ ] После девяти live scenarios записать QA report, merge replacement
-  branch и только потом close/supersede PR #61.
+- [ ] После девяти live scenarios записать evidence в существующем feature
+  design, merge replacement branch и только потом close/supersede PR #61.
 
 #### Code quality
 

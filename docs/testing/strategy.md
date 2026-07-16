@@ -1,7 +1,7 @@
 Status: Active
 Owner: QA / Testing Agent
 Last reviewed: 2026-07-16 (go2rtc preload/producer lifecycle regressions,
-545-test backend suite and revised live acceptance synchronized)
+548-test backend suite and revised live acceptance synchronized)
 
 Source files:
 - `tests/**` (54 test-модуля + `conftest.py`)
@@ -33,7 +33,7 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **545 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-07-16; 127 focused preload/manager tests + 150 related regressions) |
+| Локальный suite | **548 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-07-16; 130 focused preload/manager tests + 151 related regressions) |
 | Test modules | 54 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
@@ -202,9 +202,13 @@ Files: `test_go2rtc_validate.py`, `test_go2rtc_upsert.py`,
   config-entry reload, preload disable/enable, PATCH or operator mint. Main
   off cleans in place, main on schedules missing cameras, and transport/auth
   changes retain the reload fallback.
-- A late background mint cannot PATCH or preload after an option-off policy
-  transition; if PATCH was already running, its late registration is cleaned
-  immediately after completion instead of remaining at zero consumers.
+- A late background mint cannot PATCH after an option-off policy transition;
+  if PATCH was already running, the existing consumer-aware cleanup path is
+  retained without adding a separate on-demand polling loop.
+- Stop waits for a running reconcile and removes a pending preload whose
+  request was cancelled after it may already have reached go2rtc.
+- Entity proactive refresh skips background-eligible manager streams so a
+  preload consumer cannot synchronize every camera into a 28:30 burst.
 - Diagnostic sensor counts only eligible+present+preloaded+active+fresh streams
   and excludes operator URL, token, password and authenticated RTSP URL.
 
@@ -277,15 +281,15 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 545 passed (2026-07-16).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 548 passed (2026-07-16).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.
 - [x] `tests/test_config_flow.py` — реальные PHC-тесты, scaffold-stub отсутствует.
 - [x] Изменённый SIP-контракт покрыт на register/protocol/manager/controller слоях.
-- [ ] External RTSP A-96 не merge-ready до восьми production scenarios
-  и QA report; зелёный mocked suite не заменяет этот gate.
+- [ ] External RTSP A-96 не merge-ready до девяти production scenarios,
+  записанных в existing feature design; зелёный mocked suite не заменяет gate.
 
 ## Risks
 

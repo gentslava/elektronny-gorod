@@ -328,6 +328,67 @@ async def test_start_does_not_schedule_background_work_when_keep_warm_is_off(
     await manager.async_stop()
 
 
+async def test_stop_waits_for_running_reconcile_and_blocks_late_refresh(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reconcile_started = asyncio.Event()
+    release_reconcile = asyncio.Event()
+
+    async def slow_list_streams():
+        reconcile_started.set()
+        await release_reconcile.wait()
+        return {}
+
+    manager, _, client, _, _ = _setup(hass, monkeypatch)
+    await manager.async_start()
+    client.async_list_streams.reset_mock()
+    client.async_list_streams.side_effect = slow_list_streams
+    client.async_patch_stream.reset_mock()
+    client.async_enable_preload.reset_mock()
+    reconcile = asyncio.create_task(manager.async_reconcile())
+    await reconcile_started.wait()
+
+    stop = asyncio.create_task(manager.async_stop())
+    await asyncio.sleep(0)
+
+    assert not stop.done()
+    release_reconcile.set()
+    await reconcile
+    await stop
+
+    client.async_patch_stream.assert_not_awaited()
+    client.async_enable_preload.assert_not_awaited()
+    assert manager._inflight == {}
+
+
+async def test_stop_during_preload_disables_pending_owned_name(
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preload_started = asyncio.Event()
+    never_release = asyncio.Event()
+
+    async def slow_preload(name: str) -> None:
+        preload_started.set()
+        await never_release.wait()
+
+    manager, _, client, _, _ = _setup(hass, monkeypatch)
+    client.async_enable_preload.side_effect = slow_preload
+    await manager.async_start()
+    refresh = asyncio.create_task(
+        manager.async_refresh("100", "background_due")
+    )
+    await preload_started.wait()
+
+    await manager.async_stop()
+
+    with pytest.raises(asyncio.CancelledError):
+        await refresh
+    client.async_disable_preload.assert_awaited_once_with("eg_100")
+    assert manager._owned_preloads == set()
+
+
 async def test_start_with_keep_warm_off_removes_idle_stream_and_keeps_viewer(
     hass: HomeAssistant,
     monkeypatch: pytest.MonkeyPatch,

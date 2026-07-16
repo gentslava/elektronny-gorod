@@ -348,7 +348,7 @@ class ElektronnyGorodCamera(
         dedup создаётся N HTTP к operator + N PATCH в go2rtc + N
         `Stream.update_source()` restart, что приводит к «миганию видео».
         Concurrent callers wait first in-flight future → получают одинаковый
-        результат → 1 HTTP + 1 PUT + 1 restart.
+        результат → 1 HTTP + 1 PATCH + 1 restart.
         """
         if self._inflight_stream_future is not None:
             return await self._inflight_stream_future
@@ -658,6 +658,13 @@ class ElektronnyGorodCamera(
         (нет смысла рефрешить только что minted token).
         """
         if not self.available:
+            return
+        if (
+            self._stream_manager is not None
+            and self._stream_manager.is_camera_eligible(self._id)
+        ):
+            # Manager preload is not an external viewer. The manager owns the
+            # staggered 28:30 cadence for background-eligible cameras.
             return
         info = await self._fetch_go2rtc_stream_info()
         if info is None:

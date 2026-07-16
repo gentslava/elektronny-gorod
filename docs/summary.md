@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
 Last reviewed: 2026-07-16 (external RTSP preload revision, PATCH-only live
-failure, 545-test evidence and repeat acceptance synchronized)
+failure, 548-test evidence and repeat acceptance synchronized)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -47,7 +47,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | HA hassfest CI | ✅ зелёный |
 | HACS validation CI | ✅ зелёный |
 | pytest CI | ✅ есть (`python-tests.yaml`, matrix HA 2024.10 + 2026.5) |
-| Реальные тесты | ✅ 545 backend + 62 frontend теста зелёные локально; TypeScript check и production build зелёные |
+| Реальные тесты | ✅ 548 backend + 62 frontend тестов зелёные локально; TypeScript check и production build зелёные |
 | Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
 | Документация для пользователя | ✅ RU/EN README и HACS info описывают FCM/SIP, экран вызова и durable history 4.0.0; добавлены runtime screenshots |
@@ -87,8 +87,9 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
   живому manager без config-entry reload и массового producer churn; ручное
   включение запускает missing cameras коротким 0.5s ramp вместо jitter до 60s.
   Background gate не мешает явному post-start открытию enabled hidden camera
-  в HA: она лениво регистрируется без preload и cleanup-ится после viewer
-  (A-82/A-96, ADR-0014).
+  в HA: она лениво регистрируется без preload. Stop дожидается running
+  reconcile и снимает pending preload; manager-eligible streams не дублируют
+  28:30 entity proactive timer (A-82/A-96, ADR-0014).
   Повторный production checklist ещё не закрыт, поэтому release/merge status
   не заявляется.
 
@@ -103,7 +104,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 2. ✅ **config_flow + миграции v1→2→3 — покрыты тестами** (`3a60b15`): `test_config_flow.py` (3 ветки auth + go2rtc + abort/reauth) + `test_init.py` (миграции). Bronze config-flow gate закрыт. (A-73)
 3. ✅ **`helpers.py` crypto — golden vectors добавлены** (`362237b`, `test_helpers.py`): регрессия ловит тихий breakage формулы. (A-74)
 4. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold) — остаётся открытым.
-5. 🟡 **External RTSP after idle (A-96)** — preload revision и 545-test suite
+5. 🟡 **External RTSP after idle (A-96)** — preload revision и 548-test suite
    готовы в feature-ветке, но пять проблемных камер, `>1h idle → external
    player`, restart, consumer-preservation и cleanup должны быть повторно
    записаны на live deployment.
@@ -137,7 +138,7 @@ entity state, recorder, diagnostics или логи.
 Оставшийся reliability / quality-долг (по убыванию ценности):
 
 1. Пройти девять revised live external-RTSP scenarios A-96 и зафиксировать
-   QA report; до этого не merge/close PR #61.
+   evidence в существующем feature design; до этого не merge/close PR #61.
 2. Retry/backoff helper для идемпотентных operator GET (5xx / connection errors) — остаток A-21.
 3. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
 4. Native reauth / reconfigure flow (A-25/A-26 — Silver).

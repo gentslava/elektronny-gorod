@@ -175,7 +175,7 @@ elektronny-gorod/
 | Файл | Назначение |
 |---|---|
 | [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | `Go2RtcClient`: sanitized stream list/get/PATCH/DELETE, preload list/enable/disable, producer health, transport-config identity + credential-aware RTSP URL; raw producer source отбрасывается; validation/audio helpers — отдельные границы |
-| [`stream_manager.py`](../../custom_components/elektronny_gorod/stream_manager.py) | Один `CameraStreamManager` per entry: отдельные background/on-demand gates, in-place policy update, dedup mint+PATCH+initial preload, 28:30 non-disruptive PATCH, retry, one-minute stream/preload/producer reconcile, consumer-aware cleanup и option-off stream removal ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
+| [`stream_manager.py`](../../custom_components/elektronny_gorod/stream_manager.py) | Один `CameraStreamManager` per entry: background/on-demand gates, per-camera refresh dedup, in-place policy update, 28:30 PATCH, retry, one-minute stream/preload/producer reconcile и unload quiescence ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
 | [`fcm.py`](../../custom_components/elektronny_gorod/fcm.py) | `DoorbellFcmListener` (ADR-0011): эмуляция регистрации Android-устройства в FCM (`firebase-messaging`, Firebase-конфиг приложения в `const.py:FCM_*`) → привязка токена у оператора (`api.register_push_device`) → MTalk-сокет. Парсит `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → `SIGNAL_DOORBELL`. Весь флоу под graceful degradation (приватные API Google) — сбой не валит setup. FCM-creds персистятся в `entry.data` |
 
 ### SIP / two-way audio (приём вызова + показ экрана)

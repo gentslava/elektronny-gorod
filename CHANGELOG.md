@@ -23,7 +23,8 @@
   Disabled entity никогда не публикуется; hidden entity требует обеих
   publication options только для background keep-warm. После startup явное
   открытие enabled hidden camera в HA лениво делает mint/PATCH без preload;
-  stream живёт с viewer и удаляется после него. Setup-time policy проверяется
+  при включённом main reconcile stream живёт с viewer и удаляется после него.
+  Setup-time policy проверяется
   до operator mint/PATCH, поэтому hidden streams не появляются кратковременно
   во время reload и не замедляют setup лишними запросами. Изменение только
   publication flags теперь применяется к текущему manager без config-entry
@@ -35,6 +36,10 @@
   по-прежнему делает normal reload. Late
   background PATCH после policy transition сразу cleanup-ится и не оставляет
   новый поток с `0` consumers/producers.
+  Unload дожидается уже запущенного reconcile и заранее учитывает pending
+  preload, поэтому поздний background consumer не переживает выгрузку.
+  Entity proactive timer пропускает background-eligible streams, сохраняя
+  staggered manager cadence без синхронного 28:30 burst.
   Live validation показала, что
   PATCH-only lazy stream
   теряет одноразовый URL до первого viewer; поэтому per-entry manager

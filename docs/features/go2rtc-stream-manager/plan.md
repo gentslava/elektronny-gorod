@@ -3,10 +3,9 @@
 > **Status (2026-07-16):** Tasks 1-7 and the original Task 8 automated gates
 > are complete, but live validation disproved the PATCH-only keep-warm model:
 > five registered lazy streams returned RTSP 404/EOF after idle. The preload
-> revision Tasks 9-17 and local gates are complete: 127 focused,
-> 150 related and 545 full-suite tests pass; minimum/current HA, hassfest, HACS
-> and the inspected pre-release asset are green. Nine repeat live scenarios
-> remain pending.
+> revision Tasks 9-18 and local gates are complete: 130 focused,
+> 151 related and 548 full-suite tests pass. Updated CI/pre-release and nine
+> repeat live scenarios remain pending.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
@@ -730,9 +729,7 @@ git commit -m "docs(go2rtc): record stream manager architecture"
 
 ## Task 8: Run automated gates and prepare live acceptance
 
-**Files:**
-
-- Create after live run: `docs/features/go2rtc-stream-manager/qa-report.md`
+**Files:** update the acceptance evidence in the existing `design.md`.
 
 - [x] **Step 1: Run focused feature suites**
 
@@ -789,12 +786,13 @@ On the owner's real HA/go2rtc deployment:
 9. disable keep-warm through options and confirm idle `eg_*` registrations are
    deleted while a stream with an active external consumer is preserved.
 
-- [ ] **Step 6: Write the QA report truthfully**
+- [ ] **Step 6: Record acceptance evidence truthfully**
 
-Create `qa-report.md` with timestamps, environment versions, each scenario's
-observable evidence, automated test count, and any failure. Change the design
-status to implemented/verified only after the revised nine-scenario gate below
-passes; the original seven-scenario PATCH-only gate was attempted and failed.
+Update the acceptance section of `design.md` with timestamps, environment
+versions, each scenario's observable evidence, automated test count, and any
+failure. Change the design status to implemented/verified only after the
+revised nine-scenario gate below passes; the original seven-scenario PATCH-only
+gate was attempted and failed.
 
 - [ ] **Step 7: Close or supersede PR #61 only after live acceptance**
 
@@ -1117,7 +1115,6 @@ git commit -m "fix(sensor): require active go2rtc preload"
 - Modify: `docs/roadmap.md`
 - Modify: `docs/features/go2rtc-stream-manager/{design,plan}.md`
 - Modify: `CHANGELOG.md`
-- Create after live completion: `docs/features/go2rtc-stream-manager/qa-report.md`
 
 - [x] **Step 1: Run focused and related suites**
 
@@ -1165,8 +1162,8 @@ Use `eg_5595470`, `eg_5595471`, `eg_5595472`, `eg_5593584`, and
 `eg_5593570`. Confirm each has a preload and active producer, survives idle,
 and opens externally without first opening HA. Then repeat active-viewer PATCH,
 go2rtc restart, disabled/hidden cleanup, concurrent trigger, and unload checks.
-Record observations in `qa-report.md`; only then mark A-96 and this plan
-verified and supersede PR #61.
+Record observations in the existing `design.md`; only then mark A-96 and this
+plan verified and supersede PR #61.
 
 - [x] **Step 6: Commit documentation and live evidence separately**
 
@@ -1175,8 +1172,8 @@ git add docs CHANGELOG.md
 git commit -m "docs(go2rtc): record preload stream lifecycle"
 ```
 
-Commit `qa-report.md` and final status changes only after the real deployment
-evidence exists.
+Commit final design/status changes only after the real deployment evidence
+exists.
 
 ## Task 15: Gate hidden publication before operator mint
 
@@ -1298,6 +1295,24 @@ and hidden-on. The first new source should begin within its request latency and
 the rest should start roughly 0.5 seconds apart without disturbing existing
 producers.
 
+## Task 18: Triage independent-review concurrency and lifecycle findings
+
+**Files:** `stream_manager.py`, `camera.py`, focused manager/camera tests and
+the existing synchronized AIDD sources.
+
+- [x] Reproduce all seven review hypotheses with temporary interleaving tests,
+  then evaluate them against observed production behavior and network cost.
+- [x] Retain unload quiescence and pending-preload ownership: these prevent an
+  active background consumer surviving config-entry unload.
+- [x] Skip entity proactive refresh for background-eligible manager streams so
+  preload consumers cannot collapse staggered timers into a periodic burst.
+- [x] Reject unobserved per-camera cleanup locks/attach lease, main-off polling,
+  removed-snapshot cleanup and joined-reason upgrade; the latter mechanisms add
+  complexity/network cost, while a single missing coordinator snapshot is not
+  safe evidence that an operator camera was permanently removed.
+- [x] Focused/related/full local gates: 130/151/548 passed.
+- [ ] Push updated artifact, pass CI and obtain repeat independent READY review.
+
 ## Rollback
 
 The runtime rollback is to turn off `go2rtc_keep_warm`; startup removes manager
@@ -1310,6 +1325,6 @@ tested the feature may retain those option values.
 ## Completion gate
 
 The original PATCH-only implementation is not complete despite its green test
-suite. Automated implementation is complete when Tasks 9-14 through the full
+suite. Automated implementation is complete when Tasks 9-18 and the full
 test/CI gates pass. The feature is merge-ready only after all nine revised
-production acceptance scenarios are recorded in `qa-report.md`.
+production acceptance scenarios are recorded in the existing feature design.

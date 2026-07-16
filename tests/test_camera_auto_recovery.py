@@ -459,6 +459,27 @@ async def test_proactive_refresh_no_consumers_skips(
     assert instance.query_camera_stream.await_count == 0
 
 
+async def test_proactive_refresh_skips_background_eligible_manager_stream(
+    hass: HomeAssistant,
+    mock_api,
+) -> None:
+    """Manager preload is not an external viewer and owns its own cadence."""
+    cam = await _setup_camera(hass, use_go2rtc=True)
+    instance = mock_api.return_value
+    instance.query_camera_stream.reset_mock()
+    cam._stream_manager.keep_warm = True
+    assert cam._stream_manager.is_camera_eligible(cam._id) is True
+    cam._fetch_go2rtc_stream_info = AsyncMock(
+        return_value=([{"bytes_recv": 100000}], [{}])
+    )
+
+    await cam._async_proactive_refresh()
+    await hass.async_block_till_done()
+
+    cam._fetch_go2rtc_stream_info.assert_not_awaited()
+    instance.query_camera_stream.assert_not_awaited()
+
+
 async def test_proactive_refresh_recent_cooldown_skips(
     hass: HomeAssistant, mock_api
 ):

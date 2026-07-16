@@ -3,7 +3,7 @@
 - **Status:** preload revision implemented and automated gates passed; repeat
   production acceptance pending
 - **Date:** 2026-07-16
-- **Branch:** `feat/go2rtc-stream-manager-preload` (revision for PR #71)
+- **Delivery:** PR #71
 - **Origin:** replacement for the unmerged PR #61 and
   `feat/go2rtc-keep-warm`
 - **Related:** ADR-0009, ADR-0014, audit A-82/A-83/A-84/A-96
@@ -51,7 +51,8 @@ The implementation is accepted only when all of these scenarios pass:
 5. A hidden camera is never background-minted, PATCHed, or preloaded unless
    both publication options are on, including the platform-forwarding window
    before visibility synchronization. After startup, an explicit HA open may
-   lazily register it without a manager preload and cleanup follows the viewer.
+   lazily register it without a manager preload; when main publication remains
+   enabled, its normal reconcile cleanup follows the viewer.
 6. Concurrent background, HA-open, and recovery requests for one camera result
    in one operator request, one go2rtc PATCH, and at most one preload PUT when
    preload is missing.
@@ -141,7 +142,7 @@ policy and mutable state for `eg_<camera_id>`:
 - failure count and retry deadline;
 - last observed go2rtc presence/consumer state;
 - last observed preload and active-producer state;
-- pending cleanup for streams that still have consumers.
+- pending cleanup for active consumers.
 
 The manager is the only component allowed to write operator camera sources to
 go2rtc. Camera entities, proactive refresh, and recovery all call the same
@@ -156,8 +157,10 @@ A-71 recovery triggers. It no longer performs go2rtc writes directly.
   startup an enabled hidden camera may be minted/registered for explicit HA
   viewing, but receives no preload unless background policy also admits it.
 - Event-driven and producer-health recovery ask the manager for a refresh.
-- The existing active-consumer proactive timer remains an A-71 trigger in
-  `camera.py` for this slice and delegates its write to the manager.
+- The active-consumer proactive timer remains an A-71 trigger only for
+  on-demand/non-eligible streams. Background-eligible cameras skip it because
+  the manager preload is not an external viewer and owns the staggered 28:30
+  cadence.
 - Existing active-consumer timing and HA `Stream.update_source()` coordination
   remain behaviorally unchanged.
 
@@ -252,13 +255,16 @@ The refresh operation does not require the stream to exist before PATCHing.
 PATCH creates a missing in-memory stream or updates the source of an existing
 one. A missing-stream check is a trigger, not a precondition.
 
-Concurrent callers share only the in-flight result. A later sequential HA open
-continues to mint a fresh operator session, preserving current behavior.
+Concurrent callers share the first caller's in-flight operation and result.
+The operation revalidates background policy before and after its network work;
+it does not add a separate joined-reason upgrade path for an unobserved race.
+A later sequential HA open continues to mint a fresh operator session.
 
 ## Scheduling and reconciliation
 
-The proactive interval verified in the owner's runtime testing remains
-`GO2RTC_PROACTIVE_REFRESH_INTERVAL = 28 minutes 30 seconds`.
+The verified refresh interval remains 28 minutes 30 seconds. Background
+eligible cameras use only the manager's independently phased timers;
+entity-level proactive refresh remains for an actively viewed on-demand stream.
 
 ### Startup
 
@@ -286,7 +292,7 @@ consumer would unnecessarily reconnect the producer.
 At startup the manager requests the complete go2rtc stream list and preload
 list, then compares both with registry-derived desired state. With publication
 enabled it repeats this once per minute. With publication disabled it performs
-only the startup cleanup pass and installs no timer.
+the startup cleanup pass and installs no global reconcile timer.
 
 - Missing eligible stream or preload: schedule the full fresh
   mint/PATCH/preload chain.
@@ -296,8 +302,13 @@ only the startup cleanup pass and installs no timer.
   in the short 0.5-second asynchronous ramp.
 - Newly ineligible stream: DELETE its manager preload first. If no external
   consumers remain, DELETE the stream; otherwise stop refresh, mark cleanup
-  pending, and delete after a later reconcile observes zero consumers.
+  pending, and retry on the next enabled reconcile pass.
 - Unknown/error response: preserve current streams and retry later.
+
+Background policy is revalidated after mint/PATCH. Stop first closes
+scheduling, then waits for any running reconcile before final owned/pending
+preload cleanup. No extra on-demand cleanup poll or theoretical interleaving
+lock is installed when publication is off.
 
 The registry update listener marks desired state dirty and schedules a prompt
 reconcile. Policy-only option changes reconcile in place; incompatible
@@ -438,8 +449,8 @@ must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 - PR #61 stays open until the replacement passes production acceptance; its
   opt-in/diagnostic concepts are credited and retained.
 
-Automated evidence on 2026-07-16: 127 focused preload/manager tests, 150
-related camera/go2rtc/config/visibility regressions and the complete 545-test
+Automated evidence on 2026-07-16: 130 focused preload/manager tests, 151
+related camera/go2rtc/config/visibility regressions and the complete 548-test
 backend suite passed. This changes implementation status only; the nine live
 acceptance scenarios above remain merge-blocking.
 

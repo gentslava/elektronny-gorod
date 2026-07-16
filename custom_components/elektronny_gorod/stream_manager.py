@@ -116,11 +116,13 @@ class CameraStreamManager:
         self._listeners: set[Callable[[], None]] = set()
         self._owned_preloads: set[str] = set()
         self._started = False
+        self._stopping = False
 
     async def async_start(self) -> None:
         """Start opt-in reconcile/listener/timers after entity setup."""
         if self._started:
             return
+        self._stopping = False
         self._started = True
         if not self.keep_warm:
             # Preserve the publication contract on setup/transport reload:
@@ -146,6 +148,7 @@ class CameraStreamManager:
     async def async_stop(self) -> None:
         """Idempotently cancel every listener, timer, and refresh owner."""
         self._started = False
+        self._stopping = True
         self._stop_background_tracking()
 
         tasks = list(self._inflight.values())
@@ -153,6 +156,11 @@ class CameraStreamManager:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        # A reconcile callback already inside its network snapshot is not in
+        # `_inflight`. Waiting for its lock prevents a late preload from
+        # surviving the cleanup below.
+        async with self._reconcile_lock:
+            pass
         self._inflight.clear()
         await self._async_remove_owned_preloads()
         self._listeners.clear()
@@ -339,6 +347,8 @@ class CameraStreamManager:
 
     def _is_refresh_allowed(self, camera_id: str, reason: str) -> bool:
         """Allow hidden on-demand viewing without background publication."""
+        if self._stopping:
+            return False
         if self.is_camera_publishable(camera_id):
             return True
         return (
@@ -445,13 +455,7 @@ class CameraStreamManager:
             if not publishable:
                 state.status = "excluded"
                 self._notify_listeners()
-                return StreamRefreshResult(
-                    url=self.client.rtsp_url(
-                        state.stream_name,
-                        include_credentials=True,
-                    ),
-                    proxied=True,
-                )
+                return self._proxied_result(state)
             try:
                 source_url = await self.coordinator.get_camera_stream(camera_id)
             except asyncio.CancelledError:
@@ -475,13 +479,7 @@ class CameraStreamManager:
             ):
                 state.status = "excluded"
                 self._notify_listeners()
-                return StreamRefreshResult(
-                    url=self.client.rtsp_url(
-                        state.stream_name,
-                        include_credentials=True,
-                    ),
-                    proxied=True,
-                )
+                return self._proxied_result(state)
 
             stream_source = (
                 f"ffmpeg:{source_url}"
@@ -509,21 +507,20 @@ class CameraStreamManager:
             ):
                 await self._async_cleanup_stream(state)
                 self._notify_listeners()
-                return StreamRefreshResult(
-                    url=self.client.rtsp_url(
-                        state.stream_name,
-                        include_credentials=True,
-                    ),
-                    proxied=True,
-                )
+                return self._proxied_result(state)
 
             needs_preload = state.eligible and not (
                 state.preloaded and state.producer_active
             )
             if needs_preload:
+                # Claim the stable name before network I/O so unload can issue
+                # an idempotent DELETE even if cancellation races a completed
+                # server-side preload PUT whose response never reaches us.
+                self._owned_preloads.add(state.stream_name)
                 try:
                     await self.client.async_enable_preload(state.stream_name)
                 except Go2RtcRequestError as err:
+                    self._owned_preloads.discard(state.stream_name)
                     state.preloaded = False
                     state.producer_active = False
                     self._record_failure(state, f"preload_{err.category}")
@@ -534,6 +531,7 @@ class CameraStreamManager:
                 except asyncio.CancelledError:
                     raise
                 except Exception:  # noqa: BLE001 - sanitize transport detail
+                    self._owned_preloads.discard(state.stream_name)
                     state.preloaded = False
                     state.producer_active = False
                     self._record_failure(state, "preload_unexpected")
@@ -543,7 +541,6 @@ class CameraStreamManager:
                     )
                 state.preloaded = True
                 state.producer_active = True
-                self._owned_preloads.add(state.stream_name)
 
             state.last_success = datetime.now(timezone.utc)
             completed = _monotonic()
@@ -561,17 +558,21 @@ class CameraStreamManager:
                     base_monotonic=completed,
                 )
             self._notify_listeners()
-            return StreamRefreshResult(
-                url=self.client.rtsp_url(
-                    state.stream_name,
-                    include_credentials=True,
-                ),
-                proxied=True,
-            )
+            return self._proxied_result(state)
         finally:
             current = asyncio.current_task()
             if self._inflight.get(camera_id) is current:
                 self._inflight.pop(camera_id, None)
+
+    def _proxied_result(self, state: ManagedCameraState) -> StreamRefreshResult:
+        """Return the stable credential-aware URL without persisting it."""
+        return StreamRefreshResult(
+            url=self.client.rtsp_url(
+                state.stream_name,
+                include_credentials=True,
+            ),
+            proxied=True,
+        )
 
     def _state_for(self, camera_id: str) -> ManagedCameraState:
         state = self._states.get(camera_id)
@@ -786,7 +787,8 @@ class CameraStreamManager:
             state.next_due_monotonic = None
 
     async def _async_reconcile_interval(self, _now: datetime) -> None:
-        await self.async_reconcile()
+        if not self._stopping:
+            await self.async_reconcile()
 
     def _handle_registry_update(self, event: Event) -> None:
         entity_id = str((event.data or {}).get("entity_id") or "")

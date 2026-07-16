@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
 Last reviewed: 2026-07-16 (A-96 PATCH-only live failure, preload revision,
-545-test evidence and repeat production acceptance reconciled)
+548-test evidence and repeat production-acceptance status reconciled)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1652,6 +1652,16 @@ Quality gates:
   `0..60s`. Интерактивный path теперь ставит первую missing camera на `0s`,
   следующие на `0.5s`, `1.0s`, ...; сохранение options не ждёт operator
   mint/PATCH/preload. Cold startup сохраняет полный jitter для burst control.
+- **Independent review triage (2026-07-16):** первый review PR #71 сообщил
+  семь Important lifecycle/race гипотез без Critical. После проверки с
+  владельцем retained только два соразмерных исправления: unload ждёт running
+  reconcile и снимает pending preload даже при cancellation ambiguity; entity
+  proactive timer пропускает background-eligible streams, чтобы manager preload
+  не выдавал себя за external viewer и не синхронизировал все камеры в 28:30
+  burst. Per-camera lock/attach lease, main-off polling, removed-camera union и
+  joined-reason upgrade отклонены как ненаблюдавшаяся сложность/overhead;
+  удаление по одному пропавшему coordinator snapshot дополнительно опасно при
+  временно неполном operator response.
 - **Automated evidence in branch:**
   - `test_config_flow_keep_warm.py` — defaults/dependency/persistence;
   - `test_go2rtc_client.py` / `test_go2rtc_upsert.py` — PATCH-only source,
@@ -1663,11 +1673,13 @@ Quality gates:
     доказывает zero mint/PATCH/preload и сохраняет user-shown override;
     post-start hidden HA-open доказывает lazy mint/PATCH без preload при
     выключенной background publication;
+    unload interleavings покрывают running reconcile и cancellation во время
+    preload request;
     in-place options tests доказывают no reload/preload churn, main on/off,
     short interactive ramp при сохранённом cold-start jitter, transport
     fallback и concurrent late-mint/PATCH guards;
   - `test_sensor_rtsp_urls.py` — preloaded+active+fresh и no-secret attrs;
-  - local gates: 127 focused, 150 related regressions, 545 full suite passed.
+  - local gates: 130 focused, 151 related regressions, 548 full suite passed.
 - **Production acceptance (repeat merge-blocking):** пять перечисленных камер
   получают active preload и открываются externally после idle без HA-open;
   active consumer переживает PATCH; go2rtc restart → restore ≤60s;
