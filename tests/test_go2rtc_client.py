@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from urllib.parse import parse_qs, urlsplit
@@ -52,13 +53,14 @@ def _session(
     *,
     patch: AsyncMock | Exception | None = None,
     get: AsyncMock | Exception | None = None,
+    put: AsyncMock | Exception | None = None,
     delete: AsyncMock | Exception | None = None,
 ) -> MagicMock:
     session = MagicMock()
     session.patch = _verb(patch or _response(200))
     session.get = _verb(get or _response(200, payload={}))
+    session.put = _verb(put or _response(204))
     session.delete = _verb(delete or _response(204))
-    session.put = MagicMock()
     return session
 
 
@@ -169,8 +171,10 @@ async def test_list_streams_parses_complete_mapping() -> None:
     assert set(streams) == {"eg_1", "eg_2"}
     assert streams["eg_1"].producers == ({"bytes_recv": 123},)
     assert streams["eg_1"].consumer_count == 2
+    assert streams["eg_1"].producer_active is True
     assert streams["eg_2"].producers == ()
     assert streams["eg_2"].consumer_count == 0
+    assert streams["eg_2"].producer_active is False
     url = session.get.call_args.args[0]
     assert url == "http://go2rtc:1984/api/streams"
 
@@ -192,6 +196,7 @@ async def test_get_stream_parses_single_stream_metadata() -> None:
     assert stream is not None
     assert stream.producers == ({"bytes_recv": 456},)
     assert stream.consumer_count == 1
+    assert stream.producer_active is True
     url = session.get.call_args.args[0]
     assert parse_qs(urlsplit(url).query) == {"src": ["eg_42"]}
 
@@ -201,6 +206,39 @@ async def test_get_stream_returns_none_for_empty_object() -> None:
     client = _client(session)
 
     assert await client.async_get_stream("eg_missing") is None
+
+
+async def test_stream_info_strips_lazy_producer_source_and_reports_health() -> None:
+    session = _session(
+        get=_response(
+            200,
+            payload={
+                "eg_lazy": {
+                    "producers": [{
+                        "url": "ffmpeg:https://operator/live?token=OPERATOR_SECRET"
+                    }],
+                    "consumers": [],
+                },
+                "eg_active": {
+                    "producers": [{
+                        "url": "ffmpeg:https://operator/live?token=OPERATOR_SECRET",
+                        "bytes_recv": 0,
+                        "medias": ["video, recvonly, H264"],
+                    }],
+                    "consumers": [{}],
+                },
+            },
+        )
+    )
+    client = _client(session)
+
+    streams = await client.async_list_streams()
+
+    assert streams["eg_lazy"].producers == ({},)
+    assert streams["eg_lazy"].producer_active is False
+    assert streams["eg_active"].producers == ({"bytes_recv": 0},)
+    assert streams["eg_active"].producer_active is True
+    assert "OPERATOR_SECRET" not in repr(streams)
 
 
 async def test_list_invalid_json_raises_sanitized_error() -> None:
@@ -224,6 +262,100 @@ async def test_delete_stream_uses_src_name() -> None:
 
     url = session.delete.call_args.args[0]
     assert parse_qs(urlsplit(url).query) == {"src": ["eg_42"]}
+
+
+async def test_list_preloads_returns_only_string_names() -> None:
+    session = _session(
+        get=_response(
+            200,
+            payload={"eg_1": {"src": "eg_1"}, 42: {}, "eg_2": None},
+        )
+    )
+    client = _client(session)
+
+    preloads = await client.async_list_preloads()
+
+    assert preloads == {"eg_1", "eg_2"}
+    assert session.get.call_args.args[0] == "http://go2rtc:1984/api/preload"
+
+
+async def test_list_preloads_rejects_non_mapping_response() -> None:
+    session = _session(get=_response(200, payload=[]))
+    client = _client(session)
+
+    with pytest.raises(Go2RtcRequestError) as caught:
+        await client.async_list_preloads()
+
+    assert caught.value.operation == "preload_list"
+    assert caught.value.category == "invalid_response"
+
+
+@pytest.mark.parametrize("status", [200, 201, 204])
+async def test_enable_preload_uses_put_with_stream_name(status: int) -> None:
+    session = _session(put=_response(status))
+    client = _client(session)
+
+    await client.async_enable_preload("eg_42")
+
+    url = session.put.call_args.args[0]
+    assert urlsplit(url).path == "/api/preload"
+    assert parse_qs(urlsplit(url).query) == {"src": ["eg_42"]}
+    assert session.put.call_args.kwargs["timeout"].total == 10
+
+
+@pytest.mark.parametrize("status", [200, 201, 204, 404])
+async def test_disable_preload_is_idempotent(status: int) -> None:
+    session = _session(delete=_response(status))
+    client = _client(session)
+
+    await client.async_disable_preload("eg_42")
+
+    url = session.delete.call_args.args[0]
+    assert urlsplit(url).path == "/api/preload"
+    assert parse_qs(urlsplit(url).query) == {"src": ["eg_42"]}
+
+
+@pytest.mark.parametrize(
+    ("operation", "method", "failure", "expected_category"),
+    [
+        ("preload_enable", "async_enable_preload", _response(500), "http_500"),
+        (
+            "preload_disable",
+            "async_disable_preload",
+            ClientConnectionError("Authorization=Basic GO2RTC_SECRET"),
+            "client_error",
+        ),
+        (
+            "preload_enable",
+            "async_enable_preload",
+            asyncio.TimeoutError("GO2RTC_SECRET"),
+            "timeout",
+        ),
+    ],
+)
+async def test_preload_failures_are_sanitized(
+    operation: str,
+    method: str,
+    failure: AsyncMock | Exception,
+    expected_category: str,
+) -> None:
+    session = (
+        _session(delete=failure)
+        if method == "async_disable_preload"
+        else _session(put=failure)
+    )
+    client = _client(session, username="admin", password="GO2RTC_SECRET")
+
+    with pytest.raises(Go2RtcRequestError) as caught:
+        await getattr(client, method)("eg_42")
+
+    rendered = f"{caught.value!s} {caught.value!r}"
+    assert caught.value.operation == operation
+    assert caught.value.category == expected_category
+    assert "GO2RTC_SECRET" not in rendered
+    assert "Authorization" not in rendered
+    assert "response-body-must-not-leak" not in rendered
+    assert caught.value.__cause__ is None
 
 
 def test_rtsp_url_can_omit_credentials_for_diagnostics() -> None:

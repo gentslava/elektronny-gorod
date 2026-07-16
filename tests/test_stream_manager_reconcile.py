@@ -26,6 +26,7 @@ def _stream(*, consumers: int = 0) -> Go2RtcStreamInfo:
     return Go2RtcStreamInfo(
         producers=({"bytes_recv": 100},),
         consumer_count=consumers,
+        producer_active=True,
     )
 
 

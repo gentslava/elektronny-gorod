@@ -394,6 +394,7 @@ async def test_fetch_go2rtc_stream_info_parses_response(
         return_value=Go2RtcStreamInfo(
             producers=({"bytes_recv": 42},),
             consumer_count=1,
+            producer_active=True,
         )
     )
 

@@ -33,6 +33,7 @@ class Go2RtcStreamInfo:
 
     producers: tuple[dict[str, Any], ...]
     consumer_count: int
+    producer_active: bool
 
 
 class Go2RtcRequestError(RuntimeError):
@@ -63,21 +64,33 @@ def _parse_stream_info(payload: Any) -> Go2RtcStreamInfo | None:
     if not isinstance(payload, dict) or not payload:
         return None
     raw_producers = payload.get("producers")
-    producers = (
+    producer_items = (
         tuple(item for item in raw_producers if isinstance(item, dict))
         if isinstance(raw_producers, list)
         else ()
+    )
+    producer_active = any(
+        any(key != "url" for key in item) for item in producer_items
+    )
+    producers = tuple(
+        (
+            {"bytes_recv": item["bytes_recv"]}
+            if isinstance(item.get("bytes_recv"), int)
+            else {}
+        )
+        for item in producer_items
     )
     raw_consumers = payload.get("consumers")
     consumer_count = len(raw_consumers) if isinstance(raw_consumers, list) else 0
     return Go2RtcStreamInfo(
         producers=producers,
         consumer_count=consumer_count,
+        producer_active=producer_active,
     )
 
 
 class Go2RtcClient:
-    """PATCH-only transport for integration-owned operator camera streams."""
+    """Sanitized transport for integration-owned operator camera streams."""
 
     def __init__(
         self,
@@ -141,6 +154,32 @@ class Go2RtcClient:
         )
         return _parse_stream_info(payload)
 
+    async def async_list_preloads(self) -> set[str]:
+        """Return the stable names of all active go2rtc preloads."""
+        payload = await self._async_get_json(
+            f"{self.base_url}/api/preload",
+            operation="preload_list",
+        )
+        if not isinstance(payload, dict):
+            raise Go2RtcRequestError(
+                "preload_list", "invalid_response"
+            ) from None
+        return {name for name in payload if isinstance(name, str)}
+
+    async def async_enable_preload(self, name: str) -> None:
+        """Attach a persistent go2rtc consumer to a named stream."""
+        await self._async_mutate_preload(
+            name,
+            enable=True,
+        )
+
+    async def async_disable_preload(self, name: str) -> None:
+        """Remove a named preload; an already missing preload is clean."""
+        await self._async_mutate_preload(
+            name,
+            enable=False,
+        )
+
     async def async_delete_stream(self, name: str) -> None:
         """Delete a named stream; missing streams are already clean."""
         query = urlencode({"src": name})
@@ -172,6 +211,36 @@ class Go2RtcClient:
             auth = f"{username}:{password}@"
         stream_name = quote(name, safe="")
         return f"rtsp://{auth}{self.rtsp_host}:{GO2RTC_RTSP_PORT}/{stream_name}"
+
+    async def _async_mutate_preload(
+        self,
+        name: str,
+        *,
+        enable: bool,
+    ) -> None:
+        """Enable/disable preload without leaking request or response data."""
+        query = urlencode({"src": name})
+        url = f"{self.base_url}/api/preload?{query}"
+        operation = "preload_enable" if enable else "preload_disable"
+        request = self._session.put if enable else self._session.delete
+        accepted = (200, 201, 204) if enable else (200, 201, 204, 404)
+        try:
+            async with request(
+                url,
+                headers=self._headers,
+                timeout=_STREAM_API_TIMEOUT,
+            ) as response:
+                if response.status in accepted:
+                    return
+                raise Go2RtcRequestError(
+                    operation, f"http_{response.status}"
+                ) from None
+        except Go2RtcRequestError:
+            raise
+        except asyncio.TimeoutError:
+            raise Go2RtcRequestError(operation, "timeout") from None
+        except ClientError:
+            raise Go2RtcRequestError(operation, "client_error") from None
 
     async def _async_get_json(self, url: str, *, operation: str) -> Any:
         """GET JSON while preventing request/body details from escaping."""
