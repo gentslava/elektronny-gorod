@@ -1,7 +1,7 @@
 """A-88 A3: `async_go2rtc_video_rtsp` — reuse eg_<id> без operator-pull."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 from custom_components.elektronny_gorod.camera import ElektronnyGorodCamera
 
@@ -15,6 +15,11 @@ def _bare_camera(*, use_go2rtc: bool = True) -> ElektronnyGorodCamera:
     cam._go2rtc_username = None
     cam._go2rtc_password = None
     cam._go2rtc_stream_name = "eg_5593590"
+    cam._stream_manager = MagicMock() if use_go2rtc else None
+    if cam._stream_manager is not None:
+        cam._stream_manager.client.rtsp_url.return_value = (
+            "rtsp://127.0.0.1:8554/eg_5593590"
+        )
     return cam
 
 

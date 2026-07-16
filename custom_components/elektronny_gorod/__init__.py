@@ -8,6 +8,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -27,16 +28,18 @@ from .const import (
     CONF_GO2RTC_PASSWORD,
     DEFAULT_GO2RTC_BASE_URL,
     DEFAULT_GO2RTC_RTSP_HOST,
+    STREAM_MANAGER_DATA,
     SIGNAL_DOORBELL,
     SIP_DATA as _SIP_DATA,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .fcm import DoorbellFcmListener
-from .go2rtc import go2rtc_auth_headers
+from .go2rtc import Go2RtcClient, go2rtc_auth_headers
 from .history import HistoryManager
 from .history_ws import async_register_history_ws_command
 from .sip.call_controller import DoorbellCallController, Go2RtcConfig
+from .stream_manager import CameraStreamManager
 from .uplink_ws import async_register_uplink_card, async_register_uplink_ws_command
 from .user_agent import UserAgent
 
@@ -62,6 +65,46 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
     await coordinator.async_config_entry_first_refresh()
     hass.data[DOMAIN][entry.entry_id] = coordinator
+
+    stream_manager: CameraStreamManager | None = None
+    use_go2rtc = entry.options.get(
+        CONF_USE_GO2RTC,
+        entry.data.get(CONF_USE_GO2RTC, False),
+    )
+    go2rtc_base_url = entry.options.get(
+        CONF_GO2RTC_BASE_URL,
+        entry.data.get(CONF_GO2RTC_BASE_URL),
+    )
+    go2rtc_rtsp_host = entry.options.get(
+        CONF_GO2RTC_RTSP_HOST,
+        entry.data.get(CONF_GO2RTC_RTSP_HOST),
+    )
+    if use_go2rtc and go2rtc_base_url and go2rtc_rtsp_host:
+        go2rtc_username = entry.options.get(
+            CONF_GO2RTC_USERNAME,
+            entry.data.get(CONF_GO2RTC_USERNAME),
+        )
+        go2rtc_password = entry.options.get(
+            CONF_GO2RTC_PASSWORD,
+            entry.data.get(CONF_GO2RTC_PASSWORD),
+        )
+        client = Go2RtcClient(
+            base_url=go2rtc_base_url,
+            rtsp_host=go2rtc_rtsp_host,
+            session=async_get_clientsession(hass),
+            username=go2rtc_username,
+            password=go2rtc_password,
+        )
+        stream_manager = CameraStreamManager(
+            hass=hass,
+            entry=entry,
+            coordinator=coordinator,
+            client=client,
+        )
+        hass.data.setdefault(STREAM_MANAGER_DATA, {})[
+            entry.entry_id
+        ] = stream_manager
+        entry.async_on_unload(stream_manager.async_stop)
 
     # Slice 3c (A-12): legacy unique_id содержали динамический `name`.
     # Мигрируем ДО forward_entry_setups, чтобы entity повторно регистрировались
@@ -124,6 +167,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Пользователь может easily Show через Settings → Entities → filter Hidden.
     # Sync не требует reload — registry update подхватывается HA core напрямую.
     _sync_visibility(hass, entry, coordinator.data or {})
+
+    if stream_manager is not None:
+        await stream_manager.async_start()
 
     # Reload только если migration реально сбросила disabled_by markers — entity
     # требуют re-init платформ для применения. Sync visibility update в registry
@@ -467,6 +513,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     HA-core вызовет их автоматически независимо от исхода platform unload
     (см. audit A-16).
     """
+    stream_manager = hass.data.get(STREAM_MANAGER_DATA, {}).get(entry.entry_id)
+    if stream_manager is not None:
+        await stream_manager.async_stop()
+
     # Two-way audio: завершить активный разговор (BYE) и снять контроллер.
     # Сервисы answer/hangup — глобальные: убираем, когда выгружен последний entry.
     sip_controller = hass.data.get(_SIP_DATA, {}).pop(entry.entry_id, None)
@@ -478,7 +528,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.services.async_remove(DOMAIN, service)
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id)
+        hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data.get(STREAM_MANAGER_DATA, {}).pop(entry.entry_id, None)
 
     return unload_ok
 

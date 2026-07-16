@@ -21,7 +21,7 @@ from .const import (
     DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
     DOMAIN,
 )
-from .go2rtc import Go2RtcClient, Go2RtcRequestError
+from .go2rtc import Go2RtcClient, Go2RtcRequestError, Go2RtcStreamInfo
 
 
 BACKGROUND_REFRESH_INTERVAL = timedelta(minutes=28, seconds=30)
@@ -166,9 +166,10 @@ class CameraStreamManager:
         camera_id = str(camera_id)
         task = self._inflight.get(camera_id)
         if task is None:
-            task = asyncio.create_task(
+            task = self.hass.async_create_task(
                 self._async_refresh_owner(camera_id, reason),
                 name=f"elektronny_gorod_stream_refresh_{camera_id}",
+                eager_start=False,
             )
             self._inflight[camera_id] = task
         return await asyncio.shield(task)
@@ -177,6 +178,18 @@ class CameraStreamManager:
         """Return a detached, credential-free snapshot for diagnostics."""
         state = self._states.get(str(camera_id))
         return replace(state) if state is not None else None
+
+    async def async_get_stream_info(
+        self,
+        camera_id: str,
+    ) -> Go2RtcStreamInfo | None:
+        """Read one sanitized go2rtc stream snapshot for A-71 triggers."""
+        try:
+            return await self.client.async_get_stream(f"eg_{camera_id}")
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - transport boundary is sanitized
+            return None
 
     def is_camera_eligible(self, camera_id: str) -> bool:
         """Return registry-derived opt-in policy for one camera."""

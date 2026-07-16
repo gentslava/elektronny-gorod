@@ -9,19 +9,14 @@ Closes A-44: `async_update` удалён, дублирующий `get_camera_str
 from __future__ import annotations
 
 import asyncio
-import base64
 import logging
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
-from urllib.parse import quote, urlencode
-
-from aiohttp import ClientSession, ClientError, ClientTimeout
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
-from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
@@ -37,12 +32,13 @@ from .const import (
     CONF_GO2RTC_USERNAME,
     CONF_USE_GO2RTC,
     DOMAIN,
-    GO2RTC_RTSP_PORT,
     LOGGER,
+    STREAM_MANAGER_DATA,
 )
 from .call_camera import ElektronnyGorodCallCamera
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .go2rtc import go2rtc_auth_headers
+from .stream_manager import CameraStreamManager
 
 if TYPE_CHECKING:
     from homeassistant.components.stream import Stream
@@ -74,68 +70,6 @@ GO2RTC_HEALTH_POLL_INTERVAL = timedelta(seconds=30)
 GO2RTC_PROACTIVE_REFRESH_INTERVAL = timedelta(minutes=28, seconds=30)
 
 
-def _build_go2rtc_src(source_url: str) -> str:
-    # Video copy, audio -> AAC/OPUS (go2rtc will then output to WebRTC/HLS as needed)
-    return f"ffmpeg:{source_url}#video=copy#audio=aac#audio=opus"
-
-
-async def _go2rtc_upsert_stream(
-    session: ClientSession,
-    base_url: str,
-    stream_name: str,
-    src: str,
-    headers: dict | None = None,
-) -> None:
-    """Создать/обновить go2rtc stream.
-
-    🔑 КРИТИЧНОЕ: **PATCH first** (не PUT).
-
-    Эмпирически подтверждено на go2rtc API:
-    - **PATCH** на existing stream — idempotent: обновляет config metadata,
-      но НЕ убивает running ffmpeg-producer и НЕ disconnect-ит consumers.
-      Текущий producer продолжает работать со старым src до natural EOF;
-      go2rtc применит новый src при следующем restart. Это идеально для
-      proactive refresh (свежий URL подгружается тихо).
-    - **PATCH** на non-existing — тоже работает (HTTP 200), создаёт stream.
-    - **PUT** на existing — **DESTROY + RECREATE**: убивает текущий ffmpeg,
-      consumers падают до 0, требуется reconnect. Раньше мы делали PUT first
-      → это причина disruption consumers (root cause A-71 v3 failure).
-
-    PUT оставлен как fallback на случай если PATCH не поддерживается
-    конкретной версией go2rtc (защита от старых deployments).
-    """
-    qs = urlencode({"name": stream_name, "src": src})
-    url = f"{base_url}/api/streams?{qs}"
-    timeout = ClientTimeout(total=10)
-    # PATCH first — safe для existing producers + consumers.
-    try:
-        async with session.patch(
-            url, headers=headers or {}, timeout=timeout
-        ) as resp:
-            if resp.status in (200, 201, 204):
-                return
-    except ClientError:
-        pass
-    # PUT fallback — для старых go2rtc или если PATCH вернул 4xx/5xx.
-    # NB: aiohttp's `ClientError` subclasses (особенно `InvalidURL`) могут включать
-    # полный URL в `str(exc)`. Наш URL = `.../streams?src=ffmpeg:<OPERATOR_URL_WITH_TOKEN>`.
-    # Если такой exception всплывёт в `LOGGER.exception(...)` через caller —
-    # operator token попадёт в traceback. Перехватываем и rebrand'им через
-    # `from None` чтобы оборвать exception chain (исходный exc и его URL не
-    # попадут в traceback). См. no-secret-logs.md + security audit S-A71-01.
-    try:
-        async with session.put(
-            url, headers=headers or {}, timeout=timeout
-        ) as resp:
-            if resp.status >= 400:
-                # Аналогично: response body может echo'нуть src= с токеном.
-                raise RuntimeError(f"go2rtc PUT failed: HTTP {resp.status}")
-    except ClientError as exc:
-        raise RuntimeError(
-            f"go2rtc PUT failed: {type(exc).__name__}"
-        ) from None
-
-
 def _get_go2rtc_cfg(
     entry: ConfigEntry,
 ) -> tuple[bool, str | None, str | None, str | None, str | None]:
@@ -159,6 +93,9 @@ async def async_setup_entry(
     """Set up Elektronny Gorod Camera based on a config entry."""
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     cameras = (coordinator.data or {}).get("cameras") or []
+    stream_manager: CameraStreamManager | None = hass.data.get(
+        STREAM_MANAGER_DATA, {}
+    ).get(entry.entry_id)
 
     use_go2rtc, base_url, rtsp_host, go2rtc_username, go2rtc_password = _get_go2rtc_cfg(entry)
 
@@ -166,11 +103,7 @@ async def async_setup_entry(
         ElektronnyGorodCamera(
             coordinator,
             camera_info,
-            use_go2rtc=use_go2rtc,
-            go2rtc_base_url=base_url,
-            go2rtc_rtsp_host=rtsp_host,
-            go2rtc_username=go2rtc_username,
-            go2rtc_password=go2rtc_password,
+            stream_manager=stream_manager,
         )
         for camera_info in cameras
     )
@@ -231,17 +164,13 @@ class ElektronnyGorodCamera(
         coordinator: ElektronnyGorodUpdateCoordinator,
         camera_info: dict[str, Any],
         *,
-        use_go2rtc: bool,
-        go2rtc_base_url: str | None,
-        go2rtc_rtsp_host: str | None,
-        go2rtc_username: str | None = None,
-        go2rtc_password: str | None = None,
+        stream_manager: CameraStreamManager | None,
     ) -> None:
         # Camera.__init__ инициализирует Entity-state; затем регистрируемся в coordinator.
         CoordinatorEntity.__init__(self, coordinator)
         Camera.__init__(self)
 
-        self._id: str = camera_info.get("id") or ""
+        self._id = str(camera_info.get("id") or "")
         self._name: str = camera_info.get("name") or self._id
 
         # Intercom-камеры (от entrances в access_controls) имеют place_id +
@@ -259,13 +188,12 @@ class ElektronnyGorodCamera(
         LOGGER.debug("Camera init id=%s source=%s hidden=%s",
                      self._id, source, camera_info.get("hidden"))
 
-        self._last_src: str | None = None
         # A-65: counter consecutive empty stream URL responses для лог-throttling.
         # 1й fail → WARNING, 2й+ подряд → DEBUG, reset на первый success.
         self._consecutive_empty_count: int = 0
         # A-68: in-flight future для dedup concurrent stream_source() calls.
         # HA Stream worker + Frigate + Lovelace могут одновременно дёргать
-        # stream_source — без dedup это создаёт N HTTP к operator + N PUT в
+        # stream_source — без dedup это создаёт N HTTP к operator + N PATCH в
         # go2rtc + N `Stream.update_source()` restart → «мигание видео».
         self._inflight_stream_future: asyncio.Future[str | None] | None = None
         # A-71: monotonic-метка последней авто-recovery (throttle, см. ADR-0009).
@@ -307,19 +235,16 @@ class ElektronnyGorodCamera(
                 suggested_area=area,
             )
 
-        self._go2rtc_base_url = go2rtc_base_url
-        self._go2rtc_rtsp_host = go2rtc_rtsp_host
-        self._use_go2rtc = use_go2rtc
+        self._stream_manager = stream_manager
+        self._use_go2rtc = stream_manager is not None
         self._go2rtc_stream_name = f"eg_{self._id}"
-        self._go2rtc_username = go2rtc_username
-        self._go2rtc_password = go2rtc_password
 
     @property
     def _coordinator_camera_info(self) -> dict[str, Any] | None:
         """Найти текущую запись camera в coordinator.data."""
         cameras = (self.coordinator.data or {}).get("cameras") or []
         for cam in cameras:
-            if cam.get("id") == self._id:
+            if str(cam.get("id") or "") == self._id:
                 return cam
         return None
 
@@ -333,23 +258,12 @@ class ElektronnyGorodCamera(
     # ------------------------------------------------------------------ #
 
     def _rtsp_url(self) -> str:
-        """RTSP URL для HA Stream worker / WebRTC pipeline.
-
-        Если у юзера в go2rtc включена RTSP auth (`rtsp.username/password`,
-        отдельно от HTTP API auth), URL должен содержать `user:pass@host` —
-        иначе HA Stream worker получает 401. Креды URL-encoded для защиты от
-        спец-символов в пароле (`@`, `:`, `/`, `+`, `%`).
-        """
-        if not self._go2rtc_rtsp_host:
-            raise RuntimeError("go2rtc rtsp host is not configured")
-        auth = ""
-        if self._go2rtc_username and self._go2rtc_password:
-            u = quote(self._go2rtc_username, safe="")
-            p = quote(self._go2rtc_password, safe="")
-            auth = f"{u}:{p}@"
-        return (
-            f"rtsp://{auth}{self._go2rtc_rtsp_host}:{GO2RTC_RTSP_PORT}/"
-            f"{self._go2rtc_stream_name}"
+        """Authenticated RTSP URL for HA Stream / WebRTC pipelines."""
+        if self._stream_manager is None:
+            raise RuntimeError("go2rtc stream manager is not configured")
+        return self._stream_manager.client.rtsp_url(
+            self._go2rtc_stream_name,
+            include_credentials=True,
         )
 
     async def async_go2rtc_video_rtsp(self) -> str | None:
@@ -383,86 +297,13 @@ class ElektronnyGorodCamera(
         return isinstance(recv, int) and recv > 0
 
     def _rtsp_url_redacted(self) -> str:
-        """RTSP URL с замаскированными credentials — для логов."""
-        if not self._go2rtc_rtsp_host:
+        """Credential-free stable RTSP URL safe for logs/diagnostics."""
+        if self._stream_manager is None:
             return "<unconfigured>"
-        auth = ""
-        if self._go2rtc_username and self._go2rtc_password:
-            auth = "***:***@"
-        return (
-            f"rtsp://{auth}{self._go2rtc_rtsp_host}:{GO2RTC_RTSP_PORT}/"
-            f"{self._go2rtc_stream_name}"
-        )
-
-    def _go2rtc_auth_headers(self) -> dict[str, str]:
-        """Basic-auth заголовок для go2rtc API (если заданы creds)."""
-        headers: dict[str, str] = {}
-        if self._go2rtc_username and self._go2rtc_password:
-            userpass = f"{self._go2rtc_username}:{self._go2rtc_password}"
-            b64 = base64.b64encode(userpass.encode()).decode()
-            headers["Authorization"] = f"Basic {b64}"
-        return headers
-
-    async def _ensure_go2rtc_stream(
-        self, source_url: str, *, force_restart: bool = True
-    ) -> None:
-        """PATCH fresh source в go2rtc; опционально force-restart HA Stream.
-
-        `force_restart=True` (default, для event-driven recovery v1/v2): worker
-        stuck → дёргаем `Stream.update_source()` для fast restart.
-
-        `force_restart=False` (для proactive v3): worker ещё работает на старом
-        ffmpeg-producer'е. PATCH go2rtc idempotent (см. `_go2rtc_upsert_stream`
-        docstring) — текущий producer продолжает работать со старым URL до EOF,
-        затем go2rtc применит новый. consumers и WebRTC peers выживают.
-        """
-        if not self._use_go2rtc:
-            return
-
-        base_url = self._go2rtc_base_url
-        if not base_url:
-            LOGGER.debug("go2rtc enabled but base_url missing; falling back to direct FLV")
-            self._use_go2rtc = False
-            return
-
-        src = _build_go2rtc_src(source_url)
-        if src == self._last_src:
-            return
-
-        session: ClientSession = async_get_clientsession(self.hass)
-        await _go2rtc_upsert_stream(
-            session=session,
-            base_url=base_url,
-            stream_name=self._go2rtc_stream_name,
-            src=src,
-            headers=self._go2rtc_auth_headers(),
-        )
-        self._last_src = src
-
-        LOGGER.debug(
-            "go2rtc stream updated: name=%s rtsp=%s (force_restart=%s)",
+        return self._stream_manager.client.rtsp_url(
             self._go2rtc_stream_name,
-            self._rtsp_url_redacted(),
-            force_restart,
+            include_credentials=False,
         )
-
-        if not force_restart:
-            return
-
-        # A-66: force restart нужен для event-driven recovery (worker stuck).
-        stream = self.stream
-        if stream is not None:
-            try:
-                stream.update_source(self._rtsp_url())
-                LOGGER.debug(
-                    "Camera %s (%s): forced HA Stream restart after go2rtc PUT",
-                    self._name, self._id,
-                )
-            except Exception:  # noqa: BLE001 — defensive: HA Stream API edge cases
-                LOGGER.exception(
-                    "Failed to update HA Stream source for camera %s (%s)",
-                    self._name, self._id,
-                )
 
     # ------------------------------------------------------------------ #
     # On-demand actions                                                  #
@@ -504,7 +345,7 @@ class ElektronnyGorodCamera(
 
         A-68: dedup concurrent calls через future-pattern. HA Stream worker +
         Frigate + Lovelace могут одновременно дёргать stream_source — без
-        dedup создаётся N HTTP к operator + N PUT в go2rtc + N
+        dedup создаётся N HTTP к operator + N PATCH в go2rtc + N
         `Stream.update_source()` restart, что приводит к «миганию видео».
         Concurrent callers wait first in-flight future → получают одинаковый
         результат → 1 HTTP + 1 PUT + 1 restart.
@@ -533,11 +374,19 @@ class ElektronnyGorodCamera(
             self._inflight_stream_future = None
 
     async def _fetch_stream_source_impl(self) -> str | None:
-        """Реальная логика fetch — operator stream URL + go2rtc PUT.
+        """Реальная логика fetch — operator stream URL + go2rtc PATCH.
 
         Вызывается из `stream_source` под защитой in-flight future (A-68).
         """
-        stream_url = await self.coordinator.get_camera_stream(self._id)
+        if self._stream_manager is not None:
+            result = await self._stream_manager.async_refresh(
+                self._id,
+                "ha_open",
+            )
+            stream_url = result.url
+        else:
+            result = None
+            stream_url = await self.coordinator.get_camera_stream(self._id)
         if not stream_url:
             # A-65: log throttling — 1й fail в серии WARNING, 2й+ DEBUG.
             # Counter сбрасывается при первом успешном response.
@@ -553,23 +402,20 @@ class ElektronnyGorodCamera(
             )
             return None
         self._consecutive_empty_count = 0
-        if not self._use_go2rtc:
+        if result is None:
             return stream_url
-        try:
-            await self._ensure_go2rtc_stream(stream_url)
-        except RuntimeError as exc:
-            # go2rtc недоступен (401, 5xx, network). НЕ ломаем entity setup —
-            # fallback на direct operator FLV URL (HA Stream подключится к
-            # operator напрямую, минуя go2rtc proxy). Это degrades feature, но
-            # сохраняет работоспособность камеры.
+        if not result.proxied:
+            state = self._stream_manager.camera_state(self._id)
             LOGGER.error(
                 "Camera %s (%s): go2rtc недоступен (%s); fallback на direct "
                 "operator URL. Проверь go2rtc_username/password в integration "
                 "config.",
-                self._name, self._id, exc,
+                self._name,
+                self._id,
+                state.status if state is not None else "unknown",
             )
             return stream_url
-        return self._rtsp_url()
+        return stream_url
 
     # ------------------------------------------------------------------ #
     # Coordinator hook                                                   #
@@ -619,9 +465,8 @@ class ElektronnyGorodCamera(
         `force_restart=True` (default): event-driven recovery (v1/v2) — worker
         stuck → дёргаем `Stream.update_source()` для fast restart.
 
-        `force_restart=False`: proactive (v3) — worker ещё работает, PATCH
-        go2rtc idempotent (см. `_go2rtc_upsert_stream` docstring), не нужен
-        restart, transition smooth.
+        `force_restart=False`: proactive (v3) — worker ещё работает; manager
+        делает PATCH-only refresh, restart не нужен, transition smooth.
         """
         now = time.monotonic()
         if now - self._last_recovery_monotonic < STREAM_RECOVERY_COOLDOWN:
@@ -638,8 +483,8 @@ class ElektronnyGorodCamera(
         Вызывается когда HA Stream worker сигналит unavailable (operator
         forpost session истекла, ~30 мин — см. ADR-0009). Делает те же вызовы,
         что HA на WebRTC re-offer / пользователь при reopen карточки:
-        fresh `stream_source` → `_ensure_go2rtc_stream` (PATCH go2rtc +
-        `Stream.update_source()`, A-66) либо прямой `update_source` без go2rtc.
+        manager refresh (PATCH go2rtc + `Stream.update_source()`, A-66) либо
+        прямой `update_source` без go2rtc.
         """
         # `available` здесь = ElektronnyGorodCamera.available, т.е.
         # `CoordinatorEntity.available` (coordinator.last_update_success) И
@@ -648,12 +493,38 @@ class ElektronnyGorodCamera(
         # stream-availability (она перекрыта CoordinatorEntity.available).
         if not self.available:
             return
+        if self._stream_manager is not None:
+            result = await self._stream_manager.async_refresh(
+                self._id,
+                "recovery" if force_restart else "active_consumer",
+            )
+            if not result.url:
+                LOGGER.debug(
+                    "Camera %s (%s): stream recovery got empty url — skip",
+                    self._name,
+                    self._id,
+                )
+                return
+            if result.proxied and self.stream is not None and force_restart:
+                try:
+                    self.stream.update_source(result.url)
+                except Exception as err:  # noqa: BLE001 - sanitize HA edge
+                    LOGGER.error(
+                        "Camera %s (%s): HA Stream restart failed (%s)",
+                        self._name,
+                        self._id,
+                        type(err).__name__,
+                    )
+            return
+
         try:
             stream_url = await self.coordinator.get_camera_stream(self._id)
-        except Exception:  # noqa: BLE001 — defensive: не валим callback-цепочку
-            LOGGER.exception(
-                "Camera %s (%s): stream recovery fetch failed",
-                self._name, self._id,
+        except Exception as err:  # noqa: BLE001 - sanitize operator boundary
+            LOGGER.error(
+                "Camera %s (%s): stream recovery fetch failed (%s)",
+                self._name,
+                self._id,
+                type(err).__name__,
             )
             return
         if not stream_url:
@@ -668,16 +539,14 @@ class ElektronnyGorodCamera(
             self._name, self._id, force_restart,
         )
         try:
-            if self._use_go2rtc:
-                await self._ensure_go2rtc_stream(
-                    stream_url, force_restart=force_restart
-                )
-            elif self.stream is not None and force_restart:
+            if self.stream is not None and force_restart:
                 self.stream.update_source(stream_url)
-        except Exception:  # noqa: BLE001 — defensive: не валим callback-цепочку
-            LOGGER.exception(
-                "Camera %s (%s): recovery — go2rtc/update_source failed",
-                self._name, self._id,
+        except Exception as err:  # noqa: BLE001 - sanitize operator URL
+            LOGGER.error(
+                "Camera %s (%s): recovery update_source failed (%s)",
+                self._name,
+                self._id,
+                type(err).__name__,
             )
 
     # ------------------------------------------------------------------ #
@@ -693,8 +562,7 @@ class ElektronnyGorodCamera(
         """
         await super().async_added_to_hass()
         if (
-            self._use_go2rtc
-            and self._go2rtc_base_url
+            self._stream_manager is not None
             and self._unsub_health_poll is None  # idempotent: не плодим таймеры
         ):
             self._unsub_health_poll = async_track_time_interval(
@@ -704,8 +572,7 @@ class ElektronnyGorodCamera(
             )
         # A-71 v3: proactive keep-alive refresh для streams с активными viewers.
         if (
-            self._use_go2rtc
-            and self._go2rtc_base_url
+            self._stream_manager is not None
             and self._unsub_proactive_refresh is None
         ):
             self._unsub_proactive_refresh = async_track_time_interval(
@@ -731,25 +598,12 @@ class ElektronnyGorodCamera(
 
         Возвращает None при сетевой ошибке / не-200 / не-JSON (graceful).
         """
-        base_url = self._go2rtc_base_url
-        if not base_url:
+        if self._stream_manager is None:
             return None
-        session = async_get_clientsession(self.hass)
-        url = f"{base_url}/api/streams?{urlencode({'src': self._go2rtc_stream_name})}"
-        try:
-            async with session.get(
-                url,
-                headers=self._go2rtc_auth_headers(),
-                timeout=ClientTimeout(total=10),
-            ) as resp:
-                if resp.status != 200:
-                    return None
-                data = await resp.json()
-        except (ClientError, asyncio.TimeoutError, ValueError):
+        info = await self._stream_manager.async_get_stream_info(self._id)
+        if info is None:
             return None
-        if not isinstance(data, dict):
-            return None
-        return data.get("producers") or [], data.get("consumers")
+        return list(info.producers), [{} for _ in range(info.consumer_count)]
 
     async def _async_poll_go2rtc_health(self, now: datetime | None = None) -> None:
         """Детект stall по go2rtc producer `bytes_recv` (A-71 v2).
@@ -832,7 +686,7 @@ class ElektronnyGorodCamera(
             self._name, self._id, n_consumers, elapsed,
         )
         # CRITICAL v3.2: force_restart=False для proactive.
-        # PATCH-first в `_go2rtc_upsert_stream` НЕ убивает running producer,
+        # PATCH-only manager write НЕ убивает running producer,
         # `update_source()` HA Stream worker НЕ нужен. Existing consumers
         # (WebRTC peers + preload) выживают, transition smooth при EOF.
         self._maybe_schedule_stream_recovery(force_restart=False)

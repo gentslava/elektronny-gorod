@@ -49,8 +49,15 @@ def _manager(
         data={},
         options={},
     )
+    hass = MagicMock()
+    hass.async_create_task.side_effect = (
+        lambda coro, **kwargs: asyncio.create_task(
+            coro,
+            name=kwargs.get("name"),
+        )
+    )
     manager = CameraStreamManager(
-        hass=MagicMock(),
+        hass=hass,
         entry=entry,
         coordinator=coordinator,
         client=client,

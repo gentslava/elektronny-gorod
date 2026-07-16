@@ -14,7 +14,7 @@ Acceptance:
 - cooldown: частые False-сигналы → не более 1 recovery в окне.
 - entity unavailable (нет в coordinator.data) → no recovery.
 - empty stream url → graceful (no `update_source`).
-- go2rtc-path → recovery идёт через `_ensure_go2rtc_stream` (PATCH + restart).
+- go2rtc-path → recovery идёт через stream manager (PATCH + restart).
 """
 from __future__ import annotations
 
@@ -36,6 +36,7 @@ from custom_components.elektronny_gorod.const import (
     CONF_USER_AGENT,
     DOMAIN,
 )
+from custom_components.elektronny_gorod.go2rtc import Go2RtcStreamInfo
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
 CAM_A = "100"
@@ -242,12 +243,11 @@ async def test_recovery_empty_url_graceful(hass: HomeAssistant, mock_api):
     stream.update_source.assert_not_called()
 
 
-# ─── Test F: go2rtc-path → recovery через _ensure_go2rtc_stream ────────────
+# ─── Test F: go2rtc-path → recovery через stream manager ──────────
 
 
-async def test_recovery_go2rtc_path_calls_ensure(hass: HomeAssistant, mock_api):
-    """use_go2rtc=True → recovery идёт через `_ensure_go2rtc_stream`
-    (PATCH go2rtc + update_source через A-66), а не прямой update_source."""
+async def test_recovery_go2rtc_path_calls_manager(hass: HomeAssistant, mock_api):
+    """use_go2rtc=True → manager mints, PATCHes and restarts HA Stream."""
     cam = await _setup_camera(hass, use_go2rtc=True)
     instance = mock_api.return_value
     instance.query_camera_stream.reset_mock()
@@ -256,15 +256,18 @@ async def test_recovery_go2rtc_path_calls_ensure(hass: HomeAssistant, mock_api):
     cam.stream = stream
 
     with patch.object(
-        cam, "_ensure_go2rtc_stream", new=AsyncMock()
-    ) as mock_ensure:
+        cam._stream_manager.client,
+        "async_patch_stream",
+        new=AsyncMock(),
+    ) as mock_patch:
         cam._on_stream_state_change()
         await hass.async_block_till_done()
 
     assert instance.query_camera_stream.await_count == 1
-    mock_ensure.assert_awaited_once()
-    # Прямой update_source НЕ вызывается на go2rtc-пути (это делает _ensure).
-    stream.update_source.assert_not_called()
+    mock_patch.assert_awaited_once()
+    stream.update_source.assert_called_once_with(
+        "rtsp://127.0.0.1:8554/eg_100"
+    )
 
 
 # ─── A-71 v2: go2rtc producer-health poll (go2rtc/WebRTC-only, лифты) ──────
@@ -284,13 +287,17 @@ async def test_go2rtc_poll_frozen_triggers_recovery(hass: HomeAssistant, mock_ap
         return_value=([{"bytes_recv": 1000}], [{}])
     )
 
-    with patch.object(cam, "_ensure_go2rtc_stream", new=AsyncMock()) as mock_ensure:
+    with patch.object(
+        cam._stream_manager.client,
+        "async_patch_stream",
+        new=AsyncMock(),
+    ) as mock_patch:
         await cam._async_poll_go2rtc_health()  # baseline (prev=None) — без recovery
         await cam._async_poll_go2rtc_health()  # тот же bytes_recv → frozen → recovery
         await hass.async_block_till_done()
 
     assert instance.query_camera_stream.await_count == 1
-    mock_ensure.assert_awaited_once()
+    mock_patch.assert_awaited_once()
 
 
 async def test_go2rtc_poll_first_call_only_baselines(hass: HomeAssistant, mock_api):
@@ -383,27 +390,14 @@ async def test_fetch_go2rtc_stream_info_parses_response(
     """
     cam = await _setup_camera(hass, use_go2rtc=True)
 
-    fake_resp = AsyncMock()
-    fake_resp.status = 200
-    fake_resp.json = AsyncMock(
-        return_value={"producers": [{"bytes_recv": 42}], "consumers": [{}]}
+    cam._stream_manager.client.async_get_stream = AsyncMock(
+        return_value=Go2RtcStreamInfo(
+            producers=({"bytes_recv": 42},),
+            consumer_count=1,
+        )
     )
 
-    class _AsyncCtxMgr:
-        async def __aenter__(self_):
-            return fake_resp
-
-        async def __aexit__(self_, *args):
-            return False
-
-    session_mock = MagicMock()
-    session_mock.get = MagicMock(return_value=_AsyncCtxMgr())
-
-    with patch(
-        "custom_components.elektronny_gorod.camera.async_get_clientsession",
-        return_value=session_mock,
-    ):
-        info = await cam._fetch_go2rtc_stream_info()
+    info = await cam._fetch_go2rtc_stream_info()
 
     assert info is not None
     producers, consumers = info
@@ -434,12 +428,16 @@ async def test_proactive_refresh_active_consumers_triggers_recovery(
         return_value=([{"bytes_recv": 100000}], [{}])
     )
 
-    with patch.object(cam, "_ensure_go2rtc_stream", new=AsyncMock()) as mock_ensure:
+    with patch.object(
+        cam._stream_manager.client,
+        "async_patch_stream",
+        new=AsyncMock(),
+    ) as mock_patch:
         await cam._async_proactive_refresh()
         await hass.async_block_till_done()
 
     assert instance.query_camera_stream.await_count == 1
-    mock_ensure.assert_awaited_once()
+    mock_patch.assert_awaited_once()
 
 
 async def test_proactive_refresh_no_consumers_skips(
