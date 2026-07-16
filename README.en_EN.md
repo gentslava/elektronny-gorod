@@ -42,7 +42,7 @@ hear audio, open doors, answer calls, talk to visitors and browse answered and
 missed call history.
 
 > ✨ **Coming in 4.0.0:** a complete call screen, SIP answering, two-way audio,
-> FCM events and call history.
+> FCM events, call history and opt-in external RTSP camera publishing.
 > See the [overview below](#whats-new-in-400) or read the full
 > [release notes](docs/releases/4.0.0.md).
 
@@ -74,6 +74,9 @@ missed call history.
 - **Automation events:** new answered/missed calls are exposed as HA `event`
   entities. Camera-motion history is a separate disabled-by-default entity;
   enabling it starts polling for that camera.
+- **Stable external RTSP:** enabled cameras can be published through go2rtc for
+  an NVR, media player or another local system. Publishing is off by default;
+  hidden cameras require a separate option.
 - **No reconfiguration:** existing Home Assistant entries do not need to be
   recreated.
 - **Reliability:** FCM reconnect/watchdog, caller replacement, concurrent
@@ -137,6 +140,8 @@ days-to-block and call state), `binary_sensor`, and `switch`.
 Integration with [go2rtc](https://github.com/AlexxIT/go2rtc) is supported for Elektronny Gorod and Dom.ru cameras. This method allows you to:
 - Get audio stream from cameras.
 - Get faster and more stable video stream (low latency, fewer disconnects).
+- Optionally publish ready-to-use streams at stable RTSP addresses for NVRs,
+  media players and other local clients.
 
 ### How to connect
 
@@ -149,6 +154,29 @@ Integration with [go2rtc](https://github.com/AlexxIT/go2rtc) is supported for El
 If you already have cameras set up via the standard integration, just enable go2rtc support in the integration or camera settings — you do not need to re-add devices.
 
 **Note:** For audio and low latency to work, make sure your go2rtc and Home Assistant versions are up to date.
+
+### External RTSP in 4.0.0
+
+The go2rtc integration settings now contain two separate options:
+
+- **“Publish enabled cameras for external RTSP”** creates stable streams only
+  for camera entities that are enabled in Home Assistant.
+- **“Also publish hidden cameras”** additionally includes hidden entities and
+  works only with the main publishing option. Disabled camera entities are
+  never published.
+
+Both options are off by default. For every published camera, the integration
+immediately starts a background go2rtc consumer so the operator's one-time
+source cannot expire before the first viewer connects. The source is refreshed
+every 28 minutes 30 seconds without disconnecting an active viewer. The
+diagnostic **“Published RTSP streams”** entity exposes ready stream addresses
+and their actual state without putting go2rtc credentials in its attributes.
+
+Publishing settings control background keep-warm only. Explicitly opening an
+enabled hidden camera in Home Assistant still works without a persistent
+preload. The integration does not expose the RTSP port to the Internet;
+network access, firewall/VPN policy and go2rtc security remain the user's
+responsibility.
 
 ## 🔔 Doorbell call event (FCM push)
 

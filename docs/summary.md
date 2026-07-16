@@ -50,7 +50,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | Реальные тесты | ✅ 549 backend + 62 frontend тестов зелёные локально; TypeScript check и production build зелёные |
 | Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
-| Документация для пользователя | ✅ RU/EN README и HACS info описывают FCM/SIP, экран вызова и durable history 4.0.0; добавлены runtime screenshots |
+| Документация для пользователя | ✅ RU/EN README и release notes 4.0.0 описывают FCM/SIP, экран вызова, durable history и opt-in внешний RTSP; добавлены runtime screenshots |
 | AIDD документация для агентов | ✅ синхронизирована с mobile-app/API reconciliation 2026-07-15 |
 
 ## Главные сильные стороны
