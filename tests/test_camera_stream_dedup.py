@@ -8,7 +8,7 @@
   go2rtc + `Stream.update_source()` restart worker.
 - Каждый restart прерывает video на ~1 сек → пользователь видит
   «мигание» когда несколько источников активны одновременно.
-- Production-лог 2026-05-27 показал 2 restart за 0.88s для camera 5593590.
+- Production-лог 2026-05-27 показал 2 restart за 0.88s для одной camera.
 
 Acceptance (A-68):
 - 2+ concurrent `stream_source()` для одной camera → only 1 HTTP к operator.

@@ -426,6 +426,13 @@ The nine acceptance scenarios in this document are merge-blocking. In
 particular, the idle-over-one-hour external RTSP test and go2rtc restart test
 must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 
+Targeted startup-grid acceptance passed on 2026-07-16 after deploying
+`3a3ad02`: explicit lift-camera opens while integration setup was finishing
+created their go2rtc streams, playback worked, and closing the HA UI no longer
+left an extra non-preload consumer. This closes the observed 404/orphan
+regression only; the long-idle, scheduled-refresh and go2rtc-restart scenarios
+above remain separate gates.
+
 ## Rollout and compatibility
 
 - Continue the replacement branch and PR #71; do not revive or cherry-pick the
@@ -456,8 +463,8 @@ must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 
 Automated evidence on 2026-07-16: 131 focused preload/manager tests, 151
 related camera/go2rtc/config/visibility regressions and the complete 549-test
-backend suite passed. This changes implementation status only; the nine live
-acceptance scenarios above remain merge-blocking.
+backend suite passed. The targeted startup-grid regression also passed live;
+the remaining long-running acceptance scenarios above stay merge-blocking.
 
 ## Deferred work
 

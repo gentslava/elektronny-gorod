@@ -225,9 +225,9 @@ Static-only write paths не переходят в код без decrypted HAR (
   не превращает preload consumers в синхронный 28:30 burst. Теоретические
   per-camera locks/attach lease/main-off polling/removed-snapshot cleanup не
   приняты без production evidence и дополнительной фоновой сети.
-- [x] **Startup-grid production follow-up** — explicit hidden HA-open во время
-  setup теперь выполняет mint/PATCH вместо возврата незарегистрированного RTSP
-  name; background gate сохранён. Proxied EOF recovery больше не вызывает
+- [x] **Startup-grid production follow-up** — live на `3a3ad02`: explicit
+  hidden HA-open во время setup выполняет mint/PATCH вместо возврата
+  незарегистрированного RTSP name; background gate сохранён. Proxied EOF recovery больше не вызывает
   `Stream.update_source()` с тем же URL и не оставляет worker через
   fast-restart/idle-stop race.
 - [x] **A-82** 🟢 resolved-in-branch: `camera.py` больше не владеет

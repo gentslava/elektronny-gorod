@@ -1158,9 +1158,9 @@ rg -n "operator_url|access_token|refresh_token|Authorization|go2rtc_password" \
 
 - [ ] **Step 5: Repeat production acceptance on the five failed cameras**
 
-Use `eg_5595470`, `eg_5595471`, `eg_5595472`, `eg_5593584`, and
-`eg_5593570`. Confirm each has a preload and active producer, survives idle,
-and opens externally without first opening HA. Then repeat active-viewer PATCH,
+Use the five affected streams from the private live checklist. Confirm each has
+a preload and active producer, survives idle, and opens externally without
+first opening HA. Then repeat active-viewer PATCH,
 go2rtc restart, disabled/hidden cleanup, concurrent trigger, and unload checks.
 Record observations in the existing `design.md`; only then mark A-96 and this
 plan verified and supersede PR #61.
@@ -1310,8 +1310,8 @@ the existing synchronized AIDD sources.
   active background consumer surviving config-entry unload.
 - [x] Skip entity proactive refresh for background-eligible manager streams so
   preload consumers cannot collapse staggered timers into a periodic burst.
-- [x] Production startup-grid follow-up: allow explicit pre-start HA-open while
-  keeping background hidden gated. Proxied EOF recovery no longer calls
+- [x] Production startup-grid follow-up, verified live on `3a3ad02`: allow
+  explicit pre-start HA-open while keeping background hidden gated. Proxied EOF recovery no longer calls
   `HA Stream.update_source()` with the unchanged URL, avoiding its observed
   fast-restart/idle-stop orphan consumer race.
 - [x] Reject unobserved per-camera cleanup locks/attach lease, main-off polling,

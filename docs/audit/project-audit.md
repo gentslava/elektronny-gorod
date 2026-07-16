@@ -659,7 +659,7 @@ Quality gates:
 - **Severity:** P2 (UX — было «не грузится после toggle видимости»).
 - **Area:** HA Stream lifecycle / go2rtc integration.
 - **Evidence (production diagnostics 2026-05-26):**
-  - `eg_5593587` в go2rtc держал producer URL `a833471/dZ9lxcy0GDRaZjdxWP2k`
+  - redacted stream в go2rtc держал redacted producer URL
   - `curl` к этому URL → `connection reset` (token expired)
   - HA Stream worker retry → `Invalid data found when processing input` →
     `Server returned 404 Not Found` (после go2rtc evict config)
@@ -751,10 +751,10 @@ Quality gates:
 - **Evidence (2026-05-27 12:57 log):**
   - HA start at 12:57:14.
   - **12:57:25.816** (через 11 сек) — `Error opening stream (Invalid data found ...
-    rtsp://127.0.0.1:8554/eg_5595470)`.
-  - 12:57:25.981, 12:57:25.998 — то же для eg_5595471, eg_5595472.
-  - 12:58:05.469 — для eg_5593578.
-  - 12:58:49.988 — `go2rtc.server WRN ... i/o timeout url=rtsp://127.0.0.1:8554/eg_5595472`.
+    rtsp://127.0.0.1:8554/eg_<redacted-a>)`.
+  - 12:57:25.981, 12:57:25.998 — то же для двух других redacted streams.
+  - 12:58:05.469 — для ещё одной redacted camera.
+  - 12:58:49.988 — `go2rtc.server WRN ... i/o timeout url=rtsp://127.0.0.1:8554/eg_<redacted-c>`.
   - Recovery только в 12:58:54 (через ~90 сек после start) когда HA core
     позвал `stream_source` → fresh PUT в go2rtc → producer обновился.
 - **Root cause:** go2rtc — отдельный процесс, **переживает** HA restart.
@@ -800,10 +800,10 @@ Quality gates:
 - **Area:** HA Stream / go2rtc integration / API throttling.
 - **Evidence (2026-05-27 12:59:21 log):**
   ```
-  12:59:21.304 Fetching camera 5593578 stream URL    ← запрос #1
-  12:59:21.317 Fetching camera 5593578 stream URL    ← запрос #2 (через 13 ms!)
-  12:59:21.619 Response 5593578 video [200 OK]      ← разные tokens
-  12:59:21.668 Response 5593578 video [200 OK]
+  12:59:21.304 Fetching camera <redacted> stream URL ← запрос #1
+  12:59:21.317 Fetching camera <redacted> stream URL ← запрос #2 (через 13 ms!)
+  12:59:21.619 Response <redacted> video [200 OK]    ← разные tokens
+  12:59:21.668 Response <redacted> video [200 OK]
   ```
   Этот случай — настоящий concurrent dedup. 13 мс ≪
   `STREAM_RESTART_INCREMENT` (5 сек минимум для HA Stream retry) → не
@@ -901,16 +901,16 @@ Quality gates:
 - **Symptom (user-reported 2026-05-27):** «долго открытое видео перестаёт
   воспроизводиться» — frozen / чёрный экран.
 - **Evidence (`...2026-05-27T14-58-18.200Z.log`):**
-  - Camera Подъезд (5593590): **16×** `Error demuxing stream while finding
-    first packet (Operation timed out, rtsp://127.0.0.1:8554/eg_5593590)`
+  - Camera Подъезд (`<redacted>`): **16×** `Error demuxing stream while finding
+    first packet (Operation timed out, rtsp://127.0.0.1:8554/eg_<redacted>)`
     непрерывно **20:34:30 → 20:54:23** (~20 мин) — **без единого** `Fetching
-    camera 5593590 stream URL` в этом окне (refresh не происходит).
+    camera <redacted> stream URL` в этом окне (refresh не происходит).
   - go2rtc producer: `error=EOF url=ffmpeg:elektronny_gorod_..._camera_<id>`
     (апстрим оператора закончил поток) + `i/o timeout
     url=rtsp://127.0.0.1:8554/eg_<id>` (consumers не получают пакетов).
   - **Чистый TTL** (по последнему раунду обновления, без загрязнения
     многократными reload): PUT **21:25:14** → first error **21:55:19** =
-    **30:05** для 5593590/5593592/5595471 (минтились вместе → умерли вместе).
+    **30:05** для трёх камер (минтились вместе → умерли вместе).
   - HAR (`session_MyHome_25-05.har`): `data.URL` =
     `https://forpost-N.novotelecom.ru:18081/rtsp/a<NNNNNN>/<token>/d=1` —
     **expiry в URL отсутствует**, TTL чисто серверный; сессия `a<NNNNNN>`
@@ -1384,13 +1384,13 @@ Quality gates:
 - **Evidence (прод 2026-07-08, полный разбор: HA-лог + go2rtc-проба + браузерный
   WebRTC-хук):**
   - Видео вызова = **copy с общей forpost-камеры домофона**: `eg_intercom_call`
-    **вложен** в `rtsp://127.0.0.1:8554/eg_5593590#video=copy` + аудио-мост. SIP
+    **вложен** в `rtsp://127.0.0.1:8554/eg_<redacted>#video=copy` + аудио-мост. SIP
     от панели несёт **только аудио** (G.711), видео — из camera-API оператора.
   - go2rtc **отдаёт валидный кадр** (проба `frame.jpeg` = 65 КБ, `ff d8 ff`,
     H264) — серверный пайплайн исправен.
   - При нескольких консьюмерах (ноут + телефон, ringing-превью + стрим вызова)
     каждое открытие **пере-фетчит одноразовый operator-URL и пере-собирает
-    продюсер** → `eg_5593590` `Error opening (Invalid data)` / `Operation timed
+    продюсер** → redacted stream `Error opening (Invalid data)` / `Operation timed
     out`, у части клиентов видео пустое (браузерный хук: `frames=0 0x0`).
   - После звонка HA Stream worker `camera.*_intercom_call` **не гасится** →
     `404 eg_intercom_call` каждые ~60-90с 9+ минут.
@@ -1590,10 +1590,9 @@ Quality gates:
 - **Symptom (owner report / PR #61):** `eg_<camera_id>` в go2rtc есть,
   но после простоя внешний RTSP отвечает `500/EOF`. Открытие камеры
   в HA минтит fresh operator URL и временно восстанавливает путь.
-- **Live failure evidence (2026-07-16):** `eg_5595470`, `eg_5595471`,
-  `eg_5595472`, `eg_5593584`, `eg_5593570` присутствовали в go2rtc, но имели
-  lazy producer (`url` без active metadata) и zero consumers; RTSP DESCRIBE
-  возвращал 404/EOF. Живыми остались домофоны с фоновым consumer. Canary
+- **Live failure evidence (2026-07-16):** пять затронутых потоков присутствовали
+  в go2rtc, но имели lazy producer (`url` без active metadata) и zero consumers;
+  RTSP DESCRIBE возвращал 404/EOF. Живыми остались камеры с фоновым consumer. Canary
   preload против уже протухшего source вернул HTTP 500/TLS EOF.
 - **Root cause:** operator source — одноразовая server-side session; PATCH
   менял URL, но не подключал lazy producer. URL истекал до первого внешнего
@@ -1670,6 +1669,11 @@ Quality gates:
   `manager.start`, background hidden остаётся gated; proxied recovery больше не
   вызывает `HA Stream.update_source()` с тем же URL и не может пересечься с
   idle stop через HA `_fast_restart_once`.
+- **Startup-grid live verification (2026-07-16, `3a3ad02`):** после deployment
+  ранние explicit lift-camera opens создают go2rtc streams и воспроизводятся;
+  после закрытия HA UI лишний non-preload consumer не остаётся. Long-idle,
+  scheduled 28:30 refresh и go2rtc-restart acceptance остаются отдельными
+  незакрытыми сценариями.
 - **Automated evidence in branch:**
   - `test_config_flow_keep_warm.py` — defaults/dependency/persistence;
   - `test_go2rtc_client.py` / `test_go2rtc_upsert.py` — PATCH-only source,
@@ -1688,7 +1692,7 @@ Quality gates:
     fallback и concurrent late-mint/PATCH guards;
   - `test_sensor_rtsp_urls.py` — preloaded+active+fresh и no-secret attrs;
   - local gates: 131 focused, 151 related regressions, 549 full suite passed.
-- **Production acceptance (repeat merge-blocking):** пять перечисленных камер
+- **Production acceptance (repeat merge-blocking):** пять затронутых камер
   получают active preload и открываются externally после idle без HA-open;
   active consumer переживает PATCH; go2rtc restart → restore ≤60s;
   disabled/hidden cleanup policy; concurrent reasons → one mint/PATCH/preload;

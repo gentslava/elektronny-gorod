@@ -489,14 +489,14 @@ def test_active_call_media_returns_camera_and_bridge():
     c = DoorbellCallController(
         _hass(), api, lambda: "TOK",
         go2rtc=Go2RtcConfig("http://g:1984", {}, "127.0.0.1"),
-        camera_resolver=lambda ac: "5593590" if ac == "AC" else None,
+        camera_resolver=lambda ac: "1013" if ac == "AC" else None,
     )
     c.handle_signal(_ring(ac="AC"))
     bridge = MagicMock()
     c._manager = MagicMock(); c._manager.in_call = True
     c._bridge = bridge
     cam_id, br = c.active_call_media()
-    assert cam_id == "5593590" and br is bridge
+    assert cam_id == "1013" and br is bridge
 
 
 def test_active_call_media_none_when_no_call():
