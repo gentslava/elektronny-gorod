@@ -1,6 +1,6 @@
 # Design: go2rtc stream manager for external RTSP
 
-- **Status:** implemented in branch; production acceptance pending
+- **Status:** preload revision approved; implementation pending
 - **Date:** 2026-07-16
 - **Branch:** `feat/go2rtc-stream-manager`
 - **Origin:** replacement for the unmerged PR #61 and
@@ -22,6 +22,16 @@ still needed a Home Assistant open. Its unit tests proved callback scheduling,
 not the complete path from operator URL minting through go2rtc registration to
 external playback.
 
+The replacement branch initially repeated one important false assumption: it
+kept the registered source URL fresh with PATCH but intentionally left the
+go2rtc producer lazy. Live validation on 2026-07-16 disproved that model. Five
+problematic non-doorbell streams were present with one lazy source and zero
+consumers, yet RTSP playback returned 404. Arming go2rtc preload against the
+already-idle URL failed with TLS EOF. Doorbell streams with an existing
+background consumer remained alive. Therefore registration freshness alone is
+not keep-warm: the operator URL must be consumed immediately and its producer
+must remain active.
+
 ## Goals and acceptance criteria
 
 When the feature is enabled, every eligible camera must have a stable external
@@ -39,12 +49,14 @@ The implementation is accepted only when all of these scenarios pass:
    leave.
 5. A hidden camera is published only when the hidden-camera sub-option is on.
 6. Concurrent background, HA-open, and recovery requests for one camera result
-   in one operator request and one go2rtc PATCH.
+   in one operator request, one go2rtc PATCH, and at most one preload PUT when
+   preload is missing.
 7. Config-entry unload leaves no manager timers or background tasks.
+8. An eligible idle camera has an active manager-owned go2rtc preload consumer;
+   disabling keep-warm or unloading the entry removes that consumer.
 
 ## Non-goals
 
-- Keeping every producer continuously connected or using go2rtc preload.
 - Per-camera selection in the first version.
 - Changing the operator API contract or introducing endpoints not observed in
   the mobile application.
@@ -90,6 +102,8 @@ existing on-demand and recovery paths when keep-warm is off.
 
 - PATCHing a named source;
 - listing registered streams and their producer/consumer metadata;
+- listing manager-owned go2rtc preloads;
+- enabling and disabling preload for a named stream;
 - deleting a named stream;
 - building authenticated API requests;
 - building credential-free diagnostic RTSP addresses.
@@ -108,6 +122,7 @@ policy and mutable state for `eg_<camera_id>`:
 - last successful refresh time and next due time;
 - failure count and retry deadline;
 - last observed go2rtc presence/consumer state;
+- last observed preload and active-producer state;
 - pending cleanup for streams that still have consumers.
 
 The manager is the only component allowed to write operator camera sources to
@@ -136,14 +151,15 @@ deterministically tuned recovery state machine.
 `ElektronnyGorodRtspUrlsSensor` reads manager state rather than inferring
 success from coordinator data.
 
-- `native_value`: number of eligible streams that were present at the latest
-  reconcile and successfully refreshed within the operator TTL;
+- `native_value`: number of eligible streams that were present, preloaded, and
+  observed with an active producer at the latest reconcile;
 - `urls`: camera display name to credential-free stable RTSP address;
 - per-camera last-success timestamps and sanitized status;
 - no operator URL, token, password, or Authorization header.
 
-The sensor reports registration freshness, not proof that a remote client can
-decode video. End-to-end playback is covered by production acceptance.
+The sensor reports the latest registration, preload, and producer observation,
+not proof that a remote client can decode video. End-to-end playback is covered
+by production acceptance.
 
 ## Lifecycle
 
@@ -163,12 +179,17 @@ Starting it after entity setup and visibility synchronization ensures registry
 entries exist and eligibility is correct on the first run.
 
 On unload, the registry listener, reconcile timer, scheduled camera callbacks,
-and pending manager tasks are cancelled. A reload creates one fresh manager;
-no task or state is shared across config-entry lifetimes.
+and pending manager tasks are cancelled, then manager-owned preloads are
+removed best-effort. A reload creates one fresh manager; no task or state is
+shared across config-entry lifetimes. Startup reconciliation adopts eligible
+preloads left by an unclean HA shutdown and removes stale preloads when the
+option is now off or the camera is ineligible.
 
 ## Data flows
 
-All write reasons use one operation:
+All write reasons mint and register through one operation. An eligible camera
+also acquires a persistent go2rtc preload consumer when it does not already
+have one:
 
 ```text
 background due | HA open | A-71 recovery
@@ -179,9 +200,18 @@ background due | HA open | A-71 recovery
        name="eg_<camera_id>",
        src="ffmpeg:<operator-url>#video=copy#audio=aac#audio=opus"
      )
+  -> if eligible and preload is absent:
+       Go2RtcClient.enable_preload(name="eg_<camera_id>")
   -> update per-camera success state
   -> return stable local RTSP address
 ```
+
+The order is mandatory: mint, then PATCH, then preload. Enabling preload before
+PATCH can consume an already-expired one-time URL, which live validation showed
+as `TLS EOF`. Once preload is active, periodic refresh performs PATCH only.
+go2rtc keeps the current producer connected; PATCH changes the URL used by its
+next reconnect without interrupting the current producer or external
+consumers.
 
 The refresh operation does not require the stream to exist before PATCHing.
 PATCH creates a missing in-memory stream or updates the source of an existing
@@ -207,18 +237,23 @@ would shift identical per-entity interval timers.
 
 After a successful background refresh, that camera is next due in 28:30. The
 manager schedules cameras independently, so one slow or failing camera does not
-delay the others.
+delay the others. The initial successful refresh also enables preload. Later
+scheduled refreshes do not re-arm an active preload because replacing its
+consumer would unnecessarily reconnect the producer.
 
 ### One-minute reconcile
 
-Once per minute the manager makes one local request for the complete go2rtc
-stream list and compares it with registry-derived desired state.
+Once per minute the manager requests the complete go2rtc stream list and the
+preload list, then compares both with registry-derived desired state.
 
-- Missing eligible stream: schedule a fresh operator URL and PATCH.
+- Missing eligible stream or preload: schedule the full fresh
+  mint/PATCH/preload chain.
+- Eligible stream with preload but no active producer: refresh its URL and
+  re-arm preload so recovery does not wait for an external viewer.
 - Newly eligible stream: schedule an initial refresh with bounded jitter.
-- Newly ineligible stream with no consumers: DELETE.
-- Newly ineligible stream with consumers: stop refresh, mark cleanup pending,
-  and DELETE after a later reconcile observes zero consumers.
+- Newly ineligible stream: DELETE its manager preload first. If no external
+  consumers remain, DELETE the stream; otherwise stop refresh, mark cleanup
+  pending, and delete after a later reconcile observes zero consumers.
 - Unknown/error response: preserve current streams and retry later.
 
 The registry update listener marks desired state dirty and schedules a prompt
@@ -226,7 +261,8 @@ reconcile. Config option changes continue to use normal config-entry reload.
 
 ## go2rtc write semantics
 
-Operator camera registration is PATCH-only.
+Operator camera source registration is PATCH-only. Preload lifecycle uses the
+dedicated go2rtc preload API.
 
 - PATCH updates an existing source without destroying its active producer and
   consumers.
@@ -236,6 +272,12 @@ Operator camera registration is PATCH-only.
   duplicated YAML and plaintext stale operator tokens (A-84).
 - Because PATCH state is intentionally in-memory, the one-minute reconcile is
   responsible for recovery after a go2rtc restart.
+- `PUT /api/preload?src=<name>` is allowed only after a fresh successful PATCH
+  and only when preload is absent or the producer is inactive.
+- `DELETE /api/preload?src=<name>` removes manager background traffic before
+  stream cleanup.
+- go2rtc persists only the stable preload name/query. The operator source URL
+  remains in-memory and is never written through the config API.
 
 If a deployment does not support PATCH, keep-warm fails visibly and safely for
 that camera; it does not fall back to a disruptive PUT.
@@ -244,11 +286,16 @@ that camera; it does not fall back to a disruptive PUT.
 
 Failures are isolated per camera. A failed refresh:
 
-- leaves the previous go2rtc stream untouched;
+- leaves the previous go2rtc stream untouched when mint or PATCH fails;
 - records a sanitized error category, not exception text containing a URL;
 - retries after 15 seconds, then 30 seconds, then 60 seconds;
 - caps subsequent retry spacing at five minutes;
 - resets retry state after success and resumes the 28:30 interval.
+
+A preload failure leaves the freshly PATCHed stream registered but does not
+mark the camera ready. It enters the same per-camera retry schedule so the next
+attempt mints another one-time URL before trying preload again. Cleanup treats
+missing preload as idempotent success.
 
 Setup and coordinator refresh do not fail because go2rtc is temporarily down.
 Manager task boundaries catch unexpected exceptions, log a sanitized camera ID
@@ -260,7 +307,8 @@ and exception type, and keep the scheduler alive.
   Authorization headers, SMS codes, or full config-entry data.
 - Rebrand transport exceptions with `from None` before they cross the transport
   boundary, because aiohttp errors can embed the requested URL.
-- Do not persist operator URLs through go2rtc PUT/config APIs.
+- Do not persist operator URLs through go2rtc PUT/config APIs. Persisting a
+  stable `eg_<camera_id>` preload name is allowed and contains no credential.
 - Diagnostic attributes contain stable local RTSP addresses without embedded
   credentials.
 - Retain the warning that the go2rtc RTSP listener may be unauthenticated and
@@ -274,16 +322,20 @@ and exception type, and keep the scheduler alive.
 2. Registry eligibility matrix across main option, `disabled_by`, `hidden_by`,
    and the hidden-camera option.
 3. Startup jitter and independent 28:30 rescheduling from per-camera success.
-4. PATCH of an absent stream without a preceding per-stream GET.
-5. One-minute reconcile after simulated go2rtc state loss.
-6. Cleanup immediately at zero consumers and deferred cleanup with consumers.
-7. Per-camera concurrency dedup across background, HA open, and recovery.
-8. Retry sequence and reset after success.
-9. Unload cleanup of timers, listeners, and tasks.
-10. No secret material in logs or diagnostic state on every failure path.
-11. Diagnostic sensor reflects manager success/presence rather than desired
+4. Initial mint/PATCH/preload ordering and no preload before a fresh URL.
+5. Scheduled refresh PATCHes without replacing an active preload consumer.
+6. PATCH of an absent stream without a preceding per-stream GET.
+7. One-minute reconcile restores both stream and preload after simulated
+   go2rtc state loss.
+8. Cleanup removes preload first, then deletes immediately at zero external
+   consumers or defers with external consumers.
+9. Per-camera concurrency dedup across background, HA open, and recovery.
+10. Retry sequence and reset after success, including preload failure.
+11. Unload removes manager preloads, timers, listeners, and tasks.
+12. No secret material in logs or diagnostic state on every failure path.
+13. Diagnostic sensor reflects active producer/preload state rather than desired
     coordinator entries alone.
-12. Existing camera auto-recovery, call-camera concurrency, go2rtc audio, config
+14. Existing camera auto-recovery, call-camera concurrency, go2rtc audio, config
     flow, and visibility suites remain green.
 
 Tests must exercise the complete internal chain through a fake go2rtc HTTP
@@ -296,14 +348,14 @@ Before changing the A-71 write boundary, capture a short baseline of active
 consumer refresh/recovery behavior. After implementation, repeat it to show
 behavioral equivalence for active HA streams.
 
-The seven acceptance scenarios in this document are merge-blocking. In
+The eight acceptance scenarios in this document are merge-blocking. In
 particular, the idle-over-one-hour external RTSP test and go2rtc restart test
 must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 
 ## Rollout and compatibility
 
-- Implement on a new branch from current `master`; do not cherry-pick the old
-  keep-warm implementation.
+- Continue the replacement branch and PR #71; do not revive or cherry-pick the
+  old keep-warm implementation.
 - Manually reuse its runtime evidence, option keys, translations, diagnostic
   sensor concept, security requirements, and useful test cases.
 - Default-off options make the change inert for existing users.
@@ -314,18 +366,18 @@ must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 
 ## Documentation status
 
-- ADR-0014 records manager ownership and PATCH-only lifecycle.
+- ADR-0014 records manager ownership; it must be revised from PATCH-only
+  registration to PATCH plus dedicated preload lifecycle.
 - Audit A-96 separates automated implementation from live acceptance and
   cross-references A-82/A-84.
-- Project map, architecture, testing, roadmap and changelog describe the new
-  boundary; ADR-0009 remains active for proven A-71 behavior.
+- Project map, architecture, testing, roadmap and changelog must be synchronized
+  with the preload revision; ADR-0009 remains active for proven A-71 behavior.
 - PR #61 stays open until the replacement passes production acceptance; its
   opt-in/diagnostic concepts are credited and retained.
 
 ## Deferred work
 
 - Per-camera include/exclude controls.
-- Continuous producer preload.
 - A complete extraction of the A-71 state machine (A-83).
 - go2rtc-side dynamic `echo:`/`exec:` sources, which remain blocked in the
   tested add-on and would require operator authorization outside HA.
