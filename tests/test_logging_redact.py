@@ -165,7 +165,7 @@ def test_redact_path_masks_auth_identifiers(path, expected):
     "/rest/v3/subscriber-places",
     "/rest/v1/places/12345/accesscontrols",
     "/api/mh-payment/mobile/v1/finance",
-    "/rest/v1/forpost/cameras/5593590/video",
+    "/rest/v1/forpost/cameras/1013/video",
 ])
 def test_redact_path_passes_non_auth_unchanged(path):
     """Не-auth URLs не маскируются: place_id, camera_id и т.д. — internal

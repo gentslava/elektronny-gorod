@@ -1,6 +1,7 @@
 Status: Active
 Owner: Home Assistant Expert Agent
-Last reviewed: 2026-07-15 (Bronze current state reconciled; Silver gaps refreshed)
+Last reviewed: 2026-07-16 (diagnostic RTSP entity category and manager
+lifecycle tests reconciled; declared scale unchanged)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -95,7 +96,7 @@ redaction и тесты config flow/миграций присутствуют. �
 | Правило | Статус |
 |---|---|
 | `devices` (`device_info`) | ✅ есть у основных entity |
-| `entity-category` | 🔴 не используются |
+| `entity-category` | 🟡 diagnostic category используется для external RTSP readiness sensor; остальные entity не аудированы под это правило |
 | `entity-device-class` | ✅ balance/duration/problem классы заданы |
 | `entity-translations` | ✅ `strings.json` + ru/en |
 | `discovery` (если применимо) | n/a (нет zeroconf/SSDP) |
@@ -129,7 +130,7 @@ redaction и тесты config flow/миграций присутствуют. �
 |---|---|---|
 | Bronze | Shipped | перед внешней подачей: brands + removal docs re-check |
 | Bronze → Silver | Итерация 3 | native reauth, rule re-check, documentation, coverage evidence |
-| Silver → Gold | Будущее | entity_category, dynamic devices, repairs |
+| Silver → Gold | Будущее | entity_category audit beyond RTSP diagnostics, dynamic devices, repairs |
 | Gold → Platinum | Дальнее будущее | strict typing, 100% coverage |
 
 ## Принцип

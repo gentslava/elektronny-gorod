@@ -1,10 +1,10 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-07-16 (durable history entry/source isolation, opt-in
-camera polling and partial frontend refresh regressions)
+Last reviewed: 2026-07-16 (go2rtc preload/producer lifecycle regressions,
+549-test backend suite and revised live acceptance synchronized)
 
 Source files:
-- `tests/**` (47 test-модулей + `conftest.py`)
+- `tests/**` (54 test-модуля + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
@@ -33,13 +33,13 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **432 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`) |
-| Test modules | 47 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **549 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-07-16; 131 focused preload/manager tests + 151 related regressions) |
+| Test modules | 54 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
-| Camera / go2rtc | lifecycle, auto-recovery, concurrency, PATCH-first upsert, call-stream teardown |
+| Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Coverage | Процент намеренно не фиксируется без свежего coverage-run; каноническая команда приведена ниже |
@@ -56,6 +56,7 @@ tests/
 ├── test_init.py / test_config_flow.py / test_options_flow_clear_creds.py
 ├── test_http.py / test_api_push.py / test_api_camera.py / test_api_history.py / test_api_sip.py / test_diagnostics.py
 ├── test_camera_*.py / test_call_camera.py / test_go2rtc_*.py
+├── test_stream_manager*.py / test_sensor_rtsp_urls.py / test_config_flow_keep_warm.py
 ├── test_event.py / test_history.py / test_history_ws.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
 ├── test_sip_*.py / test_uplink_ws.py
 └── entity, visibility, balance, DND, helpers и migration regressions
@@ -100,6 +101,11 @@ inventory всегда берутся из `tests/test_*.py`; новые сет�
 - `test_options_enable_go2rtc_valid_url` — happy path.
 - `test_options_enable_go2rtc_invalid_url` → errors.
 - `test_options_disable_go2rtc` → CREATE_ENTRY (options).
+
+External RTSP options (`test_config_flow_keep_warm.py`): both flags default
+false; hidden publication depends on the main option; skip/disable normalizes
+both to false; initial and options flows persist both keys without changing
+config-entry `VERSION`.
 
 ### 3. Init / migrations (`test_init.py`)
 
@@ -156,13 +162,61 @@ inventory всегда берутся из `tests/test_*.py`; новые сет�
   rejection, overlap dedup, partial-refresh feed preservation, date groups,
   time formatting and RU/EN labels.
 
-### 7. go2rtc (`test_go2rtc_validate.py`, `test_go2rtc_upsert.py`, `test_go2rtc_audio.py`)
+### 7. go2rtc and external RTSP manager
+
+Files: `test_go2rtc_validate.py`, `test_go2rtc_upsert.py`,
+`test_go2rtc_client.py`, `test_go2rtc_audio.py`, `test_stream_manager.py`,
+`test_stream_manager_reconcile.py`, `test_stream_manager_scheduler.py`,
+`test_stream_manager_lifecycle.py`, `test_sensor_rtsp_urls.py`.
 
 - `test_validate_go2rtc_happy_path` — GET 200 + PUT 200 + DELETE cleanup.
 - `test_validate_go2rtc_unreachable` — connection error.
 - `test_validate_go2rtc_streams_api_failed` — PUT 500.
 - `test_normalize_base_url_strips_slash`.
 - `test_derive_rtsp_host`.
+- Operator-camera source writes remain PATCH-only: errors never fall back to
+  streams PUT. Dedicated preload list/PUT/DELETE stores only stable names;
+  parsed producer snapshots strip the raw source URL.
+- Initial operator mint + PATCH + preload is deduplicated across HA-open/
+  background/recovery reasons and uses HA-managed task lifecycle.
+- Active-preload refresh performs mint+PATCH without replacing its consumer;
+  preload failure retries only after minting another one-time URL.
+- Publishability/eligibility matrix covers main-off, disabled, hidden and
+  hidden-sub-option. Disabled always wins; hidden policy controls only
+  background publication and preload ownership.
+- Before visibility sync, background work for an API-hidden camera performs
+  zero operator mint, go2rtc PATCH and preload calls; a persisted user-shown
+  override remains publishable. Explicit HA-open/recovery for an enabled
+  hidden camera performs lazy mint/PATCH without preload both during setup and
+  after manager startup, even when background publication is off.
+- Scheduler covers deterministic cold-start jitter, short 0.5-second
+  interactive policy-on ramp, 28:30 success cadence, 15..300s retry and
+  idempotent stop.
+- Reconcile restores missing streams/preloads after go2rtc restart, re-arms an
+  inactive producer within the next minute and removes preload before deciding
+  whether external consumers require deferred stream deletion.
+- Config-entry lifecycle proves visibility sync precedes manager start;
+  option-off startup removes preloads and idle streams but preserves active
+  viewers, while unload leaves no task/listener/timer ownership.
+- Compatible publication-option saves update the existing manager without
+  config-entry reload, preload disable/enable, PATCH or operator mint. Main
+  off cleans in place, main on schedules missing cameras, and transport/auth
+  changes retain the reload fallback.
+- A late background mint cannot PATCH after an option-off policy transition;
+  if PATCH was already running, the existing consumer-aware cleanup path is
+  retained without adding a separate on-demand polling loop.
+- Stop waits for a running reconcile and removes a pending preload whose
+  request was cancelled after it may already have reached go2rtc.
+- Entity proactive refresh skips background-eligible manager streams so a
+  preload consumer cannot synchronize every camera into a 28:30 burst.
+- Diagnostic sensor counts only eligible+present+preloaded+active+fresh streams
+  and excludes operator URL, token, password and authenticated RTSP URL.
+
+Mocked tests prove policy and orchestration, not end-to-end playback. Before
+merge, run the nine revised live scenarios in
+[`go2rtc-stream-manager/design.md`](../features/go2rtc-stream-manager/design.md):
+especially `>1h idle -> external RTSP without HA-open`, active consumer across
+PATCH and go2rtc restart recovery within 60 seconds.
 
 ### 8. Helpers (`test_helpers.py`)
 
@@ -214,7 +268,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 | HTTP-вызовы к API | `aioresponses` или `aiohttp_mock` |
 | HA core | `pytest-homeassistant-custom-component` (предоставляет `hass`, `MockConfigEntry`) |
 | `async_setup_entry` для config-flow тестов | как в текущем `conftest.py` через patch |
-| go2rtc | `aioresponses` |
+| go2rtc | direct mocked aiohttp context managers for exact method/query/error assertions |
 | Время / UUID | `freezegun`, `unittest.mock.patch("uuid.uuid4")` |
 
 ## Acceptance Coverage
@@ -227,13 +281,15 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 432 passed.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 549 passed (2026-07-16).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.
 - [x] `tests/test_config_flow.py` — реальные PHC-тесты, scaffold-stub отсутствует.
 - [x] Изменённый SIP-контракт покрыт на register/protocol/manager/controller слоях.
+- [ ] External RTSP A-96 не merge-ready до девяти production scenarios,
+  записанных в existing feature design; зелёный mocked suite не заменяет gate.
 
 ## Risks
 

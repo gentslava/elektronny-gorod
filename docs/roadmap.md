@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-15 (9.9.0 AVD parity backlog; completed DND/finance/
-realtime statuses reconciled; history/archive/guest/key/camera plans linked)
+Last reviewed: 2026-07-16 (external RTSP stream-manager implementation and
+live acceptance gate added; A-82/A-84 status reconciled)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -170,9 +170,9 @@ Static-only write paths не переходят в код без decrypted HAR (
 - [x] **A-64** ✅ Reload cascade + user override (PR #43). Migration flag
   в `entry.data`, sync через `entity.options[DOMAIN]` track per-entity
   user_shown override.
-- [x] **A-66** ✅ go2rtc stale producer URL после long idle (PR #46).
-  `Stream.update_source()` после каждого PUT в go2rtc — forces worker
-  restart с обновлённым ffmpeg producer. Избегает 10-30s retry-backoff.
+- [x] **A-66** ✅ Historical HA Stream stale-source recovery (PR #46),
+  позже расширено A-71. В stream-manager ветке camera больше не
+  владеет write boundary; recovery делегирует PATCH-only manager'у.
 - [x] **A-65** ✅ Log throttling от broken cameras (PR #49). Per-entity
   `_consecutive_empty_count` counter в `ElektronnyGorodCamera`. 1й fail
   → WARNING, 2й+ подряд → DEBUG. Counter сбрасывается на первый success.
@@ -197,6 +197,54 @@ Static-only write paths не переходят в код без decrypted HAR (
   проверены runtime'ом на production-сервере, ни один не убрал видимое
   мигание видео. Hypothesis «ffmpeg cold-start race» оказалась неверной
   (нужна другая diagnostic-сессия). Закрыт без PR'а.
+
+#### External RTSP after idle (A-82/A-84/A-96, ADR-0014)
+
+- [x] **Revised automated implementation** — live run опроверг PATCH-only
+  registration: пять lazy streams возвращали 404/EOF. Per-entry manager теперь
+  выполняет initial mint→PATCH→preload, сохраняет non-disruptive 28:30 PATCH,
+  проверяет stream/preload/active producer раз в минуту, снимает preload перед
+  consumer-aware cleanup; option-off startup удаляет preload и idle stream,
+  сохраняя active viewer. Diagnostic sensor требует
+  preloaded+active+fresh; source writes остаются PATCH-only.
+- [x] **Hidden publication pre-mint gate** — live options reload показал
+  transient hidden names и более долгую initialization: setup-time
+  `stream_source()` успевал сделать operator mint/PATCH до visibility sync.
+  Background-excluded hidden cameras теперь делают zero mint/PATCH/preload;
+  API-hidden startup hint не перекрывает persistent user-shown override.
+  Explicit HA-open enabled hidden camera во время или после startup лениво
+  делает mint/PATCH без preload и работает на время активного viewer.
+- [x] **Policy update without producer churn** — publication checkboxes больше
+  не вызывают full config-entry reload. Existing eligible preloads и HA
+  consumers сохраняются; excluded cleanup и newly eligible scheduling делает
+  текущий manager. Live follow-up убрал ошибочный cold-start jitter из ручного
+  включения: первая missing camera запускается сразу, следующие через 0.5s;
+  transport/auth changes сохраняют normal reload fallback.
+- [x] **Independent review lifecycle triage** — stop ждёт running reconcile и
+  снимает pending preload после cancellation ambiguity; entity proactive timer
+  не превращает preload consumers в синхронный 28:30 burst. Теоретические
+  per-camera locks/attach lease/main-off polling/removed-snapshot cleanup не
+  приняты без production evidence и дополнительной фоновой сети.
+- [x] **Startup-grid production follow-up** — live на `3a3ad02`: explicit
+  hidden HA-open во время setup выполняет mint/PATCH вместо возврата
+  незарегистрированного RTSP name; background gate сохранён. Proxied EOF recovery больше не вызывает
+  `Stream.update_source()` с тем же URL и не оставляет worker через
+  fast-restart/idle-stop race.
+- [x] **A-82** 🟢 resolved-in-branch: `camera.py` больше не владеет
+  go2rtc HTTP transport/writes; merge reconciliation открыт.
+- [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles
+  проверить, что repeated PATCH не раздувает persistent go2rtc YAML.
+- [ ] **A-96 repeat production acceptance (merge gate)** — пять проблемных
+  streams получают active preload и переживают idle без HA-open; active
+  consumer переживает refresh; restart restore ≤60s; disabled/hidden cleanup;
+  concurrent reasons dedup; option-off удаляет idle registrations, unload
+  снимает background consumers; main/hidden toggle не reload-ит integration,
+  не обнуляет existing eligible producers и никогда даже кратковременно не
+  добавляет excluded hidden names фоновым path; explicit hidden HA-open во
+  время и после setup работает без persistent preload и cleanup-ится после
+  viewer; закрытие HA UI не оставляет orphan consumer после EOF recovery.
+- [ ] После девяти live scenarios записать evidence в существующем feature
+  design, merge replacement branch и только потом close/supersede PR #61.
 
 #### Code quality
 

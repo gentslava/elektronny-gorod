@@ -43,14 +43,14 @@ async def test_active_call_media_returns_camera_and_bridge():
     c = DoorbellCallController(
         _hass(), api, lambda: "TOK",
         go2rtc=Go2RtcConfig("http://g:1984", {}, "127.0.0.1"),
-        camera_resolver=lambda ac: "5593590" if ac == "AC" else None,
+        camera_resolver=lambda ac: "1013" if ac == "AC" else None,
     )
     c.handle_signal(_ring(ac="AC"))
     bridge = MagicMock()
     c._manager = MagicMock(); c._manager.in_call = True
     c._bridge = bridge
     cam_id, br = c.active_call_media()
-    assert cam_id == "5593590" and br is bridge
+    assert cam_id == "1013" and br is bridge
 
 
 def test_active_call_media_none_when_no_call():
@@ -153,11 +153,11 @@ async def test_stream_source_none_without_active_call():
 
 async def test_stream_source_builds_fresh_combined_and_returns_rtsp():
     bridge = MagicMock(); bridge.go2rtc_src = "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus"
-    c = MagicMock(); c.active_call_media.return_value = ("5593590", bridge)
+    c = MagicMock(); c.active_call_media.return_value = ("1013", bridge)
     doorbell = MagicMock()
-    doorbell.stream_source = AsyncMock(return_value="rtsp://127.0.0.1:8554/eg_5593590")
+    doorbell.stream_source = AsyncMock(return_value="rtsp://127.0.0.1:8554/eg_1013")
     upsert = AsyncMock()
-    cam = _cam(c, lambda cid: doorbell if cid == "5593590" else None)
+    cam = _cam(c, lambda cid: doorbell if cid == "1013" else None)
     with patch(f"{_CC}.upsert_audio_stream", new=upsert), patch(
         f"{_CC}.async_get_clientsession", return_value=MagicMock()
     ):
@@ -167,7 +167,7 @@ async def test_stream_source_builds_fresh_combined_and_returns_rtsp():
     # eg_intercom_call собран: свежее видео (copy) + аудио моста
     srcs = upsert.await_args.args[2]
     assert srcs == [
-        "rtsp://127.0.0.1:8554/eg_5593590#video=copy",
+        "rtsp://127.0.0.1:8554/eg_1013#video=copy",
         "ffmpeg:http://1.2.3.4:40020#audio=aac#audio=opus",
     ]
     assert url == "rtsp://127.0.0.1:8554/eg_intercom_call"

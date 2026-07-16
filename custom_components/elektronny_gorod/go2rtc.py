@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import asyncio
-import uuid
 import base64
+import uuid
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from typing import Any
+from urllib.parse import quote, urlencode
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from yarl import URL
@@ -16,6 +17,7 @@ from .const import GO2RTC_RTSP_PORT, LOGGER
 # go2rtc собран без RTSP) — раньше юзер узнавал только при попытке
 # стриминга. Probe — 3с timeout, чтобы не висеть на медленных сетях.
 RTSP_PROBE_TIMEOUT_SEC = 3.0
+_STREAM_API_TIMEOUT = ClientTimeout(total=10)
 
 
 @dataclass(frozen=True)
@@ -23,6 +25,24 @@ class Go2RtcValidationResult:
     ok: bool
     error: str = ""
     rtsp_host: str | None = None
+
+
+@dataclass(frozen=True)
+class Go2RtcStreamInfo:
+    """Sanitized producer/consumer metadata for one go2rtc stream."""
+
+    producers: tuple[dict[str, Any], ...]
+    consumer_count: int
+    producer_active: bool
+
+
+class Go2RtcRequestError(RuntimeError):
+    """Sanitized go2rtc transport failure safe to cross module boundaries."""
+
+    def __init__(self, operation: str, category: str) -> None:
+        super().__init__(f"go2rtc {operation} failed: {category}")
+        self.operation = operation
+        self.category = category
 
 
 def normalize_base_url(value: str | None) -> str:
@@ -37,6 +57,231 @@ def derive_rtsp_host(base_url: str) -> str | None:
         return host or None
     except Exception:
         return None
+
+
+def _parse_stream_info(payload: Any) -> Go2RtcStreamInfo | None:
+    """Parse one go2rtc stream object without retaining source URLs."""
+    if not isinstance(payload, dict) or not payload:
+        return None
+    raw_producers = payload.get("producers")
+    producer_items = (
+        tuple(item for item in raw_producers if isinstance(item, dict))
+        if isinstance(raw_producers, list)
+        else ()
+    )
+    producer_active = any(
+        any(key != "url" for key in item) for item in producer_items
+    )
+    producers = tuple(
+        (
+            {"bytes_recv": item["bytes_recv"]}
+            if isinstance(item.get("bytes_recv"), int)
+            else {}
+        )
+        for item in producer_items
+    )
+    raw_consumers = payload.get("consumers")
+    consumer_count = len(raw_consumers) if isinstance(raw_consumers, list) else 0
+    return Go2RtcStreamInfo(
+        producers=producers,
+        consumer_count=consumer_count,
+        producer_active=producer_active,
+    )
+
+
+class Go2RtcClient:
+    """Sanitized transport for integration-owned operator camera streams."""
+
+    def __init__(
+        self,
+        *,
+        base_url: str,
+        rtsp_host: str,
+        session: ClientSession,
+        username: str | None = None,
+        password: str | None = None,
+    ) -> None:
+        self.base_url = normalize_base_url(base_url)
+        self.rtsp_host = rtsp_host
+        self._session = session
+        self._username = username
+        self._password = password
+        self._headers = go2rtc_auth_headers(username, password)
+
+    def matches_configuration(
+        self,
+        *,
+        base_url: str,
+        rtsp_host: str,
+        username: str | None,
+        password: str | None,
+    ) -> bool:
+        """Return whether an options update can reuse this transport."""
+        return (
+            self.base_url == normalize_base_url(base_url)
+            and self.rtsp_host == rtsp_host
+            and (self._username or None) == (username or None)
+            and (self._password or None) == (password or None)
+        )
+
+    async def async_patch_stream(self, name: str, src: str) -> None:
+        """Create/update an in-memory stream without destructive PUT fallback."""
+        query = urlencode({"name": name, "src": src})
+        url = f"{self.base_url}/api/streams?{query}"
+        try:
+            async with self._session.patch(
+                url,
+                headers=self._headers,
+                timeout=_STREAM_API_TIMEOUT,
+            ) as response:
+                if response.status in (200, 201, 204):
+                    return
+                raise Go2RtcRequestError(
+                    "patch", f"http_{response.status}"
+                ) from None
+        except Go2RtcRequestError:
+            raise
+        except asyncio.TimeoutError:
+            raise Go2RtcRequestError("patch", "timeout") from None
+        except ClientError:
+            raise Go2RtcRequestError("patch", "client_error") from None
+
+    async def async_list_streams(self) -> dict[str, Go2RtcStreamInfo]:
+        """Return one sanitized snapshot of all go2rtc streams."""
+        payload = await self._async_get_json(
+            f"{self.base_url}/api/streams", operation="list"
+        )
+        if not isinstance(payload, dict):
+            raise Go2RtcRequestError("list", "invalid_response") from None
+        result: dict[str, Go2RtcStreamInfo] = {}
+        for name, raw_info in payload.items():
+            if not isinstance(name, str):
+                continue
+            info = _parse_stream_info(raw_info)
+            if info is not None:
+                result[name] = info
+        return result
+
+    async def async_get_stream(self, name: str) -> Go2RtcStreamInfo | None:
+        """Return sanitized metadata for one named stream, if it exists."""
+        query = urlencode({"src": name})
+        payload = await self._async_get_json(
+            f"{self.base_url}/api/streams?{query}", operation="get"
+        )
+        return _parse_stream_info(payload)
+
+    async def async_list_preloads(self) -> set[str]:
+        """Return the stable names of all active go2rtc preloads."""
+        payload = await self._async_get_json(
+            f"{self.base_url}/api/preload",
+            operation="preload_list",
+        )
+        if not isinstance(payload, dict):
+            raise Go2RtcRequestError(
+                "preload_list", "invalid_response"
+            ) from None
+        return {name for name in payload if isinstance(name, str)}
+
+    async def async_enable_preload(self, name: str) -> None:
+        """Attach a persistent go2rtc consumer to a named stream."""
+        await self._async_mutate_preload(
+            name,
+            enable=True,
+        )
+
+    async def async_disable_preload(self, name: str) -> None:
+        """Remove a named preload; an already missing preload is clean."""
+        await self._async_mutate_preload(
+            name,
+            enable=False,
+        )
+
+    async def async_delete_stream(self, name: str) -> None:
+        """Delete a named stream; missing streams are already clean."""
+        query = urlencode({"src": name})
+        url = f"{self.base_url}/api/streams?{query}"
+        try:
+            async with self._session.delete(
+                url,
+                headers=self._headers,
+                timeout=_STREAM_API_TIMEOUT,
+            ) as response:
+                if response.status in (200, 201, 204, 404):
+                    return
+                raise Go2RtcRequestError(
+                    "delete", f"http_{response.status}"
+                ) from None
+        except Go2RtcRequestError:
+            raise
+        except asyncio.TimeoutError:
+            raise Go2RtcRequestError("delete", "timeout") from None
+        except ClientError:
+            raise Go2RtcRequestError("delete", "client_error") from None
+
+    def rtsp_url(self, name: str, *, include_credentials: bool) -> str:
+        """Build a stable local RTSP URL, optionally with encoded credentials."""
+        auth = ""
+        if include_credentials and self._username and self._password:
+            username = quote(self._username, safe="")
+            password = quote(self._password, safe="")
+            auth = f"{username}:{password}@"
+        stream_name = quote(name, safe="")
+        return f"rtsp://{auth}{self.rtsp_host}:{GO2RTC_RTSP_PORT}/{stream_name}"
+
+    async def _async_mutate_preload(
+        self,
+        name: str,
+        *,
+        enable: bool,
+    ) -> None:
+        """Enable/disable preload without leaking request or response data."""
+        query = urlencode({"src": name})
+        url = f"{self.base_url}/api/preload?{query}"
+        operation = "preload_enable" if enable else "preload_disable"
+        request = self._session.put if enable else self._session.delete
+        accepted = (200, 201, 204) if enable else (200, 201, 204, 404)
+        try:
+            async with request(
+                url,
+                headers=self._headers,
+                timeout=_STREAM_API_TIMEOUT,
+            ) as response:
+                if response.status in accepted:
+                    return
+                raise Go2RtcRequestError(
+                    operation, f"http_{response.status}"
+                ) from None
+        except Go2RtcRequestError:
+            raise
+        except asyncio.TimeoutError:
+            raise Go2RtcRequestError(operation, "timeout") from None
+        except ClientError:
+            raise Go2RtcRequestError(operation, "client_error") from None
+
+    async def _async_get_json(self, url: str, *, operation: str) -> Any:
+        """GET JSON while preventing request/body details from escaping."""
+        try:
+            async with self._session.get(
+                url,
+                headers=self._headers,
+                timeout=_STREAM_API_TIMEOUT,
+            ) as response:
+                if response.status != 200:
+                    raise Go2RtcRequestError(
+                        operation, f"http_{response.status}"
+                    ) from None
+                try:
+                    return await response.json()
+                except (TypeError, ValueError):
+                    raise Go2RtcRequestError(
+                        operation, "invalid_response"
+                    ) from None
+        except Go2RtcRequestError:
+            raise
+        except asyncio.TimeoutError:
+            raise Go2RtcRequestError(operation, "timeout") from None
+        except ClientError:
+            raise Go2RtcRequestError(operation, "client_error") from None
 
 
 async def _probe_rtsp_port(host: str, port: int, timeout: float) -> bool:

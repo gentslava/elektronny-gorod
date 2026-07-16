@@ -34,10 +34,18 @@ CONF_GO2RTC_BASE_URL = "go2rtc_base_url"
 CONF_GO2RTC_RTSP_HOST = "go2rtc_rtsp_host"
 CONF_GO2RTC_USERNAME = "go2rtc_username"
 CONF_GO2RTC_PASSWORD = "go2rtc_password"
+CONF_GO2RTC_KEEP_WARM: Final = "go2rtc_keep_warm"
+CONF_GO2RTC_KEEP_WARM_HIDDEN: Final = "go2rtc_keep_warm_hidden"
 
 DEFAULT_GO2RTC_BASE_URL = "http://127.0.0.1:1984"
 DEFAULT_GO2RTC_RTSP_HOST = "127.0.0.1"
+DEFAULT_GO2RTC_KEEP_WARM: Final = False
+DEFAULT_GO2RTC_KEEP_WARM_HIDDEN: Final = False
 GO2RTC_RTSP_PORT = 8554
+
+# Per-config-entry CameraStreamManager registry. Kept separate from
+# hass.data[DOMAIN][entry_id], whose public shape remains the coordinator.
+STREAM_MANAGER_DATA: Final = f"{DOMAIN}_stream_managers"
 
 CONF_OPERATOR_ID: Final = "operator_id"
 CONF_ACCOUNT_ID: Final = "account_id"

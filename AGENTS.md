@@ -35,8 +35,9 @@ PYTHONPATH=. .venv/bin/pytest tests/ --cov=custom_components/elektronny_gorod --
 ```
 
 Состояние тестов (актуально — см. [`testing/strategy.md`](docs/testing/strategy.md)
-и [`project-audit.md`](docs/audit/project-audit.md)): suite зелёный; есть gap-и
-по `config_flow.py`/`api.py`/`helpers.py` (трекаются как findings).
+и [`project-audit.md`](docs/audit/project-audit.md)): suite зелёный;
+config-flow/migrations и auth-crypto покрыты, остаются точечные gap-и
+`api.py`/coverage и live hardware/operator acceptance.
 
 CI на сегодня:
 
@@ -64,9 +65,10 @@ custom_components/elektronny_gorod/
 ├── api.py                 # REST-обёртка над myhome.proptech.ru
 ├── http.py                # низкоуровневый HTTP (shared async_get_clientsession)
 ├── _logging.py            # redact() + SENSITIVE_KEYS (ADR-0004)
-├── camera.py              # Camera entity + go2rtc upsert + auto-recovery (ADR-0009)
+├── camera.py              # Camera entity + A-71 recovery triggers (ADR-0009/0014)
+├── stream_manager.py      # per-entry owner eg_<camera_id>: PATCH/reconcile/retry
 ├── lock.py                # LockEntity (домофон)
-├── sensor.py              # Balance sensor + days-to-block
+├── sensor.py              # Balance/days-to-block/call-state + RTSP diagnostics
 ├── binary_sensor.py       # account_blocked
 ├── switch.py              # DND switches (intercom / management calls)
 ├── event.py               # doorbell call event (ADR-0011)
@@ -84,7 +86,7 @@ custom_components/elektronny_gorod/
 │   └── __init__.py
 ├── call_camera.py         # camera.intercom_call: видео+звук гостя, HA-native WebRTC
 ├── services.yaml          # сервисы answer / hangup (A-81)
-├── go2rtc.py              # validate_go2rtc + cleanup + upsert_audio_stream/remove_audio_stream
+├── go2rtc.py              # validation/audio helpers + PATCH-only Go2RtcClient
 ├── diagnostics.py         # redact-нутая diagnostics-выгрузка (TO_REDACT)
 ├── entity_migration.py    # стабильные unique_id + registry migration
 ├── helpers.py             # find, dedupe, hash_password (SHA1+MD5)

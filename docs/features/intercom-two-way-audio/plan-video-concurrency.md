@@ -58,7 +58,7 @@ timed out`, у части клиентов WebRTC не успевает деко
 
 **Evidence (прод 2026-07-08 20:57, ac=35604, call_id=`R.rgCE…`):**
 ```
-20:57:39.297 вызов ПРИНЯТ, active_call_media OK cam=5593592
+20:57:39.297 вызов ПРИНЯТ, active_call_media OK cam=<redacted>
 20:57:39.298 call-camera available False -> True
 20:57:39.965 SIP signal ended: call_id=R.rgCE… (active call_id=R.rgCE…)  ← FCM, +0.67с
 20:57:45.827 SIP: вызов завершён (BYE)                                    ← реальный SIP, +6с

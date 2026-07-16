@@ -1,16 +1,13 @@
-"""Unit tests для `_go2rtc_upsert_stream` (camera.py).
+"""Regression tests for PATCH-only operator-camera writes.
 
-Закрывают G-9: PATCH-first / PUT-fallback контракт (commit 93a47a8,
-A-71 v3.2) и S-A71-01 token-leak guard (commit 90cdbbc) до сих пор
-тестировались только через camera-level integration. Direct unit-тесты
-фиксируют контракт против go2rtc API.
+These tests retain the historical A-71/S-A71 security cases while moving the
+write boundary from camera.py to `Go2RtcClient`.
 
 Контракт:
-- PATCH идёт ПЕРВЫМ (idempotent на existing stream, не убивает producer).
-- PUT идёт fallback'ом только если PATCH вернул 4xx/5xx или ClientError.
-- При PUT failure — `RuntimeError` БЕЗ исходного exception body
-  (через `from None`) — guard против leak оператор-токена в traceback.
-- ClientTimeout 10s применяется к обоим запросам.
+- PATCH is the only write verb for `eg_<camera_id>` streams.
+- HTTP/client failures never fall back to destructive PUT.
+- Sanitized errors contain neither source/body nor underlying exception text.
+- ClientTimeout 10s applies to PATCH.
 
 NB: используем прямой mock session.* (не aioresponses) — см. соседний
 test_go2rtc_validate.py:module-docstring.
@@ -23,7 +20,10 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 from aiohttp import ClientConnectionError
 
-from custom_components.elektronny_gorod.camera import _go2rtc_upsert_stream
+from custom_components.elektronny_gorod.go2rtc import (
+    Go2RtcClient,
+    Go2RtcRequestError,
+)
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────
@@ -65,6 +65,25 @@ def _make_session(
     else:
         session.put = MagicMock(return_value=_AsyncCtxMgr(put_resp))
     return session
+
+
+async def _go2rtc_upsert_stream(
+    *,
+    session,
+    base_url: str,
+    stream_name: str,
+    src: str,
+    headers: dict | None = None,
+) -> None:
+    """Exercise the production client through the old test call shape."""
+    client = Go2RtcClient(
+        base_url=base_url,
+        rtsp_host="127.0.0.1",
+        session=session,
+    )
+    if headers is not None:
+        client._headers = headers
+    await client.async_patch_stream(stream_name, src)
 
 
 # ─── PATCH-first behaviour ──────────────────────────────────────────────
@@ -129,47 +148,50 @@ async def test_upsert_patch_sets_client_timeout() -> None:
     assert timeout.total == 10
 
 
-# ─── PUT fallback ───────────────────────────────────────────────────────
+# ─── No destructive PUT fallback ───────────────────────────────────────
 
 
-async def test_upsert_patch_4xx_falls_back_to_put() -> None:
-    """PATCH 405/404 (старая go2rtc без PATCH-support) → PUT."""
+async def test_upsert_patch_4xx_does_not_fall_back_to_put() -> None:
+    """PATCH 405 fails safely instead of destroying an existing producer."""
     session = _make_session(
         patch_resp=_make_resp(405), put_resp=_make_resp(200)
     )
-    await _go2rtc_upsert_stream(
-        session=session,
-        base_url="http://127.0.0.1:1984",
-        stream_name="eg_42",
-        src="ffmpeg:rtsp://x/y",
-    )
+    with pytest.raises(Go2RtcRequestError) as caught:
+        await _go2rtc_upsert_stream(
+            session=session,
+            base_url="http://127.0.0.1:1984",
+            stream_name="eg_42",
+            src="ffmpeg:rtsp://x/y",
+        )
     assert session.patch.called
-    assert session.put.called
+    assert not session.put.called
+    assert caught.value.category == "http_405"
 
 
-async def test_upsert_patch_client_error_falls_back_to_put() -> None:
+async def test_upsert_patch_client_error_does_not_fall_back_to_put() -> None:
     session = _make_session(
         patch_resp=ClientConnectionError("boom"),
         put_resp=_make_resp(200),
     )
-    await _go2rtc_upsert_stream(
-        session=session,
-        base_url="http://127.0.0.1:1984",
-        stream_name="eg_42",
-        src="ffmpeg:rtsp://x/y",
-    )
-    assert session.put.called
+    with pytest.raises(Go2RtcRequestError):
+        await _go2rtc_upsert_stream(
+            session=session,
+            base_url="http://127.0.0.1:1984",
+            stream_name="eg_42",
+            src="ffmpeg:rtsp://x/y",
+        )
+    assert not session.put.called
 
 
-# ─── PUT failure: token-leak guard (S-A71-01) ───────────────────────────
+# ─── PATCH failure: token-leak guard (S-A71-01) ────────────────────────
 
 
-async def test_upsert_put_4xx_raises_without_body_in_message() -> None:
-    """RuntimeError НЕ должен содержать response body (может echo'нуть src=<token>)."""
+async def test_upsert_patch_4xx_raises_without_body_in_message() -> None:
+    """Error must not contain response body or source query token."""
     session = _make_session(
         patch_resp=_make_resp(500), put_resp=_make_resp(403, text="forbidden_token_42")
     )
-    with pytest.raises(RuntimeError) as exc:
+    with pytest.raises(Go2RtcRequestError) as exc:
         await _go2rtc_upsert_stream(
             session=session,
             base_url="http://127.0.0.1:1984",
@@ -177,22 +199,23 @@ async def test_upsert_put_4xx_raises_without_body_in_message() -> None:
             src="ffmpeg:rtsp://x/y?token=SECRET",
         )
     msg = str(exc.value)
-    assert "HTTP 403" in msg
+    assert "http_500" in msg
     assert "forbidden_token_42" not in msg
     assert "SECRET" not in msg
 
 
-async def test_upsert_put_client_error_raises_without_exc_details() -> None:
-    """ClientError из PUT → RuntimeError с type name только, exception chain оборван.
+async def test_upsert_patch_client_error_raises_without_exc_details() -> None:
+    """ClientError becomes a sanitized category and suppresses its chain.
 
     S-A71-01: исходный `InvalidURL` etc. может содержать полный URL с токеном —
     `from None` рвёт chain, чтобы traceback оператора не вытащил.
     """
     session = _make_session(
-        patch_resp=_make_resp(500),
-        put_resp=ClientConnectionError("rtsp://x/y?token=SECRET timeout"),
+        patch_resp=ClientConnectionError(
+            "rtsp://x/y?token=SECRET timeout"
+        ),
     )
-    with pytest.raises(RuntimeError) as exc:
+    with pytest.raises(Go2RtcRequestError) as exc:
         await _go2rtc_upsert_stream(
             session=session,
             base_url="http://127.0.0.1:1984",
@@ -200,7 +223,7 @@ async def test_upsert_put_client_error_raises_without_exc_details() -> None:
             src="ffmpeg:rtsp://x/y?token=SECRET",
         )
     msg = str(exc.value)
-    assert "ClientConnectionError" in msg
+    assert "client_error" in msg
     assert "SECRET" not in msg
     # exception chain должен быть оборван
     assert exc.value.__cause__ is None

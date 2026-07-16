@@ -31,11 +31,11 @@ from custom_components.elektronny_gorod.const import (
 )
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
-# Anonymized — public-камеры на перекрёстках, не PII.
+# Synthetic IDs preserve only the captured visible/hidden cardinality.
 PLACE_ID = "1000000"
-VISIBLE_IDS = [5593570, 5593590, 5593592, 5593594, 5595471, 5595472, 5595470]
-HIDDEN_IDS = [5593568, 5593572, 5593574, 5593576, 5593578, 5593580,
-              5593582, 5593584, 5593586, 5593587, 5593589, 8861620]
+VISIBLE_IDS = [1002, 1013, 1014, 1015, 1017, 1018, 1016]
+HIDDEN_IDS = [1001, 1003, 1004, 1005, 1006, 1007,
+              1008, 1009, 1010, 1011, 1012, 1019]
 
 
 def _make_public_cameras_response() -> list[dict[str, Any]]:
@@ -242,7 +242,7 @@ async def test_camera_unhidden_in_app_gets_shown(
     hass: HomeAssistant, mock_api_real
 ):
     """Bi-directional: пользователь показал в приложении ранее скрытую camera
-    (например 5593578 «Площадь Ленина - Красный пр-кт») → она получает
+    (например synthetic camera 1006) → она получает
     hidden_by=None в HA на следующем reload."""
     entry = _make_config_entry()
     entry.add_to_hass(hass)

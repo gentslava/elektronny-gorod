@@ -62,6 +62,26 @@ def mock_remove_entry_api() -> Generator[MagicMock, None, None]:
         yield mock_cls
 
 
+@pytest.fixture(autouse=True)
+def mock_go2rtc_clientsession() -> Generator[MagicMock, None, None]:
+    """Avoid a real aiohttp resolver thread in integration setup tests.
+
+    ``async_setup_entry`` constructs the per-entry ``Go2RtcClient`` from HA's
+    shared session. On the legacy HA 2024.10/PHC test stack, merely creating
+    that session can leave aiohttp's ``_run_safe_shutdown_loop`` daemon thread
+    alive long enough for the strict ``verify_cleanup`` fixture to fail.
+
+    HTTP behaviour is covered with explicit fake sessions in the focused
+    go2rtc client tests; setup/lifecycle tests only need a transport object.
+    """
+    session = MagicMock()
+    with patch(
+        "custom_components.elektronny_gorod.async_get_clientsession",
+        return_value=session,
+    ):
+        yield session
+
+
 @pytest.fixture
 def mock_setup_entry() -> Generator[AsyncMock, None, None]:
     """Override async_setup_entry for config-flow only tests.

@@ -25,6 +25,10 @@
 | [0008](0008-shared-client-session.md) | Shared `ClientSession` через `async_get_clientsession(hass)` | accepted | 2026-05-24 |
 | [0009](0009-camera-stream-auto-recovery.md) | Camera stream auto-recovery при истечении operator session | accepted | 2026-05-27 |
 | [0010](0010-aidd-state-reconciliation.md) | AIDD state-management + reconciliation findings↔git | accepted | 2026-05-30 |
+| [0011](0011-doorbell-fcm-channel.md) | Realtime-канал вызова домофона через FCM | accepted | 2026-06-22 |
+| [0012](0012-register-on-ring.md) | Register-on-ring для SIP-вызова | accepted | 2026-06-23 |
+| [0013](0013-uplink-mic-transport.md) | Uplink-микрофон через HA WebSocket | accepted | 2026-06-24 |
+| [0014](0014-go2rtc-stream-manager.md) | Единый lifecycle go2rtc streams для внешнего RTSP | accepted | 2026-07-16 |
 
 ## Когда писать ADR
 
