@@ -94,6 +94,24 @@ async def test_refresh_mints_and_patches_complete_source() -> None:
     assert "TOKEN_1" not in repr(state)
 
 
+async def test_refresh_notifies_sanitized_state_subscribers() -> None:
+    manager, _, _ = _manager()
+    snapshots = []
+
+    unsubscribe = manager.async_subscribe(
+        lambda: snapshots.append(manager.camera_states())
+    )
+    await manager.async_refresh("100", "ha_open")
+
+    assert len(snapshots) == 1
+    assert snapshots[0][0].status == "ready"
+    assert "TOKEN_1" not in repr(snapshots)
+
+    unsubscribe()
+    await manager.async_refresh("100", "ha_open")
+    assert len(snapshots) == 1
+
+
 async def test_concurrent_reasons_share_one_operator_request_and_patch() -> None:
     started = asyncio.Event()
     release = asyncio.Event()

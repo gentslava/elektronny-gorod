@@ -107,6 +107,9 @@
       "days_to_block": {
         "name": "Дней до блокировки"
       },
+      "go2rtc_rtsp_urls": {
+        "name": "Опубликованные RTSP-потоки"
+      },
       "call_state": {
         "name": "Состояние вызова",
         "state": {

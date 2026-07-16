@@ -7,7 +7,7 @@ import hashlib
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant
@@ -20,6 +20,7 @@ from .const import (
     DEFAULT_GO2RTC_KEEP_WARM,
     DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
     DOMAIN,
+    LOGGER,
 )
 from .go2rtc import Go2RtcClient, Go2RtcRequestError, Go2RtcStreamInfo
 
@@ -98,6 +99,7 @@ class CameraStreamManager:
         self._registry_unsub: CALLBACK_TYPE | None = None
         self._prompt_reconcile_unsub: CALLBACK_TYPE | None = None
         self._reconcile_lock = asyncio.Lock()
+        self._listeners: set[Callable[[], None]] = set()
         self._started = False
 
     async def async_start(self) -> None:
@@ -156,6 +158,7 @@ class CameraStreamManager:
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._inflight.clear()
+        self._listeners.clear()
 
     async def async_refresh(
         self,
@@ -178,6 +181,22 @@ class CameraStreamManager:
         """Return a detached, credential-free snapshot for diagnostics."""
         state = self._states.get(str(camera_id))
         return replace(state) if state is not None else None
+
+    def camera_states(self) -> tuple[ManagedCameraState, ...]:
+        """Return sorted detached snapshots without source URLs or secrets."""
+        return tuple(
+            replace(self._states[camera_id])
+            for camera_id in sorted(self._states)
+        )
+
+    def async_subscribe(self, listener: Callable[[], None]) -> CALLBACK_TYPE:
+        """Subscribe to sanitized manager-state changes."""
+        self._listeners.add(listener)
+
+        def _unsubscribe() -> None:
+            self._listeners.discard(listener)
+
+        return _unsubscribe
 
     async def async_get_stream_info(
         self,
@@ -262,6 +281,7 @@ class CameraStreamManager:
                 await asyncio.gather(*cleanups)
             if refreshes:
                 await asyncio.gather(*refreshes)
+            self._notify_listeners()
 
     async def _async_refresh_owner(
         self,
@@ -317,6 +337,7 @@ class CameraStreamManager:
                     BACKGROUND_REFRESH_INTERVAL.total_seconds(),
                     base_monotonic=completed,
                 )
+            self._notify_listeners()
             return StreamRefreshResult(
                 url=self.client.rtsp_url(
                     state.stream_name,
@@ -359,6 +380,18 @@ class CameraStreamManager:
                 RETRY_MAX_SECONDS,
             )
             self._schedule_due(state.camera_id, retry_delay)
+        self._notify_listeners()
+
+    def _notify_listeners(self) -> None:
+        """Notify diagnostic consumers without letting them break refresh."""
+        for listener in tuple(self._listeners):
+            try:
+                listener()
+            except Exception as err:  # noqa: BLE001 - HA callback boundary
+                LOGGER.error(
+                    "go2rtc stream manager listener failed (%s)",
+                    type(err).__name__,
+                )
 
     async def _async_delete_stream(self, state: ManagedCameraState) -> None:
         try:

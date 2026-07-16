@@ -9,6 +9,7 @@ Slice 3c (Bronze polish):
 """
 from __future__ import annotations
 
+import time
 from datetime import datetime
 from typing import Any
 
@@ -21,6 +22,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -35,8 +37,14 @@ from .const import (
     DOMAIN,
     EVENT_CALL_STATE,
     LOGGER,
+    STREAM_MANAGER_DATA,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
+from .stream_manager import (
+    BACKGROUND_REFRESH_INTERVAL,
+    CameraStreamManager,
+    ManagedCameraState,
+)
 
 
 async def async_setup_entry(
@@ -49,6 +57,14 @@ async def async_setup_entry(
 
     balances = (coordinator.data or {}).get("balances") or []
     entities: list[SensorEntity] = []
+    stream_manager: CameraStreamManager | None = hass.data.get(
+        STREAM_MANAGER_DATA,
+        {},
+    ).get(entry.entry_id)
+    if stream_manager is not None:
+        entities.append(
+            ElektronnyGorodRtspUrlsSensor(stream_manager, entry.entry_id)
+        )
     for balance_info in balances:
         place_id = balance_info["place_id"]
         entities.append(ElektronnyGorodBalanceSensor(coordinator, place_id))
@@ -69,6 +85,87 @@ async def async_setup_entry(
     entities.extend(ElektronnyGorodCallStateSensor(lk) for lk in by_ac.values())
 
     async_add_entities(entities)
+
+
+class ElektronnyGorodRtspUrlsSensor(SensorEntity):
+    """Actual freshness of integration-owned external RTSP registrations."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "go2rtc_rtsp_urls"
+    _attr_icon = "mdi:cctv"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(
+        self,
+        manager: CameraStreamManager,
+        entry_id: str,
+    ) -> None:
+        self._manager = manager
+        self._attr_unique_id = f"{DOMAIN}_{entry_id}_go2rtc_rtsp_urls"
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to manager-owned sanitized state changes."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._manager.async_subscribe(self._handle_manager_update)
+        )
+
+    @callback
+    def _handle_manager_update(self) -> None:
+        self.async_write_ha_state()
+
+    @staticmethod
+    def _is_fresh(state: ManagedCameraState, now: float) -> bool:
+        """A registration is truthful only inside the verified refresh TTL."""
+        if (
+            not state.eligible
+            or not state.present
+            or state.last_success is None
+            or state.last_success_monotonic is None
+        ):
+            return False
+        age = now - state.last_success_monotonic
+        return 0 <= age <= BACKGROUND_REFRESH_INTERVAL.total_seconds()
+
+    @property
+    def native_value(self) -> int:
+        """Count present, eligible registrations refreshed within 28m30s."""
+        now = time.monotonic()
+        return sum(
+            self._is_fresh(state, now)
+            for state in self._manager.camera_states()
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Expose only stable credential-free URLs and sanitized state."""
+        now = time.monotonic()
+        states = self._manager.camera_states()
+        fresh_states = [
+            state for state in states if self._is_fresh(state, now)
+        ]
+        urls = {
+            state.display_name: self._manager.client.rtsp_url(
+                state.stream_name,
+                include_credentials=False,
+            )
+            for state in fresh_states
+        }
+        streams = [
+            {
+                "camera_id": state.camera_id,
+                "status": state.status,
+                "present": state.present,
+                "consumer_count": state.consumer_count,
+                "last_success": (
+                    state.last_success.isoformat()
+                    if state.last_success is not None
+                    else None
+                ),
+            }
+            for state in states
+        ]
+        return {"urls": urls, "streams": streams}
 
 
 class ElektronnyGorodBalanceSensor(

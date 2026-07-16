@@ -115,6 +115,9 @@
       "days_to_block": {
         "name": "Days to block"
       },
+      "go2rtc_rtsp_urls": {
+        "name": "Published RTSP streams"
+      },
       "call_state": {
         "name": "Call state",
         "state": {
