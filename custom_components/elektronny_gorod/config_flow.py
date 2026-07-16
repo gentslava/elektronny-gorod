@@ -32,8 +32,12 @@ from .const import (
     CONF_GO2RTC_RTSP_HOST,
     CONF_GO2RTC_USERNAME,
     CONF_GO2RTC_PASSWORD,
+    CONF_GO2RTC_KEEP_WARM,
+    CONF_GO2RTC_KEEP_WARM_HIDDEN,
     DEFAULT_GO2RTC_BASE_URL,
     DEFAULT_GO2RTC_RTSP_HOST,
+    DEFAULT_GO2RTC_KEEP_WARM,
+    DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
 )
 from .api import ElektronnyGorodAPI
 from .helpers import find, hash_password, hash_password_timestamp
@@ -340,7 +344,12 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         if self._entry_data is None:
             return self.async_abort(reason="missing_entry_data")
 
-        data = {**self._entry_data, CONF_USE_GO2RTC: False}
+        data = {
+            **self._entry_data,
+            CONF_USE_GO2RTC: False,
+            CONF_GO2RTC_KEEP_WARM: DEFAULT_GO2RTC_KEEP_WARM,
+            CONF_GO2RTC_KEEP_WARM_HIDDEN: DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
+        }
         return self.async_create_entry(title=data[CONF_NAME], data=data)
 
     async def async_step_go2rtc(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -374,6 +383,17 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_GO2RTC_RTSP_HOST: result.rtsp_host,
                     CONF_GO2RTC_USERNAME: username,
                     CONF_GO2RTC_PASSWORD: password,
+                    CONF_GO2RTC_KEEP_WARM: bool(
+                        user_input.get(
+                            CONF_GO2RTC_KEEP_WARM, DEFAULT_GO2RTC_KEEP_WARM
+                        )
+                    ),
+                    CONF_GO2RTC_KEEP_WARM_HIDDEN: bool(
+                        user_input.get(
+                            CONF_GO2RTC_KEEP_WARM_HIDDEN,
+                            DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
+                        )
+                    ),
                 }
                 return self.async_create_entry(title=data[CONF_NAME], data=data)
 
@@ -381,6 +401,13 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             vol.Required(CONF_GO2RTC_BASE_URL, default=DEFAULT_GO2RTC_BASE_URL): str,
             vol.Optional(CONF_GO2RTC_USERNAME, default=""): str,
             vol.Optional(CONF_GO2RTC_PASSWORD, default=""): str,
+            vol.Optional(
+                CONF_GO2RTC_KEEP_WARM, default=DEFAULT_GO2RTC_KEEP_WARM
+            ): bool,
+            vol.Optional(
+                CONF_GO2RTC_KEEP_WARM_HIDDEN,
+                default=DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
+            ): bool,
         })
 
         return self.async_show_form(
@@ -433,6 +460,17 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
                     CONF_GO2RTC_RTSP_HOST: result.rtsp_host if (use_go2rtc and result) else None,
                     CONF_GO2RTC_USERNAME: username,
                     CONF_GO2RTC_PASSWORD: password,
+                    CONF_GO2RTC_KEEP_WARM: bool(
+                        user_input.get(
+                            CONF_GO2RTC_KEEP_WARM, DEFAULT_GO2RTC_KEEP_WARM
+                        )
+                    ),
+                    CONF_GO2RTC_KEEP_WARM_HIDDEN: bool(
+                        user_input.get(
+                            CONF_GO2RTC_KEEP_WARM_HIDDEN,
+                            DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
+                        )
+                    ),
                 }
                 return self.async_create_entry(title="", data=data)
 
@@ -452,6 +490,19 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
             CONF_GO2RTC_PASSWORD,
             self.entry.data.get(CONF_GO2RTC_PASSWORD, ""),
         )
+        keep_warm_default = self.entry.options.get(
+            CONF_GO2RTC_KEEP_WARM,
+            self.entry.data.get(
+                CONF_GO2RTC_KEEP_WARM, DEFAULT_GO2RTC_KEEP_WARM
+            ),
+        )
+        keep_warm_hidden_default = self.entry.options.get(
+            CONF_GO2RTC_KEEP_WARM_HIDDEN,
+            self.entry.data.get(
+                CONF_GO2RTC_KEEP_WARM_HIDDEN,
+                DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
+            ),
+        )
 
         # NB: username/password — vol.Optional WITHOUT default. voluptuous
         # default would be back-filled into empty submit (HA frontend омит
@@ -463,6 +514,13 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
             vol.Optional(CONF_GO2RTC_BASE_URL, default=str(go2rtc_host_default)): str,
             vol.Optional(CONF_GO2RTC_USERNAME): str,
             vol.Optional(CONF_GO2RTC_PASSWORD): str,
+            vol.Optional(
+                CONF_GO2RTC_KEEP_WARM, default=bool(keep_warm_default)
+            ): bool,
+            vol.Optional(
+                CONF_GO2RTC_KEEP_WARM_HIDDEN,
+                default=bool(keep_warm_hidden_default),
+            ): bool,
         })
 
         suggested_values = {
