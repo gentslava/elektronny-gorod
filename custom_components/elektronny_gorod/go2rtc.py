@@ -108,6 +108,22 @@ class Go2RtcClient:
         self._password = password
         self._headers = go2rtc_auth_headers(username, password)
 
+    def matches_configuration(
+        self,
+        *,
+        base_url: str,
+        rtsp_host: str,
+        username: str | None,
+        password: str | None,
+    ) -> bool:
+        """Return whether an options update can reuse this transport."""
+        return (
+            self.base_url == normalize_base_url(base_url)
+            and self.rtsp_host == rtsp_host
+            and (self._username or None) == (username or None)
+            and (self._password or None) == (password or None)
+        )
+
     async def async_patch_stream(self, name: str, src: str) -> None:
         """Create/update an in-memory stream without destructive PUT fallback."""
         query = urlencode({"name": name, "src": src})

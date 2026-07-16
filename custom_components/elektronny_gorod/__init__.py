@@ -487,6 +487,12 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
 async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Update options for entry that was configured via user interface."""
+    stream_manager = hass.data.get(STREAM_MANAGER_DATA, {}).get(entry.entry_id)
+    if (
+        stream_manager is not None
+        and await stream_manager.async_apply_entry_options()
+    ):
+        return
     await hass.config_entries.async_reload(entry.entry_id)
 
 

@@ -120,6 +120,8 @@ class ElektronnyGorodRtspUrlsSensor(SensorEntity):
         if (
             not state.eligible
             or not state.present
+            or not state.preloaded
+            or not state.producer_active
             or state.last_success is None
             or state.last_success_monotonic is None
         ):
@@ -157,6 +159,8 @@ class ElektronnyGorodRtspUrlsSensor(SensorEntity):
                 "status": state.status,
                 "present": state.present,
                 "consumer_count": state.consumer_count,
+                "preloaded": state.preloaded,
+                "producer_active": state.producer_active,
                 "last_success": (
                     state.last_success.isoformat()
                     if state.last_success is not None

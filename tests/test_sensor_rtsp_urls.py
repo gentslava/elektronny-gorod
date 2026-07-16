@@ -60,6 +60,8 @@ def _state(
     age: float | None = 60.0,
     status: str = "ready",
     name: str | None = None,
+    preloaded: bool | None = None,
+    producer_active: bool | None = None,
 ) -> ManagedCameraState:
     now = time.monotonic()
     return ManagedCameraState(
@@ -69,6 +71,10 @@ def _state(
         eligible=eligible,
         present=present,
         consumer_count=1 if present else 0,
+        preloaded=present if preloaded is None else preloaded,
+        producer_active=(
+            present if producer_active is None else producer_active
+        ),
         last_success=(
             datetime.now(timezone.utc) if age is not None else None
         ),
@@ -141,8 +147,35 @@ async def test_sensor_does_not_claim_desired_but_failed_stream(
         "status": "patch_http_500",
         "present": False,
         "consumer_count": 0,
+        "preloaded": False,
+        "producer_active": False,
         "last_success": None,
     }]
+
+
+async def test_sensor_requires_preload_and_active_producer(
+    hass: HomeAssistant,
+) -> None:
+    manager = _ManagerStub([
+        _state("100", preloaded=False),
+        _state("200", producer_active=False),
+        _state("300"),
+    ])
+
+    sensor = await _platform_sensor(hass, manager)
+
+    assert sensor.native_value == 1
+    assert sensor.extra_state_attributes["urls"] == {
+        "Camera 300": "rtsp://go2rtc:8554/eg_300"
+    }
+    by_camera = {
+        item["camera_id"]: item
+        for item in sensor.extra_state_attributes["streams"]
+    }
+    assert by_camera["100"]["preloaded"] is False
+    assert by_camera["200"]["producer_active"] is False
+    assert by_camera["300"]["preloaded"] is True
+    assert by_camera["300"]["producer_active"] is True
 
 
 async def test_sensor_updates_when_manager_state_changes(
@@ -198,6 +231,8 @@ async def test_sensor_attributes_never_contain_operator_url_or_token(
         "status",
         "present",
         "consumer_count",
+        "preloaded",
+        "producer_active",
         "last_success",
     }
 

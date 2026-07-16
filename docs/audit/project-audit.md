@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-16 (A-96 external idle RTSP implementation separated
-from live acceptance; A-82/A-84 reconciled with stream-manager branch)
+Last reviewed: 2026-07-16 (A-96 PATCH-only live failure, preload revision,
+545-test evidence and repeat production acceptance reconciled)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1579,8 +1579,10 @@ Quality gates:
 
 ### A-96. Внешний RTSP после простоя требует предварительного открытия камеры в HA
 
-- **Status:** 🟡 **PARTIALLY RESOLVED** — automated implementation готова
-  в `feat/go2rtc-stream-manager`; production acceptance и merge ещё открыты.
+- **Status:** 🟡 **PARTIALLY RESOLVED** — PATCH-only revision провалила live
+  acceptance; preload revision реализована и проходит automated gates в
+  `feat/go2rtc-stream-manager`, но повторный production run и merge
+  ещё открыты.
 - **Severity:** **P1 reliability** для opt-in external RTSP: stable URL
   существует, но после idle не выполняет свой контракт.
 - **Area:** `stream_manager.py`, `go2rtc.py:Go2RtcClient`, camera/config-entry
@@ -1588,24 +1590,92 @@ Quality gates:
 - **Symptom (owner report / PR #61):** `eg_<camera_id>` в go2rtc есть,
   но после простоя внешний RTSP отвечает `500/EOF`. Открытие камеры
   в HA минтит fresh operator URL и временно восстанавливает путь.
-- **Root cause:** operator source — server-side session с observed TTL ~30min;
-  old keep-warm branch доказывала callback scheduling, но не единый
-  ownership/reconcile и не полный external playback path.
-- **Decision:** [ADR-0014](../decisions/0014-go2rtc-stream-manager.md) — один
-  manager per config entry, PATCH-only, registry-derived eligibility, 28:30
-  refresh, capped retry, one-minute missing-stream restore и consumer-aware
-  cleanup. Main/hidden options default false; disabled entity всегда excluded.
+- **Live failure evidence (2026-07-16):** `eg_5595470`, `eg_5595471`,
+  `eg_5595472`, `eg_5593584`, `eg_5593570` присутствовали в go2rtc, но имели
+  lazy producer (`url` без active metadata) и zero consumers; RTSP DESCRIBE
+  возвращал 404/EOF. Живыми остались домофоны с фоновым consumer. Canary
+  preload против уже протухшего source вернул HTTP 500/TLS EOF.
+- **Root cause:** operator source — одноразовая server-side session; PATCH
+  менял URL, но не подключал lazy producer. URL истекал до первого внешнего
+  consumer, поэтому регистрация stream не означала готовность RTSP.
+- **Decision:** [ADR-0014](../decisions/0014-go2rtc-stream-manager.md) —
+  сохраняется manager per config entry и PATCH-only source write, но initial
+  flow становится `mint → PATCH → preload`. Reconcile сравнивает streams,
+  preloads и active producer; cleanup удаляет preload до подсчёта внешних
+  consumers. Main/hidden options default false; disabled всегда excluded.
+- **Option-off regression and correction (2026-07-16):** replacement manager
+  удалял preload, но из-за early return не выполнял stream reconcile. Live
+  snapshot показал семь lazy `eg_*` с zero consumers и три active домофона с
+  consumer. Итоговый lifecycle возвращает старый контракт: one-shot startup
+  cleanup удаляет idle streams, но сохраняет active viewers и не запускает
+  фоновые таймеры.
+- **Hidden-toggle transient regression (2026-07-16):** при main option on и
+  hidden sub-option off go2rtc временно показывал все enabled HA cameras, затем
+  reconcile удалял hidden names. При выключении main option происходил такой
+  же spike перед cleanup. Лишние operator mint/PATCH увеличивали время
+  инициализации integration.
+- **Transient root cause and correction:** HA мог вызвать `stream_source()` во
+  время platform forwarding, до `_sync_visibility`. Eligibility управляла
+  только preload, поэтому refresh безусловно делал mint/PATCH, а policy
+  применялась постфактум. ADR-0014 вводит отдельный pre-mint background gate,
+  консервативный API-hidden hint до sync и сохраняет persistent user-shown
+  override. Setup/background request исключённой hidden camera возвращает
+  stable RTSP name для HA Stream lifecycle, но делает zero operator, PATCH и
+  preload calls.
+- **Hidden HA-open regression and correction (2026-07-16):** первая версия
+  gate применяла background policy ко всем refresh reasons. Поэтому явное
+  открытие enabled hidden camera в HA возвращало имя отсутствующего go2rtc
+  stream и WebRTC падал на RTSP DESCRIBE `404 Not Found`. После manager startup
+  `ha_open`, `active_consumer` и `recovery` теперь могут лениво выполнить
+  mint/PATCH для любой enabled registry camera. Background-ineligible hidden
+  camera не получает preload; reconcile сохраняет её при active viewer и
+  удаляет idle registration после ухода viewer. Disabled camera остаётся
+  запрещена во всех manager paths.
+- **Options-reload churn and latency (2026-07-16):** при изменении main/hidden
+  checkbox полный config-entry reload сначала снимал все manager preloads, из-за
+  чего producer counts массово падали в zero. Новый manager затем поднимал
+  eligible cameras с jitter и только после reconcile удалял excluded streams;
+  одновременно без необходимости перезапускались coordinator, platforms,
+  history, FCM и SIP.
+- **In-place correction:** ADR-0014 оставляет normal reload только для смены
+  go2rtc URL/RTSP host/auth или отключения
+  go2rtc. Совместимое изменение publication flags применяет текущий manager:
+  сохраняет eligible preloads/HA consumers, cleanup-ит excluded из одного
+  snapshot и scheduling-ит только newly eligible. Late background mint
+  повторно проверяет policy до PATCH/preload; если PATCH уже начался, late
+  registration проходит consumer-aware cleanup сразу после ответа и не
+  отменяет option-off cleanup.
+- **Policy-on latency follow-up (2026-07-16):** после in-place correction
+  existing producers больше не обнулялись, но новые sources появлялись по
+  одному с заметной задержкой. Причина локальная и детерминированная:
+  `async_update_policy()` ошибочно переиспользовал cold-start hash jitter
+  `0..60s`. Интерактивный path теперь ставит первую missing camera на `0s`,
+  следующие на `0.5s`, `1.0s`, ...; сохранение options не ждёт operator
+  mint/PATCH/preload. Cold startup сохраняет полный jitter для burst control.
 - **Automated evidence in branch:**
   - `test_config_flow_keep_warm.py` — defaults/dependency/persistence;
-  - `test_go2rtc_client.py` / `test_go2rtc_upsert.py` — PATCH-only + no PUT;
+  - `test_go2rtc_client.py` / `test_go2rtc_upsert.py` — PATCH-only source,
+    dedicated preload API, producer sanitization + no streams PUT;
   - `test_stream_manager.py`, `test_stream_manager_reconcile.py`,
     `test_stream_manager_scheduler.py`, `test_stream_manager_lifecycle.py` —
-    dedup/policy/cadence/retry/restart/unload;
-  - `test_sensor_rtsp_urls.py` — фактическая свежесть и no-secret attrs.
-- **Production acceptance (merge-blocking):** `>1h idle → external RTSP`
-  без HA-open; active consumer переживает PATCH; go2rtc restart →
-  restore ≤60s; disabled/hidden cleanup policy; concurrent reasons → one mint
-  + one PATCH; unload без callbacks. Точный checklist —
+    mint/PATCH/preload ordering, dedup/policy/cadence/retry, inactive-producer
+    re-arm, restart, preload-first cleanup и unload; pre-visibility hidden gate
+    доказывает zero mint/PATCH/preload и сохраняет user-shown override;
+    post-start hidden HA-open доказывает lazy mint/PATCH без preload при
+    выключенной background publication;
+    in-place options tests доказывают no reload/preload churn, main on/off,
+    short interactive ramp при сохранённом cold-start jitter, transport
+    fallback и concurrent late-mint/PATCH guards;
+  - `test_sensor_rtsp_urls.py` — preloaded+active+fresh и no-secret attrs;
+  - local gates: 127 focused, 150 related regressions, 545 full suite passed.
+- **Production acceptance (repeat merge-blocking):** пять перечисленных камер
+  получают active preload и открываются externally после idle без HA-open;
+  active consumer переживает PATCH; go2rtc restart → restore ≤60s;
+  disabled/hidden cleanup policy; concurrent reasons → one mint/PATCH/preload;
+  policy toggles не reload-ят integration и не обнуляют existing eligible
+  producers; option-off удаляет idle registrations, unload снимает background
+  consumers.
+  Точный checklist —
   [`features/go2rtc-stream-manager/design.md`](../features/go2rtc-stream-manager/design.md).
 - **Security boundary:** source URL не хранится в manager state;
   diagnostic RTSP URL без credentials; errors/logs содержат только
@@ -1678,7 +1748,7 @@ Quality gates:
 | ✅ A-58 + ✅ A-54 (doorbell event via FCM в master, ADR-0011) + 🟡 A-80 (FCM «серая зона» — known risk), A-47 (P3/skip), A-50 | Итерация 4 (real-time event delivery — реализован FCM-канал вызова) |
 | ✅ A-81 (register-on-ring ADR-0012 + downlink AudioBridge + call_camera.py, master/PR #69) — закрывает практическую часть A-49 (`sipdevices` используется) | Итерация 4 (two-way audio: приём вызова + downlink-вывод + экран вызова) |
 | ✅ A-85 (uplink-микрофон ADR-0013: HA WS-binary #1, дрейф-фикс rtp.py, Lovelace-карта; live-прод 2026-06-24, master/PR #69) — завершает two-way audio (говорить гостю) | Итерация 4 (two-way audio: uplink-микрофон; #2/#3/#4 эмпирически отвергнуты) |
-| 🟢 A-82 (resolved-in-branch) + 🔴 A-83 (A-71 triggers intentionally remain in camera) + 🟡 A-84 (PATCH-only mitigation, live persistence check open) + 🟡 A-96 (implementation ready, seven live scenarios open) | external RTSP stream-manager track, ADR-0014; merge blocked by production acceptance |
+| 🟢 A-82 (resolved-in-branch) + 🔴 A-83 (A-71 triggers intentionally remain in camera) + 🟡 A-84 (PATCH-only source mitigation, live persistence check open) + 🟡 A-96 (preload revision automated, repeat live scenarios open) | external RTSP stream-manager track, ADR-0014; merge blocked by repeat production acceptance |
 | ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
 | ✅ A-87 (ring/idle watchdog, PR #68) + ✅ A-88 (video anti-churn) + ✅ A-90 (FCM-ended guard), merged PR #69 | Итерация 4 (UI + надёжность видео/жизненного цикла вызова) |
 | ✅ A-89 (смена звонящего домофона во время held) + ✅ A-91 (штатная pre-answer SIP-модель подтверждена PCAP), merged PR #69 | Итерация 4 (мульти-вызов + production diagnostics) |

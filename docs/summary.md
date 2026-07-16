@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-16 (external RTSP stream-manager implementation,
-live acceptance gate and A-82/A-84/A-96 status synchronized)
+Last reviewed: 2026-07-16 (external RTSP preload revision, PATCH-only live
+failure, 545-test evidence and repeat acceptance synchronized)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -47,7 +47,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | HA hassfest CI | ✅ зелёный |
 | HACS validation CI | ✅ зелёный |
 | pytest CI | ✅ есть (`python-tests.yaml`, matrix HA 2024.10 + 2026.5) |
-| Реальные тесты | ✅ 499 backend + 62 frontend теста зелёные локально; TypeScript check и production build зелёные |
+| Реальные тесты | ✅ 545 backend + 62 frontend теста зелёные локально; TypeScript check и production build зелёные |
 | Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
 | Документация для пользователя | ✅ RU/EN README и HACS info описывают FCM/SIP, экран вызова и durable history 4.0.0; добавлены runtime screenshots |
@@ -57,8 +57,9 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 
 - Полноценный 3-веточный config_flow: phone+SMS / phone+password / advanced (access_token).
 - Корректные миграции `async_migrate_entry` v1→2→3.
-- Опциональная интеграция go2rtc с real-валидацией; ordinary
-  operator-camera writes консолидированы в PATCH-only client/manager.
+- Опциональная интеграция go2rtc с real-валидацией; operator-camera source
+  writes консолидированы в PATCH-only client/manager, initial keep-warm
+  активирует dedicated preload consumer.
 - Reauth по совпадению `account+subscriber+name`.
 - Локализация ru/en.
 - Автоматизированный release workflow (zip + автокоммит версии).
@@ -77,10 +78,19 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
   place-scoped EventEntity, авторизованный browse старых вызовов и
   `custom:eg-event-history-card` для нескольких мест/аккаунтов (A-50/A-58,
   PR #70).
-- **External RTSP track:** per-entry `CameraStreamManager`, registry eligibility,
-  28:30 refresh/retry/reconcile, go2rtc restart restore и diagnostic sensor
-  реализованы в feature-ветке (A-82/A-96, ADR-0014). Production
-  checklist ещё не закрыт, поэтому release/merge status не заявляется.
+- **External RTSP track:** PATCH-only registration провалилась live на пяти
+  lazy streams. Revised per-entry manager делает initial mint→PATCH→preload,
+  проверяет stream/preload/active producer, сохраняет 28:30 non-disruptive
+  PATCH и снимает preloads при cleanup/unload. Pre-mint publication gate не
+  даёт excluded hidden cameras кратковременно попадать в go2rtc и убирает их
+  setup-time operator requests. Publication checkbox changes применяются к
+  живому manager без config-entry reload и массового producer churn; ручное
+  включение запускает missing cameras коротким 0.5s ramp вместо jitter до 60s.
+  Background gate не мешает явному post-start открытию enabled hidden camera
+  в HA: она лениво регистрируется без preload и cleanup-ится после viewer
+  (A-82/A-96, ADR-0014).
+  Повторный production checklist ещё не закрыт, поэтому release/merge status
+  не заявляется.
 
 ## Главные риски (на 2026-07-16)
 
@@ -93,9 +103,10 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 2. ✅ **config_flow + миграции v1→2→3 — покрыты тестами** (`3a60b15`): `test_config_flow.py` (3 ветки auth + go2rtc + abort/reauth) + `test_init.py` (миграции). Bronze config-flow gate закрыт. (A-73)
 3. ✅ **`helpers.py` crypto — golden vectors добавлены** (`362237b`, `test_helpers.py`): регрессия ловит тихий breakage формулы. (A-74)
 4. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold) — остаётся открытым.
-5. 🟡 **External RTSP after idle (A-96)** — automated implementation
-   готова в feature-ветке, но `>1h idle → external player`, restart,
-   consumer-preservation и cleanup должны быть записаны на live deployment.
+5. 🟡 **External RTSP after idle (A-96)** — preload revision и 545-test suite
+   готовы в feature-ветке, но пять проблемных камер, `>1h idle → external
+   player`, restart, consumer-preservation и cleanup должны быть повторно
+   записаны на live deployment.
 
 ✅ Закрыто в 3.3.0: `diagnostics.py` с redaction (A-23 / S-08; S-16 mitigated) —
 SECURITY_OK разблокирован.
@@ -125,7 +136,7 @@ entity state, recorder, diagnostics или логи.
 
 Оставшийся reliability / quality-долг (по убыванию ценности):
 
-1. Пройти семь live external-RTSP scenarios A-96 и зафиксировать
+1. Пройти девять revised live external-RTSP scenarios A-96 и зафиксировать
    QA report; до этого не merge/close PR #61.
 2. Retry/backoff helper для идемпотентных operator GET (5xx / connection errors) — остаток A-21.
 3. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).

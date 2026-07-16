@@ -1,123 +1,166 @@
-# ADR-0014: Единый go2rtc stream manager для внешнего RTSP
+# ADR-0014: Единый lifecycle go2rtc streams для внешнего RTSP
 
 - **Status:** accepted
 - **Date:** 2026-07-16
-- **Owner:** Architecture Agent + project owner
+- **Owner:** project owner + Codex
 - **Extends:** [ADR-0009](0009-camera-stream-auto-recovery.md)
 - **Tracks:** [audit A-96](../audit/project-audit.md#a-96-внешний-rtsp-после-простоя-требует-предварительного-открытия-камеры-в-ha)
 
 ## Context
 
 Интеграция публикует камеры в go2rtc под стабильными именами
-`eg_<camera_id>`, но operator URL является сессией с наблюдаемым TTL около
-30 минут. A-71/ADR-0009 восстановили уже открытые HA-потоки, однако внешний
-RTSP после долгого простоя мог отвечать `500/EOF`, пока пользователь сначала
-не откроет ту же камеру в Home Assistant.
+`eg_<camera_id>`, но operator URL одноразовый и истекает примерно через
+30 минут. Lazy registration без активного consumer после простоя давала
+внешнему RTSP `404/500/EOF` до предварительного открытия камеры в HA.
 
-Экспериментальная ветка `feat/go2rtc-keep-warm` добавляла фоновые таймеры в
-camera entity, но production acceptance не доказала полный путь
-`operator mint -> go2rtc registration -> external RTSP`. Запись потоков также
-оставалась разделена между `camera.py` и `go2rtc.py`, а PUT fallback мог
-разрушить работающего producer'а.
+Live-проверки показали связанные требования к одному lifecycle:
 
-Требования к замене:
-
-- функция строго opt-in и выключена по умолчанию;
-- disabled entity никогда не публикуется;
-- hidden entity публикуется только отдельным sub-option;
-- активный consumer не обрывается при refresh;
-- go2rtc restart восстанавливается без открытия камеры в HA;
-- operator URL и credentials не попадают в state, diagnostics или логи.
+- внешний opt-in RTSP должен работать после простоя без HA-open;
+- initial operator URL нужно немедленно потребить активным go2rtc preload;
+- PATCH refresh не должен обрывать producer/viewers;
+- go2rtc restart и inactive producer должны восстанавливаться;
+- выключение publication удаляет preload и idle registration, но сохраняет
+  активного viewer;
+- disabled никогда не публикуется;
+- hidden background publication требует отдельной галочки, но явное открытие
+  hidden-but-enabled камеры в HA должно работать, пока её смотрят;
+- сохранение publication options не должно reload-ить всю интеграцию или
+  обнулять существующих producers;
+- operator URL, credentials и raw producer source не должны попадать в state,
+  diagnostics или логи.
 
 ## Decision
 
-Создавать один `CameraStreamManager` на config entry и сделать его
-единственным владельцем записей `eg_<camera_id>`.
+Создать один `CameraStreamManager` на config entry и сделать его единственным
+владельцем operator-camera записей `eg_<camera_id>`.
 
-1. `Go2RtcClient` в `go2rtc.py` владеет list/get/PATCH/DELETE и построением
-   RTSP URL. Запись operator-camera stream выполняется только PATCH; PUT
-   fallback запрещён.
-2. Manager дедуплицирует полную цепочку mint+PATCH по camera ID. Одновременные
-   background, HA-open и recovery callers разделяют одну HA-managed task.
-3. Eligibility берётся из HA entity registry:
-   `disabled_by is None` и (`hidden_by is None` или включён hidden sub-option).
-4. `go2rtc_keep_warm` и `go2rtc_keep_warm_hidden` имеют default `false`.
-   При выключенном main-option manager обслуживает обычный HA on-demand/A-71,
-   но не запускает фоновые mint/list/delete операции.
-5. Успешный refresh планируется снова через 28:30. Ошибки получают backoff
-   15/30/60/120/240/300 секунд. Startup имеет детерминированный jitter <60с.
-6. Reconcile раз в минуту восстанавливает отсутствующие eligible streams
-   после рестарта go2rtc. Ineligible stream удаляется только после ухода
-   consumers.
-7. `ElektronnyGorodCamera` сохраняет проверенные A-71 triggers, но делегирует
-   manager'у все operator-camera writes.
-8. Diagnostic sensor читает только detached manager state и отдаёт
-   credential-free RTSP URL. Свежим считается успешный present/eligible stream
-   не старше 28:30.
+### Transport and refresh ownership
 
-Production acceptance из семи сценариев остаётся merge gate: автоматические
-тесты не доказывают доступность внешнего клиента после часа реального простоя.
+1. `Go2RtcClient` владеет sanitized list/get/PATCH/DELETE, preload API и
+   credential-aware RTSP URL. Operator-camera source записывается только PATCH;
+   destructive streams PUT fallback запрещён.
+2. Manager дедуплицирует по camera ID полную цепочку
+   `operator mint → PATCH → optional preload`. Concurrent background, HA-open и
+   recovery callers разделяют одну HA-managed task.
+3. Первый background refresh после PATCH включает go2rtc preload, немедленно
+   потребляя одноразовый URL. Следующий успешный refresh через 28:30 обновляет
+   source PATCH-ом без замены активного preload consumer.
+4. Ошибки получают backoff 15/30/60/120/240/300 секунд. Reconcile раз в минуту
+   сравнивает complete stream/preload snapshot, восстанавливает missing stream,
+   missing preload, inactive producer и go2rtc restart.
+5. Cold config-entry startup распределяет initial work deterministic jitter
+   `0..60s`. Ручное включение publication в уже loaded entry запускает missing
+   cameras коротким async ramp `0s, 0.5s, 1.0s, ...` и не ждёт сетевые операции
+   в options callback.
+
+### Registry policy
+
+```text
+enabled(camera) =
+  correct config entry AND registry_entry.disabled_by is None
+
+background_publishable(camera) =
+  enabled(camera)
+  AND (
+    registry_entry.hidden_by is None
+    OR (go2rtc_keep_warm AND go2rtc_keep_warm_hidden)
+  )
+
+eligible(camera) =
+  go2rtc_keep_warm AND background_publishable(camera)
+```
+
+6. `background_due` и `reconcile` могут mint/PATCH только
+   `background_publishable` camera. Только `eligible` camera получает manager
+   preload, periodic scheduling и считается eligible в diagnostics.
+7. После manager startup явные `ha_open`, `active_consumer` и `recovery` могут
+   mint/PATCH любую enabled camera, включая hidden. Background-ineligible hidden
+   camera не получает preload; reconcile сохраняет registration с viewer и
+   удаляет её после ухода consumer.
+8. До manager startup coordinator `hidden=true` используется как conservative
+   hint для всех reasons, потому что HA может запросить `stream_source()` до
+   visibility sync. Persistent user-shown override или обе publication options
+   могут разрешить source; иначе setup делает zero mint/PATCH/preload.
+9. Disabled camera запрещена в background и on-demand manager paths.
+
+### Cleanup and options lifecycle
+
+10. Cleanup сначала снимает manager preload. Затем получает актуальное число
+    consumers: active viewer сохраняет registration с `cleanup_pending`, zero
+    consumers приводит к DELETE. Unload снимает owned preloads и отменяет все
+    listeners/timers/tasks.
+11. `go2rtc_keep_warm` и `go2rtc_keep_warm_hidden` default-off. Main-off
+    выполняет cleanup in place, но не запрещает обычный HA on-demand playback.
+12. Publication-only options применяются к existing started manager без
+    config-entry reload, если normalized API URL, RTSP host и credentials не
+    изменились. Transport/auth change, disable go2rtc или missing manager
+    сохраняют normal reload fallback.
+13. Late background mint повторно проверяет policy до PATCH. Если policy
+    меняется во время already-started PATCH, consumer-aware cleanup выполняется
+    сразу после ответа, не оставляя late zero-consumer registration.
+
+### HA and security boundary
+
+14. `ElektronnyGorodCamera` сохраняет проверенные ADR-0009 recovery triggers,
+    но делегирует manager'у operator-camera writes.
+15. Source URL живёт только внутри refresh coroutine/result. Detached state и
+    diagnostic sensor содержат только credential-free имя/RTSP URL, sanitized
+    status, producer/preload/consumer observations и freshness.
 
 ## Consequences
 
 ### Positive
 
-- Один writer и один dedup boundary устраняют конкурирующие operator mint/PATCH.
-- Disabled/hidden policy соответствует фактическому HA registry state.
-- PATCH-only не разрушает действующего producer/consumers.
-- go2rtc restart обнаруживается максимум за минуту.
-- Existing users не получают фонового трафика без явного opt-in.
-- Диагностика показывает фактическую свежесть, а не желаемую конфигурацию.
+- Один writer устраняет конкурирующие mint/PATCH и duplicate config writes.
+- Active preload делает внешний RTSP действительно keep-warm после простоя.
+- PATCH refresh сохраняет producer/viewers; restart recovery ограничен минутой.
+- Background hidden inventory соответствует opt-in policy, а hidden HA playback
+  остаётся совместимым со старым “работает пока смотрят” контрактом.
+- Publication toggles сохраняют existing producers и не переинициализируют
+  coordinator/platform/history/FCM/SIP.
+- Default-off ограничивает постоянный operator traffic.
 
 ### Negative
 
-- Для каждой eligible камеры появляется operator mint раз в 28:30 даже без
-  viewers; это осознанная цена внешнего always-addressable RTSP.
-- Reconcile делает локальный list-запрос к go2rtc раз в минуту.
-- Реальный idle/playback path нельзя полностью воспроизвести mocked suite.
-- A-71 triggers пока остаются в `camera.py`; полное выделение state machine
-  (A-83) не входит в решение.
+- Каждая eligible camera постоянно держит operator producer и обновляет session
+  раз в 28:30 — это цена always-addressable external RTSP.
+- Reconcile делает локальные go2rtc list-запросы раз в минуту.
+- Hidden `eg_<id>` может появиться при явном просмотре в HA даже с выключенной
+  hidden background publication; после viewer registration cleanup-ится.
+- Реальный idle/playback path нельзя полностью доказать mocked suite.
 
 ### Mitigation
 
-- Default-off options и явная registry eligibility ограничивают нагрузку.
-- Jitter распределяет startup mint, backoff ограничивает ошибки.
-- Source URL живёт только внутри refresh coroutine/result и не сохраняется в
-  manager state.
-- Live QA report обязателен до merge/закрытия старого PR #61.
+- Registry policy, short interactive ramp, cold-start jitter и capped backoff
+  ограничивают нагрузку.
+- Consumer-aware cleanup не обрывает активных viewers.
+- Pre-visibility API hint закрывает setup race без запрета post-start HA-open.
+- Live QA остаётся merge gate для idle, restart, consumer preservation и
+  hidden/on-demand lifecycle.
 
 ## Alternatives considered
 
-1. **Оставить per-entity keep-warm timers.** Отклонено: несколько владельцев
-   записи и тестируется scheduling, а не полный lifecycle/restart/cleanup.
-2. **Сохранить PUT fallback.** Отклонено: production evidence A-71 показало,
-   что PUT уничтожает existing producer и отключает consumers.
-3. **Использовать go2rtc preload/постоянно держать producer подключённым.**
-   Отклонено: лишний трафик и другая семантика; достаточно своевременно
-   обновлять зарегистрированный source.
-4. **Отказаться от внешнего RTSP.** Отклонено владельцем: стабильный RTSP без
-   предварительного открытия HA является требуемым opt-in use case.
+1. **Per-entity keep-warm timers.** Отклонено: несколько writers и нет единого
+   restart/cleanup ownership.
+2. **PATCH-only lazy registration без preload.** Отклонено live: одноразовый URL
+   истекал до первого viewer и внешний RTSP возвращал 404/EOF.
+3. **Destructive PUT fallback.** Отклонено: production evidence ADR-0009
+   показало разрыв existing producer/consumers.
+4. **Запретить hidden HA playback вместе с background publication.** Отклонено:
+   `hidden_by` не означает disabled, а HA WebRTC получал RTSP 404.
+5. **Full config-entry reload на каждую галочку.** Отклонено: producers падали в
+   zero и повторно инициализировалась вся интеграция.
+6. **Никогда не удалять registrations/preloads.** Отклонено: нарушает opt-in
+   traffic и unload lifecycle.
 
 ## Supersedes / Superseded by
 
-- supersedes: нет; расширяет ADR-0009, не меняя его active-consumer recovery
-- superseded by: пусто на момент принятия
+- supersedes: нет; расширяет ADR-0009, не меняя active-consumer recovery
+- superseded by: none
 
 ## Notes
 
 - Design: [`../features/go2rtc-stream-manager/design.md`](../features/go2rtc-stream-manager/design.md)
 - Implementation plan: [`../features/go2rtc-stream-manager/plan.md`](../features/go2rtc-stream-manager/plan.md)
-- Related findings: [A-82](../audit/project-audit.md#a-82-go2rtc-transport-в-elektronnygorodcamera-не-вынесен-в-go2rtc-клиент),
-  [A-83](../audit/project-audit.md#a-83-auto-recovery-state-machine-a-71-не-выделена-в-отдельный-helper),
-  [A-84](../audit/project-audit.md#a-84-go2rtc-config-bloat--стрим-дописывается-а-не-мёржится-unbounded)
-- Origin: unmerged PR #61 / `feat/go2rtc-keep-warm`; option keys,
-  translations and diagnostic concept were retained, implementation was not.
-
----
-
-## Когда писать новое ADR взамен этого
-
-- Если writer ownership уходит из per-entry manager.
-- Если operator-camera writes снова требуют другой HTTP verb.
-- Если eligibility перестаёт определяться HA entity registry.
-- Если live evidence опровергнет 28:30 refresh/reconcile модель.
+- Origin: unmerged PR #61 / `feat/go2rtc-keep-warm`; идея, option keys,
+  translations и diagnostic concept сохранены и переработаны в PR #71.

@@ -3,13 +3,16 @@
 > **Status (2026-07-16):** Tasks 1-7 and the original Task 8 automated gates
 > are complete, but live validation disproved the PATCH-only keep-warm model:
 > five registered lazy streams returned RTSP 404/EOF after idle. The preload
-> revision in Tasks 9-14 is approved and pending implementation.
+> revision Tasks 9-17 and local gates are complete: 127 focused,
+> 150 related and 545 full-suite tests pass; minimum/current HA, hassfest, HACS
+> and the inspected pre-release asset are green. Nine repeat live scenarios
+> remain pending.
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Keep opt-in Home Assistant camera streams reachable through stable external go2rtc RTSP URLs after long idle periods, without disrupting active viewers or publishing disabled cameras.
 
-**Architecture:** Add one `CameraStreamManager` per config entry as the sole writer of operator camera sources named `eg_<camera_id>`. Camera entities retain the proven A-71 recovery triggers but delegate URL minting, concurrency deduplication, PATCH registration, preload activation, retry, and background lifecycle to the manager. A focused `Go2RtcClient` owns transport, and a diagnostic sensor reports actual sanitized manager state. Recorded in [ADR-0014](../../decisions/0014-go2rtc-stream-manager.md).
+**Architecture:** Add one `CameraStreamManager` per config entry as the sole writer of operator camera sources named `eg_<camera_id>`. Camera entities retain the proven A-71 recovery triggers but delegate URL minting, concurrency deduplication, PATCH registration, preload activation, retry, and background lifecycle to the manager. A focused `Go2RtcClient` owns transport, and a diagnostic sensor reports actual sanitized manager state. The final lifecycle is recorded in [ADR-0014](../../decisions/0014-go2rtc-stream-manager.md).
 
 **Tech Stack:** Python 3.12+, Home Assistant config entries/entity registry/schedulers, `aiohttp`, `voluptuous`, `pytest`, `pytest-homeassistant-custom-component`.
 
@@ -25,11 +28,13 @@
 - The verified refresh interval remains 28 minutes 30 seconds.
 - Operator-camera source writes are PATCH-only. Do not add a streams PUT
   fallback. The preload API intentionally uses `PUT /api/preload?src=<name>`.
-- `disabled_by` always excludes a camera. `hidden_by` excludes it unless the
-  hidden-camera sub-option is enabled.
+- `disabled_by` always excludes a camera. `hidden_by` excludes background
+  publication unless the hidden-camera sub-option is enabled, but explicit
+  post-start HA playback remains available.
 - With the main keep-warm option off, the manager may serve HA on-demand and
-  A-71 recovery calls but must not schedule background operator traffic or
-  delete ordinary on-demand streams.
+  A-71 recovery calls but must not schedule background operator traffic. Its
+  one-shot startup reconcile deletes idle managed registrations while
+  preserving streams with active external consumers (ADR-0014).
 - The manager owns only `eg_<camera_id>` streams. Existing
   `eg_intercom_call` audio/video composition remains outside this feature.
 - Before the write-boundary refactor, the focused A-71 baseline was captured:
@@ -50,7 +55,7 @@
 | `custom_components/elektronny_gorod/strings.json` | source strings for options and sensor |
 | `custom_components/elektronny_gorod/translations/{ru,en}.json` | localized options and sensor |
 | `tests/test_config_flow_keep_warm.py` | option defaults/persistence |
-| `tests/test_go2rtc_client.py` | PATCH-only transport, parsing, deletion, secret-safe errors |
+| `tests/test_go2rtc_client.py` | PATCH-only stream + preload transport, parsing, producer sanitization and secret-safe errors |
 | `tests/test_stream_manager.py` | core refresh/dedup/state/failure behavior |
 | `tests/test_stream_manager_reconcile.py` | registry eligibility, reconcile, deferred cleanup, restart recovery |
 | `tests/test_stream_manager_scheduler.py` | startup jitter, independent due times, retry, unload cleanup |
@@ -382,7 +387,7 @@ Implement the exact cases `test_reconcile_uses_one_complete_stream_list_request`
 `test_disabled_stream_with_consumers_defers_delete`,
 `test_deferred_cleanup_runs_when_consumers_reach_zero`,
 `test_hidden_stream_requires_hidden_suboption`,
-`test_keep_warm_off_does_not_delete_on_demand_streams`, and
+`test_keep_warm_off_deletes_idle_managed_streams`, and
 `test_unknown_list_response_preserves_existing_streams`.
 
 The restart test must first complete a successful PATCH, then replace the fake
@@ -779,13 +784,17 @@ On the owner's real HA/go2rtc deployment:
 5. hide a camera and confirm publication follows the hidden sub-option;
 6. trigger background/HA/recovery concurrently and confirm one operator mint
    and one PATCH in sanitized diagnostics/test instrumentation;
-7. reload/unload the entry and confirm no manager callbacks continue.
+7. reload/unload the entry and confirm no manager callbacks continue;
+8. disable keep-warm or unload and confirm manager preload consumers disappear;
+9. disable keep-warm through options and confirm idle `eg_*` registrations are
+   deleted while a stream with an active external consumer is preserved.
 
 - [ ] **Step 6: Write the QA report truthfully**
 
 Create `qa-report.md` with timestamps, environment versions, each scenario's
 observable evidence, automated test count, and any failure. Change the design
-status to implemented/verified only after all seven live scenarios pass.
+status to implemented/verified only after the revised nine-scenario gate below
+passes; the original seven-scenario PATCH-only gate was attempted and failed.
 
 - [ ] **Step 7: Close or supersede PR #61 only after live acceptance**
 
@@ -809,7 +818,7 @@ PATCH registration alone keeps a disposable operator URL usable.
 - Modify: `tests/test_go2rtc_client.py`
 - Modify: `tests/test_camera_auto_recovery.py`
 
-- [ ] **Step 1: Write RED tests for sanitized producer health**
+- [x] **Step 1: Write RED tests for sanitized producer health**
 
 Add a lazy producer fixture containing an obvious secret URL and an active
 producer fixture containing `bytes_recv`. Assert that the parsed result exposes
@@ -824,7 +833,7 @@ assert "OPERATOR_SECRET" not in repr(streams)
 Keep `bytes_recv` available for the existing A-71 health poll, but strip the
 raw producer `url` before constructing `Go2RtcStreamInfo`.
 
-- [ ] **Step 2: Write RED tests for preload list/enable/disable**
+- [x] **Step 2: Write RED tests for preload list/enable/disable**
 
 Cover these exact cases:
 
@@ -835,7 +844,7 @@ Cover these exact cases:
 - timeout, aiohttp error, and HTTP 500 expose only a sanitized operation and
   category, never response text, credentials, or a source URL.
 
-- [ ] **Step 3: Run the focused tests and confirm RED**
+- [x] **Step 3: Run the focused tests and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_client.py \
@@ -844,7 +853,7 @@ PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_client.py \
 
 Expected failures: preload methods and `producer_active` do not exist.
 
-- [ ] **Step 4: Implement the typed client surface**
+- [x] **Step 4: Implement the typed client surface**
 
 Extend the existing record and client without adding a streams PUT fallback:
 
@@ -865,7 +874,7 @@ only the integer `bytes_recv` field needed by `camera.py`. Preload mutation
 uses the shared auth headers and ten-second timeout. Every exception crosses
 the boundary as `Go2RtcRequestError(... ) from None`.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_client.py \
@@ -883,7 +892,7 @@ git commit -m "feat(go2rtc): add sanitized preload transport"
 - Modify: `tests/test_stream_manager.py`
 - Modify: `tests/test_stream_manager_scheduler.py`
 
-- [ ] **Step 1: Write RED initial-activation tests**
+- [x] **Step 1: Write RED initial-activation tests**
 
 For an eligible keep-warm camera, assert exact ordering through mock call
 history:
@@ -897,7 +906,7 @@ After success, assert `present`, `preloaded`, and `producer_active` are true.
 For keep-warm off or an ineligible camera, assert the existing on-demand PATCH
 still works and preload is not called.
 
-- [ ] **Step 2: Write RED failure and dedup tests**
+- [x] **Step 2: Write RED failure and dedup tests**
 
 Make preload PUT fail with `Go2RtcRequestError("preload_enable", "http_500")`.
 Assert the PATCHed stream remains present, the camera is not ready, the caller
@@ -907,20 +916,20 @@ seconds. A later retry must mint a different URL before PATCH and preload.
 Run three concurrent background/HA/recovery callers and assert one mint, one
 PATCH, and one preload PUT.
 
-- [ ] **Step 3: Write the RED active-preload refresh test**
+- [x] **Step 3: Write the RED active-preload refresh test**
 
 Seed `state.preloaded = True` and `state.producer_active = True`, then refresh.
 Assert a fresh mint and PATCH occur but preload PUT does not. This preserves
 the current producer and external consumers across the verified 28:30 refresh.
 
-- [ ] **Step 4: Run the focused tests and confirm RED**
+- [x] **Step 4: Run the focused tests and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager.py \
   tests/test_stream_manager_scheduler.py -q
 ```
 
-- [ ] **Step 5: Implement refresh state and activation**
+- [x] **Step 5: Implement refresh state and activation**
 
 Add credential-free state only:
 
@@ -935,7 +944,7 @@ already record an active preload. Do not mark refresh success until required
 preload activation succeeds. A preload failure calls the same sanitized
 failure/retry path as PATCH failure.
 
-- [ ] **Step 6: Run GREEN and commit**
+- [x] **Step 6: Run GREEN and commit**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager.py \
@@ -952,7 +961,7 @@ git commit -m "feat(go2rtc): preload eligible camera streams"
 - Modify: `custom_components/elektronny_gorod/stream_manager.py`
 - Modify: `tests/test_stream_manager_reconcile.py`
 
-- [ ] **Step 1: Write RED snapshot and recovery tests**
+- [x] **Step 1: Write RED snapshot and recovery tests**
 
 Extend the fake client with `async_list_preloads`. One reconcile must request
 exactly one complete stream map and one complete preload map. Cover:
@@ -967,7 +976,7 @@ exactly one complete stream map and one complete preload map. Cover:
 6. a preload-list error preserves all streams and schedules no destructive
    work.
 
-- [ ] **Step 2: Write RED cleanup-order tests**
+- [x] **Step 2: Write RED cleanup-order tests**
 
 For a newly disabled/hidden camera, assert preload DELETE happens before the
 exact per-stream GET. If zero consumers remain, delete the stream. If external
@@ -975,13 +984,13 @@ consumers remain, keep the stream, cancel refresh scheduling, and mark cleanup
 pending. A later zero-consumer reconcile deletes it. Missing preload and 404
 are idempotent success.
 
-- [ ] **Step 3: Run the reconcile tests and confirm RED**
+- [x] **Step 3: Run the reconcile tests and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager_reconcile.py -q
 ```
 
-- [ ] **Step 4: Implement one locked two-map reconcile**
+- [x] **Step 4: Implement one locked two-map reconcile**
 
 Within `_reconcile_lock`, list streams and preloads before mutating state.
 Populate `present`, `consumer_count`, `preloaded`, and `producer_active` from
@@ -997,7 +1006,7 @@ disable preload -> get exact stream state ->
   consumers == 0: delete stream
 ```
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager_reconcile.py \
@@ -1015,34 +1024,35 @@ git commit -m "fix(go2rtc): reconcile preload producer health"
 - Modify: `tests/test_stream_manager_scheduler.py`
 - Modify: `tests/test_stream_manager_lifecycle.py`
 
-- [ ] **Step 1: Write RED option-off startup cleanup test**
+- [x] **Step 1: Write RED option-off startup cleanup test**
 
-With keep-warm off and stale `eg_100`/`eg_200` preloads present, `async_start`
-must remove those preloads once, mint no operator URLs, install no timers or
-registry listener, and leave ordinary on-demand streams untouched.
+With keep-warm off and stale `eg_100`/`eg_200` streams/preloads present,
+`async_start` must remove the preloads once, delete idle managed streams,
+preserve streams with external consumers, mint no operator URLs, and install no
+timers or registry listener.
 
-- [ ] **Step 2: Write RED unload/idempotence tests**
+- [x] **Step 2: Write RED unload/idempotence tests**
 
 After adopting or creating an eligible preload, `async_stop` must first cancel
 callbacks/tasks and then best-effort DELETE every manager camera preload.
 Calling stop twice must not repeat network cleanup or fail. A sanitized delete
 failure must not prevent config-entry unload.
 
-- [ ] **Step 3: Run the lifecycle tests and confirm RED**
+- [x] **Step 3: Run the lifecycle tests and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager_scheduler.py \
   tests/test_stream_manager_lifecycle.py -q
 ```
 
-- [ ] **Step 4: Implement stale-preload adoption and cleanup ownership**
+- [x] **Step 4: Implement stale-preload adoption and cleanup ownership**
 
-Track stable names only, never source URLs. Startup always performs the minimal
-preload inventory needed to remove stale names when the option is off. Normal
+Track stable names only, never source URLs. Startup inventories streams and
+preloads to remove idle managed registrations when the option is off. Normal
 unload removes manager preloads but does not delete stream registrations or
 disconnect external consumers.
 
-- [ ] **Step 5: Run GREEN and commit**
+- [x] **Step 5: Run GREEN and commit**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_stream_manager_scheduler.py \
@@ -1059,20 +1069,20 @@ git commit -m "fix(go2rtc): clean preloads on option off and unload"
 - Modify: `custom_components/elektronny_gorod/sensor.py`
 - Modify: `tests/test_sensor_rtsp_urls.py`
 
-- [ ] **Step 1: Write RED truthful-readiness tests**
+- [x] **Step 1: Write RED truthful-readiness tests**
 
 Keep freshness and eligibility checks, then add cases where registration is
 fresh but preload is missing or producer is inactive. Both must report zero
 ready URLs. Extend every per-camera sanitized object with `preloaded` and
 `producer_active`, and assert secret URLs/passwords remain absent.
 
-- [ ] **Step 2: Run the sensor tests and confirm RED**
+- [x] **Step 2: Run the sensor tests and confirm RED**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_sensor_rtsp_urls.py -q
 ```
 
-- [ ] **Step 3: Implement the diagnostic predicate and attributes**
+- [x] **Step 3: Implement the diagnostic predicate and attributes**
 
 `_is_fresh` must require all of:
 
@@ -1085,7 +1095,7 @@ and state.last_success_monotonic is not None
 and 0 <= age <= BACKGROUND_REFRESH_INTERVAL.total_seconds()
 ```
 
-- [ ] **Step 4: Run GREEN and commit**
+- [x] **Step 4: Run GREEN and commit**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_sensor_rtsp_urls.py \
@@ -1109,7 +1119,7 @@ git commit -m "fix(sensor): require active go2rtc preload"
 - Modify: `CHANGELOG.md`
 - Create after live completion: `docs/features/go2rtc-stream-manager/qa-report.md`
 
-- [ ] **Step 1: Run focused and related suites**
+- [x] **Step 1: Run focused and related suites**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_client.py \
@@ -1120,14 +1130,14 @@ PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_*.py tests/test_camera_*.py \
   tests/test_call_camera.py tests/test_config_flow.py tests/test_visibility*.py -q
 ```
 
-- [ ] **Step 2: Synchronize architecture and audit truth**
+- [x] **Step 2: Synchronize architecture and audit truth**
 
-Use the project documentation update workflow. Revise ADR-0014 and A-96 from
-PATCH-only registration to PATCH plus dedicated preload lifecycle. Record the
-five-camera failure as evidence against the old model. Do not claim the
-idle-over-one-hour scenario fixed before the repeat live run passes.
+Use the project documentation update workflow. Rewrite ADR-0014 to the final
+PATCH plus dedicated preload lifecycle while the feature is still unmerged.
+Record the five-camera failure as evidence against the old model. Do not claim
+the idle-over-one-hour scenario fixed before the repeat live run passes.
 
-- [ ] **Step 3: Run full current and minimum-HA gates**
+- [x] **Step 3: Run full current and minimum-HA gates**
 
 ```bash
 PYTHONPATH=. .venv/bin/pytest tests/ -q
@@ -1136,7 +1146,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ -q
 Push only after the local suite is green, then verify both PR #71 CI variants
 (`min` and current), hassfest/HACS, and the updated pre-release artifact.
 
-- [ ] **Step 4: Inspect diff and secret surface**
+- [x] **Step 4: Inspect diff and secret surface**
 
 ```bash
 git diff --check
@@ -1158,7 +1168,7 @@ go2rtc restart, disabled/hidden cleanup, concurrent trigger, and unload checks.
 Record observations in `qa-report.md`; only then mark A-96 and this plan
 verified and supersede PR #61.
 
-- [ ] **Step 6: Commit documentation and live evidence separately**
+- [x] **Step 6: Commit documentation and live evidence separately**
 
 ```bash
 git add docs CHANGELOG.md
@@ -1168,11 +1178,131 @@ git commit -m "docs(go2rtc): record preload stream lifecycle"
 Commit `qa-report.md` and final status changes only after the real deployment
 evidence exists.
 
+## Task 15: Gate hidden publication before operator mint
+
+**Files:**
+
+- Modify: `custom_components/elektronny_gorod/stream_manager.py`
+- Modify: `tests/test_stream_manager.py`
+- Modify: `tests/test_stream_manager_reconcile.py`
+- Modify: `docs/decisions/0014-go2rtc-stream-manager.md`
+- Modify: synchronized architecture, audit, testing, roadmap and feature docs
+
+- [x] **Step 1: Reproduce the setup race with RED tests**
+
+Model platform forwarding before `_sync_visibility`: the registry entry is not
+yet hidden while coordinator data already says `hidden=true`. Assert that both
+main-option states make zero operator, PATCH, and preload calls. Add post-sync
+registry-hidden cases and a persisted user-shown override.
+
+- [x] **Step 2: Separate enabled, background publication, and eligibility**
+
+Use enabled registry state for explicit post-start HA-open/recovery. Retain
+`is_camera_publishable` as the background hidden-policy predicate and
+`is_camera_eligible = main option AND publishable` for preload/schedule
+ownership. Disabled remains excluded from both paths.
+
+- [x] **Step 3: Preserve the HA Stream lifecycle without side effects**
+
+Before visibility sync, reject API-hidden setup requests without writes. After
+manager startup, let an explicit HA-open/recovery mint and PATCH an enabled
+hidden camera without preload; reconcile preserves the active viewer and
+deletes the idle registration later. Keep this path available while the main
+background option is off.
+
+- [x] **Step 4: Synchronize ADR and project documentation**
+
+Record the transient live inventory and setup-latency regression in ADR-0014
+and A-96. Add the no-transient-hidden-write check to repeat live acceptance.
+
+- [ ] **Step 5: Verify and repeat the live toggle matrix**
+
+Run focused and full automated suites. On the deployed artifact, enable/disable
+both publication options and observe that excluded hidden names never appear
+from setup/background work, while explicit hidden HA playback works without a
+persistent preload and cleans up after its viewer leaves.
+
+## Task 16: Apply publication policy without config-entry reload
+
+**Files:**
+
+- Modify: `custom_components/elektronny_gorod/{__init__,go2rtc,stream_manager}.py`
+- Modify: `tests/test_go2rtc_client.py`
+- Modify: `tests/test_stream_manager_{scheduler,lifecycle}.py`
+- Modify: `docs/decisions/0014-go2rtc-stream-manager.md`
+- Modify: synchronized architecture, audit, testing, roadmap and feature docs
+
+- [x] **Step 1: Reproduce producer churn with RED lifecycle tests**
+
+Require a compatible publication-only options update to call the existing
+manager and never call `async_reload`. Require existing active preloads to
+survive with zero disable/enable/PATCH/operator calls.
+
+- [x] **Step 2: Add the in-place policy transition**
+
+Compare normalized API URL, RTSP host, and credentials. Reuse the manager only
+when transport is unchanged; otherwise return to normal config-entry reload.
+Update flags, tracking, cleanup and newly eligible scheduling on the existing
+manager.
+
+- [x] **Step 3: Guard concurrent background mint and PATCH**
+
+After operator mint, re-check current publication policy before PATCH/preload.
+If PATCH was already running, consumer-aware cleanup runs immediately after it
+returns. A main-off transition cannot be undone by a late background result.
+
+- [x] **Step 4: Cover the complete toggle matrix**
+
+Test compatible/no-op hidden changes, main off cleanup, main on scheduling,
+transport/auth mismatch fallback, empty credential normalization, and the
+in-flight mint/PATCH races. Policy saves perform no synchronous operator mint.
+
+- [ ] **Step 5: Verify, publish and repeat live observation**
+
+Run focused/workflow/full suites, push the new prerelease, then confirm that
+policy toggles no longer reload the integration or drive all existing producer
+counts to zero. Transport changes must still follow normal reload semantics.
+
+## Task 17: Remove cold-start jitter from interactive publication-on
+
+**Files:**
+
+- Modify: `custom_components/elektronny_gorod/stream_manager.py`
+- Modify: `tests/test_stream_manager_scheduler.py`
+- Modify: ADR-0014 and synchronized AIDD sources
+
+- [x] **Step 1: Record the live timing regression and root cause**
+
+After enabling publication in a loaded entry, new go2rtc sources appeared one
+by one after a human-visible wait. Trace `async_update_policy()` to the shared
+`_startup_offset()` call: manual policy-on inherited the cold-start 0..60 second
+hash jitter.
+
+- [x] **Step 2: Prove RED for the interactive path**
+
+Require two missing cameras to be scheduled at `0.0s` and `0.5s`, while the
+options callback performs no synchronous operator mint/PATCH. The pre-fix test
+must expose the deterministic long offsets; the captured fixture produced
+`42.861s` and `22.142s`.
+
+- [x] **Step 3: Separate cold and interactive scheduling**
+
+Keep `_startup_offset()` unchanged in `async_start()`. In
+`async_update_policy()`, enumerate only missing eligible cameras without an
+existing due callback and schedule them at `index * 0.5s`.
+
+- [ ] **Step 4: Verify, publish and repeat live timing**
+
+Run focused/related/full suites, publish a new PR artifact, then repeat main-on
+and hidden-on. The first new source should begin within its request latency and
+the rest should start roughly 0.5 seconds apart without disturbing existing
+producers.
+
 ## Rollback
 
-The runtime rollback is to turn off `go2rtc_keep_warm`; startup/unload removes
-manager preload consumers and stops background operator traffic while
-preserving ordinary go2rtc on-demand behavior. Code
+The runtime rollback is to turn off `go2rtc_keep_warm`; startup removes manager
+preload consumers and idle registrations, while unload stops background
+operator traffic. Later HA on-demand calls remain available. Code
 rollback should revert the feature commits in reverse order. Do not remove
 the option keys or translations in a patch rollback because installations that
 tested the feature may retain those option values.
@@ -1181,5 +1311,5 @@ tested the feature may retain those option values.
 
 The original PATCH-only implementation is not complete despite its green test
 suite. Automated implementation is complete when Tasks 9-14 through the full
-test/CI gates pass. The feature is merge-ready only after all eight revised
+test/CI gates pass. The feature is merge-ready only after all nine revised
 production acceptance scenarios are recorded in `qa-report.md`.

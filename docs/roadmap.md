@@ -200,18 +200,39 @@ Static-only write paths не переходят в код без decrypted HAR (
 
 #### External RTSP after idle (A-82/A-84/A-96, ADR-0014)
 
-- [x] **Automated implementation** — per-entry `CameraStreamManager`,
-  PATCH-only `Go2RtcClient`, registry eligibility, 28:30 refresh, capped retry,
-  one-minute go2rtc restart reconcile, consumer-aware cleanup, config-entry
-  lifecycle и credential-free diagnostic sensor.
+- [x] **Revised automated implementation** — live run опроверг PATCH-only
+  registration: пять lazy streams возвращали 404/EOF. Per-entry manager теперь
+  выполняет initial mint→PATCH→preload, сохраняет non-disruptive 28:30 PATCH,
+  проверяет stream/preload/active producer раз в минуту, снимает preload перед
+  consumer-aware cleanup; option-off startup удаляет preload и idle stream,
+  сохраняя active viewer. Diagnostic sensor требует
+  preloaded+active+fresh; source writes остаются PATCH-only.
+- [x] **Hidden publication pre-mint gate** — live options reload показал
+  transient hidden names и более долгую initialization: setup-time
+  `stream_source()` успевал сделать operator mint/PATCH до visibility sync.
+  Background-excluded hidden cameras теперь делают zero mint/PATCH/preload;
+  API-hidden startup hint не перекрывает persistent user-shown override.
+  После startup explicit HA-open enabled hidden camera по-прежнему лениво
+  делает mint/PATCH без preload и работает на время активного viewer.
+- [x] **Policy update without producer churn** — publication checkboxes больше
+  не вызывают full config-entry reload. Existing eligible preloads и HA
+  consumers сохраняются; excluded cleanup и newly eligible scheduling делает
+  текущий manager. Live follow-up убрал ошибочный cold-start jitter из ручного
+  включения: первая missing camera запускается сразу, следующие через 0.5s;
+  transport/auth changes сохраняют normal reload fallback.
 - [x] **A-82** 🟢 resolved-in-branch: `camera.py` больше не владеет
   go2rtc HTTP transport/writes; merge reconciliation открыт.
 - [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles
   проверить, что repeated PATCH не раздувает persistent go2rtc YAML.
-- [ ] **A-96 production acceptance (merge gate)** — `>1h idle → external
-  RTSP` без HA-open; active consumer переживает refresh; restart restore
-  ≤60s; disabled/hidden cleanup; concurrent reasons dedup; unload без callbacks.
-- [ ] После семи live scenarios записать QA report, merge replacement
+- [ ] **A-96 repeat production acceptance (merge gate)** — пять проблемных
+  streams получают active preload и переживают idle без HA-open; active
+  consumer переживает refresh; restart restore ≤60s; disabled/hidden cleanup;
+  concurrent reasons dedup; option-off удаляет idle registrations, unload
+  снимает background consumers; main/hidden toggle не reload-ит integration,
+  не обнуляет existing eligible producers и никогда даже кратковременно не
+  добавляет excluded hidden names фоновым path; explicit hidden HA-open
+  работает без persistent preload и cleanup-ится после viewer.
+- [ ] После девяти live scenarios записать QA report, merge replacement
   branch и только потом close/supersede PR #61.
 
 #### Code quality

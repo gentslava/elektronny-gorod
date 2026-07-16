@@ -1,7 +1,7 @@
 Status: Active
 Owner: Architecture Agent
-Last reviewed: 2026-07-16 (per-entry go2rtc stream manager, PATCH-only
-operator-camera writes and external RTSP diagnostics)
+Last reviewed: 2026-07-16 (go2rtc preload lifecycle, active-producer reconcile,
+in-place publication policy, cleanup and truthful external RTSP diagnostics)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -172,8 +172,14 @@ async_migrate_entry:
 OptionsFlow.async_step_init (go2rtc + credentials + external RTSP flags)
   ↓ validate_go2rtc()
 async_update_options:
-  hass.config_entries.async_reload(entry.entry_id)
-  → unload → setup snova
+  existing CameraStreamManager.async_apply_entry_options()
+  → same transport/auth: update publication policy in place
+    → preserve eligible preloads, clean excluded
+    → schedule newly eligible at 0s, 0.5s, 1.0s, ...
+    → no coordinator/platform/FCM/SIP reload
+  → changed transport/auth or disabled go2rtc:
+    hass.config_entries.async_reload(entry.entry_id)
+    → unload → setup снова
 ```
 
 ### Unload
@@ -199,8 +205,8 @@ async_unload_entry:
 | **History browse** | `history_ws.py`, `frontend/src/eg-event-history-card.ts` | авторизованный read-only browse предыдущих accepted/missed calls по выбранной EventEntity; on-demand pagination без replay в state/automation; partial refresh сохраняет недоступные feeds |
 | **Transport** | `http.py` | shared HA `ClientSession`, headers, conditional Bearer с узким pre-auth allowlist |
 | **Logging redaction** | `_logging.py` | `redact()` для headers/dict, `redact_path()` для auth URLs |
-| **External integration** | `go2rtc.py` | `Go2RtcClient` для sanitized list/get/PATCH/DELETE и RTSP URL; validation/audio helpers остаются отдельными контрактами |
-| **Camera stream ownership** | `stream_manager.py` | per-entry owner `eg_<camera_id>`: registry eligibility, mint+PATCH dedup, 28:30 schedule, retry, reconcile/restart restore, consumer-aware cleanup ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
+| **External integration** | `go2rtc.py` | `Go2RtcClient` для sanitized stream/preload API, producer health и RTSP URL; raw producer source не пересекает read/diagnostic boundary; validation/audio helpers остаются отдельными контрактами |
+| **Camera stream ownership** | `stream_manager.py` | per-entry owner `eg_<camera_id>`: separate background/on-demand gates, in-place policy update, registry background eligibility, dedup mint+PATCH+preload, 28:30 non-disruptive PATCH, retry, stream/preload/producer reconcile и preload-first cleanup ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
 | **SIP subsystem** | `sip/` (14 модулей) | SIP-UAS: REGISTER-on-ring → held-INVITE → 200 OK → RTP-latching; AudioBridge (downlink → go2rtc); `uplink.py` `UplinkSink` (микрофон-PCM → G.711) + дрейф-компенсированный RTP-uplink (`rtp.py`); ADR-0012, ADR-0013 |
 | **Uplink transport** | `uplink_ws.py`, `www/eg-intercom-mic-card.js` | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): Int16-PCM микрофона из Lovelace-карты `getUserMedia` → `DoorbellCallController.feed_uplink` → `UplinkSink`; static-регистрация JS-карты (ADR-0013) |
 | **Call camera** | `call_camera.py` | camera-сущность активного вызова: `stream_source()` собирает свежий `eg_intercom_call` (видео + аудио-мост) → RTSP; вне вызова → `None` |
@@ -218,7 +224,7 @@ async_unload_entry:
 | go2rtc settings | `entry.data` + `entry.options` (options override data) | persistent |
 | Snapshot всего: `{places, balances, cameras, locks, dnd}` | `coordinator.data` (dict) | обновляется каждые 5 минут |
 | Synthetic lock state cycle | `Lock._state` + `_cancel_reset` (in-memory) | 5 сек на unlock action |
-| go2rtc camera registration state | `CameraStreamManager._states` (credential-free, in-memory) | сессия; source URL не хранится |
+| go2rtc camera registration/preload/producer state | `CameraStreamManager._states` (credential-free, in-memory) | сессия; source URL не хранится |
 | Visibility migration flag | `entry.data["visibility_migration_v2"]` | one-time per entry |
 | History watermarks | HA `Store` `elektronny_gorod.history.{entry_id}`, schema v1 | максимум 200 opaque event IDs на source stream; без message/PII |
 
@@ -236,7 +242,13 @@ async_unload_entry:
 - ✅ Stream manager использует HA-managed task с `eager_start=False`
   для race-free per-camera dedup; unload отменяет tasks/timers/listeners.
 - ✅ External RTSP background traffic default-off; retry capped at 300s,
-  startup mint распределён deterministic jitter <60s.
+  cold-start mint распределён deterministic jitter <60s; interactive policy-on
+  использует короткий 0.5s stagger.
+- ✅ Background-excluded hidden cameras are gated before operator mint/go2rtc
+  PATCH, including the platform-forwarding window before visibility sync;
+  explicit post-start HA playback remains available without preload.
+- ✅ Compatible publication-policy saves update the current manager in place;
+  existing eligible producers and HA platform lifecycle are preserved.
 - ✅ `LOGGER.exception(...)` вместо блокирующего `traceback.format_exc()` в hot path.
 - ⚠️ **Serial-per-place refresh** в `_async_update_data`: parallelize нельзя без рефакторинга, т.к. `self._api.http.user_agent.place_id` — shared state, читаемое в момент построения HTTP-headers. См. module docstring `coordinator.py`. Race-free, но не оптимально по latency.
 - ✅ Operator API использует явные REST/binary `ClientTimeout` (A-21/S-09);
@@ -306,17 +318,28 @@ HA UI requests stream
   → Camera.stream_source()
     if use_go2rtc:
       → CameraStreamManager.async_refresh(id, "ha_open")
-        → coordinator.get_camera_stream(id) → operator URL
-        → Go2RtcClient.async_patch_stream("eg_<id>", ffmpeg:<url>#...)
+        → after startup require enabled registry entity; hidden is allowed
+        → background reasons separately require hidden publication policy
+        → if current reason is excluded: no mint/PATCH/preload
+        → else coordinator.get_camera_stream(id) → operator URL
+          → Go2RtcClient.async_patch_stream("eg_<id>", ffmpeg:<url>#...)
+          → if eligible and no active preload:
+              Go2RtcClient.async_enable_preload("eg_<id>")
         → return authenticated stable RTSP URL
     else:
       → coordinator.get_camera_stream(id) → return operator URL
 
 Background external RTSP (only `go2rtc_keep_warm=true`):
-  registry eligible camera → startup jitter <60s → mint+PATCH
+  cold start → registry eligible camera → jitter <60s → mint+PATCH+preload
+  policy-on → missing eligible cameras at 0s, 0.5s, 1.0s, ...
   success → next due 28:30; failure → 15..300s backoff
-  1-minute reconcile → restore missing stream after go2rtc restart
-  disabled/hidden-ineligible → defer while consumers>0, then DELETE
+  later 28:30 refresh → mint+PATCH without replacing active preload consumer
+  1-minute reconcile → restore missing stream/preload or inactive producer
+  disabled/hidden-ineligible → DELETE preload first, then defer external
+  consumers>0 or DELETE stream
+  policy toggle → same manager/snapshot; no config-entry reload or producer churn
+  option off → remove preloads, DELETE idle streams, preserve HA/viewer consumers
+  unload → remove manager camera preloads without disconnecting viewers
 ```
 
 ### Unlock flow
@@ -451,8 +474,9 @@ const + go2rtc ← config_flow
    `ClientTimeout` уже есть; POST/login/open_lock намеренно не ретраятся автоматически.
 6. **FCM опирается на приватные API Google** (A-80) — realtime-вызов работает
    под graceful degradation, но долгосрочная совместимость не гарантирована.
-7. **External idle RTSP требует live acceptance** (A-96/ADR-0014) —
-   automated suite доказывает policy/lifecycle, но не реальное
+7. **External idle RTSP требует повторного live acceptance** (A-96/ADR-0014) —
+   PATCH-only registration провалился на пяти lazy streams; revised automated
+   suite доказывает preload policy/lifecycle, но не реальное
    воспроизведение `>1h idle → external player`.
 
 Добавлено с момента предыдущего ревью (2026-06-24):
@@ -477,11 +501,18 @@ const + go2rtc ← config_flow
 - ✅ Synthetic lock-cycle через `async_call_later` (А-15 частично; полный fix lock→button в [ADR-0005](../decisions/0005-lock-vs-button.md)).
 - 🟡 Тестируемость — частично (90+ тестов на config_flow / coordinator / api / migrations / visibility); coverage growing.
 - ✅ **Reload-каскад при cold start** (A-64, PR #43) — migration flag перенесён в `entry.data` (не триггерит `async_update_options` listener), explicit reload только при `migration_changed`. `_sync_visibility` отслеживает user_shown override через `entity.options[DOMAIN]`.
-- 🟡 **A-63 — Won't fix** (PR #46 final). Skip `stream_source()` для hidden cameras несовместим с HA Stream lifecycle (worker pin-ится к URL, не пересоздаёт session). Лишние HTTP к operator для hidden cameras приняты как acceptable. Skip оставлен только в `async_camera_image` (snapshot on-demand).
-- 🟢 **go2rtc stream ownership в feature-ветке** (A-82/A-96,
-  ADR-0014) — camera делегирует manager'у; ordinary operator-camera
-  writes PATCH-only, с дедупликацией и restart reconciliation. Live
-  acceptance до merge ещё открыт.
+- 🟡 **A-63 — Won't fix** (PR #46 final). Возврат `None` из
+  `stream_source()` для hidden cameras несовместим с HA Stream lifecycle
+  (worker pin-ится к URL, не пересоздаёт session). ADR-0014 сохраняет stable
+  go2rtc URL и post-start lazy mint/PATCH для enabled hidden camera, но не
+  включает background preload без отдельной опции. Skip оставлен только в
+  `async_camera_image`.
+- 🟢 **go2rtc stream ownership + preload lifecycle в feature-ветке**
+  (A-82/A-96, ADR-0014) — camera делегирует manager'у; background-excluded
+  hidden requests останавливаются до operator mint, explicit HA-open остаётся
+  on-demand, остальные source writes остаются PATCH-only, а dedicated preload
+  сразу потребляет одноразовый URL. Reconcile проверяет
+  stream/preload/producer; повторный live acceptance до merge ещё открыт.
 
 ## Архитектурные решения (ADR)
 
@@ -500,7 +531,7 @@ const + go2rtc ← config_flow
 | [ADR-0011](../decisions/0011-doorbell-fcm-channel.md) | Realtime-канал события вызова: приём FCM in-HA | **accepted** |
 | [ADR-0012](../decisions/0012-register-on-ring.md) | Register-on-ring (held-short-window) для приёма вызова | **accepted** |
 | [ADR-0013](../decisions/0013-uplink-mic-transport.md) | Транспорт uplink-микрофона — HA WebSocket binary-audio (#1) | **accepted** |
-| [ADR-0014](../decisions/0014-go2rtc-stream-manager.md) | Per-entry owner внешних RTSP camera streams | **accepted**; live acceptance pending |
+| [ADR-0014](../decisions/0014-go2rtc-stream-manager.md) | Единый lifecycle внешних RTSP camera streams | **accepted**; repeat live acceptance pending |
 
 ## Next reading
 

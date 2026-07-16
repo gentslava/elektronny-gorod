@@ -1,7 +1,7 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-07-16 (go2rtc stream-manager policy/lifecycle/security
-regressions added; live external-RTSP acceptance remains manual)
+Last reviewed: 2026-07-16 (go2rtc preload/producer lifecycle regressions,
+545-test backend suite and revised live acceptance synchronized)
 
 Source files:
 - `tests/**` (54 test-модуля + `conftest.py`)
@@ -33,13 +33,13 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **499 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-07-16) |
+| Локальный suite | **545 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-07-16; 127 focused preload/manager tests + 150 related regressions) |
 | Test modules | 54 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
-| Camera / go2rtc | lifecycle, auto-recovery, PATCH-only client, manager scheduling/reconcile/dedup, credential-free diagnostics, call-stream teardown |
+| Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Coverage | Процент намеренно не фиксируется без свежего coverage-run; каноническая команда приведена ниже |
@@ -174,23 +174,42 @@ Files: `test_go2rtc_validate.py`, `test_go2rtc_upsert.py`,
 - `test_validate_go2rtc_streams_api_failed` — PUT 500.
 - `test_normalize_base_url_strips_slash`.
 - `test_derive_rtsp_host`.
-- Operator-camera write contract is PATCH-only: HTTP/client errors are
-  sanitized and never fall back to PUT; list/get/delete parsing retains no src.
-- Complete operator mint + PATCH is deduplicated across HA-open/background/
-  recovery reasons and uses HA-managed task lifecycle.
-- Eligibility matrix covers main-off, disabled, hidden and hidden-sub-option;
-  disabled always wins.
-- Scheduler covers deterministic startup jitter, 28:30 success cadence,
-  15..300s retry and idempotent stop.
-- Reconcile restores missing streams after go2rtc restart within the next
-  minute and defers ineligible deletion while consumers remain.
-- Config-entry lifecycle proves visibility sync precedes manager start and
-  unload leaves no task/listener/timer ownership.
-- Diagnostic sensor counts only eligible+present+fresh registrations and
-  excludes operator URL, token, password and authenticated RTSP URL.
+- Operator-camera source writes remain PATCH-only: errors never fall back to
+  streams PUT. Dedicated preload list/PUT/DELETE stores only stable names;
+  parsed producer snapshots strip the raw source URL.
+- Initial operator mint + PATCH + preload is deduplicated across HA-open/
+  background/recovery reasons and uses HA-managed task lifecycle.
+- Active-preload refresh performs mint+PATCH without replacing its consumer;
+  preload failure retries only after minting another one-time URL.
+- Publishability/eligibility matrix covers main-off, disabled, hidden and
+  hidden-sub-option. Disabled always wins; hidden policy controls only
+  background publication and preload ownership.
+- Before visibility sync, an API-hidden request returns the stable RTSP name
+  with zero operator mint, go2rtc PATCH and preload calls; a persisted
+  user-shown override remains publishable. After manager startup, explicit
+  HA-open/recovery for an enabled hidden camera performs lazy mint/PATCH
+  without preload even when background publication is off.
+- Scheduler covers deterministic cold-start jitter, short 0.5-second
+  interactive policy-on ramp, 28:30 success cadence, 15..300s retry and
+  idempotent stop.
+- Reconcile restores missing streams/preloads after go2rtc restart, re-arms an
+  inactive producer within the next minute and removes preload before deciding
+  whether external consumers require deferred stream deletion.
+- Config-entry lifecycle proves visibility sync precedes manager start;
+  option-off startup removes preloads and idle streams but preserves active
+  viewers, while unload leaves no task/listener/timer ownership.
+- Compatible publication-option saves update the existing manager without
+  config-entry reload, preload disable/enable, PATCH or operator mint. Main
+  off cleans in place, main on schedules missing cameras, and transport/auth
+  changes retain the reload fallback.
+- A late background mint cannot PATCH or preload after an option-off policy
+  transition; if PATCH was already running, its late registration is cleaned
+  immediately after completion instead of remaining at zero consumers.
+- Diagnostic sensor counts only eligible+present+preloaded+active+fresh streams
+  and excludes operator URL, token, password and authenticated RTSP URL.
 
 Mocked tests prove policy and orchestration, not end-to-end playback. Before
-merge, run the seven live scenarios in
+merge, run the nine revised live scenarios in
 [`go2rtc-stream-manager/design.md`](../features/go2rtc-stream-manager/design.md):
 especially `>1h idle -> external RTSP without HA-open`, active consumer across
 PATCH and go2rtc restart recovery within 60 seconds.
@@ -258,14 +277,14 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 499 passed (2026-07-16).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 545 passed (2026-07-16).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.
 - [x] `tests/test_config_flow.py` — реальные PHC-тесты, scaffold-stub отсутствует.
 - [x] Изменённый SIP-контракт покрыт на register/protocol/manager/controller слоях.
-- [ ] External RTSP A-96 не merge-ready до семи production scenarios
+- [ ] External RTSP A-96 не merge-ready до восьми production scenarios
   и QA report; зелёный mocked suite не заменяет этот gate.
 
 ## Risks

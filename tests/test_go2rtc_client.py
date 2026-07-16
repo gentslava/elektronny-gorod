@@ -76,6 +76,34 @@ def _client(session: MagicMock, **overrides: str | None):
     return Go2RtcClient(**values)
 
 
+def test_matches_configuration_normalizes_url_and_empty_credentials() -> None:
+    client = _client(_session())
+
+    assert client.matches_configuration(
+        base_url="http://go2rtc:1984/",
+        rtsp_host="go2rtc.local",
+        username="",
+        password="",
+    ) is True
+    assert client.matches_configuration(
+        base_url="http://other-go2rtc:1984",
+        rtsp_host="go2rtc.local",
+        username=None,
+        password=None,
+    ) is False
+
+
+def test_matches_configuration_detects_auth_change() -> None:
+    client = _client(_session(), username="admin", password="old-password")
+
+    assert client.matches_configuration(
+        base_url="http://go2rtc:1984",
+        rtsp_host="go2rtc.local",
+        username="admin",
+        password="new-password",
+    ) is False
+
+
 @pytest.mark.parametrize("status", [200, 201, 204])
 async def test_patch_stream_uses_patch_without_put_fallback(status: int) -> None:
     session = _session(patch=_response(status))

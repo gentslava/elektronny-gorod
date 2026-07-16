@@ -1,8 +1,9 @@
 # Design: go2rtc stream manager for external RTSP
 
-- **Status:** preload revision approved; implementation pending
+- **Status:** preload revision implemented and automated gates passed; repeat
+  production acceptance pending
 - **Date:** 2026-07-16
-- **Branch:** `feat/go2rtc-stream-manager`
+- **Branch:** `feat/go2rtc-stream-manager-preload` (revision for PR #71)
 - **Origin:** replacement for the unmerged PR #61 and
   `feat/go2rtc-keep-warm`
 - **Related:** ADR-0009, ADR-0014, audit A-82/A-83/A-84/A-96
@@ -47,13 +48,19 @@ The implementation is accepted only when all of these scenarios pass:
 3. After a go2rtc restart, eligible streams are recreated within one minute.
 4. A disabled camera is no longer refreshed and is removed after its consumers
    leave.
-5. A hidden camera is published only when the hidden-camera sub-option is on.
+5. A hidden camera is never background-minted, PATCHed, or preloaded unless
+   both publication options are on, including the platform-forwarding window
+   before visibility synchronization. After startup, an explicit HA open may
+   lazily register it without a manager preload and cleanup follows the viewer.
 6. Concurrent background, HA-open, and recovery requests for one camera result
    in one operator request, one go2rtc PATCH, and at most one preload PUT when
    preload is missing.
 7. Config-entry unload leaves no manager timers or background tasks.
 8. An eligible idle camera has an active manager-owned go2rtc preload consumer;
    disabling keep-warm or unloading the entry removes that consumer.
+9. A publication-policy save does not reload the config entry or drop existing
+   eligible producers. Disabling publication removes idle `eg_*` registrations
+   in place, while a stream with an active consumer is preserved.
 
 ## Non-goals
 
@@ -74,17 +81,26 @@ that tested it keeps its settings:
 | `go2rtc_keep_warm` | `false` | Publish eligible cameras for external RTSP without a viewer |
 | `go2rtc_keep_warm_hidden` | `false` | Also publish hidden eligible cameras; effective only when the main option is on |
 
-Home Assistant registry state is the source of truth. API visibility flags are
-not used for eligibility.
+Home Assistant registry state is the source of truth after visibility
+synchronization. During platform forwarding, before the manager starts, an API
+`hidden=true` value is used only as a conservative hint to prevent transient
+publication. A persistent `user_shown`/integration-owned marker preserves an
+explicit HA user override through that startup window.
 
 ```text
-eligible(camera) =
-  go2rtc_keep_warm
+enabled(camera) =
+  correct config entry
   AND registry_entry.disabled_by is None
+
+background_publishable(camera) =
+  enabled(camera)
   AND (
     registry_entry.hidden_by is None
-    OR go2rtc_keep_warm_hidden
+    OR (go2rtc_keep_warm AND go2rtc_keep_warm_hidden)
   )
+
+eligible(camera) =
+  go2rtc_keep_warm AND background_publishable(camera)
 ```
 
 `disabled_by` always wins. A disabled camera is never background-published,
@@ -92,7 +108,9 @@ even when the hidden-camera option is enabled.
 
 Both options remain opt-in and default off. Enabling ordinary go2rtc support
 alone does not add background operator traffic. The manager still serves the
-existing on-demand and recovery paths when keep-warm is off.
+existing on-demand and recovery paths when keep-warm is off. At startup it runs
+one consumer-aware cleanup pass: stale idle `eg_*` registrations are removed,
+but no timers are installed and no operator URL is minted.
 
 ## Architecture and ownership
 
@@ -116,7 +134,7 @@ messages returned to callers.
 A new `CameraStreamManager` instance is created per config entry. It owns the
 policy and mutable state for `eg_<camera_id>`:
 
-- registry eligibility;
+- registry publication policy and background eligibility;
 - startup and periodic scheduling;
 - one in-flight refresh future per camera;
 - last successful refresh time and next due time;
@@ -134,8 +152,9 @@ manager method.
 `ElektronnyGorodCamera` retains its HA-specific responsibilities and the proven
 A-71 recovery triggers. It no longer performs go2rtc writes directly.
 
-- `stream_source()` asks the manager to mint/register the source, then returns
-  the stable RTSP address.
+- `stream_source()` asks the manager for the stable RTSP address. After manager
+  startup an enabled hidden camera may be minted/registered for explicit HA
+  viewing, but receives no preload unless background policy also admits it.
 - Event-driven and producer-health recovery ask the manager for a refresh.
 - The existing active-consumer proactive timer remains an A-71 trigger in
   `camera.py` for this slice and delegates its write to the manager.
@@ -180,10 +199,21 @@ entries exist and eligibility is correct on the first run.
 
 On unload, the registry listener, reconcile timer, scheduled camera callbacks,
 and pending manager tasks are cancelled, then manager-owned preloads are
-removed best-effort. A reload creates one fresh manager; no task or state is
-shared across config-entry lifetimes. Startup reconciliation adopts eligible
-preloads left by an unclean HA shutdown and removes stale preloads when the
-option is now off or the camera is ineligible.
+removed best-effort. A transport/auth reload creates one fresh manager; no task
+or state is shared across config-entry lifetimes. Startup reconciliation adopts
+eligible preloads left by an unclean HA shutdown. When publication is now off,
+the fresh manager also removes idle managed streams after an exact consumer
+check; active external viewers are preserved.
+
+Publication-policy changes use the existing started manager when go2rtc API
+URL, RTSP host, and credentials are unchanged. The manager updates both flags,
+reconciles one current snapshot, preserves eligible preloads, cleans newly
+ineligible streams, and schedules only newly eligible/missing cameras. Manual
+publication-on uses a short asynchronous ramp (first camera immediately, then
+0.5 seconds per camera); it does not reuse cold-start jitter. No
+coordinator/entity/platform reload or synchronous operator mint occurs.
+Transport/auth changes and disabling go2rtc retain the normal config-entry
+reload path.
 
 ## Data flows
 
@@ -195,6 +225,10 @@ have one:
 background due | HA open | A-71 recovery
   -> CameraStreamManager.async_refresh(camera_id, reason)
   -> join existing per-camera in-flight future, if any
+  -> background reason: require background_publishable(camera)
+  -> consumer reason after startup: require enabled(camera)
+  -> if current reason is not allowed:
+       return stable local RTSP address without mint/PATCH/preload
   -> coordinator.get_camera_stream(camera_id)
   -> Go2RtcClient.patch_stream(
        name="eg_<camera_id>",
@@ -206,12 +240,13 @@ background due | HA open | A-71 recovery
   -> return stable local RTSP address
 ```
 
-The order is mandatory: mint, then PATCH, then preload. Enabling preload before
-PATCH can consume an already-expired one-time URL, which live validation showed
-as `TLS EOF`. Once preload is active, periodic refresh performs PATCH only.
-go2rtc keeps the current producer connected; PATCH changes the URL used by its
-next reconnect without interrupting the current producer or external
-consumers.
+For allowed cameras the order is mandatory: mint, then PATCH, then optional
+preload.
+Enabling preload before PATCH can consume an already-expired one-time URL,
+which live validation showed as `TLS EOF`. Once preload is active, periodic
+refresh performs PATCH only. go2rtc keeps the current producer connected;
+PATCH changes the URL used by its next reconnect without interrupting the
+current producer or external consumers.
 
 The refresh operation does not require the stream to exist before PATCHing.
 PATCH creates a missing in-memory stream or updates the source of an existing
@@ -233,6 +268,11 @@ the phase separation persists across periodic cycles. This replaces the old
 design's incorrect assumption that changing `_last_recovery_monotonic` alone
 would shift identical per-entity interval timers.
 
+This full jitter applies only to cold config-entry startup. When the user turns
+publication on in an already loaded entry, the first missing eligible camera is
+scheduled at once and each following camera 0.5 seconds later. The options flow
+still returns without awaiting operator mint/PATCH/preload.
+
 ### Periodic refresh
 
 After a successful background refresh, that camera is next due in 28:30. The
@@ -241,23 +281,27 @@ delay the others. The initial successful refresh also enables preload. Later
 scheduled refreshes do not re-arm an active preload because replacing its
 consumer would unnecessarily reconnect the producer.
 
-### One-minute reconcile
+### Reconcile
 
-Once per minute the manager requests the complete go2rtc stream list and the
-preload list, then compares both with registry-derived desired state.
+At startup the manager requests the complete go2rtc stream list and preload
+list, then compares both with registry-derived desired state. With publication
+enabled it repeats this once per minute. With publication disabled it performs
+only the startup cleanup pass and installs no timer.
 
 - Missing eligible stream or preload: schedule the full fresh
   mint/PATCH/preload chain.
 - Eligible stream with preload but no active producer: refresh its URL and
   re-arm preload so recovery does not wait for an external viewer.
-- Newly eligible stream: schedule an initial refresh with bounded jitter.
+- Newly eligible stream after a manual policy-on: schedule an initial refresh
+  in the short 0.5-second asynchronous ramp.
 - Newly ineligible stream: DELETE its manager preload first. If no external
   consumers remain, DELETE the stream; otherwise stop refresh, mark cleanup
   pending, and delete after a later reconcile observes zero consumers.
 - Unknown/error response: preserve current streams and retry later.
 
 The registry update listener marks desired state dirty and schedules a prompt
-reconcile. Config option changes continue to use normal config-entry reload.
+reconcile. Policy-only option changes reconcile in place; incompatible
+transport/auth changes use normal config-entry reload.
 
 ## go2rtc write semantics
 
@@ -319,8 +363,8 @@ and exception type, and keep the scheduler alive.
 ### Automated tests
 
 1. Config and defaults for both option keys.
-2. Registry eligibility matrix across main option, `disabled_by`, `hidden_by`,
-   and the hidden-camera option.
+2. Registry publishability/eligibility matrix across main option,
+   `disabled_by`, `hidden_by`, and the hidden-camera option.
 3. Startup jitter and independent 28:30 rescheduling from per-camera success.
 4. Initial mint/PATCH/preload ordering and no preload before a fresh URL.
 5. Scheduled refresh PATCHes without replacing an active preload consumer.
@@ -337,6 +381,20 @@ and exception type, and keep the scheduler alive.
     coordinator entries alone.
 14. Existing camera auto-recovery, call-camera concurrency, go2rtc audio, config
     flow, and visibility suites remain green.
+15. Before visibility sync, API-hidden cameras perform zero operator mint,
+    PATCH, and preload calls; a persisted user-shown override remains
+    background-publishable.
+16. After visibility sync, registry-hidden cameras perform zero background
+    writes unless both options admit them. Explicit HA-open/recovery remains
+    available for an enabled hidden camera without manager preload; its idle
+    registration is removed after the viewer leaves.
+17. Policy-only options changes preserve existing eligible preloads and skip
+    config-entry reload; main-off cleanup and newly eligible startup happen in
+    the current manager without synchronous mint. Policy-on schedules the first
+    missing camera immediately and subsequent cameras at 0.5-second intervals.
+18. A background mint already in flight when publication is disabled cannot
+    PATCH or preload after the policy transition; an already-started PATCH is
+    cleaned after completion and cannot leave a late zero-consumer stream.
 
 Tests must exercise the complete internal chain through a fake go2rtc HTTP
 contract. Merely asserting that a callback or recovery method was scheduled is
@@ -348,7 +406,7 @@ Before changing the A-71 write boundary, capture a short baseline of active
 consumer refresh/recovery behavior. After implementation, repeat it to show
 behavioral equivalence for active HA streams.
 
-The eight acceptance scenarios in this document are merge-blocking. In
+The nine acceptance scenarios in this document are merge-blocking. In
 particular, the idle-over-one-hour external RTSP test and go2rtc restart test
 must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 
@@ -366,14 +424,24 @@ must run on the user's real go2rtc deployment; mocked tests cannot prove them.
 
 ## Documentation status
 
-- ADR-0014 records manager ownership; it must be revised from PATCH-only
-  registration to PATCH plus dedicated preload lifecycle.
+- ADR-0014 records the final unified lifecycle: PATCH plus dedicated preload,
+  consumer-aware cleanup, the separation of enabled on-demand playback from
+  background eligibility, and in-place publication-policy updates.
+- The pre-visibility gate prevents transient hidden-camera writes while the
+  post-start on-demand path preserves the old “hidden camera works while
+  watched in HA” lifecycle.
 - Audit A-96 separates automated implementation from live acceptance and
   cross-references A-82/A-84.
-- Project map, architecture, testing, roadmap and changelog must be synchronized
-  with the preload revision; ADR-0009 remains active for proven A-71 behavior.
+- Project map, architecture, testing, roadmap and changelog are synchronized
+  with the implemented preload revision; ADR-0009 remains active for proven
+  A-71 behavior.
 - PR #61 stays open until the replacement passes production acceptance; its
   opt-in/diagnostic concepts are credited and retained.
+
+Automated evidence on 2026-07-16: 127 focused preload/manager tests, 150
+related camera/go2rtc/config/visibility regressions and the complete 545-test
+backend suite passed. This changes implementation status only; the nine live
+acceptance scenarios above remain merge-blocking.
 
 ## Deferred work
 

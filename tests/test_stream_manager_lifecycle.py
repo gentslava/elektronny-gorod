@@ -13,6 +13,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.elektronny_gorod import async_update_options
 from custom_components.elektronny_gorod.const import (
     CONF_ACCESS_TOKEN,
     CONF_GO2RTC_KEEP_WARM,
@@ -23,6 +24,7 @@ from custom_components.elektronny_gorod.const import (
     DOMAIN,
     STREAM_MANAGER_DATA,
 )
+from custom_components.elektronny_gorod.go2rtc import Go2RtcStreamInfo
 from custom_components.elektronny_gorod.stream_manager import (
     CameraStreamManager,
     StreamRefreshResult,
@@ -173,6 +175,86 @@ async def test_unload_stops_and_removes_manager(
     assert entry.entry_id not in hass.data.get(STREAM_MANAGER_DATA, {})
     assert manager._inflight == {}
     assert manager._due_unsubs == {}
+
+
+async def test_unload_removes_adopted_manager_preload(
+    hass: HomeAssistant,
+    mock_api,
+) -> None:
+    entry = _entry(keep_warm=True)
+    entry.add_to_hass(hass)
+    active = Go2RtcStreamInfo(
+        producers=({"bytes_recv": 100},),
+        consumer_count=1,
+        producer_active=True,
+    )
+
+    with (
+        patch.object(
+            CameraStreamManager,
+            "async_reconcile",
+            new=AsyncMock(),
+        ),
+        patch(
+            "custom_components.elektronny_gorod.go2rtc.Go2RtcClient.async_list_preloads",
+            new=AsyncMock(return_value={"eg_100"}),
+        ),
+        patch(
+            "custom_components.elektronny_gorod.go2rtc.Go2RtcClient.async_list_streams",
+            new=AsyncMock(return_value={"eg_100": active}),
+        ),
+        patch(
+            "custom_components.elektronny_gorod.go2rtc.Go2RtcClient.async_disable_preload",
+            new=AsyncMock(),
+        ) as disable_preload,
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        manager = hass.data[STREAM_MANAGER_DATA][entry.entry_id]
+        manager._owned_preloads.add("eg_100")
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    disable_preload.assert_awaited_once_with("eg_100")
+
+
+async def test_policy_only_options_update_skips_config_entry_reload(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry(keep_warm=True)
+    manager = MagicMock()
+    manager.async_apply_entry_options = AsyncMock(return_value=True)
+    hass.data.setdefault(STREAM_MANAGER_DATA, {})[entry.entry_id] = manager
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        new=AsyncMock(),
+    ) as reload_entry:
+        await async_update_options(hass, entry)
+
+    manager.async_apply_entry_options.assert_awaited_once_with()
+    reload_entry.assert_not_awaited()
+
+
+async def test_transport_options_update_keeps_config_entry_reload(
+    hass: HomeAssistant,
+) -> None:
+    entry = _entry(keep_warm=True)
+    manager = MagicMock()
+    manager.async_apply_entry_options = AsyncMock(return_value=False)
+    hass.data.setdefault(STREAM_MANAGER_DATA, {})[entry.entry_id] = manager
+
+    with patch.object(
+        hass.config_entries,
+        "async_reload",
+        new=AsyncMock(),
+    ) as reload_entry:
+        await async_update_options(hass, entry)
+
+    manager.async_apply_entry_options.assert_awaited_once_with()
+    reload_entry.assert_awaited_once_with(entry.entry_id)
 
 
 async def test_camera_open_uses_manager_patch_not_legacy_writer(

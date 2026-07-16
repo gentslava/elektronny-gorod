@@ -28,7 +28,7 @@
 | [0011](0011-doorbell-fcm-channel.md) | Realtime-канал вызова домофона через FCM | accepted | 2026-06-22 |
 | [0012](0012-register-on-ring.md) | Register-on-ring для SIP-вызова | accepted | 2026-06-23 |
 | [0013](0013-uplink-mic-transport.md) | Uplink-микрофон через HA WebSocket | accepted | 2026-06-24 |
-| [0014](0014-go2rtc-stream-manager.md) | Единый go2rtc stream manager для внешнего RTSP | accepted | 2026-07-16 |
+| [0014](0014-go2rtc-stream-manager.md) | Единый lifecycle go2rtc streams для внешнего RTSP | accepted | 2026-07-16 |
 
 ## Когда писать ADR
 

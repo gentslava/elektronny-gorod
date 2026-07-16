@@ -20,13 +20,32 @@
   `go2rtc_keep_warm` и `go2rtc_keep_warm_hidden` регулярно обновляют
   operator session для eligible `eg_<camera_id>`, чтобы стабильный
   RTSP URL не требовал предварительного открытия камеры в HA.
-  Disabled entity никогда не публикуется; hidden entity требует
-  отдельного sub-option. Per-entry manager дедуплицирует mint+PATCH,
-  восстанавливает streams после restart go2rtc, применяет retry
-  и consumer-aware cleanup. Diagnostic sensor показывает только
-  фактически fresh/present streams и credential-free RTSP URL; operator URL,
-  token и go2rtc password в state не попадают. Automated lifecycle/security
-  suite добавлен; семь live scenarios остаются merge gate.
+  Disabled entity никогда не публикуется; hidden entity требует обеих
+  publication options только для background keep-warm. После startup явное
+  открытие enabled hidden camera в HA лениво делает mint/PATCH без preload;
+  stream живёт с viewer и удаляется после него. Setup-time policy проверяется
+  до operator mint/PATCH, поэтому hidden streams не появляются кратковременно
+  во время reload и не замедляют setup лишними запросами. Изменение только
+  publication flags теперь применяется к текущему manager без config-entry
+  reload: existing
+  eligible preloads/HA consumers не обнуляются, excluded cleanup выполняется
+  сразу, newly eligible получают короткий async ramp: первая камера запускается
+  сразу, следующие с шагом `0.5s`. Холодный HA startup сохраняет jitter `0…60s`
+  для защиты operator API от burst. Смена transport/auth или отключение go2rtc
+  по-прежнему делает normal reload. Late
+  background PATCH после policy transition сразу cleanup-ится и не оставляет
+  новый поток с `0` consumers/producers.
+  Live validation показала, что
+  PATCH-only lazy stream
+  теряет одноразовый URL до первого viewer; поэтому per-entry manager
+  дедуплицирует initial mint+PATCH+preload, а дальнейший 28:30 PATCH не
+  заменяет active preload consumer. Reconcile восстанавливает missing
+  stream/preload и inactive producer после restart go2rtc; cleanup удаляет
+  preload до подсчёта внешних consumers, option-off/unload снимают background
+  consumers. Diagnostic sensor показывает только fresh/present/preloaded/
+  active streams и credential-free RTSP URL; operator URL, token и go2rtc
+  password в state не попадают. Automated lifecycle/security suite добавлен;
+  девять revised live scenarios остаются merge gate.
 - **История событий по каждому месту** ([history-card](docs/features/mobile-app-parity/history-card.md)). Для каждого адреса с домофоном добавлена отдельная EventEntity, привязанная к существующему HA-устройству места. `custom:eg-event-history-card` показывает единую ленту, фильтрует её по устройствам и может объединять несколько мест или аккаунтов через `entities:`. Прежние per-device history entity сохранены. Browse WebSocket остаётся permission-bound и передаёт только allowlisted event/source metadata без backend `message`.
 - History dispatcher изолирован по config entry, а silent baseline хранится отдельно для каждого источника. Частичный сбой обновления общей карточки сохраняет уже загруженные строки недоступного feed. Camera-motion history отключена по умолчанию и не обращается к camera API, пока пользователь не включит соответствующую entity.
 - **Карточка экрана вызова `eg-intercom-call-card` (Lit+TS, «из коробки»)** ([call-card-ux-spec](docs/features/intercom-two-way-audio/call-card-ux-spec.md), [call-card-install](docs/features/intercom-two-way-audio/call-card-install.md), Slice 3b). Готовая Lovelace-карточка входящего вызова и разговора с домофоном — родной HA-облик (theme-токены, mdi, M3, a11y), ведётся по `sensor.*_call_state`. Состояния: входящий (видео домофона без звука + Принять/Отклонить/Открыть) → соединение → разговор (видео+звук гостя, таймер-секундомер, микрофон, Mute/Unmute, Завершить) → завершён/ошибка (авто-скрытие). **Видео+звук** — через HA-native `ha-camera-stream` (WebRTC/HLS как HA, 4G без экспозиции go2rtc), **без обязательной** `webrtc-camera` (fallback на неё, если уже стоит). **Открытие двери** — адаптивно: `open_action: auto` (тач→slide «сдвиньте, чтобы открыть», десктоп/мышь→hold; также `slide|hold|tap`), «Открыть» — accent-цвет (не красный — красный за «Завершить»). **Микрофон** — порт из `eg-intercom-mic-card` (getUserMedia→AudioWorklet→WS `intercom_uplink`), авто-захват при `active`, если разрешение уже выдано и origin secure (иначе CTA «Разрешить»), всегда выключаемый. Звук гостя стартует со звуком; при блоке автоплея браузером — снимается тапом по кнопке звука (жест). Новая область `frontend/` (Lit+TS, esbuild→`www/eg-intercom-call-card.js`, HACS раздаёт без сборки; `node_modules` в .gitignore). Верификация: typecheck + 48 unit-тестов (state-machine/open-control/мат. жеста/mic-gate/camera-pick) + headless smoke (все фазы рендерятся, 0 runtime-ошибок). Видео/микрофон — финальная проверка на live-звонке (как mic-card). `eg-intercom-mic-card` остаётся для существующих дашбордов (новая карта его поглощает).

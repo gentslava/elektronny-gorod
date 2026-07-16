@@ -1,7 +1,7 @@
 Status: Active
 Owner: Validator Agent
-Last reviewed: 2026-07-16 (TESTS_PASS: 499 backend + 62 frontend; external
-RTSP manager policy/lifecycle/security regressions added)
+Last reviewed: 2026-07-16 (TESTS_PASS: 545 backend + 62 frontend; external
+RTSP preload/producer lifecycle regressions added)
 
 Source files:
 - весь репозиторий

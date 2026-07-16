@@ -1,7 +1,7 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-07-16 (per-entry go2rtc stream manager, external RTSP
-options/diagnostics and PATCH-only transport synchronized)
+Last reviewed: 2026-07-16 (external RTSP preload lifecycle, in-place policy,
+producer health, cleanup and diagnostics synchronized)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -59,7 +59,7 @@ elektronny-gorod/
 │   ├── http.py                    ← низкоуровневый HTTP
 │   ├── _logging.py                ← redact() + SENSITIVE_KEYS (ADR-0004)
 │   ├── camera.py                  ← Camera platform + A-71 recovery triggers
-│   ├── stream_manager.py          ← owner eg_<id>: eligibility/schedule/reconcile
+│   ├── stream_manager.py          ← owner eg_<id>: refresh/preload/reconcile
 │   ├── lock.py                    ← Lock platform
 │   ├── sensor.py                  ← financial/call-state + RTSP diagnostics
 │   ├── binary_sensor.py           ← account_blocked platform
@@ -88,7 +88,7 @@ elektronny-gorod/
 │   │   ├── eg-intercom-mic-card.js ← карта микрофона домофона: getUserMedia → HA-WS (ADR-0013)
 │   │   └── eg-intercom-call-card.js ← общий bundle экрана вызова и history card
 │   ├── services.yaml              ← сервисы answer / hangup (A-81)
-│   ├── go2rtc.py                  ← validation/audio + PATCH-only client
+│   ├── go2rtc.py                  ← validation/audio + stream/preload client
 │   ├── entity_migration.py        ← стабильные unique_id + registry migration
 │   ├── diagnostics.py             ← redact-нутая diagnostics-выгрузка (S-08)
 │   ├── helpers.py                 ← utils + auth crypto
@@ -165,7 +165,7 @@ elektronny-gorod/
 |---|---|---|
 | [`camera.py`](../../custom_components/elektronny_gorod/camera.py) | `camera` | `CoordinatorEntity`, stable `unique_id=elektronny_gorod_camera_{id}`, STREAM; HA-open и A-71 recovery делегируют operator-camera writes в per-entry manager |
 | [`lock.py`](../../custom_components/elektronny_gorod/lock.py) | `lock` | `CoordinatorEntity`, stable `unique_id=elektronny_gorod_lock_{place}_{ac}_{eid\|main}`, synthetic state через `async_call_later` (без блокировки event loop) |
-| [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | balance, days-to-block, call-state и diagnostic `go2rtc_rtsp_urls`: eligible/present/fresh count и credential-free URL |
+| [`sensor.py`](../../custom_components/elektronny_gorod/sensor.py) | `sensor` | balance, days-to-block, call-state и diagnostic `go2rtc_rtsp_urls`: eligible/present/preloaded/active/fresh count и credential-free URL |
 | [`switch.py`](../../custom_components/elektronny_gorod/switch.py) | `switch` | Do Not Disturb (mirror «Мой Дом» → Настройки → Уведомления). 3 entity per place: master `dnd_root` + 2 dependent (`dnd_intercom_calls`, `dnd_management_company_calls`). Dependent `_attr_available = root.status` — HA нативно красит серым при master OFF |
 | [`binary_sensor.py`](../../custom_components/elektronny_gorod/binary_sensor.py) | `binary_sensor` | `blocked` (A-57): `device_class=PROBLEM`, `True` когда `blocked=True` в `/finance`. Реюзает balance device через identifier `(DOMAIN, place_{id})` |
 | [`event.py`](../../custom_components/elektronny_gorod/event.py) | `event` | Realtime doorbell `ring`/`ended` (ADR-0011) плюс durable `call_accepted`/`call_missed` per place и per access control, а также disabled-by-default `motion` per intercom/public camera. Place-history привязана к устройству адреса; default entity ID содержит account/place IDs. History dispatcher изолирован по config entry и маршрутизируется по place/source ID; state attributes заданы allowlist без backend message |
@@ -174,8 +174,8 @@ elektronny-gorod/
 
 | Файл | Назначение |
 |---|---|
-| [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | `Go2RtcClient`: sanitized list/get/PATCH/DELETE + credential-aware RTSP URL; validation и audio-stream helpers — отдельные границы |
-| [`stream_manager.py`](../../custom_components/elektronny_gorod/stream_manager.py) | Один `CameraStreamManager` per entry: registry eligibility, 28:30 refresh, retry, one-minute reconcile/restart recovery, consumer-aware cleanup и one in-flight mint+PATCH ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
+| [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | `Go2RtcClient`: sanitized stream list/get/PATCH/DELETE, preload list/enable/disable, producer health, transport-config identity + credential-aware RTSP URL; raw producer source отбрасывается; validation/audio helpers — отдельные границы |
+| [`stream_manager.py`](../../custom_components/elektronny_gorod/stream_manager.py) | Один `CameraStreamManager` per entry: отдельные background/on-demand gates, in-place policy update, dedup mint+PATCH+initial preload, 28:30 non-disruptive PATCH, retry, one-minute stream/preload/producer reconcile, consumer-aware cleanup и option-off stream removal ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
 | [`fcm.py`](../../custom_components/elektronny_gorod/fcm.py) | `DoorbellFcmListener` (ADR-0011): эмуляция регистрации Android-устройства в FCM (`firebase-messaging`, Firebase-конфиг приложения в `const.py:FCM_*`) → привязка токена у оператора (`api.register_push_device`) → MTalk-сокет. Парсит `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → `SIGNAL_DOORBELL`. Весь флоу под graceful degradation (приватные API Google) — сбой не валит setup. FCM-creds персистятся в `entry.data` |
 
 ### SIP / two-way audio (приём вызова + показ экрана)
@@ -272,12 +272,12 @@ elektronny-gorod/
 | [`tests/test_call_camera.py`](../../tests/test_call_camera.py) | `ElektronnyGorodCallCamera`: one-build-per-call, concurrent first-open dedup, rebuild/teardown и terminal lifecycle (A-81/A-88) |
 | [`tests/test_go2rtc_audio.py`](../../tests/test_go2rtc_audio.py) | PATCH-first `upsert_audio_stream` / `remove_audio_stream` — контракт с go2rtc REST (A-81/A-88) |
 | [`tests/test_config_flow_keep_warm.py`](../../tests/test_config_flow_keep_warm.py) | default-off main/hidden flags, dependency и initial/options persistence |
-| [`tests/test_go2rtc_client.py`](../../tests/test_go2rtc_client.py) | PATCH-only verb, list/get/delete parsing, auth URL и no-secret errors |
-| [`tests/test_stream_manager.py`](../../tests/test_stream_manager.py) | refresh result, cross-reason dedup, direct fallback и sanitized subscribers |
-| [`tests/test_stream_manager_reconcile.py`](../../tests/test_stream_manager_reconcile.py) | registry eligibility matrix, missing restore, consumer-aware cleanup, inert main-off |
-| [`tests/test_stream_manager_scheduler.py`](../../tests/test_stream_manager_scheduler.py) | 28:30 cadence, jitter, retry cap, prompt reconcile и stop cleanup |
-| [`tests/test_stream_manager_lifecycle.py`](../../tests/test_stream_manager_lifecycle.py) | config-entry setup/unload, visibility ordering и camera delegation |
-| [`tests/test_sensor_rtsp_urls.py`](../../tests/test_sensor_rtsp_urls.py) | truthful freshness/count, manager notifications и credential/operator-token exclusion |
+| [`tests/test_go2rtc_client.py`](../../tests/test_go2rtc_client.py) | PATCH-only stream verb, preload list/PUT/DELETE, active-producer parsing, auth URL и no-secret errors |
+| [`tests/test_stream_manager.py`](../../tests/test_stream_manager.py) | mint→PATCH→preload ordering, active-preload PATCH, failure retry, cross-reason dedup и sanitized subscribers |
+| [`tests/test_stream_manager_reconcile.py`](../../tests/test_stream_manager_reconcile.py) | registry eligibility, pre/post-visibility hidden zero-write gate + user-shown override, stream/preload/restart restore, inactive-producer re-arm и preload-first consumer-aware cleanup |
+| [`tests/test_stream_manager_scheduler.py`](../../tests/test_stream_manager_scheduler.py) | 28:30 cadence, cold-start jitter, 0.5s interactive policy ramp, retry cap, prompt reconcile, in-place main/hidden transitions, no preload churn, late-mint guard и idempotent stop cleanup |
+| [`tests/test_stream_manager_lifecycle.py`](../../tests/test_stream_manager_lifecycle.py) | config-entry setup/unload, visibility ordering, conditional options reload, camera delegation и preload removal |
+| [`tests/test_sensor_rtsp_urls.py`](../../tests/test_sensor_rtsp_urls.py) | truthful preloaded/active/fresh count, manager notifications и credential/operator-token exclusion |
 | [`pytest.ini`](../../pytest.ini) | `asyncio_mode = auto`, `testpaths = tests` |
 
 ### CI / CD

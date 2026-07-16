@@ -36,6 +36,7 @@ def _manager(
     if client is None:
         client = MagicMock()
         client.async_patch_stream = AsyncMock()
+        client.async_enable_preload = AsyncMock()
         client.rtsp_url = MagicMock(
             side_effect=lambda name, *, include_credentials: (
                 f"rtsp://user:pass@go2rtc:8554/{name}"
@@ -62,6 +63,7 @@ def _manager(
         coordinator=coordinator,
         client=client,
     )
+    manager.is_camera_publishable = MagicMock(return_value=True)
     return manager, coordinator, client
 
 
@@ -91,7 +93,92 @@ async def test_refresh_mints_and_patches_complete_source() -> None:
     assert state.status == "ready"
     assert state.last_success is not None
     assert state.last_success_monotonic is not None
+    assert state.preloaded is False
+    assert state.producer_active is False
     assert "TOKEN_1" not in repr(state)
+
+
+async def test_eligible_refresh_patches_then_enables_preload() -> None:
+    manager, coordinator, client = _manager()
+    events: list[str] = []
+    manager.keep_warm = True
+    manager.is_camera_eligible = MagicMock(return_value=True)
+    coordinator.get_camera_stream.side_effect = lambda camera_id: (
+        events.append("mint")
+        or f"https://operator/{camera_id}?token=FRESH"
+    )
+    client.async_patch_stream.side_effect = (
+        lambda *_args: events.append("patch")
+    )
+    client.async_enable_preload.side_effect = (
+        lambda *_args: events.append("preload")
+    )
+
+    result = await manager.async_refresh("100", "background")
+
+    assert events == ["mint", "patch", "preload"]
+    assert result.proxied is True
+    client.async_enable_preload.assert_awaited_once_with("eg_100")
+    state = manager.camera_state("100")
+    assert state is not None
+    assert state.eligible is True
+    assert state.present is True
+    assert state.preloaded is True
+    assert state.producer_active is True
+    assert state.status == "ready"
+
+
+async def test_active_preload_refreshes_source_without_rearming() -> None:
+    manager, coordinator, client = _manager()
+    manager.keep_warm = True
+    manager.is_camera_eligible = MagicMock(return_value=True)
+    state = manager._state_for("100")
+    state.preloaded = True
+    state.producer_active = True
+
+    result = await manager.async_refresh("100", "background_due")
+
+    assert result.proxied is True
+    coordinator.get_camera_stream.assert_awaited_once_with("100")
+    client.async_patch_stream.assert_awaited_once()
+    client.async_enable_preload.assert_not_awaited()
+    assert manager.camera_state("100").preloaded is True
+    assert manager.camera_state("100").producer_active is True
+
+
+async def test_preload_failure_retries_with_a_new_operator_url() -> None:
+    manager, coordinator, client = _manager(
+        stream_side_effect=[
+            "https://operator/100?token=FIRST",
+            "https://operator/100?token=SECOND",
+        ]
+    )
+    manager.keep_warm = True
+    manager._started = True
+    manager.is_camera_eligible = MagicMock(return_value=True)
+    manager._schedule_due = MagicMock()
+    client.async_enable_preload.side_effect = [
+        Go2RtcRequestError("preload_enable", "http_500"),
+        None,
+    ]
+
+    first = await manager.async_refresh("100", "background")
+    second = await manager.async_refresh("100", "retry")
+
+    assert first.url == "https://operator/100?token=FIRST"
+    assert first.proxied is False
+    assert second.proxied is True
+    assert coordinator.get_camera_stream.await_count == 2
+    assert client.async_patch_stream.await_count == 2
+    assert client.async_enable_preload.await_count == 2
+    assert "FIRST" in client.async_patch_stream.await_args_list[0].args[1]
+    assert "SECOND" in client.async_patch_stream.await_args_list[1].args[1]
+    manager._schedule_due.assert_any_call("100", 15.0)
+    state = manager.camera_state("100")
+    assert state is not None
+    assert state.failure_count == 0
+    assert state.preloaded is True
+    assert state.producer_active is True
 
 
 async def test_refresh_notifies_sanitized_state_subscribers() -> None:
@@ -134,6 +221,34 @@ async def test_concurrent_reasons_share_one_operator_request_and_patch() -> None
 
     assert coordinator.get_camera_stream.await_count == 1
     assert client.async_patch_stream.await_count == 1
+    assert results[0] == results[1] == results[2]
+
+
+async def test_concurrent_eligible_reasons_share_one_preload_activation() -> None:
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def delayed_stream(camera_id: str) -> str:
+        started.set()
+        await release.wait()
+        return f"https://operator/{camera_id}?token=SHARED"
+
+    manager, coordinator, client = _manager(stream_side_effect=delayed_stream)
+    manager.keep_warm = True
+    manager.is_camera_eligible = MagicMock(return_value=True)
+    calls = [
+        asyncio.create_task(manager.async_refresh("100", "background")),
+        asyncio.create_task(manager.async_refresh("100", "ha_open")),
+        asyncio.create_task(manager.async_refresh("100", "recovery")),
+    ]
+    await started.wait()
+    release.set()
+
+    results = await asyncio.gather(*calls)
+
+    assert coordinator.get_camera_stream.await_count == 1
+    assert client.async_patch_stream.await_count == 1
+    assert client.async_enable_preload.await_count == 1
     assert results[0] == results[1] == results[2]
 
 
