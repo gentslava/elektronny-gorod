@@ -1,0 +1,552 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Домофон в Home Assistant — Электронный город и Дом.ру</title>
+  <meta name="description" content="Открытая интеграция для Home Assistant: звонок с домофона в реальном времени, видео и разговор с гостем, открытие двери, история вызовов и автоматизации. Электронный город (Новотелеком) и Дом.ру." />
+  <link rel="canonical" href="https://gentslava.github.io/elektronny-gorod/" />
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <meta name="theme-color" content="#0e1014" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:locale" content="ru_RU" />
+  <meta property="og:title" content="Домофон в Home Assistant — Электронный город и Дом.ру" />
+  <meta property="og:description" content="Звонок в реальном времени, разговор с гостем, открытие двери и автоматизации. Открытая интеграция, установка через HACS." />
+  <meta property="og:url" content="https://gentslava.github.io/elektronny-gorod/" />
+  <meta property="og:image" content="https://gentslava.github.io/elektronny-gorod/og.jpg" />
+  <meta name="twitter:card" content="summary_large_image" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Электронный город и Дом.ру для Home Assistant",
+    "operatingSystem": "Home Assistant 2024.10.4+",
+    "applicationCategory": "SmartHomeApplication",
+    "softwareVersion": "4.0.0",
+    "license": "https://opensource.org/license/mit/",
+    "isAccessibleForFree": true,
+    "offers": { "@type": "Offer", "price": "0", "priceCurrency": "RUB" },
+    "url": "https://gentslava.github.io/elektronny-gorod/",
+    "downloadUrl": "https://github.com/gentslava/elektronny-gorod/releases",
+    "codeRepository": "https://github.com/gentslava/elektronny-gorod",
+    "author": { "@type": "Person", "name": "gentslava" },
+    "description": "Открытая интеграция домофонов, камер и замков Электронного города (Новотелеком) и Дом.ру в Home Assistant: событие звонка в реальном времени, двусторонний звук, открытие двери, история вызовов."
+  }
+  </script>
+
+  <link rel="preload" href="./fonts/Unbounded-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="./fonts/Unbounded-latin.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="./fonts/GolosText-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="./fonts/GolosText-latin.woff2" as="font" type="font/woff2" crossorigin />
+
+  <link rel="stylesheet" href="./src/styles/tokens.css" />
+  <link rel="stylesheet" href="./src/styles/site.css" />
+</head>
+<body>
+  <a class="skip-link" href="#main">К содержанию</a>
+
+  <header class="top">
+    <div class="wrap top-in">
+      <a class="wordmark" href="#hero">домофон<span class="dim">·в·</span>home assistant</a>
+      <nav class="top-nav" aria-label="Разделы страницы">
+        <a href="#scenario">Как работает</a>
+        <a href="#automations">Сценарии</a>
+        <a href="#install">Установка</a>
+        <a href="#faq">FAQ</a>
+        <a class="gh-link" href="https://github.com/gentslava/elektronny-gorod" data-track="open_github" rel="noopener"><svg class="gh-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>GitHub</a>
+      </nav>
+      <button class="theme-toggle" id="theme-toggle" type="button" aria-label="Переключить светлую и тёмную тему">
+        <span class="sun" aria-hidden="true">☀️</span><span class="moon" aria-hidden="true">🌙</span>
+      </button>
+    </div>
+  </header>
+
+  <main id="main">
+
+    <!-- ============ 1. Hero ============ -->
+    <section class="hero deep" id="hero" aria-label="Главное">
+      <div class="wrap hero-grid">
+        <div>
+          <h1>Ваш домофон умеет&nbsp;больше</h1>
+          <p class="lead">«Электронный город» и «Дом.ру» — прямо в Home Assistant.
+            Звонок приходит мгновенно: видео гостя, разговор, открытие двери
+            и любые автоматизации умного дома.</p>
+          <div class="hero-ctas">
+            <a class="btn btn-primary" data-track="cta_hacs" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=gentslava&repository=elektronny-gorod&category=integration" rel="noopener">Установить через HACS</a>
+            <a class="btn btn-ghost" data-track="cta_watch_demo" href="#scenario">Посмотреть, как работает</a>
+          </div>
+          <div class="hero-badges">
+            <span class="chip">Электронный город · Дом.ру</span>
+            <span class="chip">Home Assistant 2024.10+</span>
+            <span class="chip">Open source · MIT</span>
+          </div>
+          <p class="hero-strip">видео · разговор · открытие двери · события · история · автоматизации</p>
+        </div>
+        <div class="hero-stage-col">
+          <figure class="tablet" aria-label="Настенная панель с запущенной интеграцией (демонстрация)">
+            <i class="tablet-cam" aria-hidden="true"></i>
+            <div class="stage stage-theme-dark" id="hero-stage"></div>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 2. Сценарий звонка ============ -->
+    <section class="station" id="scenario" aria-label="Что происходит при звонке">
+      <div class="wrap" data-reveal>
+        <i class="node" aria-hidden="true"></i>
+        <p class="kicker">путь одного звонка</p>
+        <h2>Что происходит, когда гость нажимает кнопку</h2>
+        <p class="lead">Каждый шаг ниже — настоящий этап работы интеграции.
+          Интерфейс справа — живой: он проходит те же состояния, что и при реальном звонке.</p>
+
+        <div class="scenario-grid">
+          <div class="sc-steps" id="sc-steps">
+            <article class="sc-step" data-phase="idle" data-log="ожидание событий…">
+              <p class="sc-num">01</p>
+              <h3>Гость нажимает кнопку домофона</h3>
+              <p>Обычный подъездный домофон «Электронного города» или Дом.ру.
+                Ничего перепрошивать и подключать проводами не нужно.</p>
+              <p class="sc-log">камера у подъезда уже смотрит на гостя</p>
+            </article>
+            <article class="sc-step" data-phase="idle" data-push="true" data-log="FCM push → event.doorbell_call = ring">
+              <p class="sc-num">02</p>
+              <h3>Home Assistant узнаёт о звонке мгновенно</h3>
+              <p>Событие приходит push-сообщением — тем же каналом, что и в
+                мобильное приложение. Без постоянного опроса сервера.</p>
+              <p class="sc-log">FCM push → event: ring</p>
+            </article>
+            <article class="sc-step" data-phase="ringing" data-log="видео гостя на телефоне и панели">
+              <p class="sc-num">03</p>
+              <h3>Видео гостя — на телефоне и настенной панели</h3>
+              <p>Появляется экран вызова: видео с домофона, адрес, окно ответа.
+                Работает и дома, и удалённо через мобильный интернет.</p>
+              <p class="sc-log">карточка вызова: входящий</p>
+            </article>
+            <article class="sc-step" data-phase="active" data-log="elektronny_gorod.answer → SIP-разговор">
+              <p class="sc-num">04</p>
+              <h3>Ответьте — или сразу откройте дверь</h3>
+              <p>«Принять» включает разговор: вы слышите гостя и говорите через
+                микрофон. А можно просто открыть дверь одним движением.</p>
+              <p class="sc-log">разговор: видео + звук гостя</p>
+            </article>
+            <article class="sc-step" data-phase="active" data-open="true" data-log="lock.unlock → дверь открыта">
+              <p class="sc-num">05</p>
+              <h3>Дверь открывается из Home Assistant</h3>
+              <p>Замок домофона — обычная сущность lock: открывайте из карточки,
+                пуша или автоматизации.</p>
+              <p class="sc-log">lock.unlock → дверь открыта</p>
+            </article>
+            <article class="sc-step" data-phase="ended" data-log="event: ended → история вызовов">
+              <p class="sc-num">06</p>
+              <h3>Звонок завершён — сценарии уже отработали</h3>
+              <p>Карточка прощается и прячется до следующего гостя. Событие остаётся
+                в истории вызовов, а автоматизации уже сделали своё: свет в прихожей,
+                пуш всей семье, тишина в колонках.</p>
+              <p class="sc-log">event: ended → история вызовов</p>
+            </article>
+          </div>
+          <div class="sc-stage-col">
+            <div class="sc-shell" id="sc-shell">
+              <div class="stage stage-theme-dark" id="sc-stage" aria-label="Состояние карточки вызова для текущего шага"></div>
+              <div class="sc-push" id="sc-push" hidden aria-hidden="true">
+                <div class="push-mock">
+                  <div class="push-app">
+                    <img src="./favicon.svg" alt="" width="18" height="18" />
+                    <span>Home Assistant</span><i>·</i><span>сейчас</span>
+                  </div>
+                  <div class="push-body">
+                    <div class="push-text">
+                      <b>🔔 Звонок в домофон</b>
+                      <span>Подъезд 2</span>
+                    </div>
+                    <img class="push-thumb" src="./assets/guest.jpg" alt="" />
+                  </div>
+                  <div class="push-actions"><span>🔓 Открыть дверь</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 3. Playground ============ -->
+    <section class="station" id="demo" aria-label="Интерактивная демонстрация">
+      <div class="wrap" data-reveal>
+        <i class="node" aria-hidden="true"></i>
+        <p class="kicker">конфигуратор</p>
+        <h2>Соберите карточку вызова под свой дом</h2>
+        <p class="lead">Ниже — живой production-код карточки <code>eg-intercom-call-card</code>.
+          Выберите устройство, раскладку и тему: карточка отвечает мгновенно, а внизу
+          собирается готовый YAML для вашего дашборда. Кнопки внутри тоже работают —
+          «Принять» запускает разговор, слайдер открывает дверь.</p>
+
+        <div class="pg-panel">
+          <div class="pg-controls" id="pg-controls">
+            <fieldset class="pg-group">
+              <legend>Состояние вызова</legend>
+              <div class="seg" role="radiogroup">
+                <label><input type="radio" name="pg-phase" value="ringing" checked /><span>Входящий</span></label>
+                <label><input type="radio" name="pg-phase" value="active" /><span>Разговор</span></label>
+                <label><input type="radio" name="pg-phase" value="door" /><span>Дверь открыта</span></label>
+                <label><input type="radio" name="pg-phase" value="ended" /><span>Завершён</span></label>
+                <label><input type="radio" name="pg-phase" value="error" /><span>Ошибка связи</span></label>
+                <label><input type="radio" name="pg-phase" value="idle" /><span>Ожидание</span></label>
+              </div>
+            </fieldset>
+            <fieldset class="pg-group">
+              <legend>Устройство</legend>
+              <div class="seg" role="radiogroup">
+                <label><input type="radio" name="pg-device" value="phone" checked /><span>Телефон</span></label>
+                <label><input type="radio" name="pg-device" value="tablet" /><span>Планшет</span></label>
+                <label><input type="radio" name="pg-device" value="panel" /><span>Настенная панель</span></label>
+              </div>
+            </fieldset>
+            <fieldset class="pg-group">
+              <legend>Раскладка</legend>
+              <div class="seg" role="radiogroup">
+                <label><input type="radio" name="pg-layout" value="full" checked /><span>Полная</span></label>
+                <label><input type="radio" name="pg-layout" value="compact" /><span>Компактная</span></label>
+              </div>
+            </fieldset>
+            <fieldset class="pg-group">
+              <legend>Тема</legend>
+              <div class="seg" role="radiogroup">
+                <label><input type="radio" name="pg-theme" value="dark" checked /><span>Тёмная</span></label>
+                <label><input type="radio" name="pg-theme" value="light" /><span>Светлая</span></label>
+              </div>
+            </fieldset>
+            <fieldset class="pg-group">
+              <legend>Язык</legend>
+              <div class="seg" role="radiogroup">
+                <label><input type="radio" name="pg-lang" value="ru" checked /><span>RU</span></label>
+                <label><input type="radio" name="pg-lang" value="en" /><span>EN</span></label>
+              </div>
+            </fieldset>
+          </div>
+
+          <div class="pg-stage-zone">
+            <div class="pg-frame" id="pg-frame" data-device="phone">
+              <div class="stage stage-theme-dark" id="pg-stage" aria-label="Интерактивная карточка вызова (симуляция)"></div>
+            </div>
+          </div>
+          <p class="pg-status mono" id="pg-status" role="status" aria-live="polite"></p>
+
+          <div class="pg-yaml">
+            <h3>Ваш конфиг для Lovelace</h3>
+            <div class="code-wrap">
+              <pre><code id="pg-yaml-code"></code></pre>
+              <button type="button" class="code-copy" id="pg-yaml-copy" aria-label="Скопировать YAML" title="Скопировать"></button>
+            </div>
+            <p class="pg-note">Замените <code>YOUR_INTERCOM</code> на имя своего домофона —
+              его подскажет Home Assistant после установки. Ресурс карточки:
+              <code>/elektronny_gorod_static/eg-intercom-call-card.js</code>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 4. Возможности ============ -->
+    <section class="station" id="features" aria-label="Возможности">
+      <div class="wrap" data-reveal>
+        <i class="node" aria-hidden="true"></i>
+        <p class="kicker">что появится в вашем доме</p>
+        <h2>Двенадцать жизненных ситуаций</h2>
+        <p class="lead">Не список API, а то, что вы реально сможете делать каждый день.</p>
+
+        <div class="feat-cols">
+          <article class="feat"><p class="idx">01</p><h3>Увидеть, кто пришёл</h3><p>Видео с домофона и дворовых камер — в Home Assistant, на телефоне и планшете.</p></article>
+          <article class="feat"><p class="idx">02</p><h3>Поговорить с гостем</h3><p>Примите вызов и говорите через микрофон — как по видеосвязи, даже не дома.</p></article>
+          <article class="feat"><p class="idx">03</p><h3>Открыть дверь одним движением</h3><p>Из карточки, из пуша, из автоматизации. Защищённый слайдер — от случайных нажатий.</p></article>
+          <article class="feat"><p class="idx">04</p><h3>Узнать о звонке мгновенно</h3><p>Пуш с кадром камеры приходит одновременно со звонком трубки.</p></article>
+          <article class="feat"><p class="idx">05</p><h3>Открыть, не отвечая</h3><p>Курьер? Не обязательно разговаривать — кнопка «Открыть» доступна сразу.</p></article>
+          <article class="feat"><p class="idx">06</p><h3>Посмотреть, кого вы пропустили</h3><p>История принятых и пропущенных вызовов с фильтрами по датам и устройствам.</p></article>
+          <article class="feat"><p class="idx">07</p><h3>Повесить домофон на стену</h3><p>Готовый экран вызова для настенного планшета — как видеопанель, только умнее.</p></article>
+          <article class="feat"><p class="idx">08</p><h3>Подключить несколько адресов</h3><p>Квартира, дача, родители — несколько договоров и аккаунтов в одной системе.</p></article>
+          <article class="feat"><p class="idx">09</p><h3>Слышать камеры</h3><p>Через go2rtc камеры получают звук и заметно меньшую задержку.</p></article>
+          <article class="feat"><p class="idx">10</p><h3>Строить свои сценарии</h3><p>Звонок — обычное событие Home Assistant: свет, колонки, ТВ, уведомления — что угодно.</p></article>
+          <article class="feat"><p class="idx">11</p><h3>Следить за балансом</h3><p>Баланс, дни до блокировки и статус договора — сенсоры с уведомлениями.</p></article>
+          <article class="feat"><p class="idx">12</p><h3>Спать спокойно</h3><p>Режим «Не беспокоить» отключает звонки в квартиру — по кнопке или расписанию.</p></article>
+        </div>
+
+        <div class="hood" id="hood">
+          <div class="hood-head">
+            <p class="kicker">для продвинутых</p>
+            <h3>Под капотом</h3>
+            <p>Всё, из чего собирается опыт выше, — обычные сущности и сервисы
+              Home Assistant. Стройте на них что угодно.</p>
+          </div>
+          <dl class="hood-grid">
+            <div class="hood-row"><dt><code>event</code></dt><dd>Звонок в реальном времени (FCM, device class <code>doorbell</code>): <code>ring</code>/<code>ended</code> с атрибутами <code>gate_name</code>, <code>apartment</code>, <code>call_id</code>, <code>allow_open</code>. Плюс события истории по каждому месту.</dd></div>
+            <div class="hood-row"><dt><code>camera</code></dt><dd>Домофоны и камеры двора; на время вызова — <code>camera.*_intercom_call</code>: видео и звук гостя по HA-native WebRTC.</dd></div>
+            <div class="hood-row"><dt><code>lock</code></dt><dd>Дверь домофона и калитки — открытие из интерфейса, пушей и автоматизаций.</dd></div>
+            <div class="hood-row"><dt><code>sensor</code></dt><dd>Баланс, дни до блокировки, состояние вызова <code>ringing/active/…</code>, диагностика RTSP-потоков.</dd></div>
+            <div class="hood-row"><dt><code>switch</code></dt><dd>«Не беспокоить» для домофонных и управляющих звонков; <code>binary_sensor</code> блокировки договора.</dd></div>
+            <div class="hood-row"><dt>services</dt><dd><code>elektronny_gorod.answer</code> / <code>.hangup</code> — приём и завершение SIP-вызова из любых автоматизаций.</dd></div>
+            <div class="hood-row"><dt>lovelace</dt><dd><code>eg-intercom-call-card</code> — экран вызова с микрофоном, <code>eg-event-history-card</code> — история, <code>eg-intercom-mic-card</code>.</dd></div>
+            <div class="hood-row"><dt>go2rtc</dt><dd>Звук и низкая задержка потоков; opt-in публикация камер по стабильным RTSP для NVR и медиаплееров (выключено по умолчанию).</dd></div>
+            <div class="hood-row"><dt>sip · fcm</dt><dd>Register-on-ring SIP-стек и FCM-приём — те же протоколы, что у мобильного приложения. Всё работает внутри вашего Home Assistant.</dd></div>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 5. Автоматизации ============ -->
+    <section class="station" id="automations" aria-label="Библиотека автоматизаций">
+      <div class="wrap" data-reveal>
+        <i class="node" aria-hidden="true"></i>
+        <p class="kicker">библиотека сценариев</p>
+        <h2>Звонок в дверь — событие для всего дома</h2>
+        <p class="lead">Каждый сценарий — готовый YAML с реальными сущностями интеграции:
+          скопируйте и замените <code>YOUR_INTERCOM</code> / <code>YOUR_PHONE</code> на свои.</p>
+
+        <div class="auto-hero" id="auto-hero">
+          <noscript><p>Библиотека сценариев требует JavaScript. Примеры также есть в <a href="https://github.com/gentslava/elektronny-gorod#readme">README проекта</a>.</p></noscript>
+        </div>
+        <h3 class="auto-sub">Не только звонок</h3>
+        <p class="lead">Панели камер и замков, распознавание лиц, тишина по ночам, баланс — сущности
+          интеграции работают в любых сценариях Home Assistant.</p>
+        <div class="auto-rows" id="auto-rows"></div>
+      </div>
+    </section>
+
+    <!-- ============ 6. Мастер установки ============ -->
+    <section class="station" id="install" aria-label="Мастер установки">
+      <div class="wrap" data-reveal>
+        <i class="node" aria-hidden="true"></i>
+        <p class="kicker">персональная инструкция</p>
+        <h2>Установка под вашу ситуацию</h2>
+        <p class="lead">Ответьте на несколько вопросов — соберём точный список шагов:
+          что ставить, в каком порядке и что можно пропустить. Все данные аккаунта
+          вводятся только внутри вашего Home Assistant — сайт их не запрашивает и не видит.</p>
+
+        <div class="wiz-grid">
+          <div class="wiz-questions" id="wiz-questions">
+            <noscript><p>Мастер требует JavaScript. Классическая инструкция — в <a href="https://github.com/gentslava/elektronny-gorod#readme">README</a>.</p></noscript>
+          </div>
+          <aside class="wiz-plan" id="wiz-plan" aria-live="polite">
+            <h3>Ваш план установки</h3>
+            <p class="wiz-empty">Ответьте на вопросы слева — план соберётся здесь.</p>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 7. Совместимость ============ -->
+    <section class="station" id="compat" aria-label="Проверка совместимости">
+      <div class="wrap" data-reveal>
+        <i class="node" aria-hidden="true"></i>
+        <p class="kicker">честная проверка</p>
+        <h2>Поддерживается ли ваш домофон</h2>
+        <p class="lead">«Электронный город» и Дом.ру работают одинаково — у них одно API,
+          оператора выбирать не нужно. Укажите устройство и нужные функции — покажем, что
+          заработает сразу, что потребует go2rtc или HTTPS, а что пока экспериментально.</p>
+
+        <div class="compat-panel">
+          <form class="compat-form" id="compat-form">
+            <noscript><p>Проверка требует JavaScript. Сводка совместимости — в <a href="https://github.com/gentslava/elektronny-gorod#readme">README</a>.</p></noscript>
+          </form>
+          <div class="compat-result" id="compat-result" aria-live="polite">
+            <h3>Результат</h3>
+            <p class="compat-summary">Выберите параметры слева.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 8. Доверие ============ -->
+    <section class="station" id="trust" aria-label="Доверие и прозрачность">
+      <div class="wrap" data-reveal>
+        <i class="node" aria-hidden="true"></i>
+        <p class="kicker">без магии и мелкого шрифта</p>
+        <h2>Как это устроено — честно</h2>
+
+        <div class="trust-grid">
+          <div class="trust-item">
+            <h3>Открытый код</h3>
+            <p>Весь код — на <a href="https://github.com/gentslava/elektronny-gorod" data-track="open_github" rel="noopener">GitHub</a> под лицензией MIT.
+              Каждый релиз собирается публичным CI; изменения — в
+              <a href="https://github.com/gentslava/elektronny-gorod/blob/master/CHANGELOG.md" rel="noopener">changelog</a> и
+              <a href="https://github.com/gentslava/elektronny-gorod/releases" data-track="open_releases" rel="noopener">releases</a>.</p>
+          </div>
+          <div class="trust-item">
+            <h3>Ваши данные остаются у вас</h3>
+            <p>Этот сайт — статические страницы: никаких форм логина, SMS-кодов,
+              токенов и cookies. Учётные данные оператора вы вводите только в своём
+              Home Assistant, и они хранятся только там.</p>
+          </div>
+          <div class="trust-item">
+            <h3>Какие API использует интеграция</h3>
+            <p>Интеграция воспроизводит API мобильных приложений «Мой Дом» и
+              «Умный Дом.ру» (myhome.proptech.ru) — те же запросы, что делает ваш
+              телефон. Это <b>неофициальное</b> API: оператор может изменить его,
+              тогда потребуется обновление интеграции.</p>
+          </div>
+          <div class="trust-item">
+            <h3>Что будет, если оператор недоступен</h3>
+            <p>Интеграция деградирует аккуратно: при сбое push-канала камеры, замки
+              и баланс продолжают работать; при недоступности API сущности честно
+              становятся «недоступны», а после восстановления возвращаются сами.</p>
+          </div>
+          <div class="trust-item">
+            <h3>Нашли ошибку?</h3>
+            <p>Откройте <a href="https://github.com/gentslava/elektronny-gorod/issues" rel="noopener">issue на GitHub</a>.
+              Диагностика Home Assistant автоматически скрывает токены и личные
+              данные — выгрузку безопасно прикладывать к отчёту.</p>
+          </div>
+          <div class="trust-item">
+            <h3>Поддержать проект</h3>
+            <p>Интеграция бесплатна и развивается на энтузиазме. Если она делает ваш
+              дом удобнее — можно поддержать разработку на
+              <a href="https://boosty.to/gentslava" data-track="open_support" rel="noopener">Boosty</a> или через
+              <a href="https://yoomoney.ru/to/410011558436973" data-track="open_support" rel="noopener">ЮMoney</a>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 9. FAQ ============ -->
+    <section class="station" id="faq" aria-label="Вопросы и ответы">
+      <div class="wrap" data-reveal>
+        <i class="node" aria-hidden="true"></i>
+        <p class="kicker">вопросы и ответы</p>
+        <h2>Частые вопросы</h2>
+
+        <div class="faq-list">
+          <details>
+            <summary>Будет ли работать с моим домофоном?</summary>
+            <div class="faq-a"><p>Если домофон обслуживает «Электронный город» (Новотелеком) или
+              «Дом.ру» и он виден в официальном мобильном приложении — да. Интеграция
+              показывает те же устройства, что и приложение. Проверить быстрее всего
+              через <a href="#compat">проверку совместимости</a>.</p></div>
+          </details>
+          <details>
+            <summary>Нужна ли подписка оператора?</summary>
+            <div class="faq-a"><p>Нужен действующий договор с оператором — тот же, по которому работает
+              мобильное приложение. Отдельной платы за интеграцию нет: она бесплатна и open source.</p></div>
+          </details>
+          <details>
+            <summary>Можно ли открыть дверь из Home Assistant?</summary>
+            <div class="faq-a"><p>Да. Замок домофона появляется как обычная сущность <code>lock</code>:
+              открытие доступно из интерфейса, из пуш-уведомления и из автоматизаций.</p></div>
+          </details>
+          <details>
+            <summary>Разговор с гостем правда работает?</summary>
+            <div class="faq-a"><p>Да: интеграция принимает SIP-вызов, вы слышите гостя и говорите через
+              микрофон браузера или телефона. Это продвинутая функция — понадобится HTTPS-доступ
+              к Home Assistant и пара шагов из <a href="https://github.com/gentslava/elektronny-gorod/blob/master/docs/features/intercom-two-way-audio/call-screen-setup.md" rel="noopener">инструкции</a>.</p></div>
+          </details>
+          <details>
+            <summary>Почему браузер просит доступ к микрофону?</summary>
+            <div class="faq-a"><p>Доступ нужен только чтобы говорить с гостем, и запрашивается в момент,
+              когда вы сами нажимаете кнопку микрофона. Звук идёт в домофон через ваш же
+              Home Assistant — не через сторонние серверы.</p></div>
+          </details>
+          <details>
+            <summary>Почему звук не включается сам?</summary>
+            <div class="faq-a"><p>Браузеры запрещают автозапуск звука до первого действия пользователя.
+              Нажмите «Принять» или кнопку звука — дальше всё работает автоматически.</p></div>
+          </details>
+          <details>
+            <summary>Нужен ли go2rtc?</summary>
+            <div class="faq-a"><p>Для видео — нет. go2rtc добавляет звук с камер, снижает задержку и даёт
+              стабильные RTSP-адреса. В Home Assistant 2024.11+ go2rtc уже встроен — остаётся
+              включить его в настройках интеграции.</p></div>
+          </details>
+          <details>
+            <summary>Работает ли удалённо, через мобильный интернет?</summary>
+            <div class="faq-a"><p>Да: и звонок, и видео, и разговор работают через ваш обычный удалённый
+              доступ к Home Assistant (Nabu Casa или собственный HTTPS). Открывать go2rtc наружу
+              не нужно.</p></div>
+          </details>
+          <details>
+            <summary>Можно ли добавить несколько квартир или адресов?</summary>
+            <div class="faq-a"><p>Да, интеграция поддерживает несколько договоров и несколько аккаунтов —
+              карточка истории даже объединяет их в одну ленту.</p></div>
+          </details>
+          <details>
+            <summary>Что делать после обновления интеграции?</summary>
+            <div class="faq-a"><p>Ничего особенного: обновитесь через HACS и перезапустите Home Assistant.
+              Перенастраивать аккаунт не нужно — обновление 4.0.0 прошло без breaking changes.</p></div>
+          </details>
+          <details>
+            <summary>Долгий просмотр камеры замирает через полчаса. Это баг?</summary>
+            <div class="faq-a"><p>Это ограничение оператора: его ссылка на поток живёт около 30 минут —
+              так же ведёт себя и официальное приложение. Для постоянного просмотра включите
+              go2rtc-публикацию: интеграция обновляет источник сама, не разрывая просмотр.</p></div>
+          </details>
+          <details>
+            <summary>Где искать логи и диагностику?</summary>
+            <div class="faq-a"><p>«Настройки → Устройства и службы → Электронный город → Диагностика».
+              Выгрузка автоматически скрывает токены, пароли и личные данные — её безопасно
+              прикладывать к issue.</p></div>
+          </details>
+          <details>
+            <summary>Что будет, если оператор изменит API?</summary>
+            <div class="faq-a"><p>Интеграция может временно перестать работать — как и неофициальные
+              приложения. Обычно это чинится обновлением: следите за
+              <a href="https://github.com/gentslava/elektronny-gorod/releases" rel="noopener">releases</a>
+              или включите уведомления об обновлениях в HACS.</p></div>
+          </details>
+        </div>
+
+        <div class="notworking" id="notworking">
+          <h3>У меня не работает — что делать</h3>
+          <ol>
+            <li><b>Базовая проверка:</b> работает ли официальное приложение оператора?
+              Если нет — проблема на стороне оператора или договора.</li>
+            <li><b>Диагностика:</b> перезапустите Home Assistant и посмотрите
+              «Настройки → Журналы» по слову <code>elektronny_gorod</code>.</li>
+            <li><b>Безопасный экспорт:</b> скачайте диагностику интеграции — секреты
+              в ней уже скрыты автоматически.</li>
+            <li><b>Поиск:</b> проверьте <a href="https://github.com/gentslava/elektronny-gorod/issues" rel="noopener">существующие issues</a> —
+              возможно, решение уже описано.</li>
+            <li><b>Новый issue:</b> опишите шаги воспроизведения и приложите диагностику —
+              по шаблону, который предложит GitHub.</li>
+          </ol>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 10. Финал ============ -->
+    <section class="final deep" id="cta" aria-label="Установить интеграцию">
+      <div class="wrap" data-reveal>
+        <div class="lock-mark" aria-hidden="true">🔓</div>
+        <h2>Превратите домофон в часть умного дома</h2>
+        <p class="lead">Пять минут установки — и звонок в дверь становится событием,
+          на которое может ответить весь ваш дом.</p>
+        <div class="final-ctas">
+          <a class="btn btn-primary" data-track="cta_hacs" href="https://my.home-assistant.io/redirect/hacs_repository/?owner=gentslava&repository=elektronny-gorod&category=integration" rel="noopener">Установить через HACS</a>
+          <a class="btn btn-ghost" data-track="open_github" href="https://github.com/gentslava/elektronny-gorod" rel="noopener"><svg class="gh-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>Открыть GitHub</a>
+          <a class="btn btn-ghost" href="https://github.com/gentslava/elektronny-gorod#readme" rel="noopener">Документация</a>
+          <a class="btn btn-ghost" data-track="open_support" href="https://boosty.to/gentslava" rel="noopener">Поддержать проект</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="wrap">
+      <div class="footer-in">
+        <span>© gentslava · MIT License</span>
+        <nav aria-label="Ссылки" style="display:flex;gap:18px;flex-wrap:wrap">
+          <a class="gh-link" href="https://github.com/gentslava/elektronny-gorod" rel="noopener"><svg class="gh-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>GitHub</a>
+          <a href="https://github.com/gentslava/elektronny-gorod/releases" rel="noopener">Releases</a>
+          <a href="https://github.com/gentslava/elektronny-gorod/blob/master/CHANGELOG.md" rel="noopener">Changelog</a>
+          <a href="https://github.com/gentslava/elektronny-gorod/issues" rel="noopener">Issues</a>
+        </nav>
+      </div>
+      <p class="legal">Неофициальный проект сообщества. Не является продуктом и не
+        аффилирован с ООО «Новотелеком» («Электронный город»), АО «ЭР-Телеком Холдинг»
+        («Дом.ру») и Nabu Casa (Home Assistant). Названия операторов использованы для
+        обозначения совместимости. Демонстрации на странице — симуляция без подключения
+        к реальным аккаунтам; изображение гостя сгенерировано.</p>
+    </div>
+  </footer>
+
+  <script type="module" src="./src/main.ts"></script>
+</body>
+</html>
