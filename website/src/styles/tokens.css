@@ -1,0 +1,110 @@
+/* Дизайн-токены сайта. Собственная нейтральная система:
+   акцент — технологичный синий (родственник HA-синего из карточки),
+   зелёный — только успех/дверь, красный — только ошибки/завершение.
+   Операторы не выделяются отдельными цветами: интеграция работает
+   с обоими одинаково. */
+
+@font-face {
+  font-family: "Unbounded";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/Unbounded-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Unbounded";
+  font-style: normal;
+  font-weight: 400 800;
+  font-display: swap;
+  src: url("/fonts/Unbounded-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Golos Text";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/GolosText-cyrillic.woff2") format("woff2");
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+@font-face {
+  font-family: "Golos Text";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("/fonts/GolosText-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+:root {
+  /* Поверхности: light */
+  --bg: #f6f6f3;
+  --bg-elev: #ffffff;
+  --ink: #16181d;
+  --ink-2: #565d68;
+  --ink-3: #8a919c;
+  --line: rgba(22, 24, 29, 0.13);
+  --line-strong: rgba(22, 24, 29, 0.28);
+
+  /* Глубокая сцена (видео-контекст) — одинакова в обеих темах */
+  --deep: #0e1014;
+  --deep-elev: #171a21;
+  --deep-ink: #eceef1;
+  --deep-ink-2: #9aa2ad;
+  --deep-line: rgba(236, 238, 241, 0.14);
+
+  /* Роли */
+  --accent: #0f8bd0;
+  --accent-strong: #0b6ea6;
+  --accent-tint: rgba(15, 139, 208, 0.12);
+  --success: #2f9e63;
+  --success-tint: rgba(47, 158, 99, 0.14);
+  --danger: #d84a44;
+  --danger-tint: rgba(216, 74, 68, 0.13);
+  --warn: #c98a04;
+  --warn-tint: rgba(201, 138, 4, 0.14);
+
+
+  /* Типографика */
+  --font-display: "Unbounded", "Golos Text", system-ui, sans-serif;
+  --font-text: "Golos Text", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Roboto Mono", ui-monospace, "SF Mono", "Cascadia Mono", monospace;
+
+  /* Геометрия */
+  --r-lg: 20px;
+  --r-md: 12px;
+  --r-sm: 8px;
+  --content: 1140px;
+  --rail: 56px; /* левое поле сигнальной нити на desktop */
+
+  /* Нить */
+  --thread: var(--accent);
+  --thread-idle: var(--line-strong);
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #101216;
+  --bg-elev: #181b21;
+  --ink: #e9eaec;
+  --ink-2: #a4abb5;
+  --ink-3: #6d7480;
+  --line: rgba(233, 234, 236, 0.13);
+  --line-strong: rgba(233, 234, 236, 0.3);
+  --accent: #3aa6e0;
+  --accent-strong: #64bce9;
+  --accent-tint: rgba(58, 166, 224, 0.14);
+  --success: #46b578;
+  --success-tint: rgba(70, 181, 120, 0.15);
+  --danger: #e4685f;
+  --danger-tint: rgba(228, 104, 95, 0.15);
+  --warn: #d9a53a;
+  --warn-tint: rgba(217, 165, 58, 0.16);
+  color-scheme: dark;
+}

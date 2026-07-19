@@ -1,0 +1,2044 @@
+/* ============ База ============ */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Плавный скролл — только после полной загрузки (класс ставит main.ts):
+   иначе браузерное восстановление позиции при релоаде «едет» анимацией. */
+html.smooth {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-text);
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  /* Плавная смена светлой/тёмной темы */
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+section[id] {
+  scroll-margin-top: 72px;
+}
+
+h1,
+h2,
+h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.5em;
+  text-wrap: balance;
+}
+
+h2 {
+  font-size: clamp(26px, 3.6vw, 40px);
+}
+
+h3 {
+  font-family: var(--font-text);
+  font-weight: 700;
+  font-size: 19px;
+}
+
+p {
+  margin: 0 0 1em;
+}
+
+a {
+  color: var(--accent-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+}
+
+pre {
+  overflow-x: auto;
+  padding: 16px;
+  border-radius: var(--r-md);
+  background: var(--deep);
+  color: var(--deep-ink);
+  line-height: 1.55;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  z-index: 100;
+  background: var(--accent);
+  color: #fff;
+  padding: 10px 18px;
+  border-radius: 0 0 var(--r-sm) 0;
+}
+.skip-link:focus {
+  left: 0;
+}
+
+.wrap {
+  max-width: var(--content);
+  margin-inline: auto;
+  padding-inline: clamp(20px, 5vw, 48px);
+}
+
+section {
+  padding-block: clamp(64px, 9vw, 128px);
+}
+
+.kicker {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+  margin: 0 0 14px;
+}
+
+.lead {
+  font-size: clamp(17px, 2vw, 20px);
+  color: var(--ink-2);
+  max-width: 62ch;
+}
+
+/* Появление при скролле */
+[data-reveal] {
+  opacity: 0;
+  transform: translateY(14px);
+  transition: opacity 0.55s ease, transform 0.55s ease;
+}
+[data-reveal].in {
+  opacity: 1;
+  transform: none;
+}
+
+/* ============ Сигнальная нить ============ */
+
+.station .wrap {
+  position: relative;
+  padding-left: calc(clamp(20px, 5vw, 48px) + var(--rail));
+}
+
+.station .wrap::before {
+  content: "";
+  position: absolute;
+  left: clamp(8px, 2.5vw, 26px);
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: linear-gradient(
+    to bottom,
+    var(--thread-idle) 0,
+    var(--thread-idle) 100%
+  );
+  opacity: 0.55;
+}
+
+.station .node {
+  position: absolute;
+  left: calc(clamp(8px, 2.5vw, 26px) - 5px);
+  top: clamp(70px, 9vw, 134px);
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: 2px solid var(--thread-idle);
+  transition: border-color 0.4s ease, box-shadow 0.4s ease;
+}
+
+.station .wrap.in .node,
+.station .wrap:has([data-reveal].in) .node {
+  border-color: var(--thread);
+  box-shadow: 0 0 0 5px var(--accent-tint);
+}
+
+@media (max-width: 720px) {
+  :root {
+    --rail: 26px;
+  }
+}
+
+/* ============ Шапка ============ */
+
+.top {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--line);
+}
+
+.top-in {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  min-height: 60px;
+}
+
+.wordmark {
+  font-family: var(--font-display);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--ink);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.wordmark .dim {
+  color: var(--ink-3);
+  font-weight: 400;
+}
+
+.top-nav {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.top-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.top-nav a {
+  color: var(--ink-2);
+  text-decoration: none;
+  font-size: 14.5px;
+  padding: 9px 11px;
+  border-radius: var(--r-sm);
+  white-space: nowrap;
+}
+.top-nav a:hover {
+  color: var(--ink);
+  background: var(--accent-tint);
+}
+
+/* Ссылки на GitHub с фирменным знаком */
+.gh-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.gh-mark {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
+  flex: none;
+}
+
+.theme-toggle {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-2);
+  border-radius: var(--r-full, 999px);
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.theme-toggle:hover {
+  color: var(--ink);
+  border-color: var(--line-strong);
+}
+
+@media (max-width: 860px) {
+  .top-in {
+    flex-wrap: wrap;
+    padding-block: 8px 6px;
+    gap: 6px 12px;
+    min-height: 0;
+  }
+  .theme-toggle {
+    margin-left: auto;
+  }
+  .top-nav {
+    order: 3;
+    flex-basis: 100%;
+    margin-left: 0;
+  }
+}
+:root[data-theme="dark"] .theme-toggle .sun,
+:root:not([data-theme="dark"]) .theme-toggle .moon {
+  display: none;
+}
+
+/* ============ Кнопки и бейджи ============ */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 50px;
+  padding: 12px 24px;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  font: 600 16px/1.2 var(--font-text);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.18s ease, border-color 0.18s ease,
+    transform 0.15s ease, box-shadow 0.18s ease;
+}
+.btn:hover {
+  transform: translateY(-1px);
+}
+.btn:active {
+  transform: translateY(1px);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.btn-primary:hover {
+  background: var(--accent-strong);
+  box-shadow: 0 8px 22px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+.btn-ghost {
+  border-color: var(--line-strong);
+  color: var(--ink);
+  background: transparent;
+}
+.btn-ghost:hover {
+  border-color: var(--ink-2);
+  background: var(--accent-tint);
+}
+
+.deep .btn-ghost {
+  color: var(--deep-ink);
+  border-color: var(--deep-line);
+}
+.deep .btn-ghost:hover {
+  border-color: var(--deep-ink-2);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  font-size: 13.5px;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.deep .chip {
+  border-color: var(--deep-line);
+  color: var(--deep-ink-2);
+}
+
+/* ============ Hero ============ */
+
+.hero {
+  /* Стена с мягким верхним светом — контекст для настенной панели. */
+  background: radial-gradient(
+      130% 90% at 78% -10%,
+      #232833 0%,
+      #171a21 42%,
+      var(--deep) 78%
+    );
+  color: var(--deep-ink);
+  overflow: clip;
+  min-height: calc(100svh - 60px);
+  display: grid;
+  align-items: center;
+  padding-block: clamp(40px, 5vw, 72px);
+}
+
+.hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 420px);
+  gap: clamp(32px, 5vw, 72px);
+  align-items: center;
+}
+
+.hero h1 {
+  font-size: clamp(30px, 4.6vw, 54px);
+  font-weight: 700;
+  margin-bottom: 20px;
+  color: var(--deep-ink);
+}
+
+.hero .lead {
+  color: var(--deep-ink-2);
+  margin-bottom: 28px;
+}
+
+.hero-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 26px;
+}
+
+.hero-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 30px;
+}
+
+.hero-strip {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  color: var(--deep-ink-2);
+  border-top: 1px solid var(--deep-line);
+  padding-top: 16px;
+}
+
+/* Настенный планшет: рамка вокруг живой карточки */
+.tablet {
+  margin: 0;
+  position: relative;
+  background: linear-gradient(175deg, #10131a 0%, #05070a 60%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 30px;
+  padding: 26px 14px 18px;
+  box-shadow:
+    0 40px 90px rgba(0, 0, 0, 0.55),
+    0 6px 18px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+}
+
+.tablet-cam {
+  position: absolute;
+  top: 11px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #1d222b;
+  box-shadow: inset 0 0 2px rgba(0, 0, 0, 0.9), 0 0 0 1.5px rgba(255, 255, 255, 0.05);
+}
+
+/* Сцена карточки */
+.stage-shell {
+  position: relative;
+}
+
+.stage {
+  border-radius: 18px;
+  overflow: hidden;
+  background: #1c1c1c;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.45);
+  min-height: 300px;
+}
+
+.tablet .stage {
+  border-radius: 12px;
+  box-shadow: none;
+  /* Резерв под карточку в состоянии «разговор»: без него при загрузке
+     контент ниже прыгает, а браузерный restore скролла промахивается. */
+  min-height: 640px;
+}
+
+.stage:empty::after {
+  content: "загружаем интерфейс…";
+  display: grid;
+  place-items: center;
+  min-height: 300px;
+  color: var(--deep-ink-2);
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.stage eg-intercom-call-card {
+  display: block;
+}
+
+/* Тема HA внутри сцены (значения — из demo harness интеграции) */
+.stage-theme-dark {
+  --primary-color: #03a9f4;
+  --success-color: #43a047;
+  --error-color: #e45e65;
+  --warning-color: #ff9800;
+  --primary-text-color: #e8e8e8;
+  --secondary-text-color: #a6a6a6;
+  --disabled-text-color: #787878;
+  --secondary-background-color: #2a2a2a;
+  --card-background-color: #1c1c1c;
+  --ha-card-background: #1c1c1c;
+  --divider-color: rgba(225, 225, 225, 0.12);
+  --text-primary-color: #ffffff;
+  background: #1c1c1c;
+  color: var(--primary-text-color);
+}
+
+.stage-theme-light {
+  --primary-color: #03a9f4;
+  --success-color: #43a047;
+  --error-color: #e45e65;
+  --warning-color: #ff9800;
+  --primary-text-color: #212121;
+  --secondary-text-color: #6b6b6b;
+  --disabled-text-color: #9b9b9b;
+  --secondary-background-color: #eeeeee;
+  --card-background-color: #ffffff;
+  --ha-card-background: #ffffff;
+  --divider-color: rgba(0, 0, 0, 0.12);
+  --text-primary-color: #ffffff;
+  background: #ffffff;
+  color: var(--primary-text-color);
+}
+
+.fallback-note {
+  margin-top: 10px;
+  font-size: 13.5px;
+  color: var(--deep-ink-2);
+}
+
+@media (max-width: 920px) {
+  .hero {
+    min-height: 0;
+  }
+  .hero-grid {
+    grid-template-columns: 1fr;
+  }
+  .hero-stage-col {
+    max-width: 420px;
+    width: 100%;
+    margin-inline: auto;
+  }
+}
+
+/* ============ Сценарий звонка ============ */
+
+.scenario-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+  gap: clamp(28px, 5vw, 72px);
+  align-items: start;
+}
+
+.sc-steps {
+  display: flex;
+  flex-direction: column;
+}
+
+.sc-step {
+  min-height: 40vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-block: 24px;
+  border-bottom: 1px solid var(--line);
+  opacity: 0.38;
+  transition: opacity 0.4s ease;
+}
+.sc-step:last-child {
+  border-bottom: 0;
+}
+.sc-step.current {
+  opacity: 1;
+}
+
+.sc-num {
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--accent-strong);
+  margin-bottom: 10px;
+}
+
+.sc-step h3 {
+  font-size: clamp(20px, 2.4vw, 26px);
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+.sc-step p {
+  color: var(--ink-2);
+  max-width: 46ch;
+}
+
+.sc-log {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--accent-strong);
+  background: var(--accent-tint);
+  border-radius: var(--r-sm);
+  padding: 6px 10px;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.sc-stage-col {
+  position: sticky;
+  /* Карточка держится у вертикального центра вьюпорта — синхронно с шагом,
+     который читает пользователь. 330px ≈ половина высоты карточки. */
+  top: clamp(76px, calc(50svh - 330px), 40vh);
+}
+
+.sc-stage-col .stage {
+  box-shadow: 0 18px 50px rgba(14, 16, 20, 0.24);
+}
+
+.sc-shell {
+  position: relative;
+}
+.sc-shell .stage {
+  transition: filter 0.3s ease;
+}
+.sc-shell.push-on .stage {
+  filter: brightness(0.5);
+}
+
+/* Пуш-оверлей шага 02: уведомление прилетело, экран вызова ещё не открыт */
+.sc-push {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: min(88%, 340px);
+  z-index: 2;
+  pointer-events: none;
+}
+.sc-push[hidden] {
+  display: none;
+}
+.sc-push .push-mock {
+  background: rgba(28, 30, 36, 0.92);
+  color: var(--deep-ink);
+}
+
+@media (max-width: 920px) {
+  .scenario-grid {
+    grid-template-columns: 1fr;
+  }
+  .sc-stage-col {
+    order: -1;
+    top: 68px;
+    z-index: 5;
+    max-width: 390px;
+    margin-inline: auto;
+    width: 100%;
+  }
+  .sc-step {
+    min-height: 52vh;
+  }
+}
+
+/* ============ Playground ============ */
+
+.pg-panel {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  padding: clamp(18px, 3vw, 32px);
+}
+
+.pg-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 28px;
+  margin-bottom: 24px;
+}
+
+.pg-group {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.pg-group legend {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--ink-2);
+  margin-bottom: 8px;
+  padding: 0;
+}
+
+.seg {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seg label {
+  position: relative;
+  display: inline-flex;
+}
+
+.seg input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.seg span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 14px;
+  min-height: 40px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: 14px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.seg input:hover + span {
+  border-color: var(--line-strong);
+}
+.seg input:checked + span {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--ink);
+  font-weight: 600;
+}
+.seg input:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.pg-stage-zone {
+  overflow-x: auto;
+  padding: clamp(14px, 3vw, 34px);
+  border-radius: var(--r-md);
+  background: var(--deep);
+  display: grid;
+  justify-items: center;
+}
+
+.pg-frame {
+  border-radius: 22px;
+  padding: 10px;
+  background: #05070a;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  transition: width 0.25s ease;
+  max-width: 100%;
+}
+.pg-frame .stage {
+  box-shadow: none;
+  border-radius: 14px;
+  min-height: 260px;
+}
+/* Компактная раскладка — одна строка: резерв высоты не нужен. */
+.pg-frame .stage[data-layout="compact"] {
+  min-height: 0;
+}
+.pg-frame[data-device="phone"] {
+  width: 400px;
+}
+.pg-frame[data-device="tablet"] {
+  width: 700px;
+}
+.pg-frame[data-device="panel"] {
+  width: 100%;
+  max-width: 980px;
+}
+
+.pg-note {
+  margin-top: 14px;
+  font-size: 14px;
+  color: var(--ink-2);
+}
+
+.pg-status {
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--accent-strong);
+  min-height: 20px;
+}
+.pg-status:not(:empty)::before {
+  content: "> ";
+}
+
+.pg-yaml {
+  margin-top: 22px;
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+
+.pg-yaml h3 {
+  margin-bottom: 12px;
+}
+.pg-yaml .code-wrap {
+  margin-bottom: 12px;
+}
+.pg-yaml pre {
+  font-size: 13px;
+}
+
+/* ============ Возможности ============ */
+
+.feat-cols {
+  columns: 2;
+  column-gap: clamp(28px, 5vw, 64px);
+  margin-top: 8px;
+}
+
+.feat {
+  break-inside: avoid;
+  border-top: 1px solid var(--line);
+  padding: 18px 0 22px;
+}
+
+.feat .idx {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--ink-3);
+}
+
+.feat h3 {
+  margin: 6px 0 4px;
+  font-size: 17.5px;
+}
+
+.feat p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 15px;
+}
+
+@media (max-width: 760px) {
+  .feat-cols {
+    columns: 1;
+  }
+}
+
+/* «Под капотом» — открытый технослой на глубокой поверхности */
+.hood {
+  margin-top: 56px;
+  background: var(--deep);
+  color: var(--deep-ink);
+  border-radius: var(--r-lg);
+  padding: clamp(24px, 4vw, 48px);
+}
+
+.hood-head {
+  max-width: 56ch;
+  margin-bottom: 26px;
+}
+.hood-head h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(20px, 2.6vw, 28px);
+  margin-bottom: 8px;
+}
+.hood-head p:last-child {
+  margin: 0;
+  color: var(--deep-ink-2);
+}
+
+.hood-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 0 clamp(24px, 4vw, 56px);
+  margin: 0;
+}
+
+.hood-row {
+  display: grid;
+  grid-template-columns: 92px 1fr;
+  gap: 14px;
+  padding: 14px 0;
+  border-top: 1px solid var(--deep-line);
+  align-items: baseline;
+}
+
+.hood-row dt {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--accent-strong);
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+.hood-row dt code {
+  font-size: inherit;
+}
+
+.hood-row dd {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--deep-ink-2);
+}
+.hood-row dd code {
+  color: var(--deep-ink);
+  background: rgba(255, 255, 255, 0.07);
+  padding: 1px 6px;
+  border-radius: 5px;
+  white-space: nowrap;
+}
+
+/* ============ Автоматизации ============ */
+
+/* Hero-рецепт: мокап пуша + разбор */
+.auto-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(280px, 400px) minmax(0, 1fr);
+  gap: clamp(28px, 5vw, 64px);
+  align-items: center;
+  margin: 18px 0 30px;
+  padding: clamp(22px, 3.5vw, 40px);
+  border-radius: var(--r-lg);
+  background: var(--deep);
+  color: var(--deep-ink);
+}
+
+.push-scene {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.push-mock {
+  width: min(100%, 360px);
+  background: rgba(255, 255, 255, 0.09);
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 20px;
+  padding: 14px 16px;
+  box-shadow: 0 22px 55px rgba(0, 0, 0, 0.45);
+}
+
+.push-app {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  color: var(--deep-ink-2);
+  margin-bottom: 10px;
+}
+.push-app img {
+  border-radius: 5px;
+}
+.push-app i {
+  font-style: normal;
+  opacity: 0.6;
+}
+
+.push-body {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.push-text b {
+  display: block;
+  font-size: 14.5px;
+  margin-bottom: 3px;
+}
+.push-text span {
+  font-size: 13.5px;
+  color: var(--deep-ink-2);
+}
+
+.push-thumb {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+  border-radius: 10px;
+  flex: none;
+}
+
+.push-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.push-actions span {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-strong);
+}
+
+.push-caption {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--deep-ink-2);
+}
+
+.auto-hero-info h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(19px, 2.4vw, 25px);
+  margin-bottom: 10px;
+}
+.auto-hero-info .story {
+  color: var(--deep-ink-2);
+  max-width: 52ch;
+}
+.auto-hero-info .chain code {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--deep-ink);
+}
+.auto-hero-info .yaml-box summary {
+  border-color: var(--deep-line);
+}
+.auto-hero-info .yaml-box summary:hover {
+  border-color: var(--accent);
+  background: rgba(58, 166, 224, 0.12);
+}
+.auto-hero-info .yaml-box .lines {
+  color: var(--deep-ink-2);
+}
+/* Код внутри тёмной панели — темнее фона, с тонкой рамкой */
+.auto-hero-grid pre {
+  background: #05070a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Переключатель ring-сценариев */
+.ring-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin: 16px 0 20px;
+}
+.ring-tabs button {
+  font: 500 13.5px var(--font-text);
+  color: var(--deep-ink-2);
+  background: transparent;
+  border: 1px solid var(--deep-line);
+  border-radius: 999px;
+  padding: 8px 14px;
+  min-height: 38px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+}
+.ring-tabs button:hover {
+  border-color: var(--deep-ink-2);
+}
+.ring-tabs button.active {
+  color: var(--deep-ink);
+  border-color: var(--accent);
+  background: rgba(58, 166, 224, 0.16);
+  font-weight: 600;
+}
+
+.ring-detail h4 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.ring-detail .flow-req {
+  color: var(--deep-ink-2);
+}
+.ring-detail pre {
+  max-height: 300px;
+}
+
+.auto-sub {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: clamp(19px, 2.4vw, 25px);
+  margin: 44px 0 6px;
+}
+
+@media (max-width: 860px) {
+  .auto-hero-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Остальные рецепты: строки-цепочки */
+.auto-rows {
+  border-top: 1px solid var(--line);
+}
+
+.flow-row {
+  border-bottom: 1px solid var(--line);
+  padding: 26px 0;
+}
+
+.flow-row.has-viz {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(230px, 300px);
+  gap: 18px clamp(28px, 4vw, 56px);
+  align-items: center;
+}
+
+@media (max-width: 840px) {
+  .flow-row.has-viz {
+    grid-template-columns: 1fr;
+  }
+  .flow-viz {
+    max-width: 340px;
+  }
+}
+
+/* ---- CSS-мокапы результата ---- */
+
+.flow-viz .viz {
+  background: var(--deep);
+  color: var(--deep-ink);
+  border-radius: var(--r-md);
+  padding: 14px;
+}
+
+.viz-cap {
+  margin: 10px 2px 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--deep-ink-2);
+  line-height: 1.5;
+}
+
+/* Панель камер: сетка живых превью */
+.viz-cams {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+.viz-cams .viz-cap {
+  grid-column: 1 / -1;
+}
+.viz-cams .tile {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  border-radius: 7px;
+  overflow: hidden;
+  font-style: normal;
+}
+.viz-cams .t1 { background: linear-gradient(160deg, #4a5364 0%, #2b303b 70%); }
+.viz-cams .t2 { background: linear-gradient(200deg, #5a5348 0%, #33302a 70%); }
+.viz-cams .t3 { background: linear-gradient(150deg, #45525a 0%, #262e33 70%); }
+.viz-cams .t4 { background: linear-gradient(180deg, #565248 10%, #3a362e 80%); }
+.viz-cams .ts {
+  position: absolute;
+  top: 5px;
+  left: 6px;
+  font-family: var(--font-mono);
+  font-size: 7.5px;
+  color: rgba(255, 255, 255, 0.75);
+}
+.viz-cams b {
+  position: absolute;
+  left: 6px;
+  bottom: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #fff;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+}
+.viz-cams em {
+  position: absolute;
+  right: 5px;
+  bottom: 4px;
+  font-size: 10px;
+  font-style: normal;
+  filter: grayscale(1) brightness(1.6);
+}
+
+/* Панель замков */
+.viz-locks i {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-style: normal;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+}
+.viz-locks .lk {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--success-tint);
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  flex: none;
+}
+.viz-locks .nm {
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+  min-width: 0;
+}
+.viz-locks .nm small {
+  display: block;
+  font-weight: 400;
+  font-size: 10.5px;
+  color: var(--deep-ink-2);
+}
+.viz-locks .act {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.09);
+  border-radius: 7px;
+  padding: 5px 12px;
+  font-size: 11px;
+  flex: none;
+}
+
+/* Распознавание лица */
+.viz-face .frame {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 10;
+  border-radius: 9px;
+  overflow: hidden;
+  background-size: cover;
+  background-position: 70% 20%;
+  font-style: normal;
+}
+.viz-face .c {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--accent);
+}
+.viz-face .c1 { top: 14%; left: 46%; border-right: 0; border-bottom: 0; }
+.viz-face .c2 { top: 14%; right: 14%; border-left: 0; border-bottom: 0; }
+.viz-face .c3 { bottom: 22%; left: 46%; border-right: 0; border-top: 0; }
+.viz-face .c4 { bottom: 22%; right: 14%; border-left: 0; border-top: 0; }
+.viz-face b {
+  position: absolute;
+  left: 8px;
+  bottom: 7px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: #fff;
+  background: rgba(47, 158, 99, 0.85);
+  border-radius: 5px;
+  padding: 2px 7px;
+}
+
+/* «Не беспокоить» */
+.viz-dnd i {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-style: normal;
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 9px;
+  padding: 12px 12px;
+}
+.viz-dnd b {
+  font-size: 13px;
+}
+.viz-dnd .tgl {
+  margin-left: auto;
+  width: 36px;
+  height: 21px;
+  border-radius: 999px;
+  background: var(--accent);
+  position: relative;
+  flex: none;
+}
+.viz-dnd .tgl::after {
+  content: "";
+  position: absolute;
+  top: 2.5px;
+  right: 2.5px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+}
+
+/* Кнопка → замок */
+.viz-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding-block: 20px 14px;
+}
+.viz-btn .viz-cap {
+  flex-basis: 100%;
+  text-align: center;
+}
+.viz-btn i {
+  font-style: normal;
+}
+.viz-btn .press {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 2px solid var(--deep-line);
+  background: radial-gradient(circle at 50% 42%, #2c313a 0%, #171a21 75%);
+  box-shadow: 0 0 0 6px rgba(58, 166, 224, 0.14);
+}
+.viz-btn .arr {
+  color: var(--deep-ink-2);
+}
+.viz-btn .done {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 18px;
+  background: var(--success-tint);
+  border: 2px solid var(--success);
+}
+
+/* Мини-пуш (баланс, блокировка) */
+.viz-push i {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-style: normal;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 11px 13px;
+}
+.viz-push .tx {
+  font-size: 11.5px;
+  color: var(--deep-ink-2);
+  line-height: 1.45;
+}
+.viz-push .tx b {
+  display: block;
+  font-size: 12.5px;
+  color: var(--deep-ink);
+}
+
+/* Лента вечерних снимков */
+.viz-snap {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.viz-snap .viz-cap {
+  grid-column: 1 / -1;
+}
+.viz-snap .tile {
+  position: relative;
+  aspect-ratio: 16 / 11;
+  border-radius: 7px;
+  font-style: normal;
+}
+.viz-snap .t1 { background: linear-gradient(160deg, #4a5364 0%, #2b303b 70%); }
+.viz-snap .t2 { background: linear-gradient(200deg, #6b5f4c 0%, #33302a 75%); }
+.viz-snap .t3 { background: linear-gradient(150deg, #3c4c56 0%, #232b30 70%); }
+.viz-snap span {
+  position: absolute;
+  left: 6px;
+  bottom: 5px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.85);
+}
+
+.flow-head {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+.flow-head h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.flow-body .story {
+  margin: 8px 0 12px;
+  color: var(--ink-2);
+  font-size: 15px;
+  max-width: 62ch;
+}
+
+.chain {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 4px;
+}
+.chain code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--accent-tint);
+  color: var(--accent-strong);
+  border-radius: 7px;
+  padding: 5px 10px;
+  white-space: nowrap;
+}
+.chain i {
+  font-style: normal;
+  color: var(--ink-3);
+}
+
+.diff {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.diff-easy {
+  color: var(--success);
+  background: var(--success-tint);
+}
+.diff-medium {
+  color: var(--warn);
+  background: var(--warn-tint);
+}
+
+.flow-req {
+  margin: 10px 0 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+.flow-req::before {
+  content: "⚠ ";
+  color: var(--warn);
+}
+
+/* Раскрытие YAML: пилюля с шевроном, код и копирование — внутри */
+.yaml-box {
+  width: 100%;
+  margin-top: 14px;
+}
+.yaml-box summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 40px;
+  padding: 8px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--accent-strong);
+  width: fit-content;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.yaml-box summary::-webkit-details-marker {
+  display: none;
+}
+.yaml-box summary:hover {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+.yaml-box .chev {
+  width: 13px;
+  height: 13px;
+  flex: none;
+  transition: transform 0.25s ease;
+}
+.yaml-box[open] > summary .chev {
+  transform: rotate(90deg);
+}
+.yaml-box .lines {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.yaml-box .code-wrap {
+  margin-top: 14px;
+}
+.yaml-box pre {
+  font-size: 12px;
+  max-height: 360px;
+  box-sizing: border-box;
+}
+
+/* Код-блок с иконкой копирования в углу */
+.code-wrap {
+  position: relative;
+  width: 100%;
+}
+.code-wrap pre {
+  margin: 0;
+  padding-right: 56px;
+}
+
+.code-copy {
+  position: absolute;
+  top: 9px;
+  right: 9px;
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.07);
+  color: rgba(236, 238, 241, 0.72);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease,
+    border-color 0.15s ease;
+}
+.code-copy:hover {
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+}
+.code-copy svg {
+  width: 15px;
+  height: 15px;
+  fill: currentColor;
+}
+.code-copy .ic-check {
+  display: none;
+}
+.code-copy.ok {
+  color: var(--success);
+  border-color: var(--success);
+}
+.code-copy.ok .ic-copy {
+  display: none;
+}
+.code-copy.ok .ic-check {
+  display: block;
+  animation: pop 0.3s ease;
+}
+.code-copy.fail {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* ============ Мастер установки ============ */
+
+.wiz-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr);
+  gap: clamp(28px, 5vw, 64px);
+  align-items: start;
+}
+
+.wiz-questions {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.wiz-q legend,
+.wiz-q .q-title {
+  font-weight: 700;
+  font-size: 16.5px;
+  margin-bottom: 4px;
+  padding: 0;
+}
+
+.wiz-q {
+  border: 0;
+  padding: 0;
+  margin: 0;
+}
+
+.wiz-q .hint {
+  font-size: 14px;
+  color: var(--ink-3);
+  margin: 0 0 10px;
+}
+
+.wiz-plan {
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  padding: clamp(20px, 3vw, 32px);
+  position: sticky;
+  top: 84px;
+}
+
+.wiz-plan h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 20px;
+}
+
+.wiz-empty {
+  color: var(--ink-3);
+  font-size: 15px;
+}
+
+.plan-steps {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  counter-reset: step;
+}
+
+.plan-steps li {
+  position: relative;
+  padding: 0 0 22px 46px;
+  counter-increment: step;
+}
+.plan-steps li::before {
+  content: counter(step);
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font: 700 14px var(--font-display);
+  color: var(--accent-strong);
+  background: var(--accent-tint);
+}
+.plan-steps li::after {
+  content: "";
+  position: absolute;
+  left: 14.5px;
+  top: 34px;
+  bottom: 4px;
+  width: 2px;
+  background: var(--line);
+}
+.plan-steps li:last-child::after {
+  display: none;
+}
+
+.plan-steps b {
+  display: block;
+  margin-bottom: 3px;
+}
+.plan-steps p {
+  margin: 0 0 6px;
+  font-size: 14.5px;
+  color: var(--ink-2);
+}
+.plan-steps .opt {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--ink-3);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.plan-extra {
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+  font-size: 14.5px;
+}
+.plan-extra h4 {
+  margin: 0 0 6px;
+  font-size: 13px;
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ink-3);
+  font-weight: 500;
+}
+.plan-extra ul {
+  margin: 0 0 14px;
+  padding-left: 20px;
+  color: var(--ink-2);
+}
+.plan-extra .unlock li::marker {
+  content: "✓ ";
+  color: var(--success);
+}
+
+@media (max-width: 920px) {
+  .wiz-grid {
+    grid-template-columns: 1fr;
+  }
+  .wiz-plan {
+    position: static;
+  }
+}
+
+/* ============ Совместимость ============ */
+
+.compat-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: clamp(24px, 4vw, 56px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  padding: clamp(20px, 3.5vw, 40px);
+}
+
+.compat-form {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.compat-result h3 {
+  margin-top: 0;
+}
+
+.compat-summary {
+  font-size: 15px;
+  color: var(--ink-2);
+}
+
+.verdicts {
+  list-style: none;
+  margin: 14px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.verdicts li {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+}
+
+.verdicts .v-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.verdicts b {
+  font-size: 15px;
+}
+
+.verdict {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+.v-ok {
+  color: var(--success);
+  background: var(--success-tint);
+}
+.v-ok-go2rtc,
+.v-needs-https {
+  color: var(--accent-strong);
+  background: var(--accent-tint);
+}
+.v-experimental {
+  color: var(--warn);
+  background: var(--warn-tint);
+}
+.v-unsupported {
+  color: var(--danger);
+  background: var(--danger-tint);
+}
+.v-unknown {
+  color: var(--ink-2);
+  background: var(--bg);
+}
+
+.verdicts .note {
+  margin: 6px 0 0;
+  font-size: 13.5px;
+  color: var(--ink-2);
+}
+
+@media (max-width: 860px) {
+  .compat-panel {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============ Доверие ============ */
+
+.trust-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(26px, 4vw, 56px) clamp(28px, 5vw, 72px);
+  margin-top: 10px;
+}
+
+.trust-item h3 {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 17px;
+  margin-bottom: 8px;
+}
+
+.trust-item p,
+.trust-item li {
+  color: var(--ink-2);
+  font-size: 15px;
+}
+.trust-item ul {
+  margin: 0;
+  padding-left: 20px;
+}
+.trust-item p:last-child {
+  margin-bottom: 0;
+}
+
+@media (max-width: 760px) {
+  .trust-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ============ FAQ ============ */
+
+.faq-list {
+  margin-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.faq-list details {
+  border-bottom: 1px solid var(--line);
+}
+
+.faq-list summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 18px 34px 18px 0;
+  font-weight: 600;
+  font-size: 16.5px;
+  position: relative;
+}
+.faq-list summary::-webkit-details-marker {
+  display: none;
+}
+.faq-list summary::after {
+  content: "+";
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: var(--font-display);
+  color: var(--accent-strong);
+  font-size: 20px;
+  transition: transform 0.2s ease;
+}
+.faq-list details[open] summary::after {
+  transform: translateY(-50%) rotate(45deg);
+}
+
+.faq-list .faq-a {
+  padding: 0 0 20px;
+  color: var(--ink-2);
+  max-width: 70ch;
+}
+.faq-list .faq-a p:last-child {
+  margin-bottom: 0;
+}
+
+.notworking {
+  margin-top: 48px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--bg-elev);
+  padding: clamp(20px, 3.5vw, 36px);
+}
+.notworking ol {
+  margin: 12px 0 0;
+  padding-left: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--ink-2);
+}
+.notworking b {
+  color: var(--ink);
+}
+
+/* ============ Финальный CTA ============ */
+
+.final {
+  background: var(--deep);
+  color: var(--deep-ink);
+  text-align: center;
+  position: relative;
+  overflow: clip;
+}
+
+.final .lock-mark {
+  width: 58px;
+  height: 58px;
+  margin: 0 auto 26px;
+  border-radius: 50%;
+  border: 2px solid var(--success);
+  display: grid;
+  place-items: center;
+  font-size: 24px;
+  box-shadow: 0 0 0 10px var(--success-tint);
+}
+
+.final h2 {
+  font-size: clamp(26px, 4vw, 44px);
+  max-width: 18ch;
+  margin-inline: auto;
+}
+
+.final .lead {
+  margin-inline: auto;
+  color: var(--deep-ink-2);
+}
+
+.final-ctas {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 34px;
+}
+
+/* ============ Футер ============ */
+
+.footer {
+  border-top: 1px solid var(--line);
+  padding-block: 36px;
+  font-size: 14px;
+  color: var(--ink-3);
+}
+
+.footer-in {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 28px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.footer a {
+  color: var(--ink-2);
+}
+
+.footer .legal {
+  max-width: 72ch;
+  margin-top: 14px;
+  font-size: 13px;
+}
+
+/* ============ Микроанимации ============ */
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pushIn {
+  from {
+    opacity: 0;
+    transform: translateY(-16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes pop {
+  0% {
+    transform: scale(1);
+  }
+  40% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Аккордеоны (<details>) раскрываются плавно: нативный CSS-механизм,
+   в браузерах без поддержки — мгновенно, без потери функции. */
+details {
+  interpolate-size: allow-keywords;
+}
+details::details-content {
+  block-size: 0;
+  overflow-y: clip;
+  transition: block-size 0.32s ease, content-visibility 0.32s allow-discrete;
+}
+details[open]::details-content {
+  block-size: auto;
+}
+
+/* Подмена контента — мягкий подъём: табы ring-блока, план мастера,
+   результат совместимости. Элементы пересоздаются — анимация на вставку. */
+.ring-detail > *,
+.wiz-plan > *,
+.compat-result > * {
+  animation: fadeUp 0.24s ease both;
+}
+
+/* Пуш-уведомление «прилетает» сверху, как настоящее (шаг 02 сценария). */
+.sc-push:not([hidden]) .push-mock {
+  animation: pushIn 0.38s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+
+/* Hero-планшет мягко проявляется при загрузке (только transform/opacity —
+   размер зарезервирован, layout не прыгает). */
+.tablet {
+  animation: fadeUp 0.55s ease both 0.08s;
+}
+
+/* FAQ — отклик на hover */
+.faq-list summary {
+  transition: color 0.15s ease;
+}
+.faq-list summary:hover {
+  color: var(--accent-strong);
+}
+
+/* ============ Motion ============ */
+
+@media (prefers-reduced-motion: reduce) {
+  html,
+  html.smooth {
+    scroll-behavior: auto;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  details::details-content {
+    transition: none;
+  }
+  [data-reveal] {
+    opacity: 1;
+    transform: none;
+  }
+}
