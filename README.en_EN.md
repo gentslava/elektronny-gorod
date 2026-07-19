@@ -35,14 +35,18 @@
   </tr>
 </table>
 
-This is a custom integration for Home Assistant that allows you to integrate with the Elektronny Gorod (Novotelecom) and Dom.ru services. It implements the APIs of the My Home – Elektronny Gorod and Umnyy Dom.ru applications.
+Your **intercoms, cameras and locks** from Elektronny Gorod (Novotelecom) and
+Dom.ru — right inside Home Assistant. When a guest rings the doorbell you
+instantly see the video, hear the audio, talk back and open the door with a
+single tap, even when you're away from home.
 
-Add your **intercoms, cameras and locks** to Home Assistant: watch video and
-hear audio, open doors, answer calls, talk to visitors and browse answered and
-missed call history.
+The integration mirrors the APIs of the official My Home and Umnyy Dom.ru
+apps: watch cameras with sound, answer and end calls, browse answered and
+missed call history and build any Home Assistant automation on top.
 
-> ✨ **Coming in 4.0.0:** a complete call screen, SIP answering, two-way audio,
-> FCM events, call history and opt-in external RTSP camera publishing.
+> 🎉 **4.0.0 is out** — the project's biggest release yet: a complete call
+> screen, SIP answering with two-way audio, realtime doorbell events (FCM),
+> a call history card and opt-in external RTSP camera publishing.
 > See the [overview below](#whats-new-in-400) or read the full
 > [release notes](docs/releases/4.0.0.md).
 
