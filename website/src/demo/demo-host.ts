@@ -84,13 +84,13 @@ export class DemoHost {
         },
       ],
     });
-    // Демо-детерминизм: ошибка и «Вызов завершён» в карточке гаснут по
-    // внутренним таймерам — здесь состояние держится, пока его не сменит
-    // сценарий или пользователь. Тумблер микрофона переключает только
-    // индикатор: настоящий getUserMedia в симуляции не вызывается никогда.
+    // Демо-детерминизм: ошибку держим до смены фазы. Таймер завершённого
+    // вызова отменяется после рендера в setPhase(), но штатный _clearEnded
+    // оставляем рабочим — он нужен при обратной прокрутке и кнопке «Закрыть».
+    // Тумблер микрофона переключает только индикатор: настоящий getUserMedia
+    // в симуляции не вызывается никогда.
     try {
       card._scheduleErrDismiss = () => {};
-      card._clearEnded = () => {};
       card._toggleMic = () => {
         card._micActive = !card._micActive;
         card.requestUpdate?.();
@@ -117,12 +117,22 @@ export class DemoHost {
       this.startedAt = new Date(Date.now() - talk * 1000).toISOString();
     }
     this.lockState = opts.doorOpen ? "unlocked" : "locked";
-    this.pushHass();
     const card = this.card;
+    if (phase !== "ended" && card?._endedEntity) {
+      card._clearEnded?.();
+    }
+    this.pushHass();
     if (card) {
       const openStatus = opts.doorOpen ? "opened" : "idle";
       Promise.resolve(card.updateComplete)
         .then(() => {
+          // На витрине ended должен оставаться видимым, пока активен его шаг,
+          // а не исчезать через production-таймаут. Само состояние при этом
+          // остаётся сбрасываемым следующей фазой или кнопкой «Закрыть».
+          if (this.phase === "ended" && card._endedHide) {
+            clearTimeout(card._endedHide);
+            card._endedHide = undefined;
+          }
           // Слайдер «Открыть» показывает зелёное «Открыто», когда дверь
           // открыта сценарием, — визуал совпадает с текстом шага.
           card._openStatus = openStatus;
