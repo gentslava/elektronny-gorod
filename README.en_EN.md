@@ -137,27 +137,74 @@ Entity types created: `camera` (regular and active-call video), `lock` (open the
 door), `event` (calls and history), `sensor` (balance,
 days-to-block and call state), `binary_sensor`, and `switch`.
 
-> **New:** Now you can connect cameras via [go2rtc](https://github.com/AlexxIT/go2rtc) — this method allows you to get audio from cameras and provides faster and more stable video streaming.
+> **go2rtc:** The integration can use an existing
+> [go2rtc](https://github.com/AlexxIT/go2rtc) instance. If you do not have one,
+> the easiest option is to install
+> [WebRTC Camera](https://github.com/AlexxIT/WebRTC) through HACS: the component
+> downloads and runs go2rtc inside Home Assistant automatically.
 
 ## Camera connection via go2rtc
 
-Integration with [go2rtc](https://github.com/AlexxIT/go2rtc) is supported for Elektronny Gorod and Dom.ru cameras. This method allows you to:
-- Get audio stream from cameras.
-- Get faster and more stable video stream (low latency, fewer disconnects).
+The integration supports [go2rtc](https://github.com/AlexxIT/go2rtc) for both
+Elektronny Gorod and Dom.ru cameras. It provides:
+
+- Audio from camera streams.
+- Faster and more stable video (low latency and fewer disconnects).
 - Optionally publish ready-to-use streams at stable RTSP addresses for NVRs,
   media players and other local clients.
 
 ### How to connect
 
-1. Install and configure [go2rtc](https://github.com/AlexxIT/go2rtc) in Home Assistant (via HACS or manually).
-2. In the Elektronny Gorod/Dom.ru integration settings, select the stream method via go2rtc (or specify the go2rtc link in the camera settings).
-3. After that, cameras will automatically appear in Home Assistant with audio support and improved video.
+The integration needs access to a go2rtc instance with an HTTP API and RTSP
+port. You do not need to add the cameras to `go2rtc.yaml` manually: streams are
+created and refreshed automatically.
 
-#### Using with already configured integrations
+#### If go2rtc is already installed
 
-If you already have cameras set up via the standard integration, just enable go2rtc support in the integration or camera settings — you do not need to re-add devices.
+You can use an existing go2rtc instance, such as an add-on, container or server
+on your local network:
 
-**Note:** For audio and low latency to work, make sure your go2rtc and Home Assistant versions are up to date.
+1. Make sure Home Assistant can reach the go2rtc HTTP API (usually
+   `http://HOST:1984`) and RTSP port `8554`.
+2. Select **Configure go2rtc** while adding the integration and enter the API
+   URL.
+3. If go2rtc uses Basic Auth, enter its username and password in the same form.
+
+For a separate container or server, use a hostname or local IP address that is
+reachable from Home Assistant. Use `127.0.0.1` only when go2rtc runs in the same
+environment as Home Assistant Core.
+
+#### If you do not have go2rtc: install WebRTC Camera through HACS
+
+[WebRTC Camera](https://github.com/AlexxIT/WebRTC) downloads and runs its own
+go2rtc automatically, so you do not need a separate add-on or a manually
+installed binary:
+
+1. Open **HACS → Integrations**, search for **WebRTC**, and install the
+   component.
+2. Restart Home Assistant.
+3. Open **Settings → Devices & services → Add integration → WebRTC**.
+4. Enable go2rtc in the integration settings for your operator account and keep
+   the default address `http://127.0.0.1:1984`.
+
+The component also provides a low-latency Lovelace card with audio:
+
+```yaml
+type: custom:webrtc-camera
+entity: camera.YOUR_INTERCOM
+```
+
+Replace `camera.YOUR_INTERCOM` with the entity ID of the camera you want to
+display. If you manage Lovelace resources in YAML mode, follow the
+[additional installation step in the WebRTC Camera documentation](https://github.com/AlexxIT/WebRTC#installation).
+
+#### If the integration is already configured
+
+Open its options and enable go2rtc. You do not need to add the account or its
+devices again.
+
+**Note:** Use current versions of go2rtc, WebRTC Camera and Home Assistant for
+audio and low-latency streaming.
 
 ### External RTSP in 4.0.0
 
