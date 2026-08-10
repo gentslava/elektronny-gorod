@@ -1,7 +1,6 @@
 Status: Active
 Owner: Documentation / AIDD Agent
-Last reviewed: 2026-07-16 (history isolation, opt-in camera polling and public
-4.0.0 documentation synchronized)
+Last reviewed: 2026-08-10 (tool-independent `specs/` and `plans/` structure)
 
 Source files:
 - AIDD-документы в `docs/` (этот каталог и подкаталоги)
@@ -68,6 +67,8 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | Понять принцип reverse engineering | `decisions/0006-mirror-app-behavior.md`, `decisions/0007-stateful-emulator-baseline.md` |
 | Разобрать API из HAR | `architecture/api-reference.md` (через subagent `reverse-engineer`) |
 | Спроектировать новую feature | `aidd/runbooks/har-collection.md` → HAR → `aidd/templates/idea.template.md` → `prd.template.md` → `plan.template.md` |
+| Зафиксировать согласованный технический дизайн | `specs/README.md` → подходящий `specs/*-design.md` |
+| Выполнить утверждённый implementation plan | `plans/README.md` → подходящий `plans/*.md` |
 | Реализовать найденные фичи 9.9.0 | `features/mobile-app-parity/README.md` → `research.md` → `plan.md` → `tasklist.md` |
 | Использовать готовый prompt | `aidd/prompt-library.md` |
 | Выбрать skill для задачи | `aidd/skills.md` |
@@ -117,6 +118,8 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | `aidd/skills.md` | Active |
 | `aidd/prompt-library.md` | Active |
 | `aidd/mcp-tools.md` | Active |
+| `specs/*` | Согласованные tool-independent технические дизайны |
+| `plans/*` | Исполняемые tool-independent implementation plans |
 | `decisions/0001..0007` | accepted (0001, 0006, 0007) / proposed (0002..0005) |
 | `aidd/templates/*` | шаблоны |
 | `aidd/runbooks/*` | руководства (вкл. `har-collection.md`) |

@@ -22,7 +22,7 @@
 - Create `research/intercom-call-probe/analyze_busy_capture.py` — sanitize raw pcap into stage/method/status/profile facts without printing credentials or tokens.
 - Create `tests/test_sip_protocol.py`, `tests/test_sip_registration_probe.py`, `tests/test_sip_busy_diagnostic.py`, `tests/test_busy_capture_analyzer.py`.
 - Modify `tests/test_sip_register.py`, `tests/test_sip_call_controller.py`, `tests/test_init.py`.
-- Update `docs/superpowers/specs/2026-07-13-intercom-busy-production-diagnostic-design.md` only if implementation constraints require wording corrections; do not add conclusions before the live run.
+- Update `docs/specs/2026-07-13-intercom-busy-production-diagnostic-design.md` only if implementation constraints require wording corrections; do not add conclusions before the live run.
 
 ## Task 1: Exact REGISTER profiles and explicit unregister
 
@@ -1278,7 +1278,7 @@ constraint changed, update the design with observed implementation facts and com
 that change:
 
 ```bash
-git add docs/superpowers/specs/2026-07-13-intercom-busy-production-diagnostic-design.md
+git add docs/specs/2026-07-13-intercom-busy-production-diagnostic-design.md
 git commit -m "docs: align busy diagnostic with implementation"
 ```
 
