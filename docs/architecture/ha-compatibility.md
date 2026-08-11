@@ -174,7 +174,7 @@ HA-класс требует поддержку `ring`; doorbell-класс ос
 | `translations/ru.json` | ✅ соответствует |
 | `translations/en.json` | ✅ соответствует |
 | **Entity translations** (раздел `strings.json:entity`) | ✅ ru/en |
-| FCM Repairs issue | ✅ source/ru/en, placeholder содержит только entry title |
+| FCM Repairs issue | ✅ source/ru/en, placeholder содержит только entry title; persistent PII duplication принято без расширения authenticated HA audience, а diagnostics redacts `title` перед export (S-23) |
 | History event types | ✅ `call_accepted`, `call_missed`, `motion` в source/ru/en |
 | External RTSP | ✅ options + `go2rtc_rtsp_urls` sensor name в source/ru/en |
 

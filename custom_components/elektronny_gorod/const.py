@@ -46,7 +46,6 @@ GO2RTC_RTSP_PORT = 8554
 # Per-config-entry CameraStreamManager registry. Kept separate from
 # hass.data[DOMAIN][entry_id], whose public shape remains the coordinator.
 STREAM_MANAGER_DATA: Final = f"{DOMAIN}_stream_managers"
-FCM_DATA: Final = f"{DOMAIN}_fcm_listeners"
 
 CONF_OPERATOR_ID: Final = "operator_id"
 CONF_ACCOUNT_ID: Final = "account_id"

@@ -13,8 +13,7 @@
 ## File map
 
 - Modify `custom_components/elektronny_gorod/fcm.py` — per-entry state machine, bounded reconnect/probe schedule, Repairs helpers and recovery logging.
-- Modify `custom_components/elektronny_gorod/__init__.py` — own the listener through config-entry unload and remove the persistent FCM issue when the entry is deleted.
-- Modify `custom_components/elektronny_gorod/const.py` — add the per-entry FCM listener registry key.
+- Modify `custom_components/elektronny_gorod/__init__.py` — keep the per-entry FCM listener registry key local, own the listener through config-entry unload and remove the persistent FCM issue when the entry is deleted.
 - Modify `custom_components/elektronny_gorod/strings.json` — English source text for the Repairs issue.
 - Modify `custom_components/elektronny_gorod/translations/en.json` — English Repairs translation.
 - Modify `custom_components/elektronny_gorod/translations/ru.json` — Russian Repairs translation.

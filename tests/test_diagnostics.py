@@ -1,4 +1,4 @@
-"""Тесты diagnostics redaction (S-08 / S-16 / A-23).
+"""Тесты diagnostics redaction (S-08 / S-16 / S-23 / A-23).
 
 Гарантируют, что выгрузка diagnostics через HA UI НЕ содержит секретов
 (access_token, refresh_token, go2rtc creds, user_agent с account_id) и PII.
@@ -19,11 +19,13 @@ from custom_components.elektronny_gorod.diagnostics import (
     async_get_config_entry_diagnostics,
 )
 
-_SECRET_MARKERS = (
+_SENSITIVE_MARKERS = (
     "supersecret-access",
     "supersecret-refresh",
     "go2rtc-pass-secret",
     "go2rtc-user-secret",
+    "Иван Иванов",
+    "1131686",
     "Pixel 7; account=1131686",  # user_agent несёт account_id
 )
 
@@ -31,7 +33,7 @@ _SECRET_MARKERS = (
 def _make_entry() -> MockConfigEntry:
     return MockConfigEntry(
         domain=DOMAIN,
-        title="Электронный город",
+        title="Иван Иванов (1131686)",
         data={
             "access_token": "supersecret-access",
             "refresh_token": "supersecret-refresh",
@@ -51,16 +53,20 @@ def _make_entry() -> MockConfigEntry:
     )
 
 
-async def test_diagnostics_redacts_all_secrets(hass: HomeAssistant) -> None:
-    """Ни один секрет/креденшл не должен попасть в выгрузку (даже как substring)."""
+async def test_diagnostics_redacts_all_sensitive_values(
+    hass: HomeAssistant,
+) -> None:
+    """Секреты и PII не должны попасть в выгрузку даже как substring."""
     entry = _make_entry()
     entry.add_to_hass(hass)
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     blob = json.dumps(diag, default=str, ensure_ascii=False)
 
-    for marker in _SECRET_MARKERS:
-        assert marker not in blob, f"Секрет утёк в diagnostics: {marker!r}"
+    for marker in _SENSITIVE_MARKERS:
+        assert marker not in blob, (
+            f"Чувствительные данные попали в diagnostics: {marker!r}"
+        )
 
     data = diag["entry"]["data"]
     assert data["access_token"] == REDACTED

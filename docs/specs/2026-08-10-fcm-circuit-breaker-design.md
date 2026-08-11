@@ -115,7 +115,18 @@ When the circuit first enters OPEN, create one persistent Repairs issue:
 - issue ID: `fcm_receiver_unavailable_<entry_id>`
 - severity: error (realtime doorbell notifications are already unavailable)
 - fixable: false for this change
-- translation placeholder: the config entry title only
+- translation placeholder: the config entry title only; its default value is
+  the resident name plus operator account ID
+
+Privacy trade-off (accepted 2026-08-11): a persistent issue duplicates that
+title in `repairs.issue_registry`. This adds no authorization audience because
+authenticated HA users can already read the same title through
+`config_entries/get`; the duplication is accepted so a multi-account user can
+identify the affected entry. The acceptance is conditional on diagnostics
+redacting every `title` key before a user shares the export outside HA. The
+generated title is sourced only from resident name and operator account ID;
+custom titles are copied verbatim, so users must not place credentials in them.
+FCM tokens, credentials and complete `entry.data` remain forbidden in the issue.
 
 The user-facing message states that:
 
@@ -203,11 +214,10 @@ permanent disablement.
   - Repairs issue creation/deletion helpers;
   - cleanup of the active client.
 - `custom_components/elektronny_gorod/__init__.py`
+  - keep the per-entry FCM listener registry key local to this lifecycle module;
   - own the listener through config-entry unload/reload;
   - fail unload if a started dependency client cannot stop;
   - delete the per-entry persistent issue on config entry removal.
-- `custom_components/elektronny_gorod/const.py`
-  - per-entry FCM listener registry key.
 - `custom_components/elektronny_gorod/strings.json`
 - `custom_components/elektronny_gorod/translations/ru.json`
 - `custom_components/elektronny_gorod/translations/en.json`
@@ -252,7 +262,9 @@ Required cases:
     owner and HA reports that restart is required.
 16. A late dependency notification after terminal stop is ignored.
 17. Logs and issue placeholders contain no FCM credentials or tokens; the only
-    placeholder is the config-entry title shown to the same HA user.
+    placeholder is the config-entry title exposed to the same authenticated HA
+    audience as `config_entries/get`, and diagnostics redacts `title` before an
+    export can be shared outside HA (accepted privacy trade-off S-23).
 18. Existing notification parsing and healthy-start tests remain green.
 
 ## Documentation updates with implementation

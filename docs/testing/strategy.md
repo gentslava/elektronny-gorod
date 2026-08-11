@@ -37,7 +37,7 @@ camera/go2rtc и security regressions.**
 | Test modules | 54 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
-| Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
+| Security / crypto | redaction including production-format config-entry title, diagnostics, HTTP no-leak, golden vectors helpers |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
 | Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |

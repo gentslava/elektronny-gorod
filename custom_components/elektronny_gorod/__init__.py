@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import json
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -28,7 +28,6 @@ from .const import (
     CONF_GO2RTC_PASSWORD,
     DEFAULT_GO2RTC_BASE_URL,
     DEFAULT_GO2RTC_RTSP_HOST,
-    FCM_DATA,
     STREAM_MANAGER_DATA,
     SIGNAL_DOORBELL,
     SIP_DATA as _SIP_DATA,
@@ -47,6 +46,9 @@ from .sip.call_controller import DoorbellCallController, Go2RtcConfig
 from .stream_manager import CameraStreamManager
 from .uplink_ws import async_register_uplink_card, async_register_uplink_ws_command
 from .user_agent import UserAgent
+
+# Per-entry FCM ownership is private to this lifecycle module.
+_FCM_DATA: Final = f"{DOMAIN}_fcm_listeners"
 
 # Реестр SIP-контроллеров per-entry (`SIP_DATA` из const.py) — отдельный top-level
 # key, чтобы не ломать `hass.data[DOMAIN][entry_id] = coordinator` (event/camera/lock).
@@ -69,7 +71,7 @@ async def _async_register_fcm_listener(
     listener: DoorbellFcmListener,
 ) -> bool:
     """Claim per-entry FCM ownership without replacing a surviving receiver."""
-    registry = hass.data.setdefault(FCM_DATA, {})
+    registry = hass.data.setdefault(_FCM_DATA, {})
     previous = registry.get(entry.entry_id)
     if previous is not None and previous is not listener:
         try:
@@ -565,7 +567,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     HA-core вызовет их автоматически независимо от исхода platform unload
     (см. audit A-16).
     """
-    fcm_listener = hass.data.get(FCM_DATA, {}).get(entry.entry_id)
+    fcm_listener = hass.data.get(_FCM_DATA, {}).get(entry.entry_id)
     if fcm_listener is not None and not await fcm_listener.async_stop():
         return False
 
@@ -585,7 +587,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id, None)
-        hass.data.get(FCM_DATA, {}).pop(entry.entry_id, None)
+        hass.data.get(_FCM_DATA, {}).pop(entry.entry_id, None)
         hass.data.get(STREAM_MANAGER_DATA, {}).pop(entry.entry_id, None)
 
     return unload_ok
@@ -601,7 +603,7 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     Для remote cleanup строим временный API из entry.data; ошибки глушим, чтобы
     cleanup не мешал удалению.
     """
-    registry = hass.data.get(FCM_DATA, {})
+    registry = hass.data.get(_FCM_DATA, {})
     listener = registry.get(entry.entry_id)
     if listener is not None:
         try:

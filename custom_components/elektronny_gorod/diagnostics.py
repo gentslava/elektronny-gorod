@@ -1,8 +1,9 @@
-"""Diagnostics для Elektronny Gorod (S-08 / S-16 / A-23, ADR-0004).
+"""Diagnostics для Elektronny Gorod (S-08 / S-16 / S-23 / A-23, ADR-0004).
 
 HA по умолчанию при экспорте diagnostics дампит `entry.data`/`entry.options`
 целиком — там access_token / refresh_token / go2rtc creds / user_agent
-(с account_id). Этот модуль маскирует их через `async_redact_data`, чтобы
+(с account_id), а production title дублирует name + account_id. Этот модуль
+маскирует их через `async_redact_data`, чтобы
 пользователь мог безопасно поделиться диагностикой.
 """
 from __future__ import annotations
@@ -32,6 +33,7 @@ TO_REDACT: frozenset[str] = SENSITIVE_KEYS | {
     CONF_OPERATOR_ID,
     CONF_ACCOUNT_ID,
     CONF_SUBSCRIBER_ID,
+    "title",
     "name",
     "address",
 }

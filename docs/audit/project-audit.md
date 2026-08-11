@@ -1219,6 +1219,10 @@ Quality gates:
   Removal после failed unload повторяет stop retained owner; повторный failure
   сохраняет ownership, HA требует restart, поздние callbacks игнорируются.
   FCM использует shared HA aiohttp session; Repairs называет затронутый entry.
+  Дублирование title (resident name + account ID) в persistent Repairs принято
+  как P3 UX/privacy trade-off без расширения authenticated HA audience;
+  обязательный control — redaction `title` в user-shared diagnostics. См.
+  [`security.md#S-23`](security.md#s-23-config-entry-title-в-persistent-fcm-repairs).
 - **Evidence:** focused FCM/removal suite — **42 passed**: state transitions,
   capped backoff, quiet OPEN, named Repairs lifecycle, multi-account isolation,
   shared session, no-secret output, pre-start cleanup, failed-unload/setup-unwind

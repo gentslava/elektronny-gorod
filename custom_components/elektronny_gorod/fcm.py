@@ -163,6 +163,8 @@ class DoorbellFcmListener:
                 bundle_id=FCM_BUNDLE_ID,
             )
             credentials = self._entry.data.get(CONF_FCM_CREDENTIALS)
+            # Keep the candidate local until start(): firebase-messaging 0.4.5
+            # creates stopping_lock in start(), so stop() is unsafe beforehand.
             client = FcmPushClient(
                 self._on_notification,
                 register_config,
