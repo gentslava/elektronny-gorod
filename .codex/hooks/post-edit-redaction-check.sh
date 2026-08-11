@@ -9,31 +9,22 @@
 
 set -uo pipefail
 
-# Берём путь файла из аргументов Claude Code hook (передаётся как $1)
+# Путь может прийти как $1. Штатный PostToolUse не передаёт
+# positional argument, поэтому при пустом $1 запускаем full-tree scan.
 FILE="${1:-}"
 
-# Триггер только на .py в custom_components/elektronny_gorod/
-if [[ ! "$FILE" =~ custom_components/elektronny_gorod/.*\.py$ ]]; then
+# Если путь известен, триггер нужен только для integration Python.
+if [[ -n "$FILE" && ! "$FILE" =~ custom_components/elektronny_gorod/.*\.py$ ]]; then
     exit 0
 fi
 
-if [[ ! -f "$FILE" ]]; then
+if [[ -n "$FILE" && ! -f "$FILE" ]]; then
     exit 0
 fi
 
-# Паттерн: прямое логирование sensitive значений.
-# Маркер `# noqa: redaction-ok` явно отключает проверку с обоснованием.
-PATTERN='LOGGER\.(debug|info|warning|error|exception|critical)\([^)]*(access_token|refresh_token|password|sms|headers|entry\.data|api_key|secret|Authorization)'
-
-LEAKS=$(grep -nE "$PATTERN" "$FILE" | grep -v 'noqa: redaction-ok' || true)
-
-if [[ -n "$LEAKS" ]]; then
-    echo "❌ Direct secret logging detected in $FILE:"
-    echo "$LEAKS"
-    echo ""
-    echo "→ Use redact() helper (см. _logging.py / ADR-0004) or remove the log."
-    echo "→ Если ложное срабатывание — добавить '# noqa: redaction-ok <reason>' в конец строки."
-    exit 1
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
+if [[ -n "$FILE" ]]; then
+    exec bash "$REPO_ROOT/.codex/hooks/check-secret-logs.sh" "$FILE"
 fi
-
-exit 0
+exec bash "$REPO_ROOT/.codex/hooks/check-secret-logs.sh"
