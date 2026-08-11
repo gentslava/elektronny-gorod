@@ -1,5 +1,11 @@
 {
   "title": "Elektronny Gorod",
+  "issues": {
+    "fcm_receiver_unavailable": {
+      "title": "Doorbell notifications are unavailable for {entry_title}",
+      "description": "Realtime doorbell notifications for {entry_title} are temporarily unavailable. The integration stopped frequent reconnection attempts to prevent repeated log errors. Cameras, locks, balance, history, and other features continue to work. Reload this account to try again. If the problem returns, reconnect it."
+    }
+  },
   "config": {
     "abort": {
       "missing_phone": "Phone number is missing. Go back and enter your phone number.",

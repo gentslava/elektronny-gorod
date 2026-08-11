@@ -13,17 +13,23 @@ degradation: при любом сбое логируем warning, интегра
 """
 from __future__ import annotations
 
-from datetime import timedelta
+import asyncio
+from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.util import dt as dt_util
 
 from .api import ElektronnyGorodAPI
 from .const import (
     CONF_FCM_CREDENTIALS,
+    DOMAIN,
     FCM_API_KEY,
     FCM_APP_ID,
     FCM_BUNDLE_ID,
@@ -46,6 +52,52 @@ _PUSH_TYPE_EVENT = {
 # поднимает заново — иначе пуши о вызове молча отвалятся (инцидент 2026-06-24:
 # сетевой блип → 3 ошибки подряд → receiver выключился, юзер не узнал).
 FCM_WATCHDOG_INTERVAL = timedelta(minutes=2)
+FCM_RETRY_BACKOFFS = (
+    timedelta(minutes=15),
+    timedelta(hours=1),
+    timedelta(hours=6),
+    timedelta(hours=24),
+)
+_FCM_REPAIR_ISSUE_PREFIX = "fcm_receiver_unavailable"
+
+
+def fcm_repair_issue_id(entry_id: str) -> str:
+    """Вернуть стабильный Repairs issue ID для config entry."""
+    return f"{_FCM_REPAIR_ISSUE_PREFIX}_{entry_id}"
+
+
+@callback
+def async_create_fcm_repair_issue(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Show one persistent degraded-FCM issue for a config entry."""
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        fcm_repair_issue_id(entry.entry_id),
+        is_fixable=False,
+        is_persistent=True,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="fcm_receiver_unavailable",
+        translation_placeholders={"entry_title": entry.title},
+    )
+
+
+@callback
+def async_delete_fcm_repair_issue(
+    hass: HomeAssistant, entry_id: str
+) -> None:
+    """Удалить persistent FCM issue одного config entry."""
+    ir.async_delete_issue(hass, DOMAIN, fcm_repair_issue_id(entry_id))
+
+
+class _FcmRecoveryPhase(StrEnum):
+    """Per-entry FCM recovery phase."""
+
+    HEALTHY = "healthy"
+    SUSPECT = "suspect"
+    VERIFYING = "verifying"
+    OPEN = "open"
 
 
 class DoorbellFcmListener:
@@ -61,15 +113,24 @@ class DoorbellFcmListener:
         # Watchdog: unsub периодического контроля живости + guard от
         # перекрытия повторных переподнятий.
         self._watchdog_unsub: Any = None
-        self._reconnecting = False
+        self._transition_lock = asyncio.Lock()
+        self._stopping = False
+        self._recovery_phase = _FcmRecoveryPhase.HEALTHY
+        self._next_probe_at: datetime | None = None
+        self._backoff_index = 0
         # FCM push-токен (после checkin_or_register). Нужен SIP-ответу для
         # push-params REGISTER (pn-tok=...) — см. sip/call_controller.py.
         self.fcm_token: str | None = None
 
     async def async_start(self) -> None:
         """Первичный коннект + запуск watchdog'а (контроль живости сокета)."""
-        await self._async_connect()
-        if self._watchdog_unsub is None:
+        async with self._transition_lock:
+            if self._stopping or self._watchdog_unsub is not None:
+                return
+            await self._async_connect()
+            if self._stopping:
+                await self._async_disconnect()
+                return
             self._watchdog_unsub = async_track_time_interval(
                 self._hass, self._async_watchdog, FCM_WATCHDOG_INTERVAL
             )
@@ -88,7 +149,8 @@ class DoorbellFcmListener:
             )
         except Exception as err:  # noqa: BLE001
             LOGGER.warning(
-                "FCM: firebase-messaging недоступна (%s) — событие вызова отключено", err
+                "FCM: firebase-messaging недоступна (%s) — событие вызова отключено",
+                type(err).__name__,
             )
             return
 
@@ -101,66 +163,145 @@ class DoorbellFcmListener:
                 bundle_id=FCM_BUNDLE_ID,
             )
             credentials = self._entry.data.get(CONF_FCM_CREDENTIALS)
-            self._client = FcmPushClient(
+            client = FcmPushClient(
                 self._on_notification,
                 register_config,
                 credentials,
                 self._on_credentials_updated,
                 config=FcmPushClientConfig(abort_on_sequential_error_count=None),
+                http_client_session=async_get_clientsession(self._hass),
             )
-            fcm_token = await self._client.checkin_or_register()
+            fcm_token = await client.checkin_or_register()
             self.fcm_token = fcm_token
+            if self._stopping:
+                await self._async_disconnect()
+                return
             if not await self._api.register_push_device(fcm_token):
                 LOGGER.warning(
                     "FCM: привязка push-токена у оператора не удалась — пуши могут не прийти"
                 )
-            await self._client.start()
+            if self._stopping:
+                await self._async_disconnect()
+                return
+            await client.start()
+            self._client = client
             LOGGER.info("FCM doorbell listener запущен")
         except Exception as err:  # noqa: BLE001
             LOGGER.warning(
-                "FCM: не удалось запустить listener (%s) — событие вызова отключено", err
+                "FCM: не удалось запустить listener (%s) — событие вызова отключено",
+                type(err).__name__,
             )
-            self._client = None
-
-    async def _async_watchdog(self, _now: Any = None) -> None:
-        """Периодически: если push-receiver неактивен — переподнять listener.
-
-        Ловит фатальную смерть клиента и провал первичного checkin (client=None).
-        Guard `_reconnecting` — против перекрытия с предыдущим переподнятием.
-        """
-        if self._reconnecting:
-            return
-        client = self._client
-        if client is not None and client.is_started():
-            return
-        # is_started()==False = receiver мёртв ЛИБО ещё в фазе MCS-login.
-        # Интервал watchdog (2 мин) ≫ времени login (секунды) → к тику живой
-        # клиент уже STARTED; не-STARTED на тике = реально залип/умер →
-        # переподнимаем (grace-период не нужен и лишь задержал бы восстановление
-        # действительно зависшего login).
-        self._reconnecting = True
-        try:
-            LOGGER.warning("FCM: push-receiver неактивен — переподнимаю listener")
             await self._async_disconnect()
-            await self._async_connect()
-        finally:
-            self._reconnecting = False
 
-    async def _async_disconnect(self) -> None:
+    @callback
+    def _async_mark_healthy(self) -> None:
+        """Сбросить recovery-state после подтверждённого healthy-тика."""
+        recovered = self._recovery_phase in {
+            _FcmRecoveryPhase.VERIFYING,
+            _FcmRecoveryPhase.OPEN,
+        }
+        self._recovery_phase = _FcmRecoveryPhase.HEALTHY
+        self._next_probe_at = None
+        self._backoff_index = 0
+        async_delete_fcm_repair_issue(self._hass, self._entry.entry_id)
+        if recovered:
+            LOGGER.info("FCM: push-receiver восстановлен")
+
+    @callback
+    def _async_open_circuit(self, now: datetime) -> None:
+        """Назначить следующую пробу и показать persistent Repairs issue."""
+        if self._stopping:
+            return
+        delay = FCM_RETRY_BACKOFFS[self._backoff_index]
+        self._backoff_index = min(
+            self._backoff_index + 1, len(FCM_RETRY_BACKOFFS) - 1
+        )
+        self._next_probe_at = now + delay
+        self._recovery_phase = _FcmRecoveryPhase.OPEN
+        async_create_fcm_repair_issue(self._hass, self._entry)
+        LOGGER.warning(
+            "FCM: частые попытки восстановления приостановлены; "
+            "следующая проверка через %s",
+            delay,
+        )
+
+    async def _async_reconnect(self) -> bool:
+        """Выполнить один защищённый disconnect/connect цикл."""
+        if not await self._async_disconnect():
+            return False
+        if self._stopping:
+            return False
+        await self._async_connect()
+        if not self._stopping:
+            self._recovery_phase = _FcmRecoveryPhase.VERIFYING
+        return True
+
+    async def _async_watchdog(self, _now: datetime | None = None) -> None:
+        """Наблюдать receiver и выполнять bounded automatic recovery."""
+        if self._stopping or self._transition_lock.locked():
+            return
+        async with self._transition_lock:
+            if self._stopping:
+                return
+            client = self._client
+            if client is not None and client.is_started():
+                self._async_mark_healthy()
+                return
+
+            now = _now or dt_util.utcnow()
+
+            if self._recovery_phase is _FcmRecoveryPhase.OPEN:
+                if self._next_probe_at is not None and now < self._next_probe_at:
+                    return
+                LOGGER.info("FCM: выполняю пробную попытку восстановления")
+                if not await self._async_reconnect():
+                    self._async_open_circuit(now)
+                return
+
+            if self._recovery_phase is _FcmRecoveryPhase.VERIFYING:
+                await self._async_disconnect()
+                self._async_open_circuit(now)
+                return
+
+            if self._recovery_phase is _FcmRecoveryPhase.HEALTHY:
+                self._recovery_phase = _FcmRecoveryPhase.SUSPECT
+                return
+
+            if self._recovery_phase is _FcmRecoveryPhase.SUSPECT:
+                LOGGER.warning(
+                    "FCM: push-receiver неактивен — выполняю одну попытку восстановления"
+                )
+                if not await self._async_reconnect():
+                    self._async_open_circuit(now)
+
+    async def _async_disconnect(self) -> bool:
         """Остановить текущий MTalk-сокет (watchdog НЕ трогаем)."""
-        client, self._client = self._client, None
-        if client is not None:
-            try:
-                await client.stop()
-            except Exception:  # noqa: BLE001
-                pass
+        client = self._client
+        if client is None:
+            return True
+        try:
+            await client.stop()
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning(
+                "FCM: не удалось остановить listener (%s)",
+                type(err).__name__,
+            )
+            return False
+        if self._client is client:
+            self._client = None
+        return True
 
-    async def async_stop(self) -> None:
+    async def async_stop(self) -> bool:
         """Полная остановка на unload entry: отменить watchdog + закрыть сокет."""
+        self._stopping = True
         if self._watchdog_unsub is not None:
             self._watchdog_unsub()
             self._watchdog_unsub = None
-        await self._async_disconnect()
+        async with self._transition_lock:
+            stopped = await self._async_disconnect()
+        if stopped and self._entry.disabled_by is not None:
+            async_delete_fcm_repair_issue(self._hass, self._entry.entry_id)
+        return stopped
 
     @callback
     def _on_credentials_updated(self, credentials: dict, *_: Any) -> None:
@@ -173,6 +314,8 @@ class DoorbellFcmListener:
     @callback
     def _on_notification(self, notification: dict, persistent_id: str, *_: Any) -> None:
         """Callback firebase-messaging: парсит push → SIGNAL_DOORBELL."""
+        if self._stopping:
+            return
         data = (notification or {}).get("data") or {}
         push_type = data.get("PushType") or data.get("google.c.a.m_l")
         event_type = _PUSH_TYPE_EVENT.get(push_type)
