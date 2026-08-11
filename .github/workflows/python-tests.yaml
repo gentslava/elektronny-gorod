@@ -49,14 +49,16 @@ jobs:
           pip install pytest-homeassistant-custom-component==${{ matrix.phc-version }}
           pip install -r requirements_test.txt
 
-      - name: Apply legacy HA constraint (josepy<2)
+      - name: Apply legacy HA constraints
         if: matrix.phc-version == '0.13.175'
         run: |
           # HA 2024.10 транзитивно тянет acme<3, которая всё ещё ожидает
           # josepy.ComparableX509. josepy>=2 этот атрибут удалил
           # → AttributeError при загрузке pytest-homeassistant-custom-component.
-          # Для current (HA 2026.5+) acme>=3 + josepy>=2 уже совместимы.
-          pip install 'josepy<2'
+          # PHC 0.13.175 также считает pycares>=4.9 safe-shutdown thread
+          # утечкой; новые PHC уже разрешают этот служебный daemon-thread.
+          # Для current (HA 2026.5+) оба ограничения не нужны.
+          pip install 'josepy<2' 'pycares<4.9'
 
       - name: Run pytest
         run: |

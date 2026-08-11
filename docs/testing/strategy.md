@@ -269,7 +269,11 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 - **Matrix-стратегия через `include:`** (не product) — потому что Python и PHC-версии жёстко связаны: PHC 0.13.175 → HA 2024.10.4 → py3.12 (min), PHC 0.13.333 → HA 2026.5.4 → py3.14 (current). Простой `ha-version: [min, stable]` не выражает эту связку.
 - **PHC ставится отдельным `pip install` после `requirements_test.txt`** — версия PHC из matrix, не из файла. `requirements_test.txt` держит только `aioresponses` (PHC сам тянет pytest, pytest-cov, coverage).
-- **josepy<2 conditional** для min-job — HA 2024.10 транзитивно использует acme<3, ожидающий `josepy.ComparableX509` (удалён в josepy 2.0). Для current (HA 2026.5+) шаг пропускается.
+- **Legacy constraints conditional** для min-job: HA 2024.10 транзитивно
+  использует acme<3, ожидающий `josepy.ComparableX509` (удалён в josepy 2.0),
+  а PHC 0.13.175 ещё не разрешает служебный pycares safe-shutdown thread,
+  появившийся в pycares 4.9. Поэтому min-job ставит `josepy<2` и
+  `pycares<4.9`; для current (HA 2026.5+) шаг пропускается.
 - **turbojpeg mock** в `tests/conftest.py` — `pytest-homeassistant-custom-component` не тянет optional HA-extras, нужно для `homeassistant.components.camera.img_util`.
 - **Path-filter на push и pull_request** — docs-only коммиты CI не запускают.
 - **Coverage artifact** с уникальным именем `coverage-py<v>-phc<v>` (artifact@v4 требует уникальности в matrix).
