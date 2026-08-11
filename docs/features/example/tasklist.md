@@ -1,6 +1,7 @@
 # Tasklist: Token redaction in logs
 
 - **Date:** 2026-05-22
+- **Last reviewed:** 2026-08-11
 - **Owner:** Security & Privacy Agent
 - **Linked plan:** [`plan.md`](plan.md)
 
@@ -18,9 +19,12 @@
 
 ### Slice 3 — `config_flow.py`
 
-- [ ] **T-005** Удалить строку `LOGGER.debug("Access token is %s", self.access_token)` ([`config_flow.py:77`](../../../custom_components/elektronny_gorod/config_flow.py#L77)). _Audit:_ S-01.
-- [ ] **T-006** Заменить `entry.data` на `entry.entry_id` ([`config_flow.py:283,291`](../../../custom_components/elektronny_gorod/config_flow.py#L283)). _Audit:_ S-04.
-- [ ] **T-007** Обезличить `LOGGER.debug("Selected contract is %s. Contract object is %s", ...)` ([`config_flow.py:201`](../../../custom_components/elektronny_gorod/config_flow.py#L201)) — оставить только `selected_id`. _Audit:_ S-06.
+- [ ] **T-005** В `ElektronnyGorodConfigFlow.async_step_user` удалить raw-log
+  access token. _Audit:_ S-01.
+- [ ] **T-006** В `ElektronnyGorodConfigFlow.get_account` заменить полный
+  `entry.data` на `entry.entry_id`. _Audit:_ S-04.
+- [ ] **T-007** В `ElektronnyGorodConfigFlow.async_step_contract` оставить в
+  логе только `selected_id`, без contract object. _Audit:_ S-06.
 
 ### Slice 4 — `diagnostics.py`
 
@@ -29,7 +33,8 @@
 
 ### Slice 5 — Pre-commit hook
 
-- [ ] **T-010** Создать `.claude/hooks/pre-commit-redaction-check.sh` (см. [ADR-0004](../../decisions/0004-token-redaction.md)).
+- [x] **T-010** Создать canonical `.codex/hooks/check-secret-logs.py/.sh` и
+  thin tool-specific adapters (см. [ADR-0004](../../decisions/0004-token-redaction.md)).
 - [ ] **T-011** Зарегистрировать hook в `.claude/settings.json` для events `PreToolUse: Bash(git commit:*)` или эквивалентного.
 - [ ] **T-012** Ручной dry-run: создать локальный коммит с заведомой утечкой → hook блокирует.
 

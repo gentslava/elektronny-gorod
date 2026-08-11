@@ -1,6 +1,7 @@
 # Экран вызова через HA-native (camera.intercom_call) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development (recommended) или superpowers:executing-plans. Шаги — checkbox (`- [ ]`).
+> **Execution mode:** use the active tool's native subagent workflow when
+> available; otherwise execute the checkboxes inline.
 
 **Goal:** Показать вызов домофона (видео + звук гостя инлайн) в HA-дашборде, работая на 4G без экспозиции go2rtc, через одну camera-сущность `camera.intercom_call` + HA-native WebRTC.
 

@@ -1,17 +1,17 @@
 Status: Active
 Owner: Validator Agent
-Last reviewed: 2026-08-11 (TESTS_PASS: 579 backend + 62 frontend; bounded FCM
-recovery and lifecycle regressions added)
+Last reviewed: 2026-08-11 (A-97 candidate freeze/re-attestation and
+publication/CI evidence lifecycle by ADR-0015)
 
 Source files:
 - весь репозиторий
 
 Related docs:
 - `../../workflow.md`
-- `project-audit.md`
-- `security.md`
-- `testing/strategy.md`
-- `roadmap.md`
+- `../audit/project-audit.md`
+- `../audit/security.md`
+- `../testing/strategy.md`
+- `../roadmap.md`
 
 Used by agents:
 - Validator, Lead Architect, QA
@@ -71,9 +71,9 @@ Used by agents:
 |---|---|
 | Purpose | План работ имеет порядок и acceptance |
 | Owner | Lead Architect / разработчик |
-| Required evidence | [`roadmap.md`](../roadmap.md) с итерациями + TodoWrite-список |
-| Pass | каждый таск ссылается на конкретную находку из audit |
-| Fail | план «улучшить документацию» / «добавить тесты» без конкретики |
+| Required evidence | executable plan/tasklist с scope, acceptance, execution mode, concrete implementer/reviewer identities, plan revision, approver/date/evidence |
+| Pass | каждый таск конкретен; subagent-driven выбран по умолчанию при доступности; обязательные independent reviewers назначены до implementation; approval относится к записанной revision |
+| Fail | план «улучшить документацию» без конкретики; execution mode/review routing оставлены на конец; короткое «го» не было прямым ответом на предъявленный полный план |
 
 ## IMPLEMENTATION_STEP_OK
 
@@ -89,23 +89,35 @@ Used by agents:
 
 | Поле | Значение |
 |---|---|
-| Purpose | Тесты зелёные, реально выполнялись |
+| Purpose | Локальные тесты зелёные до candidate freeze и реально выполнялись |
 | Owner | QA Agent |
 | Required commands | `PYTHONPATH=. .venv/bin/pytest tests/ -q` |
 | Required evidence | свежий вывод pytest; актуальный baseline и состав suite — в [`testing/strategy.md`](../testing/strategy.md) |
 | Pass | все тесты зелёные; config_flow покрыт основными сценариями; новые external API contracts проверяют exact wire shape; background lifecycle имеет unload/backpressure regressions; нет тестов, маскирующих баги |
 | Fail | падающие тесты; pytest не запускался; тесты «исправлены» под сломанное поведение |
-| Stop | без TESTS_PASS не релизить |
+| Stop | без TESTS_PASS не замораживать candidate; remote checks закрываются отдельным `CI_GREEN` после push |
+
+## CANDIDATE_FROZEN
+
+| Поле | Значение |
+|---|---|
+| Purpose | Все implementation gates завершены, а review относится к immutable candidate |
+| Owner | implementer / Validator Agent |
+| Required evidence | пустой `git status --short`; merge-base SHA, head SHA и `HEAD^{tree}`; spec/plan revision |
+| Pass | candidate полностью committed; TESTS_PASS, SECURITY_PRECHECK_OK, DOCS_UPDATED и HISTORY_CLEAN завершены; все финальные reviewers получили один base/head/tree |
+| Fail | uncommitted changes; reviewer проверяет другой head/tree; после approval появился содержательный commit |
+| Stop | не выдавать `REVIEW_OK`; после любого fix повторить затронутые implementation gates, freeze и получить новую candidate-bound аттестацию каждого обязательного reviewer-а |
 
 ## REVIEW_OK
 
 | Поле | Значение |
 |---|---|
 | Purpose | Diff проверен по 5 осям |
-| Owner | code-reviewer agent / human reviewer |
-| Required evidence | review-комментарии или approval |
-| Pass | correctness ✓ readability ✓ architecture ✓ security ✓ performance ✓ |
-| Fail | хотя бы одна ось — fail |
+| Owner | независимый от implementer-а code-reviewer agent / human reviewer |
+| Required evidence | `CANDIDATE_FROZEN`; reviewer identity/independence; base/head/tree; read-only report; новая candidate-bound аттестация каждого обязательного HA/security/QA reviewer-а по routing matrix |
+| Pass | correctness ✓ readability ✓ architecture ✓ security ✓ performance ✓; Critical/Important findings закрыты; все обязательные verdicts относятся к одному текущему tuple |
+| Fail | только self-review; reviewer участвовал в implementation; хотя бы один verdict относится к старому/другому tuple; нет профильного review; хотя бы один Critical/Important открыт |
+| Stop | не merge-ить и не релизить; обычный push/PR запрещён, кроме явно разрешённой review-only branch/draft с красным gate |
 
 ## SECURITY_OK
 
@@ -113,11 +125,44 @@ Used by agents:
 |---|---|
 | Purpose | Нет утечек секретов в логи, есть redaction, нет очевидных уязвимостей |
 | Owner | Security & Privacy Agent |
-| Required commands | `grep -rE "LOGGER\..*token\|LOGGER\..*headers\|LOGGER\..*entry\.data" custom_components/` → пусто |
-| Required evidence | закрытые P0 пункты из [`security.md`](../audit/security.md) |
-| Pass | все P0 security-findings закрыты; `diagnostics.py` с redaction; pre-commit hook (Итерация 3) |
-| Fail | хотя бы один P0 не закрыт |
+| Required commands | `bash .codex/hooks/check-secret-logs.sh` → `Secret log scan passed` |
+| Required evidence | `CANDIDATE_FROZEN` + independent read-only security review того же base/head/tree для auth/token/credentials/FCM-sensitive diff |
+| Pass | все Critical/Important security findings закрыты и перепроверены; redaction boundary подтверждена на frozen candidate |
+| Fail | хотя бы один Critical/Important finding не закрыт или review относится к другому candidate |
 | Stop | без SECURITY_OK не релизить |
+
+## REVIEW_EVIDENCE_PUBLISHED
+
+| Поле | Значение |
+|---|---|
+| Purpose | Candidate-bound approvals доступны всем участникам PR вне проверяемого tree |
+| Owner | Validator/root orchestrator |
+| Required evidence | PR comment для текущего head/tree: base/head/tree, plan/spec revision, local gates, identity/independence/scope/verdict каждого обязательного reviewer |
+| Pass | comment опубликован после ordinary push и точно соответствует текущему candidate; новый candidate имеет новый comment |
+| Fail | evidence осталось только в session transcript; comment относится к старому SHA; отчёт закоммичен внутрь candidate |
+| Stop | не merge-ить без durable PR evidence текущего candidate |
+
+## CI_GREEN
+
+| Поле | Значение |
+|---|---|
+| Purpose | Remote checks подтвердили уже опубликованный и одобренный candidate |
+| Owner | Validator / DevOps Agent |
+| Required evidence | Required GitHub checks текущего head SHA: Python Tests, Validate with hassfest, HACS Action; PR Pre-Release — когда workflow применим |
+| Pass | все применимые required jobs success; корректно skipped conditional job допустим |
+| Fail | failure/cancelled/pending required job; checks относятся к старому head |
+| Stop | не merge-ить и не релизить до зелёного CI текущего candidate |
+
+## SECURITY_PRECHECK_OK
+
+| Поле | Значение |
+|---|---|
+| Purpose | До freeze устранены известные security-проблемы и зелёные локальные проверки |
+| Owner | Security & Privacy Agent / implementer |
+| Required evidence | secret grep/redaction tests; закрытые known Critical/Important findings |
+| Pass | candidate можно безопасно commit/freeze без известных blocker-ов |
+| Fail | секреты в output; открытый blocker; precheck не запускался |
+| Stop | без SECURITY_PRECHECK_OK не закрывать `CANDIDATE_FROZEN` |
 
 ## DOCS_UPDATED
 
@@ -133,12 +178,12 @@ Used by agents:
 
 | Поле | Значение |
 |---|---|
-| Purpose | git-история feature-ветки чистая перед merge в master |
-| Owner | [Git Historian Agent](../../.claude/agents/git-historian.md) |
-| Required evidence | каждый коммит — substantive (нет hotfix-цепочек, DIAG-логов, typo-правок); commit messages conventional-стиля с body; diff vs master сохранён после rebase; backup-ветка создана |
-| Pass | `git log --oneline master..HEAD` показывает короткую серию logically-grouped коммитов; каждое сообщение читается отдельно |
+| Purpose | git-история feature-ветки стабилизирована до candidate freeze и останется чистой перед merge |
+| Owner | Git Historian ([Claude](../../.claude/agents/git-historian.md) / [Codex](../../.codex/agents/git-historian.toml)); Validator/root fallback |
+| Required evidence | commit list + diff against `<target-ref>`; нет WIP/DIAG/debug/typo-only цепочек; дальнейший rebase/squash не запланирован; при rewrite создан локальный backup ref |
+| Pass | `git log --oneline <target-ref>..HEAD` показывает logically-grouped conventional commits; rationale понятен из subject/body; после freeze история не меняется |
 | Fail | >3 hotfix-ов подряд на одну фичу; коммиты «WIP», «fix typo», «revert prev»; DIAG/debug код в финальном diff |
-| Stop | merge feature-ветки без cleanup'а; force-push в master |
+| Stop | не закрывать `CANDIDATE_FROZEN` и не merge-ить без cleanup; force-push в master запрещён |
 
 См. [`.claude/rules/git-history.md`](../../.claude/rules/git-history.md) и
 slash-команду `/git-cleanup`.
@@ -149,7 +194,7 @@ slash-команду `/git-cleanup`.
 |---|---|
 | Purpose | Релиз готов к публикации |
 | Owner | Lead Architect / разработчик |
-| Required gates passed | TESTS_PASS + SECURITY_OK + REVIEW_OK + DOCS_UPDATED + AUDIT_DONE + HISTORY_CLEAN |
+| Required gates passed | TESTS_PASS + SECURITY_PRECHECK_OK + DOCS_UPDATED + HISTORY_CLEAN + CANDIDATE_FROZEN + REVIEW_OK + SECURITY_OK + REVIEW_EVIDENCE_PUBLISHED + CI_GREEN + AUDIT_DONE |
 | Required evidence | CHANGELOG entry; обновлённый README, если есть user-facing изменения; брендинг |
 | Pass | все обязательные gates зелёные; нет открытых P0 |
 | Fail | хотя бы один обязательный gate красный |
@@ -166,17 +211,22 @@ slash-команду `/git-cleanup`.
 | PLAN_APPROVED | implementation |
 | IMPLEMENTATION_STEP_OK | каждый commit |
 | TESTS_PASS | merge |
+| SECURITY_PRECHECK_OK | candidate freeze |
+| CANDIDATE_FROZEN | независимый review |
 | REVIEW_OK | merge |
 | SECURITY_OK | merge |
+| REVIEW_EVIDENCE_PUBLISHED | merge |
+| CI_GREEN | merge + release |
 | DOCS_UPDATED | merge |
-| HISTORY_CLEAN | merge |
+| HISTORY_CLEAN | candidate freeze + merge |
 | READY_FOR_RELEASE | публикация |
 
 > **«Реальное состояние сейчас» намеренно убрано из этой таблицы (ADR-0010,
 > D-03).** Live-состояние гниёт внутри методологического документа. Единый
-> источник «что зелёное / что красное» — [`project-audit.md`](../audit/project-audit.md)
-> (findings со `Status:`) + [`summary.md`](../summary.md) (таблица «Состояние»).
-> Здесь — только **определения** гейтов, не их текущий цвет.
+> источник findings/status — [`project-audit.md`](../audit/project-audit.md),
+> live test baseline — [`testing/strategy.md`](../testing/strategy.md), а
+> [`summary.md`](../summary.md) содержит только качественную сводку без count.
+> Здесь — только **определения** гейтов, не их текущий цвет (ADR-0015).
 
 ## Принцип
 
@@ -184,6 +234,12 @@ Gate можно «пропустить» только с **записанным 
 строка в `project-audit.md` / PR body вида «gate X skipped, owner: <…>,
 причина: <…>». Никаких «потом починим». Если gate красный — фиксить gate,
 а не идти дальше.
+
+**Исключение ADR-0015:** для нетривиального diff `REVIEW_OK`, обязательные
+профильные reviews, `REVIEW_EVIDENCE_PUBLISHED` и `CI_GREEN` non-waivable для
+merge/release. Явное human risk acceptance может разрешить только review-only
+branch/draft PR; оно не создаёт ни один из этих гейтов и не разрешает
+merge/release.
 
 ### quality_scale ≤ gate-confirmed (D-05)
 
@@ -196,7 +252,7 @@ Gate можно «пропустить» только с **записанным 
 ## Next reading
 
 - For workflow: `../../workflow.md`
-- For findings: `project-audit.md`
-- For security details: `security.md`
-- For test plan: `testing/strategy.md`
-- For roadmap: `roadmap.md`
+- For findings: `../audit/project-audit.md`
+- For security details: `../audit/security.md`
+- For test plan: `../testing/strategy.md`
+- For roadmap: `../roadmap.md`

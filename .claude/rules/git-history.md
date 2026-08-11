@@ -1,12 +1,12 @@
 # Rule: Чистая git история
 
-**Применимо к:** все feature-ветки перед merge в master.
+**Применимо к:** все нетривиальные feature-ветки до candidate freeze и merge.
 
 ## Правило
 
 🔴 **Запрещено мерджить в master** feature-ветки, содержащие «иттерационный
 мусор»: hotfix-цепочки, DIAG-логи добавлены→удалены, «fix typo», revert
-собственных коммитов из той же серии. Перед PR-finalization → squash/rebase
+собственных коммитов из той же серии. До `CANDIDATE_FROZEN` → squash/rebase
 до **достаточного** числа осмысленных коммитов.
 
 ⚠️ **Две цели одновременно** (равно важные):
@@ -18,7 +18,7 @@
 
 2. **Drop коммитов с нулевым net-diff** — особенно DIAG/debug-логи добавлены
    в одном коммите и удалены в следующем (или через N коммитов). Они не
-   несут ничего в финальный `git diff master..HEAD` и только захламляют
+   несут ничего в финальный `git diff <target-ref>..HEAD` и только захламляют
    историю. Drop всех таких пар целиком.
 
 ⚠️ **Цель НЕ «минимум коммитов любой ценой».** Главная метрика — понятная
@@ -34,23 +34,30 @@
 1. **Каждый коммит ветки несёт substantive change** (не «починка предыдущего»).
 2. **Commit messages** соответствуют [conventional commits](https://www.conventionalcommits.org/)
    стилю проекта (`<type>(<scope>): <subject>` + body с «почему»).
-3. **CI зелёный на каждом коммите** (можно автоматически проверить через
-   `git rebase --exec`).
-4. **Diff vs master сохранён** (rebase не привёл к потере/добавлению строк).
+3. **CI/test gate зелёный для итоговой логической серии**; если проверяется
+   самостоятельная cherry-pick/revert пригодность каждого commit, допустим
+   `git rebase --exec` до freeze.
+4. **Diff vs `<target-ref>` сохранён** (для stacked PR это parent feature
+   branch; rebase не привёл к потере/добавлению строк).
 5. **Backup-ветка существует** для безопасного rollback: `backup/<branch>-<date>`.
 
 ## Когда чистить
 
-- В конце любой нетривиальной работы перед PR creation / готовности к merge.
+- После implementation/tests/docs и перед `CANDIDATE_FROZEN`.
 - После каждой существенной hotfix-серии (>3 hotfix-ов подряд на одну фичу).
-- Перед `gh pr ready` / переключением PR из draft в ready-for-review.
+- Перед обычным push/PR; после freeze/review history rewrite запрещён без нового
+  candidate и повторных attestations всех обязательных reviewers (ADR-0015),
+  а после публикации — также без нового PR evidence comment и CI run
+  (ADR-0015).
 
 ## Кто исполняет
 
-- Subagent [`git-historian`](../agents/git-historian.md) — автоматический
-  audit + плановый rebase.
+- Subagent Git Historian: [Claude](../agents/git-historian.md) или
+  [Codex](../../.codex/agents/git-historian.toml) — автоматический audit +
+  плановый rebase.
+- Если отдельная роль недоступна — Validator/root выполняет тот же audit.
 - Slash-команда: `/git-cleanup` (TBD).
-- Вручную через `git rebase -i master` — если ты уверен в действиях.
+- Вручную через `git rebase -i <target-ref>` — если ты уверен в действиях.
 
 ## Что НЕ делать
 
@@ -99,6 +106,7 @@
 ## Связь
 
 - [`.claude/agents/git-historian.md`](../agents/git-historian.md) — исполнитель.
+- [`.codex/agents/git-historian.toml`](../../.codex/agents/git-historian.toml) — cross-tool исполнитель.
 - [`docs/aidd/quality-gates.md`](../../docs/aidd/quality-gates.md) — gate `HISTORY_CLEAN`.
 - [`AGENTS.md`](../../AGENTS.md) §git contract.
 - [Conventional Commits](https://www.conventionalcommits.org/).

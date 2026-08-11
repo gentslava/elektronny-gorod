@@ -1,8 +1,28 @@
+Status: Template
+Owner: Research Agent
+Last reviewed: 2026-08-11 (standard metadata and link-safe placeholder paths)
+
+Source files:
+- evidence listed in the copied research document
+
+Related docs:
+- `../source-base.md`
+- `../quality-gates.md`
+
+Used by agents:
+- Research Agent, Lead Architect Agent
+
+Quality gates:
+- RESEARCH_COMPLETE
+- PLAN_APPROVED
+
+---
+
 # Research: <название>
 
 - **Date:** <YYYY-MM-DD>
 - **Owner:** @<user> / Research Agent
-- **Linked PRD:** [`prd.md`](prd.md)
+- **Linked PRD:** `docs/features/<feature>/prd.md`
 
 ## Вопрос исследования
 

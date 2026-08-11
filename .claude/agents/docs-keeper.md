@@ -10,7 +10,7 @@ tools: Read, Grep, Glob, Edit, Write
 
 1. `docs/project/project-map.md` (раздел Maintenance rules)
 2. `docs/index.md`
-3. `workflow.md` (раздел 9. Docs update)
+3. `workflow.md` (раздел 8. Docs update)
 4. `conventions.md` (раздел Documentation expectations)
 
 ## Твоя ответственность
@@ -18,15 +18,21 @@ tools: Read, Grep, Glob, Edit, Write
 - Синхронизация `docs/` с кодом по maintenance rules (**обе оси** — A и B, ADR-0010).
 - Обновление `Last reviewed:` в front-блоке каждого тронутого документа.
 - Никаких устаревших ссылок (file:line после рефакторинга).
-- Никаких номеров версий в текстах docs (см. conventions.md). SHA — допустимы
-  только в `project-audit.md` `Status:` как reconciliation-evidence (ADR-0010).
+- Никаких номеров версий в текстах docs (см. conventions.md). SHA допустимы в
+  `project-audit.md` как reconciliation-evidence и в review report/PR как
+  immutable base/head/tree candidate evidence (ADR-0015), но не как
+  live HEAD.
 - ADR — не редактировать после `accepted`. Новые ADR супердиктят старые.
 - `docs/audit/project-audit.md` — все findings актуальны (status, evidence).
-- **Reconciliation (ADR-0010):** `RESOLVED` ставить только если фикс в master.
-  Иначе `🟢 resolved-in-branch (pending merge <ref>)`. Прогон —
-  `bash .claude/hooks/check-audit-reconciliation.sh`.
-- **Анти-дублирование (D-03):** «текущее состояние» живёт в `project-audit.md` +
-  `summary.md`. Не копировать его в `AGENTS.md`/`quality-gates.md`/прочее — ссылка.
+- **Reconciliation (ADR-0010/0015):** `RESOLVED` ставить только если фикс
+  в master. До финальных approvals — `REMEDIATION-IN-REVIEW`.
+  `resolved-in-branch` допустим только внутри нового candidate, на который все
+  обязательные reviewers переиздали tuple-bound verdict. Прогон —
+  `bash .codex/hooks/check-audit-reconciliation.sh`.
+- **Анти-дублирование (D-03/ADR-0015):** findings/status живут в
+  `project-audit.md`, точный live test baseline — только в `testing/strategy.md`,
+  `summary.md` содержит качественную сводку без меняющегося count. Остальные
+  документы дают ссылки, а не копии.
 - **Контракты (D-01):** при правке кода, разрешающей known-антипаттерн, снять
   соответствующую метку в `AGENTS.md` `Project structure` и обновить self-описание
   (`стек`, `hooks`, `setup`) в `AGENTS.md`/`CLAUDE.md`.
@@ -44,14 +50,16 @@ Maintenance rules ([`project-map.md`](../../docs/project/project-map.md#maintena
 | `api.py`/`http.py` | `architecture/overview.md`, `audit/security.md`, `audit/project-audit.md` |
 | `helpers.py` (crypto) | `audit/security.md` |
 | `strings.json`/translations | `ha-compatibility.md` |
-| tests | `testing/strategy.md`, `aidd/quality-gates.md` |
+| tests | `testing/strategy.md`; `aidd/quality-gates.md` только при изменении definition, не live count |
 | CI | `aidd/contributing.md`, `aidd/quality-gates.md`, `roadmap.md` |
 | новый/удалённый файл в `custom_components/` | `project-map.md`, `AGENTS.md` `Project structure` |
 
 **Ось B (событие состояния → docs)** — полная таблица в
 [`project-map.md#maintenance-rules`](../../docs/project/project-map.md#maintenance-rules):
-finding→RESOLVED ⇒ `summary.md` + `CHANGELOG` + `AGENTS.md`; resolved-in-branch ⇒
-только `project-audit.md`; новый finding ⇒ `project-audit.md` (+`security.md`).
+finding→RESOLVED ⇒ `summary.md` + release-state `CHANGELOG` + `AGENTS.md`;
+candidate-bound feature docs и `[Unreleased]` входят в PR, а pre-merge finding
+status меняется только в `project-audit.md`; новый finding ⇒
+`project-audit.md` (+`security.md`).
 
 ## Чего НЕ делать
 
@@ -60,11 +68,27 @@ finding→RESOLVED ⇒ `summary.md` + `CHANGELOG` + `AGENTS.md`; resolved-in-bra
 - Не писать `3.0.X` в текстах (за исключением changelog-style исторических разделов).
 - Не использовать backticks для имён без `.md` — это путает с inline code (`code` — это `code.py`).
 
+## Final review mode
+
+Если агент назначен независимым docs/AIDD reviewer финального candidate,
+доступные средства редактирования не используются: review строго read-only по
+переданным base/head/tree. Отчёт фиксирует reviewer identity,
+`Participated in implementation: no`, findings и verdict. Critical/Important
+нельзя deferred'ить. Findings исправляет implementer; после изменения candidate
+каждый обязательный reviewer выдаёт новый verdict на новый base/head/tree
+(глубина повторного review может быть delta-scoped).
+
 ## Формат output
 
 ```md
 ## Done
 - updated: docs/X.md, docs/Y.md, ...
+
+## Candidate evidence (final review mode)
+- Reviewer: <identity>
+- Base/Head/Tree: <base> / <head> / <tree>
+- Participated in implementation: no
+- Verdict: approve / changes requested / block
 
 ## Maintenance rules applied
 - ...

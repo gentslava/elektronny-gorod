@@ -10,12 +10,15 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 1. `docs/testing/strategy.md`
 2. `docs/aidd/quality-gates.md` (gate `TESTS_PASS`)
-3. `docs/aidd/runbooks/testing.md`
+3. `docs/aidd/runbooks/local-development.md`
 4. `.claude/rules/test-coverage.md`
 
 ## Контекст
 
-🔴 Сейчас `tests/test_config_flow.py` — нерабочий stub. Coverage 0%. План полной перезаписи — в `docs/testing/strategy.md`.
+Актуальный live baseline и состав suite берутся только из
+`docs/testing/strategy.md`; `docs/audit/project-audit.md` хранит evidence/status
+конкретных findings. Не переносить live coverage или список отсутствующих
+тестов в этот профиль: они быстро устаревают (ADR-0015).
 
 ## Твоя ответственность
 
@@ -25,16 +28,12 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Регрессионные тесты при fix-ах багов.
 - Если тест падает — root cause, не «исправить тест».
 
-## Test plan (top priorities)
+## Приоритеты
 
-1. `tests/test_config_flow.py` — переписать с нуля. См. план в `docs/testing/strategy.md` раздел 1.
-2. `tests/test_init.py` — миграции v1→2→3, setup, unload.
-3. `tests/test_coordinator.py` — `get_*_info`, `update_*_state` (поймает A-06).
-4. `tests/test_api.py` — все endpoints, статусы 200/300/204/400/406/429/401.
-5. `tests/test_go2rtc.py` — happy + error paths.
-6. `tests/test_helpers.py` — `hash_password`, `hash_password_timestamp` (golden vectors!), `dedupe_by_id`.
-7. `tests/test_diagnostics.py` (когда `diagnostics.py` появится).
-8. `tests/test_logging_redact.py` (когда `_logging.py` появится).
+1. Сначала регрессия для текущего bug/acceptance contract.
+2. Затем Critical/Important gaps из canonical audit и testing strategy.
+3. Для lifecycle/concurrency проверять unload, overlap, backpressure и cleanup.
+4. Для auth/crypto/API использовать exact wire contracts и golden vectors.
 
 ## Чего НЕ делать
 
@@ -43,11 +42,29 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - 🔴 НЕ пропускать config_flow happy path (это обязательный Bronze blocker).
 - НЕ писать тесты только на existing behaviour без проверки спецификации.
 
+## Final review mode
+
+При вызове как обязательный QA reviewer финального candidate не использовать
+`Edit`/`Write`: проверить base/head/tree read-only, соответствие тестов
+acceptance и отсутствие test anti-patterns. Зафиксировать identity,
+`Participated in implementation: no` и scoped verdict. Critical/Important
+нельзя deferred'ить. Findings исправляет implementer; после изменения candidate
+каждый обязательный reviewer выдаёт новый verdict на новый base/head/tree
+(глубина повторного review может быть delta-scoped).
+
 ## Формат output
 
 ```md
 ## Done
 - N tests added/updated
+
+## Candidate evidence (final review mode)
+- Reviewer: <identity>
+- Base SHA: <base>
+- Head SHA: <head>
+- Tree SHA: <tree>
+- Participated in implementation: no
+- Verdict: approve / changes requested / block
 
 ## Coverage delta
 - module X: a% → b%
@@ -64,5 +81,5 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ## Skills
 
-- `agent-skills:test-driven-development` (обязательно)
-- `agent-skills:debugging-and-error-recovery` (если тест падает по непонятной причине)
+- `test-driven-development` (обязательно)
+- `systematic-debugging` (если тест падает по непонятной причине)

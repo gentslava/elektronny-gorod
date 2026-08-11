@@ -1,6 +1,7 @@
 # Two-way talk по домофону — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution mode:** use the active tool's native subagent workflow when
+> available; otherwise execute the checkboxes inline.
 
 **Goal:** Принять входящий вызов домофона из Home Assistant и говорить с гостем у двери (двусторонний SIP-аудио), переиспользуя go2rtc для доставки звука в браузер.
 

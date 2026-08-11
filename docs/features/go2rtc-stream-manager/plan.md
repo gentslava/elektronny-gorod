@@ -8,7 +8,8 @@
 > closed as superseded. Owner live acceptance, including go2rtc restart and a
 > healthy post-restart producer/preload snapshot, closed the 4.0.0 release gate.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution mode:** use the active tool's native subagent workflow when
+> available; otherwise execute the checkboxes inline.
 
 **Goal:** Keep opt-in Home Assistant camera streams reachable through stable external go2rtc RTSP URLs after long idle periods, without disrupting active viewers or publishing disabled cameras.
 

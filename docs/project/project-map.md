@@ -1,6 +1,7 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-08-10 (bounded FCM recovery and per-entry Repairs lifecycle)
+Last reviewed: 2026-08-11 (bounded FCM recovery plus candidate-bound AIDD
+maintenance rules)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -323,8 +324,8 @@ Pytest CI настроен; актуальный локальный baseline и 
 | `api.py` / `http.py` | `architecture/overview.md`, `security.md`, `project-audit.md` |
 | `helpers.py` (crypto) | `security.md` |
 | `strings.json` / `translations/*` | `ha-compatibility.md` |
-| `tests/**` | `testing/strategy.md`, `quality-gates.md` |
-| `.github/workflows/**` | `contributing.md`, `quality-gates.md`, `roadmap.md` |
+| `tests/**` | `testing/strategy.md`; `quality-gates.md` только при изменении определения gate |
+| `.github/workflows/**` | `contributing.md`, `quality-gates.md`; `roadmap.md` только при изменении плана |
 | новый/удалённый файл в `custom_components/` | `project-map.md`, `AGENTS.md` (`Project structure`) |
 | `README.md` | `summary.md`, `index.md` |
 | `AGENTS.md` / `CLAUDE.md` (self-описание: стек, hooks, setup) | взаимная сверка обоих + `contributing.md` |
@@ -335,13 +336,16 @@ Pytest CI настроен; актуальный локальный baseline и 
 |---|---|
 | finding → `✅ RESOLVED` (merged в master) | `summary.md` (риски), `CHANGELOG.md`, снять `🔴` в `AGENTS.md` `Project structure` если упоминался |
 | finding → `🟢 resolved-in-branch` | `project-audit.md` (статус + `pending merge <ref>`), **не** трогать `summary.md` риски до merge |
+| finding → `🟡 REMEDIATION-IN-REVIEW` | `project-audit.md`; candidate/review/CI ещё не дают merged-state |
 | новый finding (A-NN / S-NN) | `project-audit.md` (+ `security.md` если security), `summary.md` риски если P0/P1 |
 | разрешён known-антипаттерн в коде | `AGENTS.md` `Project structure` (снять метку), `summary.md` |
-| изменилось CI / тест-состояние | `summary.md` «Состояние»; `quality-gates.md` — только ссылкой, не копией |
+| изменился aggregate test baseline | `testing/strategy.md`; audit может хранить только historical candidate evidence |
+| изменился CI-контракт | `contributing.md`, `quality-gates.md`; `summary.md` только при изменении capability/risk |
 | изменён `manifest:quality_scale` | сверить с гейтом (D-05); при несоответствии — finding в `project-audit.md` |
 
-🔴 **Запрет (ADR-0010):** дублировать «текущее состояние» в нескольких доках.
-Единый источник — `project-audit.md` + `summary.md`. Остальное ссылается.
+🔴 **Запрет (ADR-0010/0015):** дублировать live-состояние. Findings/status
+принадлежат `project-audit.md`, aggregate test baseline —
+`testing/strategy.md`, а `summary.md` хранит только качественную сводку.
 
 ## Next reading
 

@@ -1,7 +1,7 @@
 Status: Active
 Owner: Home Assistant Expert Agent
-Last reviewed: 2026-07-16 (diagnostic RTSP entity category and manager
-lifecycle tests reconciled; declared scale unchanged)
+Last reviewed: 2026-08-11 (FCM Repairs and shared-session review reconciled;
+declared scale unchanged)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -57,9 +57,9 @@ redaction и тесты config flow/миграций присутствуют. �
 | `entity-event-setup` | ✅ платформы forward-нуты | `__init__.py` |
 | `entity-unique-id` | ✅ стабильные UID + registry migration | `entity_migration.py` |
 | `has-entity-name` | ✅ HA entity naming pattern | entity platforms |
-| `runtime-data` | ⚠️ используется `hass.data[DOMAIN][entry_id]` — допустимо, но `entry.runtime_data` рекомендован | `__init__.py:38` |
+| `runtime-data` | ⚠️ используется `hass.data[DOMAIN][entry_id]` — допустимо, но `entry.runtime_data` рекомендован | `__init__.py:async_setup_entry` |
 | `test-before-configure` | ✅ профиль и go2rtc проверяются до create entry | `config_flow.py` |
-| `test-before-setup` | ✅ `async_config_entry_first_refresh` | `__init__.py:37` |
+| `test-before-setup` | ✅ `async_config_entry_first_refresh` | `__init__.py:async_setup_entry` |
 | `unique-config-entry` | ✅ проверка дубликата | `config_flow.py` |
 
 **Bronze blockers:** подтверждённых блокеров нет. Перед формальной внешней
@@ -110,15 +110,17 @@ redaction и тесты config flow/миграций присутствуют. �
 | `exception-translations` | 🔴 нет |
 | `icon-translations` | n/a |
 | `reconfiguration-flow` | 🔴 нет |
-| `repair-issues` | 🔴 нет |
+| `repair-issues` | 🟡 есть для подтверждённого FCM-degraded; остальные recovery edge-cases не аудированы |
 | `stale-devices` | 🔴 — |
 
 ## Platinum
 
 После Gold. Требует:
 - 100% type hints;
-- async dependency (n/a — нет внешней зависимости);
-- websocket (n/a — оператор предоставляет только REST);
+- async dependency rule: 🟡 `firebase-messaging` async и получает shared HA
+  session; полный Platinum-аудит всех pip dependencies ещё не выполнен;
+- websocket API rule: applicability нужно переоценить с учётом HA history/uplink
+  commands и provider transport REST/FCM/SIP;
 - strict typing;
 - очень высокий test coverage.
 
@@ -130,7 +132,7 @@ redaction и тесты config flow/миграций присутствуют. �
 |---|---|---|
 | Bronze | Shipped | перед внешней подачей: brands + removal docs re-check |
 | Bronze → Silver | Итерация 3 | native reauth, rule re-check, documentation, coverage evidence |
-| Silver → Gold | Будущее | entity_category audit beyond RTSP diagnostics, dynamic devices, repairs |
+| Silver → Gold | Будущее | entity_category audit beyond RTSP diagnostics, dynamic devices, расширение Repairs на остальные recovery edge-cases |
 | Gold → Platinum | Дальнее будущее | strict typing, 100% coverage |
 
 ## Принцип

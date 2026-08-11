@@ -9,44 +9,46 @@ Use this skill when the user asks to run the migrated source command `test-confi
 
 ## Command Template
 
-Ты — QA Engineer. Активируй skill `agent-skills:test-driven-development`.
+Ты — QA Engineer. Активируй skill `test-driven-development`.
 
 ## Контекст
 
-`tests/test_config_flow.py` — нерабочий stub из HA scaffold (см. audit A-07). Нужно полностью переписать по плану из `docs/testing/strategy.md` раздел 1.
+`tests/test_config_flow.py` уже содержит реальные PHC-based tests основных auth,
+abort/reauth, options и migration paths. Команда расширяет существующее покрытие
+по текущим gaps из `docs/testing/strategy.md`, а не пересоздаёт suite.
 
 ## Шаги
 
 1. Прочитай `custom_components/elektronny_gorod/config_flow.py` — все steps, errors, aborts.
-2. Прочитай `docs/testing/strategy.md` (раздел 1. Config flow) — list test cases.
-3. Прочитай `docs/aidd/runbooks/testing.md` — mock стратегия + пример теста.
-4. Удали существующий нерабочий `tests/test_config_flow.py` (или замени его содержимое).
-5. Напиши тесты в порядке:
-   - happy path: phone+SMS+skip_go2rtc
-   - happy path: phone+password+skip_go2rtc
-   - happy path: access_token (advanced) + skip_go2rtc
-   - happy path: with go2rtc setup
-   - error: invalid_phone, unregistered, invalid_login, invalid_password, invalid_code, limit_exceeded
-   - abort: already_configured (duplicate token)
-   - abort: reauth_successful (account+subscriber match)
-6. Запусти `pytest tests/test_config_flow.py -v` — должно быть зелёным.
-7. Если тест падает по непонятной причине — root cause через `agent-skills:debugging-and-error-recovery`. **Не упрощать тест.**
+2. Прочитай существующие `tests/test_config_flow.py`, `tests/test_init.py` и
+   `tests/test_options_flow_clear_creds.py`; не дублируй уже проверяемый сценарий.
+3. Прочитай `docs/testing/strategy.md` (раздел Config flow) и
+   `docs/aidd/runbooks/local-development.md`.
+4. Выбери конкретный uncovered behavior или regression.
+5. Следуй RED → GREEN:
+   - сначала добавь минимальный test, который падает по ожидаемой причине;
+   - затем меняй production code только с отдельным разрешением владельца;
+   - не ослабляй assertions ради зелёного результата.
+6. Запусти focused config-flow/migration suite, затем полный backend suite.
+7. Если причина падения неясна — активируй `systematic-debugging` и установи
+   root cause до изменения теста или production code.
 
 ## Output
 
 ```md
 ## Done
-- N тестов добавлено
-- coverage config_flow: a% → b%
+- N тестов добавлено/обновлено
+- какой behavior или regression теперь защищён
 
 ## Verification
-- `pytest tests/test_config_flow.py -v` — passed N/N
+- focused config-flow/migration suite — passed N/N
+- `PYTHONPATH=. .venv/bin/pytest tests/ -q` — passed N/N
 
 ## Caught bugs (если были)
 - F-NN: description, evidence, severity
 
 ## Hand-off
-- next: docs-keeper (обновить testing/strategy.md как RESOLVED)
+- next: docs-keeper (обновить `testing/strategy.md`; audit — только если менялся finding)
 ```
 
 ## Constraints
@@ -54,4 +56,4 @@ Use this skill when the user asks to run the migrated source command `test-confi
 - 🔴 НЕ исправлять тест ради зелёного CI, если код сломан.
 - НЕ использовать реальный API оператора.
 - НЕ оставлять `print()` / `debugger`.
-- НЕ импортировать несуществующие сущности (как в текущем stub).
+- Не заявлять coverage-процент без свежего coverage-run.

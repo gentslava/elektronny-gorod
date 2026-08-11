@@ -1,10 +1,10 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-08-11 (FCM circuit-breaker/Repairs regressions and
-597-test backend suite synchronized)
+Last reviewed: 2026-08-14 (FCM/Repairs plus deterministic
+secret/audit/cross-tool gate regressions; 666-test backend suite synchronized)
 
 Source files:
-- `tests/**` (54 test-модуля + `conftest.py`)
+- `tests/**` (57 test-модулей + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
@@ -33,11 +33,12 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **597 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-13) |
-| Test modules | 54 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **666 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-14) |
+| Test modules | 57 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
-| Security / crypto | redaction including production-format config-entry title, diagnostics, HTTP no-leak, golden vectors helpers |
+| Security / crypto | redaction including production-format config-entry title, diagnostics, HTTP no-leak, golden vectors helpers, deterministic secret-log scanner |
+| AIDD gates | Secret scanner; Claude/Codex reconciliation adapters; candidate-SHA CI, stacked target-ref, reviewer parity и portable-plan contracts |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
 | Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
@@ -59,6 +60,8 @@ tests/
 ├── test_stream_manager*.py / test_sensor_rtsp_urls.py / test_config_flow_keep_warm.py
 ├── test_event.py / test_history.py / test_history_ws.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
 ├── test_sip_*.py / test_uplink_ws.py
+├── test_secret_log_gate.py / test_audit_reconciliation_gate.py
+├── test_aidd_contracts.py
 └── entity, visibility, balance, DND, helpers и migration regressions
 ```
 
@@ -310,15 +313,15 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 597 passed (2026-08-13).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 666 passed (2026-08-14).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.
 - [x] `tests/test_config_flow.py` — реальные PHC-тесты, scaffold-stub отсутствует.
 - [x] Изменённый SIP-контракт покрыт на register/protocol/manager/controller слоях.
-- [ ] External RTSP A-96 не merge-ready до девяти production scenarios,
-  записанных в existing feature design; зелёный mocked suite не заменяет gate.
+- [x] External RTSP A-96 принят live; остаточный A-84 config-persistence check
+  остаётся отдельным follow-up и не подменяется mocked suite.
 
 ## Risks
 

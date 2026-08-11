@@ -1,3 +1,23 @@
+Status: Active
+Owner: Lead Architect Agent
+Last reviewed: 2026-08-11 (ADR registry synchronized through ADR-0015)
+
+Source files:
+- `*.md` in this directory
+
+Related docs:
+- `../architecture/overview.md`
+- `../aidd/templates/adr.template.md`
+
+Used by agents:
+- architects, implementers, reviewers
+
+Quality gates:
+- ARCHITECTURE_UNDERSTOOD
+- DOCS_UPDATED
+
+---
+
 # Architecture Decision Records
 
 Журнал архитектурных решений проекта. Каждое ADR — отдельный файл `NNNN-kebab-title.md`.
@@ -29,6 +49,7 @@
 | [0012](0012-register-on-ring.md) | Register-on-ring для SIP-вызова | accepted | 2026-06-23 |
 | [0013](0013-uplink-mic-transport.md) | Uplink-микрофон через HA WebSocket | accepted | 2026-06-24 |
 | [0014](0014-go2rtc-stream-manager.md) | Единый lifecycle go2rtc streams для внешнего RTSP | accepted | 2026-07-16 |
+| [0015](0015-independent-review-candidate.md) | Неизменяемый candidate, независимый review, publication/CI и test baseline | accepted | 2026-08-11 |
 
 ## Когда писать ADR
 
@@ -44,3 +65,10 @@
 - Опечатка / документация.
 - Косметический рефакторинг.
 - Добавление теста для существующего кода.
+
+## Next reading
+
+- For architecture context: `../architecture/overview.md`
+- For the ADR template: `../aidd/templates/adr.template.md`
+- For process decisions: `0010-aidd-state-reconciliation.md` and the consolidated
+  `0015-independent-review-candidate.md`.

@@ -1,6 +1,8 @@
 # FCM Circuit Breaker Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution mode:** subagent-driven is recommended when the active tool can
+> isolate implementation ownership; otherwise execute inline task-by-task.
+> Use the tool's native planning/delegation mechanism and track the checkboxes.
 
 **Goal:** Ограничить повторные падения FCM для одного проблемного аккаунта, не затрагивая остальные функции и аккаунты, и показать пользователю одно понятное предупреждение в Home Assistant Repairs.
 

@@ -1,20 +1,23 @@
 # PRD: Token redaction in logs
 
 - **Date:** 2026-05-22
+- **Last reviewed:** 2026-08-11
 - **Owner:** Security & Privacy Agent
 - **Status:** Approved (для example — синтетически)
 - **Linked idea:** [`idea.md`](idea.md)
 
 ## Problem
 
-При уровне `logger: default: debug` все ниже строки сливают секреты пользователя:
+Это синтетический пример PRD по уже закрытому инциденту ADR-0004. До фикса при
+debug-логировании были зафиксированы четыре класса утечек:
 
-- [`config_flow.py:77`](../../../custom_components/elektronny_gorod/config_flow.py#L77) — `access_token` напрямую.
-- [`http.py:11-13`](../../../custom_components/elektronny_gorod/http.py#L11-L13) — `headers` (Bearer) + `data` (password/SMS).
-- [`http.py:22-25`](../../../custom_components/elektronny_gorod/http.py#L22-L25) — body auth-ответа (новые токены).
-- [`config_flow.py:283,291`](../../../custom_components/elektronny_gorod/config_flow.py#L283) — `entry.data` целиком.
+- raw `access_token` из config flow;
+- HTTP headers с Bearer и auth payload с password/SMS;
+- body auth-ответа с новыми токенами;
+- полный `config_entry.data`.
 
-Evidence — issue + аудит [`security.md`](../../audit/security.md).
+Это историческое описание, а не характеристика текущего кода. Актуальные
+evidence и статус принадлежат [`security.md`](../../audit/security.md).
 
 ## Users
 
@@ -37,13 +40,14 @@ Evidence — issue + аудит [`security.md`](../../audit/security.md).
 - Создать `_logging.py` с `redact()` helper и `SENSITIVE_KEYS`.
 - Заменить все прямые логи токенов на `redact(headers/data)` либо удалить.
 - Создать `diagnostics.py` с `TO_REDACT = SENSITIVE_KEYS`.
-- Hook `.claude/hooks/pre-commit-redaction-check.sh`.
+- Canonical scanner `.codex/hooks/check-secret-logs.py` с portable shell
+  wrapper и thin tool-specific adapters.
 
 См. [ADR-0004](../../decisions/0004-token-redaction.md).
 
 ## Acceptance criteria
 
-- [ ] `grep -rE "LOGGER\..*(token|password|sms|headers|entry\.data)" custom_components/` → 0 matches.
+- [ ] `bash .codex/hooks/check-secret-logs.sh` → `Secret log scan passed`.
 - [ ] Diagnostics-выгрузка через UI содержит `"***"` вместо реальных токенов.
 - [ ] Pre-commit hook блокирует регрессии.
 - [ ] Hotfix-релиз с changelog «security: redact tokens in logs» опубликован.

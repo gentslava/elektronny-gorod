@@ -5,6 +5,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 Ты — DevOps / Release Agent. Активируй skill `agent-skills:shipping-and-launch`.
 
+**Last reviewed:** 2026-08-11 (ADR-0015 candidate, evidence and CI enforcement)
+
 ## Pre-release checklist
 
 Проверь поочерёдно каждый пункт. Любой ❌ блокирует релиз.
@@ -20,15 +22,38 @@ allowed-tools: Read, Grep, Glob, Bash
 ### 1. Quality gates
 
 - [ ] `TESTS_PASS` — `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный.
-- [ ] `SECURITY_OK` — все P0 из `docs/audit/security.md` закрыты:
+- [ ] `SECURITY_PRECHECK_OK` был закрыт до candidate freeze: secret/redaction
+  checks зелёные, известных Critical/Important security findings не осталось.
+- [ ] `DOCS_UPDATED` — maintenance rules применены (обе оси, ADR-0010).
+- [ ] `HISTORY_CLEAN` был завершён до freeze; после review не было
+  rebase/squash/history rewrite.
+- [ ] `CANDIDATE_FROZEN` — PR evidence содержит пустой `git status --short`,
+  merge-base SHA, head SHA и tree SHA clean committed candidate.
+- [ ] `REVIEW_OK` — каждый обязательный reviewer:
+  - явно указал identity и `Participated in implementation: no`;
+  - работал read-only;
+  - указал identity, один и тот же base/head/tree и scoped verdict;
+  - закрыл все Critical/Important findings на текущем candidate.
+- [ ] Routing matrix полная: code-reviewer обязателен; HA/security/QA/docs-AIDD
+  reviewers присутствуют по затронутым областям.
+- [ ] `SECURITY_OK` закрыт **post-freeze** независимым security review того же
+  candidate для auth/token/credentials/logs/FCM/privacy diff:
   ```bash
-  grep -rE 'LOGGER\..*(token|password|sms|headers|entry\.data)' \
-      custom_components/elektronny_gorod/
-  # ⇒ должно быть пусто (если есть — это P0 utечка, не релизить)
+  bash .codex/hooks/check-secret-logs.sh
+  # ⇒ Secret log scan passed (иной результат — blocker, не релизить)
   ```
   И `diagnostics.py` существует с `TO_REDACT` (S-08/S-16).
-- [ ] `REVIEW_OK` — PR review пройден (5 осей).
-- [ ] `DOCS_UPDATED` — maintenance rules применены (обе оси, ADR-0010).
+- [ ] После последнего approval не было содержательного commit. Если head/tree
+  менялся, есть новый freeze и новые candidate-bound attestations **каждого**
+  обязательного reviewer; повторный analysis мог быть delta-scoped.
+- [ ] Review evidence хранится вне candidate tree. Если evidence было добавлено
+  commit-ом, этот новый candidate заново прошёл всю обязательную matrix.
+- [ ] `REVIEW_EVIDENCE_PUBLISHED` — PR содержит durable validation comment для
+  текущего base/head/tree с local gates и всеми reviewer verdicts.
+- [ ] `CI_GREEN` — Python Tests, hassfest и HACS зелёные на текущем head;
+  PR Pre-Release зелёный либо корректно skipped как неприменимый.
+- [ ] PR не является blocked review-only draft; обычный push/ready-for-review PR
+  произошёл после approval либо recovery flow полностью завершён.
 - [ ] `AUDIT_DONE` — `docs/audit/project-audit.md` актуален.
 - [ ] **quality_scale ≤ gate-confirmed (D-05)** — `manifest:quality_scale`
   не выше реально подтверждённого гейтами уровня. Bronze ⇒ config_flow-тесты
@@ -48,16 +73,23 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ### 3. CI
 
-Зелёный hassfest + HACS check на текущем HEAD:
+Привяжи PR к frozen candidate и дождись всех checks именно этого SHA:
 ```bash
-gh run list --branch master --limit 5
+CANDIDATE_SHA=$(git rev-parse HEAD)
+PR_HEAD_SHA=$(gh pr view --json headRefOid --jq .headRefOid)
+test "$PR_HEAD_SHA" = "$CANDIDATE_SHA"
+gh pr checks --watch
 ```
+
+В итоговом отчёте отдельно подтвердить оба Python Tests jobs, hassfest, HACS и
+применимый PR Pre-Release. SHA mismatch, pending, failure или cancelled не
+закрывают `CI_GREEN`.
 
 ### 4. Migration
 
 Если этот release меняет `VERSION` config-entry:
 - [ ] есть соответствующая ветка в `async_migrate_entry` (`__init__.py`).
-- [ ] тест миграции (`async_migrate_entry` v1→2→3 — см. finding A-73).
+- [ ] есть regression test для каждого затронутого migration path.
 
 ### 5. Breaking changes
 
@@ -98,5 +130,7 @@ gh run list --branch master --limit 5
 ## Constraints
 
 - 🔴 НЕ делать `git tag` / `gh release create` без явного approval owner.
+- 🔴 Critical/Important review findings нельзя deferred'ить или закрывать waiver-ом.
+- 🔴 Self-review implementer-а не закрывает `REVIEW_OK` / `SECURITY_OK`.
 - НЕ делать force-push.
 - НЕ скрывать blockers — лучше отложить релиз.

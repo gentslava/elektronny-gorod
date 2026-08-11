@@ -1,6 +1,7 @@
 Status: Active
 Owner: Home Assistant Expert Agent
-Last reviewed: 2026-08-10 (persistent FCM Repairs issue and ru/en translations)
+Last reviewed: 2026-08-11 (persistent PII-free FCM Repairs issue, serialized
+lifecycle and stable-symbol evidence)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
@@ -181,7 +182,7 @@ HA-класс требует поддержку `ring`; doorbell-класс ос
 ## Платформы и manifest dependencies
 
 PLATFORMS: `[BINARY_SENSOR, CAMERA, EVENT, LOCK, SENSOR, SWITCH]`
-([`__init__.py:46-53`](../../custom_components/elektronny_gorod/__init__.py)).
+(`__init__.py:PLATFORMS`).
 
 Зависимости HA-core (`dependencies` в manifest) пусты. Импортированный helper
 `persistent_notification` и стандартные entity-платформы не требуют отдельного

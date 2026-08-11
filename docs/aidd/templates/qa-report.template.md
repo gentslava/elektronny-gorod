@@ -1,9 +1,35 @@
+Status: Template
+Owner: QA Agent
+Last reviewed: 2026-08-11 (ADR-0015 immutable candidate evidence)
+
+Source files:
+- exact clean committed candidate and its tests
+
+Related docs:
+- `../quality-gates.md`
+- `../multi-agent-workflow.md`
+
+Used by agents:
+- QA reviewers, Validator Agent
+
+Quality gates:
+- TESTS_PASS
+- CANDIDATE_FROZEN
+- REVIEW_OK
+
+---
+
 # QA Report: <feature / PR>
 
 - **Date:** <YYYY-MM-DD>
-- **Owner:** QA Agent / @<user>
-- **Linked PR:** #N
-- **Linked plan:** [`plan.md`](plan.md)
+- **Reviewer:** QA Agent / @<user>
+- **Linked PR:** <#N | not created yet>
+- **Linked plan:** <path | not created yet>
+- **Base SHA:** <base>
+- **Head SHA:** <head>
+- **Tree SHA:** <tree>
+- **Reviewer participated in implementation:** no
+- **Verdict:** approve / changes requested / block
 
 ## Scope
 
@@ -19,7 +45,7 @@
 ## Test execution
 
 ```bash
-$ pytest tests/ -v
+PYTHONPATH=. .venv/bin/pytest tests/ -q
 ```
 
 Краткий summary вывода (passed / failed / skipped).
@@ -33,10 +59,13 @@ $ pytest tests/ -v
 
 | ID | Severity | Что не работает | Where |
 |---|---|---|---|
-| F-001 | P1 | ... | `file:line` |
+| F-001 | Critical / Important / Minor | ... | `file:line` |
 | ... | ... | ... | ... |
 
-Если findings есть — таска не считается завершённой; либо фикс, либо явное «accepted as future work».
+`Critical` и `Important` всегда блокируют approval: нужен fix, новый frozen
+candidate и повторный review. Отложить можно только `Minor`, явно записав
+evidence, влияние и владельца follow-up; такое решение не должно требовать
+изменения проверяемого candidate.
 
 ## Manual verification
 
@@ -50,3 +79,8 @@ $ pytest tests/ -v
 ## Quality gate
 
 `TESTS_PASS` — pass / fail.
+
+## Next reading
+
+- For candidate invalidation: `../multi-agent-workflow.md`
+- For gate definitions: `../quality-gates.md`

@@ -1,3 +1,28 @@
+Status: Active
+Owner: Developer Experience / QA Agent
+Last reviewed: 2026-08-11 (current test baseline and redacted diagnostics)
+
+Source files:
+- `custom_components/elektronny_gorod/**`
+- `tests/**`
+- `hacs.json`
+- `.github/workflows/**`
+
+Related docs:
+- `../../testing/strategy.md`
+- `testing.md`
+- `debugging.md`
+- `../../audit/security.md`
+
+Used by agents:
+- Implementer, QA Agent, Validator
+
+Quality gates:
+- TESTS_PASS
+- SECURITY_PRECHECK_OK
+
+---
+
 # Runbook: Local development
 
 Как запустить проект локально на dev-машине разработчика / AI-агента.
@@ -49,12 +74,17 @@ hass -c "$HA_CONFIG_DIR" --debug
 2. Пройти SMS/password/token flow.
 3. (опционально) настроить go2rtc.
 
-### 5. Тесты (когда переписаны — см. [`testing.md`](testing.md))
+### 5. Запустить тесты
 
 ```bash
-pip install pytest pytest-asyncio pytest-homeassistant-custom-component aioresponses
-pytest tests/ -v
+python3 -m venv .venv
+.venv/bin/pip install -r requirements_test.txt
+PYTHONPATH=. .venv/bin/pytest tests/ -q
 ```
+
+Точный текущий baseline, состав suite и известные gaps находятся только в
+[`testing/strategy.md`](../../testing/strategy.md). Дополнительные команды и
+mock-стратегия — в [`testing.md`](testing.md).
 
 ### 6. Перезагрузить интеграцию после правок
 
@@ -84,13 +114,18 @@ docker run --rm -v "$(pwd)":/github/workspace ghcr.io/hacs/action:main \
 |---|---|
 | `ImportError: cannot import name X from homeassistant` | HA версия dev-инстанса ниже `hacs.json:homeassistant` — обновите HA. |
 | Интеграция не появляется в списке | проверить `__init__.py`, `manifest.json`, перезапустить HA. |
-| Config flow show form, но submit падает | смотрите логи; включить `default: debug` в `configuration.yaml` для домена `custom_components.elektronny_gorod`. |
-| Snapshot 404 | пропал stream_url — проверить через `update_camera_state` в логах (после фикса A-06). |
+| Config flow показывает форму, но submit падает | собрать diagnostics и релевантный фрагмент лога с debug только для `custom_components.elektronny_gorod`; см. [`debugging.md`](debugging.md). |
+| Snapshot 404 / камера недоступна | проверить доступность API оператора и состояние coordinator/камер в diagnostics; затем собрать короткий релевантный фрагмент лога. |
 
 ## Не забыть
 
-- 🔴 Никогда не делиться `home-assistant.log` с включённым `debug` — там утечки токенов (см. [`security.md`](../../audit/security.md)). До hotfix-релиза.
-- При шаринге debug — обязательно проходить через diagnostics (когда появится).
+- Для issue предпочитать встроенную diagnostics-выгрузку: интеграция редактирует
+  известные секреты и персональные поля.
+- Перед публикацией всё равно проверить diagnostics и лог вручную. Не передавать
+  токены, пароли, SMS-коды, заголовки авторизации и персональные данные:
+  сторонние зависимости могут писать собственные сообщения.
+- Не публиковать полный `home-assistant.log`; достаточно короткого фрагмента с
+  debug только для нужного модуля.
 
 ## Next reading
 

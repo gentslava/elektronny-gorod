@@ -1,6 +1,6 @@
 Status: Active
 Owner: Documentation / AIDD Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-08-11 (independent review and FCM/security routing updated)
 
 Source files:
 - глобальные skills плагина `agent-skills:*`
@@ -30,9 +30,9 @@ Quality gates:
 
 | Skill | Когда применять | Почему |
 |---|---|---|
-| `agent-skills:security-and-hardening` | работа с `http.py`, `config_flow.py:logging`, `helpers.py`, новый `diagnostics.py` | P0 утечки — критический риск проекта |
-| `agent-skills:test-driven-development` | переписывание тестов config-flow / coordinator / api | сейчас 0% coverage |
-| `agent-skills:code-review-and-quality` | перед коммитом в entity / coordinator | пять осей review |
+| `agent-skills:security-and-hardening` | работа с `http.py`, `config_flow.py:logging`, `helpers.py`, `diagnostics.py`, `fcm.py`, credentials/tokens | P0 утечки и log-amplification — критический риск проекта |
+| `agent-skills:test-driven-development` | любое изменение поведения или bug-fix в config-flow / coordinator / api / FCM | regression сначала воспроизводится тестом; live baseline — в testing strategy |
+| `agent-skills:code-review-and-quality` | независимым reviewer-ом clean committed candidate после tests/security prechecks/docs/history cleanup | пять осей review; self-review не закрывает gate; fixes создают новый candidate |
 | `agent-skills:debugging-and-error-recovery` | падающий тест, странное runtime-поведение | systematic debugging |
 | `agent-skills:incremental-implementation` | переход на `CoordinatorEntity` (3 платформы) | тонкие vertical slices |
 | `agent-skills:spec-driven-development` | новые features (reconfigure flow, repairs) | spec до кода |

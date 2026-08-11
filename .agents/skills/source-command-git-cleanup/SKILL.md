@@ -15,16 +15,22 @@ Use this skill when the user asks to run the migrated source command `git-cleanu
 
 ## Шаги
 
-1. Прочитай [`.Codex/agents/git-historian.md`](../agents/git-historian.md) —
+1. Прочитай [`.claude/agents/git-historian.md`](../../../.claude/agents/git-historian.md) —
    контракт агента.
-2. Прочитай [`.Codex/rules/git-history.md`](../rules/git-history.md) —
+2. Прочитай [`.claude/rules/git-history.md`](../../../.claude/rules/git-history.md) —
    критерии gate `HISTORY_CLEAN`.
-3. Запусти subagent через `subagent_type=git-historian` с задачей:
-   - проанализировать текущую ветку `git log --oneline master..HEAD`,
+3. Запусти независимого subagent с контрактом Git Historian (dedicated
+   `git-historian`, если такой тип доступен; иначе general-purpose agent с тем
+   же read-only заданием) с задачей:
+   - сначала зафиксировать явный `<target-ref>` (PR base; для stacked PR —
+     parent feature branch, не `master`);
+   - проанализировать текущую ветку `git log --oneline <target-ref>..HEAD`,
    - предложить план rebase (squash / fixup / reword / drop),
    - **спросить подтверждение** у user'а перед выполнением (не делать rebase
      автоматически без явного approval),
-   - после rebase — verify diff vs master + force-push (если ветка пушена).
+   - после rebase — verify diff vs `<target-ref>`, объявить прежние approvals
+     stale и остановиться до нового freeze/review; не push-ить переписанный
+     candidate напрямую.
 
 ## Что обязательно сделать перед rebase
 
@@ -46,9 +52,10 @@ Use this skill when the user asks to run the migrated source command `git-cleanu
 - Plan table
 - Verification (backup branch, diff idempotent)
 - Push status
+- Новый base/head/tree и hand-off на обязательные re-attestations
 
 ## Связь
 
-- [`.Codex/agents/git-historian.md`](../agents/git-historian.md)
-- [`.Codex/rules/git-history.md`](../rules/git-history.md)
-- [`docs/aidd/quality-gates.md`](../../docs/aidd/quality-gates.md) — `HISTORY_CLEAN`.
+- [`.claude/agents/git-historian.md`](../../../.claude/agents/git-historian.md)
+- [`.claude/rules/git-history.md`](../../../.claude/rules/git-history.md)
+- [`docs/aidd/quality-gates.md`](../../../docs/aidd/quality-gates.md) — `HISTORY_CLEAN`.

@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-16 (external RTSP stream-manager implementation accepted
-live after go2rtc restart; A-82/A-84/A-96 status reconciled)
+Last reviewed: 2026-08-11 (A-97 independent-review candidate lifecycle mapped;
+current finding status remains canonical in project-audit)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -259,14 +259,22 @@ Static-only write paths не переходят в код без decrypted HAR (
 
 #### AIDD Full
 
-- [ ] Создать `.claude/agents/` (3 роли: HA-expert, security, QA).
-- [ ] Создать `.claude/commands/` (audit, test-config-flow, release-check).
-- [ ] Создать `.claude/rules/` (no-secret-logs, coordinator-pattern, test-coverage).
-- [ ] Создать `.claude/hooks/pre-commit-redaction-check.sh`.
-- [ ] Создать `docs/decisions/` (ADR-0001..0004).
-- [ ] Создать `docs/features/<feature-id>/` templates.
-- [ ] Создать `docs/aidd/mcp-tools.md` — карта инструментов и permissions.
-- [ ] Создать `docs/aidd/prompts.md` — prompt library.
+- [ ] **A-97** Independent review candidate lifecycle: durable plan approval,
+  tests/security prechecks/docs/history cleanup before freeze, immutable
+  base/head/tree, non-waivable read-only post-freeze security/code/profile
+  reviews and mandatory candidate-bound re-attestation (ADR-0015).
+  Complete after the process changeset itself passes those reviews and merges.
+- [x] Claude/Codex agent profiles синхронизированы; final review mode требует
+  exact tuple, independence и Critical/Important closure.
+- [x] Operational commands/skills созданы и используют один candidate lifecycle.
+- [x] Path rules созданы; security/review gates не расходятся между tools.
+- [x] Canonical hooks живут в `.codex/hooks/`; Claude hooks — wrappers без
+  дублирования scanner/reconciliation логики.
+- [x] `docs/decisions/` содержит актуальные ADR; итоговый review/publication
+  процесс консолидирован в ADR-0015.
+- [x] `docs/features/<feature-id>/` templates созданы.
+- [x] `docs/aidd/mcp-tools.md` описывает инструменты и permissions.
+- [x] `docs/aidd/prompt-library.md` содержит portable prompt library.
 
 #### Гэпы с приложением (на основе первого HAR-разбора)
 

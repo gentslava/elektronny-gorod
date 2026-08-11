@@ -50,5 +50,5 @@
 ## Связь
 
 - docs/testing/strategy.md (полный test plan)
-- docs/aidd/runbooks/testing.md (как запускать)
+- docs/aidd/runbooks/local-development.md (как запускать)
 - docs/aidd/quality-gates.md (TESTS_PASS criteria)

@@ -1,6 +1,7 @@
 # Аудио-мост Slice 1 (downlink — слышать гостя) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution mode:** use the active tool's native subagent workflow when
+> available; otherwise execute the checkboxes inline.
 
 **Goal:** Вывести звук гостя (G.711-кадры из `SipManager.on_downlink`) в браузер HA через go2rtc + Advanced Camera Card — «слышим гостя».
 

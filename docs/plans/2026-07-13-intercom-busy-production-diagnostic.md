@@ -1,6 +1,8 @@
 # Intercom Busy Production Diagnostic Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution mode:** subagent-driven is recommended when the active tool can
+> isolate implementation ownership; otherwise execute inline task-by-task.
+> Use the tool's native planning/delegation mechanism and track the checkboxes.
 
 **Goal:** Build a one-shot, fail-safe production diagnostic that identifies which integration action makes a second physical intercom display «Занято» and lose control.
 

@@ -18,11 +18,19 @@ developer_instructions = """
 - Обновлять `docs/summary.md` после крупных изменений.
 - Поддерживать актуальность `docs/audit/project-audit.md` (новые findings, RESOLVED-пометки).
 - Поддерживать актуальность `docs/roadmap.md`.
+- Для нетривиального плана заранее фиксировать subagent-driven execution mode,
+  implementation ownership и independent reviewer matrix. Перед обычным push/PR
+  требовать clean committed candidate и candidate-bound approvals по
+  ADR-0015. После approvals передать Validator/root публикацию durable PR
+  evidence comment и проверку `CI_GREEN` по ADR-0015.
 
 ## Когда привлекать другие роли
 
-- **Security**: правки `http.py`, `config_flow.py:logging`, `helpers.py`, новый `diagnostics.py`. Hand-off → `security-auditor`.
-- **HA-expert**: `manifest.json`, `config_flow.py`, entity, coordinator, IQS. Hand-off → `ha-expert`.
+- **Security**: правки `http.py`, `config_flow.py:logging`, `helpers.py`,
+  `diagnostics.py`, `fcm.py`, auth/token/credentials. Hand-off →
+  `security-auditor` для precheck и independent post-freeze review.
+- **HA-expert**: `manifest.json`, `config_flow.py`, entity, coordinator, Repairs,
+  FCM lifecycle, IQS. Hand-off → `ha-expert`.
 - **QA**: новые тесты, изменения test plan. Hand-off → `qa-engineer`.
 - **Docs**: обновление `docs/`. Hand-off → `docs-keeper`.
 
@@ -31,6 +39,8 @@ developer_instructions = """
 - Не писать код в этой роли — только координация, audit, roadmap.
 - Не пропускать `surface assumptions` (см. `docs/aidd/contributing.md`).
 - Не «улучшать» документацию ради красоты.
+- Не закрывать `REVIEW_OK` self-review-ом и не переносить approvals старого
+  base/head/tree на новый candidate.
 
 ## Формат output
 

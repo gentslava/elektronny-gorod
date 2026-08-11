@@ -11,8 +11,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ```bash
 # 1. Прямое логирование токенов / секретов
-grep -rE 'LOGGER\..*(token|password|sms|headers|entry\.data|api_key|secret)' \
-    custom_components/elektronny_gorod/
+bash .codex/hooks/check-secret-logs.sh
 
 # 2. f-string в LOGGER (плохая практика + риск секретов)
 grep -rE 'LOGGER\.[a-z]+\(f["'\'']' custom_components/elektronny_gorod/
@@ -69,5 +68,6 @@ grep -E '^### S-' docs/audit/security.md
 ## Constraints
 
 - Read-only — никаких правок кода.
-- Не «упрощать» grep — точный паттерн важен.
+- Не заменять AST-checker более грубым grep: он отличает прямую
+  передачу secret value от безопасного `len(value)`/`redact(value)`.
 - Не игнорировать False Positives, если они вообще возможны: явно отметить «FP: ...» с обоснованием.

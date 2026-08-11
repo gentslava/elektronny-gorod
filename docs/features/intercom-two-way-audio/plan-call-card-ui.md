@@ -1,7 +1,7 @@
 # План реализации: Call UI (Slice 3) — `call_state` + карточка `eg-intercom-call-card`
 
-> **For agentic workers:** REQUIRED SUB-SKILL: superpowers:subagent-driven-development
-> или superpowers:executing-plans. Шаги — checkbox (`- [ ]`). TDD обязателен для backend
+> **Execution mode:** use the active tool's native subagent workflow when
+> available; otherwise execute the checkboxes inline. TDD обязателен для backend
 > (Slice 3a). Перед push — `.claude/rules/pre-pr-checklist.md`.
 
 **Goal:** Дать (а) единый backend-источник состояния вызова `sensor.<intercom>_call_state`

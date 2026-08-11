@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-08-11 (bounded per-entry FCM recovery and 597-test backend
-evidence synchronized; 4.0.0 remains the current release)
+Last reviewed: 2026-08-14 (bounded per-entry FCM recovery and candidate-bound
+review lifecycle reconciled; live test baseline delegated to testing strategy)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -46,12 +46,17 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | Работает у пользователей | ✅ да (релизится через HACS) |
 | HA hassfest CI | ✅ зелёный |
 | HACS validation CI | ✅ зелёный |
-| pytest CI | ✅ есть (`python-tests.yaml`, matrix HA 2024.10 + 2026.5) |
-| Реальные тесты | ✅ 597 backend + 62 frontend тестов зелёные локально; TypeScript check и production build зелёные |
+| pytest CI | ✅ есть; точная matrix задаётся [`python-tests.yaml`](../.github/workflows/python-tests.yaml) |
+| Реальные тесты | ✅ pytest CI и локальный gate настроены; актуальные команды, состав и последний baseline — в [`testing/strategy.md`](testing/strategy.md) |
 | Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
 | Документация для пользователя | ✅ RU/EN README и release notes 4.0.0 описывают FCM/SIP, экран вызова, durable history и opt-in внешний RTSP; добавлены runtime screenshots |
-| AIDD документация для агентов | ✅ синхронизирована с mobile-app/API reconciliation 2026-07-15 |
+| AIDD документация для агентов | ✅ process/source-of-truth контракты синхронизированы; актуальные findings — в [`project-audit.md`](audit/project-audit.md) |
+
+Этот обзор фиксирует возможности и риски, но не владеет живым количеством
+тестов. Единственный источник текущего test baseline —
+[`testing/strategy.md`](testing/strategy.md); evidence закрытых findings хранится
+в [`project-audit.md`](audit/project-audit.md).
 
 ## Главные сильные стороны
 
@@ -95,7 +100,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
   Повторный production checklist ещё не закрыт, поэтому release status пока не
   заявляется; реализация уже находится в master через PR #71.
 
-## Главные риски (на 2026-07-16)
+## Главные риски (на 2026-08-10)
 
 > Все исторические P0 token-leaks **закрыты** (verified по коду). Текущие
 > открытые риски — reliability + test-debt, не утечки секретов.
@@ -106,7 +111,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 2. ✅ **config_flow + миграции v1→2→3 — покрыты тестами** (`3a60b15`): `test_config_flow.py` (3 ветки auth + go2rtc + abort/reauth) + `test_init.py` (миграции). Bronze config-flow gate закрыт. (A-73)
 3. ✅ **`helpers.py` crypto — golden vectors добавлены** (`362237b`, `test_helpers.py`): регрессия ловит тихий breakage формулы. (A-74)
 4. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold) — остаётся открытым.
-5. ✅ **External RTSP after idle (A-96)** — preload revision, 549-test suite и
+5. ✅ **External RTSP after idle (A-96)** — preload revision, regression suite и
    live acceptance завершены. После manual go2rtc restart обезличенный snapshot
    подтвердил `3/3` active producer/preload consumer и рост входящих данных;
    предыдущие toggle/startup/hidden/orphan-consumer сценарии также пройдены.

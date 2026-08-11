@@ -1,3 +1,22 @@
+Status: Active
+Owner: Documentation / AIDD Agent
+Last reviewed: 2026-08-11 (placeholder paths made link-validator safe)
+
+Source files:
+- `*.template.md` in this directory
+
+Related docs:
+- `../quality-gates.md`
+- `../../features/example/`
+
+Used by agents:
+- planners, implementers, reviewers
+
+Quality gates:
+- DOCS_UPDATED
+
+---
+
 # Templates
 
 Шаблоны для повторяющихся артефактов проекта. Используются человеком и AI-агентами.
@@ -22,12 +41,10 @@
 - Не редактируйте сами шаблоны для конкретной задачи — копируйте в `docs/features/<id>/` и заполняйте там.
 - В commit message — ссылка на скопированный документ, а не на шаблон.
 
-## Про «битые» ссылки внутри шаблонов
+## Placeholder paths внутри шаблонов
 
-Шаблоны содержат ссылки вида `[idea.md](idea.md)` / `[prd.md](prd.md)` / `[plan.md](plan.md)`. **В папке `templates/` эти ссылки заведомо «битые»** — соответствующих файлов рядом нет.
-
-Это **by design**: после копирования шаблона в `docs/features/<id>/` рядом окажутся реальные `idea.md`, `prd.md`, ... и все ссылки начнут работать. Образец — в [`../../features/example/`](../../features/example/).
-
-При автоматической проверке link-validator-ом такие template-local ссылки
-ожидаемо помечаются как broken — каталог `templates/` является документированным
-исключением до копирования шаблона в feature-каталог.
+Связанные артефакты записаны как literal paths вида
+`docs/features/<feature>/prd.md`. После копирования шаблона замени `<feature>`
+на реальный каталог и при желании преврати path в Markdown link. Так сами
+templates остаются совместимы с link-validator без специальных исключений.
+Готовый образец — в [`../../features/example/`](../../features/example/).

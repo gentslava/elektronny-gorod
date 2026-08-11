@@ -1,3 +1,25 @@
+Status: Active
+Owner: QA Agent
+Last reviewed: 2026-08-11 (current diagnostics and open-trap reconciliation)
+
+Source files:
+- `custom_components/elektronny_gorod/**`
+- `tests/**`
+
+Related docs:
+- `../../audit/project-audit.md`
+- `../../testing/strategy.md`
+- `../quality-gates.md`
+
+Used by agents:
+- Implementer, QA, Code Reviewer, Security Auditor
+
+Quality gates:
+- TESTS_PASS
+- SECURITY_PRECHECK_OK
+
+---
+
 # Runbook: Debugging
 
 Когда что-то странное происходит. Systematic, не угадывание.
@@ -20,7 +42,7 @@
 - GitHub issue;
 - комментарий в discord;
 - собственный dev-инстанс;
-- diagnostics (когда появится).
+- redacted config-entry diagnostics из Home Assistant.
 
 ## Шаг 2: Логирование
 
@@ -34,7 +56,10 @@ logger:
     homeassistant.components.camera: info
 ```
 
-> ⚠️ Включая debug, **временно** позволяете утечку токенов в лог (до hotfix-релиза). Не делиться этим логом без redaction.
+> ⚠️ Перед публикацией всё равно проверьте фрагмент лога: не передавайте
+> токены, пароли, SMS-коды, заголовки авторизации и персональные данные. Встроенная
+> redaction закрывает известные поля интеграции, но сторонние зависимости могут
+> писать собственные сообщения.
 
 Перезапустить HA. Воспроизвести проблему. Скопировать релевантный отрезок лога.
 
@@ -86,11 +111,12 @@ logger:
 
 | Симптом | Подозрительное место |
 |---|---|
-| Camera shows unavailable несмотря на live stream | `coordinator.update_camera_state` — A-06 (баг `c.get("ID")`) |
-| Тесты «работают» в IDE, падают в CI | `tests/test_config_flow.py` stub (A-07) — реальных тестов нет |
-| После reload интеграции теряется список устройств | `coordinator._async_update_data` — A-08 (нет update_interval) |
-| go2rtc 401 несмотря на правильные URL/username/password | проверить, не залогирован ли заголовок Authorization (S-02) |
-| Балансы «застряли» | A-08 + A-09 (нет CoordinatorEntity) |
+| FCM listener завершается и повторяет одну ошибку | внешний FCM-клиент и per-entry recovery — A-80/A-86 |
+| Тесты проходят локально, падают в CI | сверить Python/HA matrix, plugins и команды с `testing/strategy.md` и CI workflow |
+| Временный сбой operator GET не восстанавливается автоматически | retry/backoff ещё не реализован — остаток A-21 |
+| После 401 требуется переподключение аккаунта | auto-refresh и native reauth остаются открыты — A-22/A-25 |
+| VPN/WAF выглядит как пустой список камер | HTML service-pipe block маскируется generic API-ошибкой — A-92 |
+| API-ошибка превращается в другой exception или пустой результат | широкие fallback-ветки — A-19/A-20 |
 
 ## Next reading
 

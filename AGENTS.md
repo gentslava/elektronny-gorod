@@ -28,28 +28,16 @@ ln -s "$(pwd)/custom_components/elektronny_gorod" \
 ## Test / lint commands
 
 ```bash
-# Локальный прогон (зелёный):
+# Локальный прогон:
 PYTHONPATH=. .venv/bin/pytest tests/ -q
 # С покрытием:
 PYTHONPATH=. .venv/bin/pytest tests/ --cov=custom_components/elektronny_gorod --cov-report=term-missing -q
 ```
 
-Состояние тестов (актуально — см. [`testing/strategy.md`](docs/testing/strategy.md)
-и [`project-audit.md`](docs/audit/project-audit.md)): suite зелёный;
-config-flow/migrations и auth-crypto покрыты, остаются точечные gap-и
-`api.py`/coverage и live hardware/operator acceptance.
-
-CI на сегодня:
-
-```bash
-# python-tests.yaml — pytest matrix (HA min + current)
-# hassfest (manifest валидация)
-# HACS validate
-# release pipeline: zip + GH release + автокоммит версии
-# prerelease.yaml — pre-release zip для каждого PR
-```
-
-См. [`.github/workflows/`](.github/workflows/).
+Актуальный aggregate test baseline и gaps ведутся только в
+[`testing/strategy.md`](docs/testing/strategy.md). [`project-audit.md`](docs/audit/project-audit.md)
+хранит findings и исторические evidence-snapshots, а исполняемые
+CI-определения находятся в [`.github/workflows/`](.github/workflows/).
 
 ## Project structure
 
@@ -122,6 +110,42 @@ docs/                      # AIDD-документация (project/architecture
 - `version` config entry **только увеличивать** через `async_migrate_entry`.
 
 Чеклист — в [`ha-compatibility.md`](docs/architecture/ha-compatibility.md).
+
+## Agent orchestration and review gates
+
+Для любого нетривиального изменения действует единый cross-tool контракт.
+Нетривиальность определяется риском: production-поведение/lifecycle,
+security/privacy, persistent data, HA/public contract, CI/release или связанная
+миграция нескольких источников правды. Опечатка и механическая правка одного
+документа не требуют всей матрицы.
+
+- Если платформа поддерживает subagents, **subagent-driven execution является
+  режимом по умолчанию**. Короткое подтверждение пользователя после рекомендации
+  («го», «да», «начинай») означает запуск рекомендованного режима; inline-режим
+  выбирается только по явному указанию пользователя или при отсутствии subagents.
+- План обязан заранее назвать execution mode, конкретных implementer/reviewer
+  identities и reviewer matrix по затронутым областям. Approval сохраняет
+  approver/date/revision; нельзя откладывать выбор до момента merge.
+- Self-review implementer-а полезен, но **не закрывает `REVIEW_OK`**. Перед push,
+  созданием PR или merge нужен независимый read-only `code-reviewer` (либо
+  human reviewer), который не реализовывал изменение.
+- Для HA lifecycle / Repairs / config flow / coordinator / entity / manifest
+  дополнительно обязателен `ha-expert`. Для auth, токенов, credentials, headers,
+  логирования, crypto, diagnostics и FCM — `security-auditor`. Для изменений
+  tests/fixtures/test plan — `qa-engineer`. Финальные profile reviews read-only.
+- Critical и Important findings исправляются и перепроверяются до merge. Если
+  независимый reviewer недоступен, gate остаётся незакрытым; self-review не
+  подменяет evidence.
+- Финальный candidate фиксируется после tests/security prechecks/docs/history
+  cleanup: clean worktree + base/head/tree SHA. Любое содержательное изменение
+  инвалидирует все обязательные candidate approvals: каждый reviewer выдаёт
+  новую аттестацию нового tuple, хотя её глубина может быть delta-scoped. Если
+  human reviewer-у нужен remote diff, допустим только явно разрешённый
+  review-only branch/draft PR с красным gate и запретом merge.
+
+Подробный routing — в
+[`multi-agent-workflow.md`](docs/aidd/multi-agent-workflow.md), критерии — в
+[`quality-gates.md`](docs/aidd/quality-gates.md).
 
 ## Safety rules / Boundaries
 

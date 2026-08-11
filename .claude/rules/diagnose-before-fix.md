@@ -63,6 +63,13 @@ production bug»):
 - **Pre-emptive hardening** без observed bug (но это **не** «закрытие
   production-bug», другой класс).
 - **Revert PR** уже merged change — diagnostic был у оригинала.
+- **Прямой crash boundary внешней зависимости:** timestamped traceback уже
+  однозначно показывает failing dependency function/exception, а соседний лог
+  интеграции показывает повторяющее действие, которое усиливает сбой. В таком
+  случае source inspection внешнего call path заменяет временную DIAG-прошивку,
+  если в audit/PR записаны точная causal chain и deterministic regression на
+  локальный failure boundary. Это исключение разрешает только containment;
+  внешний дефект нельзя объявлять исправленным без upstream evidence.
 
 Не исключения:
 - ❌ «Logs показывают X, очевидно нужен Y» — нет, нужно показать

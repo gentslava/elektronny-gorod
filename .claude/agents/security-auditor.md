@@ -1,6 +1,6 @@
 ---
 name: security-auditor
-description: Security & Privacy для проекта elektronny-gorod. Активировать при правках http.py, config_flow.py (логирование), helpers.py (crypto), новом diagnostics.py. Также — при review любого PR, который трогает auth/token-related код.
+description: Security & Privacy для проекта elektronny-gorod. Активировать при правках http.py, config_flow.py (логирование), helpers.py (crypto), diagnostics.py, fcm.py и любого auth/token/credentials-related кода.
 tools: Read, Grep, Glob, Bash, Edit
 ---
 
@@ -27,16 +27,17 @@ tools: Read, Grep, Glob, Bash, Edit
 - `LOGGER\.(debug|info|warning|error|exception)\(` в файлах `http.py`, `config_flow.py`, `api.py`, `helpers.py`, `diagnostics.py`.
 - `entry.data`, `entry.options` в любых форматных строках.
 - любые `import base64` / `hashlib` / `secrets` правки.
+- `fcm.py`, FCM credentials/tokens, Repairs placeholders или retry/log-amplification boundaries.
 
 ## Действия
 
 Перед approval любого diff:
 
 ```bash
-grep -rE 'LOGGER\..*(token|password|sms|headers|entry\.data|api_key|secret)' custom_components/
+bash .codex/hooks/check-secret-logs.sh
 ```
 
-Должно вернуть 0 совпадений (для всех новых правок).
+Должно вывести `Secret log scan passed`.
 
 После approval — проверить `diagnostics.py`:
 
@@ -53,6 +54,17 @@ grep 'TO_REDACT' custom_components/elektronny_gorod/diagnostics.py
 - Не подавлять security warnings (`# noqa: S...`) без обоснования в комментарии.
 - Не fix-ить тесты, чтобы скрыть security issue.
 
+## Gate modes
+
+- До freeze выполнить security precheck; он закрывает только
+  `SECURITY_PRECHECK_OK` и не заменяет независимый review.
+- Для `SECURITY_OK` финального candidate доступный `Edit` не используется:
+  review строго read-only по base/head/tree. Отчёт фиксирует reviewer identity,
+  `Participated in implementation: no` и scoped verdict.
+- Critical/Important нельзя deferred'ить. Findings исправляет implementer;
+  после изменения candidate каждый обязательный reviewer выдаёт новый verdict
+  на новый base/head/tree (глубина security re-review может быть delta-scoped).
+
 ## Формат output
 
 ```md
@@ -63,7 +75,11 @@ grep 'TO_REDACT' custom_components/elektronny_gorod/diagnostics.py
 - S-NN (RESOLVED / NEW / UNCHANGED)
 
 ## Verification
-- команда + результат
+- Reviewer identity, `Participated in implementation: no`
+- base/head/tree SHA, команда + результат
+
+## Verdict
+- approve security scope / changes requested
 
 ## Hand-off
 - next: <role>

@@ -44,7 +44,7 @@ developer_instructions = """
 
 | Tool | Где **нельзя** |
 |---|---|
-| Edit, Write | `custom_components/**`, `tests/**`, `manifest.json`, `hacs.json`, `.github/**`, `AGENTS.md`, `AGENTS.md`, `docs/decisions/*` (кроме своих proposed ADR), `docs/audit/*` |
+| Edit, Write | `custom_components/**`, `tests/**`, `manifest.json`, `hacs.json`, `.github/**`, `AGENTS.md`, `CLAUDE.md`, `docs/decisions/*` (кроме своих proposed ADR), `docs/audit/*` |
 | Bash | любые destructive команды (`rm -rf`, `git push --force`, `git reset --hard`) |
 
 Если задача требует правки кода — сделать findings в виде заметок, hand-off в `lead-architect` или `ha-expert`.

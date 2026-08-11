@@ -1,6 +1,6 @@
 Status: Active
 Owner: Documentation / AIDD Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-08-11 (canonical Codex hooks and Claude adapters)
 
 Source files:
 - этот документ
@@ -119,9 +119,18 @@ Quality gates:
 
 В Claude Code hooks — это shell-команды, привязанные к events.
 
-Запланированные для этого проекта:
-- `PreToolUse` для `Bash` — блокировать `rm -rf custom_components/`.
-- `PostToolUse` для `Edit` / `Write` — `pre-commit-redaction-check.sh` для измененных `.py` файлов.
+Активные hooks проекта:
+
+- `.codex/hooks/check-secret-logs.py` +
+  `.codex/hooks/check-secret-logs.sh` — канонический AST scanner для всего
+  candidate; Claude/Codex security-команды вызывают его.
+- `.codex/hooks/post-edit-redaction-check.sh` — быстрый adapter после правки;
+  `.claude/hooks/post-edit-redaction-check.sh` делегирует канонической проверке.
+- `.codex/hooks/check-audit-reconciliation.sh` — каноническая сверка audit↔git;
+  одноимённый Claude hook является тонким wrapper.
+
+Новые hooks добавляются в `.codex/hooks/`; tool-specific каталог содержит
+только adapter, если формат события инструмента этого требует.
 
 См. [`../../.claude/hooks/`](../../.claude/hooks/).
 

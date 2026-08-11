@@ -1,7 +1,7 @@
 Status: Active
 Owner: Architecture Agent
-Last reviewed: 2026-08-10 (bounded per-entry FCM recovery, Repairs visibility
-and multi-account isolation)
+Last reviewed: 2026-08-11 (bounded per-entry FCM lifecycle and consolidated
+ADR-0015 candidate/review/publication contract)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -224,7 +224,7 @@ async_unload_entry:
 | **SIP subsystem** | `sip/` (14 модулей) | SIP-UAS: REGISTER-on-ring → held-INVITE → 200 OK → RTP-latching; AudioBridge (downlink → go2rtc); `uplink.py` `UplinkSink` (микрофон-PCM → G.711) + дрейф-компенсированный RTP-uplink (`rtp.py`); ADR-0012, ADR-0013 |
 | **Uplink transport** | `uplink_ws.py`, `www/eg-intercom-mic-card.js` | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): Int16-PCM микрофона из Lovelace-карты `getUserMedia` → `DoorbellCallController.feed_uplink` → `UplinkSink`; static-регистрация JS-карты (ADR-0013) |
 | **Call camera** | `call_camera.py` | camera-сущность активного вызова: `stream_source()` собирает свежий `eg_intercom_call` (видео + аудио-мост) → RTSP; вне вызова → `None` |
-| **FCM listener** | `fcm.py` | `DoorbellFcmListener` — FCM-триггер вызова → `SIGNAL_DOORBELL` → `DoorbellCallController.handle_signal`; per-entry circuit breaker ограничивает reconnect-loop паузами 15 мин / 1 ч / 6 ч / 24 ч и показывает persistent Repairs issue с названием затронутого аккаунта. Startup, watchdog и unload сериализованы; клиент использует shared HA session, а после ошибки `stop()` его ссылка сохраняется и config-entry unload блокирует replacement |
+| **FCM listener** | `fcm.py` | `DoorbellFcmListener` — FCM-триггер вызова → `SIGNAL_DOORBELL` → `DoorbellCallController.handle_signal`; per-entry circuit breaker ограничивает reconnect-loop паузами 15 мин / 1 ч / 6 ч / 24 ч и показывает persistent Repairs issue с названием затронутого аккаунта. Startup, watchdog и unload сериализованы; failed stop сохраняет owner и блокирует replacement. Owner claim/start выполняются после последнего fallible setup-await; surviving owner не заменяется, entry остаётся loaded без realtime FCM и без setup-retry loop. После failed unload removal повторяет stop; повторный failure требует restart и сохраняет owner до него |
 | **Auth crypto** | `helpers.py`, `time.py`, `user_agent.py` | reverse-engineered hashing, эмуляция мобильного клиента |
 | **Entities (HA platforms)** | `camera.py`, `lock.py`, `sensor.py`, `switch.py`, `event.py`, `binary_sensor.py` | UI представление; `event.py` — realtime doorbell (ADR-0011) и routed durable access/camera history |
 | **Constants & UI strings** | `const.py`, `strings.json`, `translations/*` | конфиг + локализация |
@@ -502,10 +502,10 @@ const + go2rtc ← config_flow
    но realtime FCM для него отключён с Repairs warning — без setup-retry loop.
    Removal после failed unload повторяет stop; при повторном failure HA требует
    restart, а ownership сохраняется до него.
-7. **External idle RTSP требует повторного live acceptance** (A-96/ADR-0014) —
-   PATCH-only registration провалился на пяти lazy streams; revised automated
-   suite доказывает preload policy/lifecycle, но не реальное
-   воспроизведение `>1h idle → external player`.
+7. **go2rtc config persistence после повторных PATCH требует live check**
+   (остаток A-84) — preload/lifecycle и external idle RTSP приняты live в A-96,
+   но ещё нужно доказать, что конкретная сборка go2rtc не накапливает duplicate
+   YAML после длительных циклов обновления source.
 
 Добавлено с момента предыдущего ревью (2026-06-24):
 - ✅ **Uplink-микрофон — two-way audio завершён** (A-85, ADR-0013) — `uplink_ws.py` (WS-команда `intercom_uplink` + Lovelace-карта `www/eg-intercom-mic-card.js`), `sip/uplink.py` `UplinkSink`, дрейф-компенсированный RTP-uplink (`sip/rtp.py`). Механизм #1 (HA WebSocket binary-audio) — без go2rtc/TURN/новых зависимостей. Live-прод 2026-06-24 (микрофон дошёл до домофона). #2/#3/#4 эмпирически отвергнуты.
@@ -535,12 +535,12 @@ const + go2rtc ← config_flow
   go2rtc URL и lazy mint/PATCH во время или после setup для enabled hidden
   camera, но не включает background preload без отдельной опции. Skip оставлен только в
   `async_camera_image`.
-- 🟢 **go2rtc stream ownership + preload lifecycle в feature-ветке**
+- ✅ **go2rtc stream ownership + preload lifecycle в master через PR #71**
   (A-82/A-96, ADR-0014) — camera делегирует manager'у; background-excluded
   hidden requests останавливаются до operator mint, explicit HA-open остаётся
   on-demand, остальные source writes остаются PATCH-only, а dedicated preload
-  сразу потребляет одноразовый URL. Reconcile проверяет
-  stream/preload/producer; повторный live acceptance до merge ещё открыт.
+  сразу потребляет одноразовый URL. Reconcile проверяет stream/preload/producer;
+  owner acceptance после ручного рестарта go2rtc подтвердил восстановление.
 
 ## Архитектурные решения (ADR)
 
@@ -559,7 +559,8 @@ const + go2rtc ← config_flow
 | [ADR-0011](../decisions/0011-doorbell-fcm-channel.md) | Realtime-канал события вызова: приём FCM in-HA | **accepted** |
 | [ADR-0012](../decisions/0012-register-on-ring.md) | Register-on-ring (held-short-window) для приёма вызова | **accepted** |
 | [ADR-0013](../decisions/0013-uplink-mic-transport.md) | Транспорт uplink-микрофона — HA WebSocket binary-audio (#1) | **accepted** |
-| [ADR-0014](../decisions/0014-go2rtc-stream-manager.md) | Единый lifecycle внешних RTSP camera streams | **accepted**; repeat live acceptance pending |
+| [ADR-0014](../decisions/0014-go2rtc-stream-manager.md) | Единый lifecycle внешних RTSP camera streams | **accepted**; A-96 live acceptance complete, A-84 persistence follow-up open |
+| [ADR-0015](../decisions/0015-independent-review-candidate.md) | Неизменяемый candidate, independent review, publication/CI и test baseline | **accepted** |
 
 ## Next reading
 

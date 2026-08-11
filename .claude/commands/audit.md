@@ -16,7 +16,10 @@ allowed-tools: Read, Grep, Glob, Bash, Agent, TodoWrite
 2a. **Reconciliation findings↔git (ADR-0010).** Запусти
    `bash .claude/hooks/check-audit-reconciliation.sh`. Для каждого `RESOLVED`
    finding убедись, что его фикс **в master** (`git log master`). Если нет —
-   статус `🟢 resolved-in-branch (pending merge <ref>)`, НЕ `RESOLVED`.
+   до завершения candidate-bound reviews/publication/CI используй
+   `🟡 REMEDIATION-IN-REVIEW`; только полностью одобренный и опубликованный
+   candidate получает `🟢 resolved-in-branch (pending merge <ref>)`.
+   `RESOLVED` допустим только после merge в master.
    Также проверь, что entry-контракты (`AGENTS.md`, `CLAUDE.md`, `workflow.md`)
    не противоречат коду (stale-маркеры).
 3. **Параллельно запусти subagents** для независимых проверок:

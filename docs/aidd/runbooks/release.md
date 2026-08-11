@@ -1,3 +1,26 @@
+Status: Active
+Owner: DevOps / Release Agent
+Last reviewed: 2026-08-11 (ADR-0015 candidate-bound evidence and CI release gates)
+
+Source files:
+- `.github/workflows/release.yaml`
+- `.github/workflows/prerelease.yaml`
+- `custom_components/elektronny_gorod/manifest.json`
+
+Related docs:
+- `../quality-gates.md`
+- `../../../.claude/commands/release-check.md`
+
+Used by agents:
+- Release Agent, Validator, maintainer
+
+Quality gates:
+- READY_FOR_RELEASE
+- REVIEW_OK
+- SECURITY_OK
+
+---
+
 # Runbook: Release
 
 Как выпустить новую версию проекта.
@@ -22,9 +45,11 @@ SemVer. Версия живёт в `manifest.json`, обновляется ав�
 - [ ] `cd frontend && npm audit --omit=dev` без high/critical findings.
 - [ ] `hassfest` зелёный (CI всегда проверяет).
 - [ ] `HACS validate` зелёный.
-- [ ] Все P0 из [`audit/security.md`](../../audit/security.md) закрыты.
+- [ ] Все Critical/Important findings обязательных reviews закрыты.
 - [ ] Все обязательные [`quality-gates`](../quality-gates.md) зелёные:
-  - TESTS_PASS, SECURITY_OK, REVIEW_OK, DOCS_UPDATED, AUDIT_DONE.
+  - TESTS_PASS, SECURITY_PRECHECK_OK, DOCS_UPDATED, HISTORY_CLEAN;
+  - CANDIDATE_FROZEN и candidate-bound REVIEW_OK/SECURITY_OK одного tuple;
+  - REVIEW_EVIDENCE_PUBLISHED, CI_GREEN, AUDIT_DONE и READY_FOR_RELEASE.
 - [ ] CHANGELOG entry и release notes готовы.
 - [ ] README обновлён (если есть user-facing изменения).
 - [ ] Documentation в `docs/` синхронизирована (maintenance rules).
@@ -64,8 +89,8 @@ SemVer. Версия живёт в `manifest.json`, обновляется ав�
 2. Применить минимальный набор security-фиксов:
    - см. [`audit/security.md`](../../audit/security.md) S-01..S-05;
    - см. [`docs/decisions/0004-token-redaction.md`](../../decisions/0004-token-redaction.md).
-3. Тесты + security gate.
-4. PR в `master` → review → merge.
+3. Тесты + security precheck + docs/history → clean committed freeze.
+4. Независимые candidate-bound code/security reviews → PR в `master` → merge.
 5. Создать Release (patch bump).
 6. В release notes — **в начале** упомянуть:
    - что было опасно;
@@ -102,7 +127,10 @@ GitHub auto-generated changelog или вручную.
 
 ## PR pre-release
 
-Workflow [`prerelease.yaml`](../../../.github/workflows/prerelease.yaml) выкатывает pre-release zip для **каждого** открытого PR с тегом `pr-N`. Используется для тестирования PR пользователями.
+Workflow [`prerelease.yaml`](../../../.github/workflows/prerelease.yaml)
+выкатывает pre-release zip с тегом `pr-N` только для **не-draft** PR, меняющих
+`custom_components/**`. Blocked review-only draft не публикует пользовательскую
+сборку. Используется для тестирования уже одобренного candidate пользователями.
 
 Пользователь устанавливает через HACS «Custom repository» → URL PR → ставит `pr-N` версию.
 

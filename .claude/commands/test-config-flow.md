@@ -1,51 +1,55 @@
 ---
-description: Сгенерировать или дополнить тесты config_flow по плану docs/testing/strategy.md.
+description: Запустить и дополнить реальные config_flow-тесты по плану docs/testing/strategy.md.
 allowed-tools: Read, Grep, Glob, Bash, Edit, Write
 ---
 
-Ты — QA Engineer. Активируй skill `agent-skills:test-driven-development`.
+Ты — QA Engineer. Активируй skill `test-driven-development`.
 
 ## Контекст
 
-`tests/test_config_flow.py` — нерабочий stub из HA scaffold (см. audit A-07). Нужно полностью переписать по плану из `docs/testing/strategy.md` раздел 1.
+`tests/test_config_flow.py` содержит рабочие PHC-тесты auth-веток, ошибок и
+abort/reauth-сценариев. Актуальный baseline и остающиеся gaps определяются
+только по `docs/testing/strategy.md` и реальному test inventory.
 
 ## Шаги
 
 1. Прочитай `custom_components/elektronny_gorod/config_flow.py` — все steps, errors, aborts.
-2. Прочитай `docs/testing/strategy.md` (раздел 1. Config flow) — list test cases.
-3. Прочитай `docs/aidd/runbooks/testing.md` — mock стратегия + пример теста.
-4. Удали существующий нерабочий `tests/test_config_flow.py` (или замени его содержимое).
-5. Напиши тесты в порядке:
-   - happy path: phone+SMS+skip_go2rtc
-   - happy path: phone+password+skip_go2rtc
-   - happy path: access_token (advanced) + skip_go2rtc
-   - happy path: with go2rtc setup
-   - error: invalid_phone, unregistered, invalid_login, invalid_password, invalid_code, limit_exceeded
-   - abort: already_configured (duplicate token)
-   - abort: reauth_successful (account+subscriber match)
-6. Запусти `pytest tests/test_config_flow.py -v` — должно быть зелёным.
-7. Если тест падает по непонятной причине — root cause через `agent-skills:debugging-and-error-recovery`. **Не упрощать тест.**
+2. Прочитай `docs/testing/strategy.md` (раздел 1. Config flow) — canonical
+   baseline и список сценариев.
+3. Прочитай `docs/aidd/runbooks/local-development.md` — команды и mock strategy.
+4. Запусти существующий файл и зафиксируй исходный результат:
+   `PYTHONPATH=. .venv/bin/pytest tests/test_config_flow.py -v`.
+5. Сопоставь реальные тесты с изменёнными ветками `config_flow.py`, acceptance
+   criteria задачи и открытыми gaps из strategy. Добавляй только отсутствующие
+   сценарии; существующие рабочие тесты и fixtures не переписывай без доказанной
+   причины.
+6. Для нового или исправляемого поведения сначала получи ожидаемый RED, затем
+   минимальный GREEN и повторно запусти весь `tests/test_config_flow.py`.
+7. Если тест падает по непонятной причине — найди root cause через
+   `systematic-debugging`. **Не упрощать тест.**
 
 ## Output
 
 ```md
 ## Done
-- N тестов добавлено
-- coverage config_flow: a% → b%
+- N тестов добавлено/уточнено и какие сценарии они защищают
+- если запускался coverage — команда и свежий результат; иначе не оценивать его
 
 ## Verification
-- `pytest tests/test_config_flow.py -v` — passed N/N
+- `PYTHONPATH=. .venv/bin/pytest tests/test_config_flow.py -v` — passed N/N
 
 ## Caught bugs (если были)
 - F-NN: description, evidence, severity
 
 ## Hand-off
-- next: docs-keeper (обновить testing/strategy.md как RESOLVED)
+- next: docs-keeper (обновить canonical baseline/gaps в testing/strategy.md,
+  только если фактический состав или покрываемый capability изменился)
 ```
 
 ## Constraints
 
 - 🔴 НЕ исправлять тест ради зелёного CI, если код сломан.
 - НЕ использовать реальный API оператора.
+- НЕ удалять и не переписывать весь существующий test module ради одного gap.
 - НЕ оставлять `print()` / `debugger`.
-- НЕ импортировать несуществующие сущности (как в текущем stub).
+- НЕ импортировать несуществующие сущности.

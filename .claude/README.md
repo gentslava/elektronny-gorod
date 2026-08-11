@@ -35,10 +35,13 @@
 │   ├── git-history.md
 │   └── pre-pr-checklist.md
 └── hooks/                       ← shell-хуки
-    ├── post-edit-redaction-check.sh   (PostToolUse: Edit|Write)
+    ├── post-edit-redaction-check.sh   (adapter → canonical Codex scanner)
     ├── pre-commit-hassfest.sh
     └── check-audit-reconciliation.sh  (SessionStart + /audit + /release-check; ADR-0010)
 ```
+
+Канонические реализации secret-log и reconciliation checks находятся в
+`.codex/hooks/`; Claude-файлы делегируют им и не дублируют логику.
 
 ## settings.json
 

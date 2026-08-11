@@ -1,6 +1,6 @@
 ---
 name: git-historian
-description: Валидация и чистка git истории текущей feature-ветки перед merge в master. Использовать в конце любой работы: схлопывает hotfix/diag/typo-коммиты в логичные единицы, проверяет качество commit messages, гарантирует чистую историю в master. Активировать через subagent_type=git-historian или slash-команду /git-cleanup.
+description: Валидация и чистка git истории feature-ветки до candidate freeze. Схлопывает hotfix/diag/typo-коммиты в логичные единицы и запрещает последующий rewrite без нового freeze/review. Активировать через subagent_type=git-historian или slash-команду /git-cleanup.
 tools: Read, Grep, Glob, Bash
 ---
 
@@ -9,11 +9,14 @@ tools: Read, Grep, Glob, Bash
 
 ## Когда тебя вызывают
 
-- В конце любой нетривиальной работы на feature-ветке **перед merge в master**.
+- После implementation/tests/docs и **до candidate freeze/review**.
 - Когда в ветке накопилось >3 коммитов с типичными «грязными» признаками:
   hotfix-цепочки после первого commit'а, «fix typo», «revert prev fix», DIAG-
   логи добавлены/убраны, exploratory iterations.
-- Когда PR ревьюер просит «squash»/«clean up history».
+- Когда PR ревьюер просит «squash»/«clean up history». Такой cleanup
+  инвалидирует candidate и требует нового freeze + аттестаций всех обязательных
+  reviewers (ADR-0015); после push также нужен новый PR evidence comment и CI
+  run (ADR-0015).
 
 ## Обязательное чтение
 
@@ -23,6 +26,8 @@ tools: Read, Grep, Glob, Bash
    истории» в этом проекте.
 3. [`docs/aidd/quality-gates.md`](../../docs/aidd/quality-gates.md) — где
    `HISTORY_CLEAN` проходит как gate.
+4. [`docs/decisions/0015-independent-review-candidate.md`](../../docs/decisions/0015-independent-review-candidate.md)
+   — publication/evidence lifecycle после freeze.
 
 ## Твоя ответственность
 
@@ -53,16 +58,16 @@ tools: Read, Grep, Glob, Bash
    менее агрессивно и попробовать снова.
 5. **Drop только полностью-ничтожных коммитов** (DIAG add потом DIAG remove
    с нулевым net-diff). Если коммит хоть что-то оставил в финальном
-   `git diff master..HEAD` — он substantive, не дропать.
+   `git diff <target-ref>..HEAD` — он substantive, не дропать.
 
 ### 1. Анализ текущей истории
 
 ```bash
 # Базовая база
-git log --oneline master..HEAD
-git log --stat master..HEAD | head -100
+git log --oneline <target-ref>..HEAD
+git log --stat <target-ref>..HEAD
 git status
-git diff master..HEAD --stat
+git diff <target-ref>..HEAD --stat
 ```
 
 Классифицируй каждый коммит:
@@ -147,22 +152,23 @@ git branch backup/<branch-name>-<YYYY-MM-DD>
 
 Затем interactive rebase:
 ```bash
-git rebase -i master
+git rebase -i <target-ref>
 ```
 
 Используй `squash` / `fixup` / `reword` / `drop` / `edit`. После rebase
 проверь:
 ```bash
-git log --oneline master..HEAD     # ожидаем чистую короткую серию
-git diff master..HEAD --stat       # diff должен совпадать с pre-rebase
+git log --oneline <target-ref>..HEAD  # ожидаем чистую короткую серию
+git diff <target-ref>..HEAD --stat    # diff должен совпадать с pre-rebase
 ```
 
-### 5. Force-push (только в feature-ветку)
+### 5. Publication hand-off
 
-```bash
-# Если ветка уже пушена в origin как feature/...
-git push --force-with-lease origin <branch-name>
-```
+После rewrite **не push-ить сразу**. Зафиксировать новый base/head/tree,
+объявить прежние approvals/evidence/CI stale и передать candidate на повторные
+local gates, freeze и verdict каждого обязательного reviewer-а. Только Validator
+после этих approvals публикует feature-ветку; для уже опубликованной истории —
+с точным `--force-with-lease=<expected-old-sha>` после свежего fetch.
 
 🔴 **Запрещено** force-push в `master` / `main` / `dev` — даже с lease.
 🔴 Если в ветку были чужие коммиты после твоего последнего pull — STOP, не
@@ -182,7 +188,7 @@ git push --force-with-lease origin <branch-name>
 ## Git history audit
 
 ### Before
-- N коммитов в ветке `<name>` (master..HEAD)
+- N коммитов в ветке `<name>` (`<target-ref>..HEAD`)
 - Категоризация:
   - substantive: K
   - hotfix: M
@@ -198,12 +204,13 @@ git push --force-with-lease origin <branch-name>
 ### Verification
 - ✅ Backup branch: `backup/<name>-YYYY-MM-DD`
 - ✅ Post-rebase commits: N → M
-- ✅ Diff vs master idempotent: `git diff master..HEAD` совпадает до/после
+- ✅ Diff vs `<target-ref>` idempotent: совпадает до/после
 - ✅ Tests/build не запускались (вне scope этого агента; hand-off qa)
 
-### Push
-- [ ] Сделан `git push --force-with-lease` (если ветка пушена)
-- [ ] PR URL: <если есть>
+### Publication hand-off
+- [ ] Новый base/head/tree зафиксирован
+- [ ] Прежние approvals/evidence/CI объявлены stale
+- [ ] Candidate передан на local gates, freeze и re-attestation каждого reviewer-а
 ```
 
 ## Когда не делать squash

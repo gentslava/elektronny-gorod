@@ -1,7 +1,8 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-08-11 (A-80/A-86: field incident #77 and bounded per-entry
-FCM recovery; 597-test product baseline reconciled)
+Last reviewed: 2026-08-11 (A-80/A-86 field incident #77 and bounded per-entry
+FCM recovery; A-97 independent candidate review/publication gates split from
+product; live test baseline delegated to testing strategy)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -42,15 +43,21 @@ Quality gates:
 Этот файл — **единый источник правды** о том, что сделано/открыто (ADR-0010).
 Статус сверяется с git master, не пишется авансом:
 
-- **✅ RESOLVED** — фикс **в master** (обязателен commit SHA или merged PR).
+- **✅ RESOLVED** — фикс **в master** (для нового закрытия обязателен commit
+  SHA; legacy-запись может подтверждаться тем же RESOLVED finding в target
+  master, что проверяет reconciliation hook).
 - **🟢 resolved-in-branch (pending merge ...)** — код готов, но **ещё не в
   master**. Не считать закрытым для релиза. Перевести в RESOLVED после merge.
+- **🟡 REMEDIATION-IN-REVIEW** — fix находится в candidate, но обязательные
+  candidate-bound reviews, publication evidence или CI ещё не завершены;
+  finding остаётся открытым для merge/release.
 - **🟡 PARTIALLY RESOLVED** — часть закрыта, остаток описан.
 - **🔴 OPEN / STILL OPEN** — не сделано.
 - **🟡 WON'T FIX** — осознанно не чиним (с обоснованием).
 
 🔴 Статус-плейсхолдеры без reconciliation запрещены: указывай либо merged-SHA,
-либо `pending merge <ref>`. Сверку гоняет `.claude/hooks/check-audit-reconciliation.sh`.
+либо `pending merge <ref>`. Каноническую сверку гоняет
+`.codex/hooks/check-audit-reconciliation.sh`; Claude adapter делегирует ему.
 
 ## P0 — критичные
 
@@ -1822,6 +1829,30 @@ Quality gates:
   recovery; A-82 закрыт в master через PR #71; A-83 intentionally deferred;
   A-84 требует live config-persistence evidence.
 
+### A-97. Независимый review можно было заменить self-review и пропустить до PR
+
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — process changes вынесены из product
+  PR #78 в stacked-ветку `chore/aidd-review-gates`; finding остаётся открытым до
+  candidate-bound approvals, publication evidence и CI этой ветки.
+- **Severity:** P1 process/reliability.
+- **Area:** `AGENTS.md`, `CLAUDE.md`, `workflow.md`, agent adapters, hooks,
+  `docs/aidd/**`, ADR-0015 и maintenance rules.
+- **Evidence (2026-08-10):** после рекомендации subagent-driven режима короткое
+  «го» было ошибочно интерпретировано как inline execution. FCM fix прошёл
+  self-review, но PR #78 был опубликован до независимых code/HA/security reviews.
+- **Root cause:** источники процесса не определяли единые semantics approval,
+  immutable candidate tuple, reviewer independence и post-push CI/evidence.
+- **Fix draft:** консолидированный ADR-0015 задаёт plan approval, local gates,
+  clean base/head/tree freeze, обязательные read-only reviews и re-attestation
+  всех reviewers после изменения candidate. `TESTS_PASS` отделён от post-push
+  `CI_GREEN`; durable evidence хранится в PR comment; review/evidence/CI gates
+  non-waivable. Точный live test baseline принадлежит только
+  `testing/strategy.md`. Claude/Codex adapters синхронизированы, дублирующие
+  hooks заменены wrappers к одной canonical реализации.
+- **Acceptance:** AIDD changes опубликованы отдельным логическим PR; все
+  обязательные reviewers одобряют один tuple; reconciliation/secret scanners,
+  links и полный suite зелёные.
+
 ### A-73. config_flow + `async_migrate_entry` без тестов (Bronze IQS gate)
 
 - **Status:** ✅ **RESOLVED** — merged в master, commit `3a60b15`
@@ -1868,7 +1899,7 @@ Quality gates:
 
 ## Maintenance rules (повтор)
 
-См. [`PROJECT_MAP.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
+См. [`project-map.md#maintenance-rules`](../project/project-map.md#maintenance-rules).
 
 ## Связь с roadmap
 

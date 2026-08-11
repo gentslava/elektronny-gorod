@@ -1,7 +1,7 @@
 Status: Active
 Owner: Security & Privacy Agent
-Last reviewed: 2026-08-11 (FCM Repairs title privacy boundary accepted;
-9.9.0 parity credential classification retained)
+Last reviewed: 2026-08-11 (canonical AST/CLI secret-log gate; FCM Repairs title
+privacy boundary accepted; 9.9.0 parity credential classification retained)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -10,6 +10,8 @@ Source files:
 - `custom_components/elektronny_gorod/helpers.py`
 - `custom_components/elektronny_gorod/user_agent.py`
 - `custom_components/elektronny_gorod/fcm.py`
+- `.codex/hooks/check-secret-logs.py`
+- `.codex/hooks/check-secret-logs.sh`
 
 Related docs:
 - `project-audit.md`
@@ -61,7 +63,8 @@ Quality gates:
 
 ### S-01. Утечка access_token в логи
 
-- **Status:** ✅ **RESOLVED**. `config_flow.py:93` теперь
+- **Status:** ✅ **RESOLVED**.
+  `config_flow.py:ElektronnyGorodConfigFlow.async_step_user` теперь
   `LOGGER.debug("Credentials captured (length=%d)", len(self.access_token))` —
   логируется только длина.
 - **Original Severity:** P0 — при `debug` токен попадал в `home-assistant.log`.
@@ -79,13 +82,15 @@ Quality gates:
 
 ### S-03. Утечка response body на DEBUG
 
-- **Status:** ✅ **RESOLVED**. `http.py:37-56` `_log_response` логирует только
+- **Status:** ✅ **RESOLVED**. `http.py:HTTP._log_response` логирует только
   status + Content-Length; body не читается; для auth-path размер пропущен.
 - **Original Severity:** P0 — debug-логи содержали `accessToken`/`refreshToken`.
 
 ### S-04. Утечка `entry.data` в логи
 
-- **Status:** ✅ **RESOLVED**. `config_flow.py:299,307` теперь `entry.entry_id`.
+- **Status:** ✅ **RESOLVED**.
+  `config_flow.py:ElektronnyGorodConfigFlow.get_account` теперь использует
+  `entry.entry_id`.
   Grep `LOGGER.*entry\.(data|options)` по компоненту → 0 совпадений.
 - **Original Severity:** P0 — `entry.data` содержал токены/user_agent/operator_id.
 
@@ -99,7 +104,8 @@ Quality gates:
 
 ### S-06. Утечка `contract` объекта
 
-- **Status:** ✅ **RESOLVED**. `config_flow.py:217` теперь
+- **Status:** ✅ **RESOLVED**.
+  `config_flow.py:ElektronnyGorodConfigFlow.async_step_contract` теперь
   `LOGGER.debug("Selected contract subscriberId=%s", selected_id)` — только ID,
   не contract object.
 - **Original Impact:** `contract` содержал accountId, subscriberId, address,
@@ -108,7 +114,8 @@ Quality gates:
 ### S-A71-01. Operator-токен в traceback при go2rtc PUT (NEW, RESOLVED)
 
 - **Status:** ✅ **RESOLVED** (ветка `fix/a71-camera-stream-auto-recovery`).
-- **Файл:** [`camera.py:124-134`](../../custom_components/elektronny_gorod/camera.py#L124-L134)
+- **Файл:** `go2rtc.py:Go2RtcClient.async_patch_stream` и
+  `stream_manager.py:CameraStreamManager` refresh/reconcile paths.
 - **Impact (предотвращённый):** forpost RTSP-URL с токеном (`https://forpost-N.
   novotelecom.ru:18081/rtsp/a<NNNNNN>/<token>/...`) передаётся в go2rtc PUT;
   при `ClientError` он мог попасть в traceback/RuntimeError.
@@ -118,7 +125,7 @@ Quality gates:
 
 ### S-07. Отсутствие auto-refresh на 401
 
-- **Файл:** [`api.py:160-162`](../../custom_components/elektronny_gorod/api.py#L160-L162)
+- **Файл:** `api.py:ElektronnyGorodAPI.query_profile`.
 - **Impact:** при истечении access_token интеграция падает с `unauthorized` — пользователь должен заново вручную проходить config_flow, несмотря на наличие `refresh_token` в `entry.data`.
 - **Fix:** реализовать `_refresh_access_token()` и автоматически вызывать при `401`. Затем — повторить запрос.
 
@@ -150,18 +157,22 @@ Quality gates:
   → больше **не утекают** в diagnostics-выгрузку (S-08 RESOLVED). Остаётся
   plaintext в `.storage`/backup (HA-storage limitation) — полное шифрование
   (`Store`/pin) в backlog, не блокер.
-- **Файлы:** [`config_flow.py:362`](../../custom_components/elektronny_gorod/config_flow.py#L362), [`config_flow.py:419-420`](../../custom_components/elektronny_gorod/config_flow.py#L419-L420), [`camera.py:166-170`](../../custom_components/elektronny_gorod/camera.py#L166-L170)
+- **Файлы:** `config_flow.py:ElektronnyGorodConfigFlow.async_step_go2rtc`,
+  `ElektronnyGorodOptionsFlowHandler.async_step_init`,
+  `camera.py:_get_go2rtc_cfg`
 - **Severity:** P1 → P3 (после mitigation)
 - **Impact:** `go2rtc_password` (Basic Auth) хранится в `entry.data` без шифрования. ~~Попадёт в diagnostics-выгрузку (S-08)~~ — закрыто redaction.
 - **Fix:** ✅ ключи в `TO_REDACT`. Долгосрочно — рассмотреть HA `Store` с pin-кодом.
-- **Дополнительно:** в [`camera.py:167`](../../custom_components/elektronny_gorod/camera.py#L167) `import base64` находится внутри метода — функционально безопасно, но плохая практика (плюс auth-header строится «вручную» вместо `aiohttp.BasicAuth`).
+- **Дополнительно:** camera setup передаёт credentials только в
+  `go2rtc_auth_headers`; raw auth-header не логируется и не попадает в
+  diagnostics.
 
 ### S-09. Нет timeout на HTTP-запросы
 
 - **Status:** ✅ **RESOLVED**. `http.py` использует `_REST_TIMEOUT`
   (`total=30`, `connect=10`) и `_BINARY_TIMEOUT` (`total=60`, `connect=10`)
   и передаёт выбранный timeout во все GET/POST/DELETE запросы.
-- **Файл:** [`http.py:15-22,120-126`](../../custom_components/elektronny_gorod/http.py)
+- **Файл:** `http.py:_REST_TIMEOUT`, `_BINARY_TIMEOUT`, `HTTP.__request`
 - **Original Impact:** один зависший запрос к `myhome.proptech.ru` мог надолго
   задержать setup/coordinator tick.
 - **Остаток:** retry/backoff вынесен в S-10/A-21 и применяется только к
@@ -243,24 +254,26 @@ Quality gates:
 
 ### S-11. Логирование `Failed to fetch balance: %s` f-string
 
-- **Файл:** [`sensor.py:90`](../../custom_components/elektronny_gorod/sensor.py#L90)
-- **Impact:** `e` может содержать ClientResponse с URL → утечка через `repr()`. Минор.
-- **Fix:** `LOGGER.exception("Failed to fetch balance")`.
+- **Status:** ✅ **RESOLVED** — прежнего exception-log в `sensor.py` больше нет;
+  balance читается из coordinator snapshot. Secret-log scanner дополнительно
+  блокирует f-string и unsafe exception values в `LOGGER.*`.
+- **Original Impact:** `e` мог содержать ClientResponse с URL → утечка через
+  `repr()`.
 
 ### S-12. SHA1 для пароля
 
-- **Файл:** [`helpers.py:35-39`](../../custom_components/elektronny_gorod/helpers.py#L35-L39)
+- **Файл:** `helpers.py:hash_password`.
 - **Impact:** SHA1 — устаревший алгоритм. Но это формат серверного API; не наша уязвимость. Документировать.
 
 ### S-13. Hardcoded crypto «соль» (reverse-engineered)
 
-- **Файл:** [`helpers.py:43-44`](../../custom_components/elektronny_gorod/helpers.py#L43-L44)
+- **Файл:** `helpers.py:hash_password_timestamp`.
 - **Impact:** юридический риск (использование reverse-engineered протокола в нарушение ToS оператора). Не уязвимость, но требует понимания.
 - **Mitigation:** документировать ограничения в README; рекомендовать пользователям предоставлять access_token напрямую (advanced mode) как альтернативу.
 
 ### S-14. UUID не привязан к HA install_id
 
-- **Файл:** [`user_agent.py:18`](../../custom_components/elektronny_gorod/user_agent.py#L18)
+- **Файл:** `user_agent.py:UserAgent.__init__`.
 - **Impact:** каждый раз новый UUID при создании UserAgent — это нарушает «привязку» сессии на стороне оператора. На практике сейчас работает, но фрагильно.
 - **Mitigation:** uuid сохраняется в `entry.data` и не пересоздаётся при reauth.
 
@@ -292,12 +305,12 @@ Quality gates:
 
 ### S-15. Случайный Pixel device fingerprint
 
-- **Файл:** [`user_agent.py:11-13`](../../custom_components/elektronny_gorod/user_agent.py#L11-L13)
+- **Файл:** `user_agent.py:UserAgent.__init__`.
 - **Impact:** ToS-вопрос; не уязвимость безопасности.
 
 ### S-17. go2rtc.py — сырой ClientError в логе (NEW)
 
-- **Файл:** [`go2rtc.py:104-105`](../../custom_components/elektronny_gorod/go2rtc.py#L104-L105)
+- **Файл:** `go2rtc.py:cleanup_go2rtc_stream`.
 - **Код:** `LOGGER.debug("go2rtc cleanup request failed: %s", err)`
 - **Impact:** `str(ClientError)` может содержать URL. В **текущем** flow URL =
   `{base_url}/api/streams?src=ha_check_<uuid>` (validation cleanup, synthetic
@@ -307,7 +320,7 @@ Quality gates:
 
 ### S-18. go2rtc.py — сырой response body в логе (NEW)
 
-- **Файл:** [`go2rtc.py:78,103`](../../custom_components/elektronny_gorod/go2rtc.py#L78)
+- **Файл:** `go2rtc.py:validate_go2rtc`, `cleanup_go2rtc_stream`.
 - **Код:** `LOGGER.debug("...failed: %s %s", resp.status, body)`
 - **Impact:** body от go2rtc в validation/cleanup flow = echo dummy src
   (`rtsp://127.0.0.1...` / `ha_check_<uuid>`) без operator-токена → безопасно в
@@ -396,7 +409,9 @@ Google задокументирована в [A-80](project-audit.md)) + `audioo
 
 - [x] **S-01..S-04, S-06 исправлены** (ветка `hotfix/p0-security`; верифицировано по коду 2026-05-30).
 - [x] Добавлен helper `_logging.py` с `SENSITIVE_KEYS` + `redact()` (ADR-0004).
-- [x] `grep -rE 'LOGGER\..*(token|password|sms|headers|entry\.data)' custom_components/elektronny_gorod/` возвращает 0 реальных утечек (1 совпадение `config_flow.py:93` — redacted-by-design, длина).
+- [x] `bash .codex/hooks/check-secret-logs.sh` проходит: прямые sensitive
+  values в `LOGGER.*` не найдены; безопасные `len(value)`/`redact(value)`
+  не считаются утечками.
 - [x] S-05 (shared ClientSession) — RESOLVED (ADR-0008).
 - [x] S-A71-01 (operator-токен в traceback go2rtc PUT) — RESOLVED (`from None`).
 - [x] **S-08 — `diagnostics.py` с redaction** (RESOLVED в 3.3.0).

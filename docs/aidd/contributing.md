@@ -1,6 +1,7 @@
 Status: Active
 Owner: Documentation / AIDD Agent
-Last reviewed: 2026-05-22
+Last reviewed: 2026-08-11 (default subagent execution, independent review and
+ADR-0015 publication/CI contract synchronized after A-97)
 
 Source files:
 - весь репозиторий (это процессный документ)
@@ -39,6 +40,15 @@ Quality gates:
 ```text
 idea → spec (для нетривиального) → research → plan → implementation → tests → docs → review → release
 ```
+
+Для нетривиального плана subagent-driven execution — default, если инструмент
+его поддерживает. Короткое «го» после такой рекомендации принимает default.
+Inline выбирается явно. После tests/security prechecks/docs/history cleanup
+замораживается clean committed candidate; self-review дополняется независимым
+code-reviewer и профильными HA/security/QA reviewers по
+[`multi-agent-workflow.md`](multi-agent-workflow.md).
+После approvals Validator выполняет ordinary push/PR, публикует durable
+candidate-bound evidence comment и ждёт отдельный `CI_GREEN` до merge.
 
 ## Правила для AI-агента
 
@@ -92,7 +102,12 @@ ASSUMPTIONS:
 - Тесты должны быть запущены и зелёные.
 - Hassfest должен пройти.
 - Diff должен быть прочитан **самим агентом** до коммита.
-- Грep на «не логирую ли я токены» — обязателен после правок в `http.py` / `config_flow.py`.
+- Независимый reviewer должен проверить frozen base/head/tree candidate до
+  merge; обычный push/PR выполняется после review, кроме явно разрешённого
+  blocked review-only draft для human reviewer;
+  self-review не закрывает `REVIEW_OK`.
+- Грep на «не логирую ли я токены» — обязателен после правок в `http.py` /
+  `config_flow.py` / `fcm.py` и других token-bearing paths.
 
 ## Boundaries (повтор)
 
@@ -191,22 +206,23 @@ ADR-шаблон (создаётся в Итерации 3): `docs/decisions/NNN
 |---|---|
 | `agent-skills:security-and-hardening` | работа с `http.py`, `config_flow.py:logging`, `helpers.py`, новые diagnostics |
 | `agent-skills:test-driven-development` | переписывание тестов config-flow, новые тесты coordinator/api |
-| `agent-skills:code-review-and-quality` | перед коммитами, затрагивающими entity / coordinator |
+| `agent-skills:code-review-and-quality` | независимый read-only review frozen candidate после commit/local gates |
 | `agent-skills:incremental-implementation` | большие изменения (CoordinatorEntity-перевод, новые platforms) |
 | `agent-skills:spec-driven-development` | новые features (например, reconfigure flow) |
 | `agent-skills:debugging-and-error-recovery` | при странном поведении в runtime / падающих тестах |
 
 ## Какие агенты Claude Code использовать
 
-В этом проекте определены 5 ролей. Полный гайд — [`multi-agent-workflow.md`](multi-agent-workflow.md). Кратко:
+Полный routing ролей — [`multi-agent-workflow.md`](multi-agent-workflow.md). Кратко:
 
 | Subagent | Когда вызывать |
 |---|---|
 | `lead-architect` | начало сессии, координация, обновление audit/summary/roadmap |
 | `ha-expert` | manifest, config_flow, coordinator, entity, IQS |
-| `security-auditor` | http.py, config_flow.py логирование, helpers.py, diagnostics |
+| `security-auditor` | http.py, config_flow.py логирование, helpers.py, diagnostics, fcm.py, credentials/tokens |
 | `qa-engineer` | новые тесты, изменения test plan |
 | `docs-keeper` | синхронизация docs после правок кода |
+| `code-reviewer` | независимый read-only review каждого нетривиального diff до публикации |
 
 ## Slash-команды
 
