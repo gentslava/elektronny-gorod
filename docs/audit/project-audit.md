@@ -1103,7 +1103,7 @@ Quality gates:
   опирается на **недокументированные приватные API** (checkin / register /
   MTalk). Google уже ломал их (20.06.2024 — «умерли» старые версии всех
   библиотек). Долгосрочных гарантий нет: «работает, пока работает».
-- **Risk 2 — новая зависимость `firebase-messaging==0.4.5`** (тянет protobuf /
+- **Risk 2 — новая зависимость `firebase-messaging>=0.4.5`** (тянет protobuf /
   http_ece / cryptography). Раньше `requirements` был пуст (всё из HA core) —
   теперь интеграция имеет внешний pip-deps.
 - **Field evidence 2026-08-10:** в [issue #77](https://github.com/gentslava/elektronny-gorod/issues/77)
@@ -1122,8 +1122,10 @@ Quality gates:
   автоматические пробы через 15 минут / 1 час / 6 часов / 24 часа и persistent
   Repairs warning. Логика изолирована в `fcm.py` за интерфейсом
   `SIGNAL_DOORBELL`; один проблемный аккаунт не влияет на остальные.
-- **Watch:** при breakage приватного API — bump `firebase-messaging` (линия
-  поддержки Lemoine → sdb9696 переживает изменения через обновление зависимости).
+- **Watch:** lower bound `0.4.5` гарантирует проверенный shared-session API, а
+  более новые upstream bugfix releases разрешены автоматически. Это ускоряет
+  получение root fix из PR #37, но сохраняет риск несовместимого future release;
+  после такого обновления нужен regression/live check FCM lifecycle.
 
 ### A-81. Приём вызова домофона по SIP + показ экрана вызова (фундамент two-way audio)
 

@@ -302,7 +302,7 @@ Pytest CI настроен; актуальный локальный baseline и 
 
 **Python-зависимости:**
 - из HA core (`aiohttp`, `voluptuous`, `yarl`);
-- `manifest.json:requirements` — `firebase-messaging==0.4.5` (FCM-приём события вызова, ADR-0011; зафиксированная проверенная версия с shared `aiohttp` session; тянет protobuf / http_ece / cryptography);
+- `manifest.json:requirements` — `firebase-messaging>=0.4.5` (FCM-приём события вызова, ADR-0011; проверенный minimum для shared `aiohttp` session с автоматическим получением upstream bugfix releases; тянет protobuf / http_ece / cryptography);
 - `audioop-lts>=0.2.1` (только Python 3.13+) — `audioop` удалён из stdlib в PEP 594; нужен для `sip/audio.py` (G.711 транскод, A-81).
 
 ## Maintenance rules

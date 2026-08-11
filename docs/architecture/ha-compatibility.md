@@ -46,7 +46,7 @@ Quality gates:
 | `version` | см. `manifest.json` | semver, обновляется release workflow | ✅ |
 | `documentation` | wiki URL | действующая ссылка | ⚠️ контент wiki не подтверждён |
 | `issue_tracker` | issues URL | действующая ссылка | ✅ |
-| `requirements` | `firebase-messaging==0.4.5`, `audioop-lts>=0.2.1` | все вне HA core, объявлены в manifest | ✅ — проверенная `firebase-messaging` 0.4.5 для FCM-вызова и shared HA session (ADR-0011), `audioop-lts` для G.711-транскода SIP (A-81; только Python 3.13+, `audioop` удалён из stdlib PEP 594) |
+| `requirements` | `firebase-messaging>=0.4.5`, `audioop-lts>=0.2.1` | все вне HA core, объявлены в manifest | ✅ — `0.4.5` является проверенным минимумом для FCM-вызова и shared HA session; более новые исправления зависимости разрешены осознанно (ADR-0011, A-80), `audioop-lts` нужен для G.711-транскода SIP (A-81; только Python 3.13+, `audioop` удалён из stdlib PEP 594) |
 | `dependencies` | `[]` | HA-интеграции, нужные при старте | ✅ |
 | `iot_class` | `cloud_polling` | соответствие реальности | ✅ coordinator polling каждые 5 минут |
 | `config_flow` | `true` | если есть UI flow | ✅ |

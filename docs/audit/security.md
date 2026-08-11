@@ -343,8 +343,9 @@ scan и review перед коммитом.
 
 ## Dependency vulnerabilities
 
-`manifest.json:requirements` больше не пуст: `firebase-messaging==0.4.5` (FCM-вызов,
-ADR-0011 — тянет protobuf / http_ece / cryptography; «серая зона» приватных API
+`manifest.json:requirements` больше не пуст: `firebase-messaging>=0.4.5` (FCM-вызов,
+ADR-0011 — `0.4.5` является проверенным минимумом, а обновления выше него
+разрешены; тянет protobuf / http_ece / cryptography; «серая зона» приватных API
 Google задокументирована в [A-80](project-audit.md)) + `audioop-lts>=0.2.1`
 (G.711-транскод SIP, A-81; только Python 3.13+). Остальное — `aiohttp`/`voluptuous`/
 `yarl` из HA core. CVE-risk core-зависимостей управляется HA core; внешние pip-deps
