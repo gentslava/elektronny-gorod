@@ -44,8 +44,9 @@ the upstream parser.
 - Guarantee that an unsupported FCM payload can be decrypted.
 - Add an automated Repair flow that rotates FCM credentials.
 - Change config entry version, entity IDs, or public services. The dependency
-  floor is raised to the verified `firebase-messaging>=0.4.5` API contract while
-  allowing future upstream bugfix releases to be installed automatically.
+  floor is raised to the verified `firebase-messaging>=0.4.5` API contract.
+  Later releases may be selected on a fresh install or dependency re-resolution;
+  the range does not proactively upgrade an already-satisfied environment.
 
 ## Decision
 
