@@ -8,7 +8,7 @@
 
 ## Problem
 
-`firebase-messaging 0.4.5` can terminate `FcmPushClient` when a single incoming
+`firebase-messaging` can terminate `FcmPushClient` when a single incoming
 message contains Base64URL encryption fields it cannot decode. The message is
 not acknowledged because acknowledgement happens after decryption. The
 integration watchdog then recreates the client every two minutes, and the same
@@ -18,6 +18,14 @@ Assistant log while realtime doorbell notifications remain unavailable.
 The upstream parsing bug is outside the integration, but bounding retries,
 isolating accounts, and explaining the degraded state to the user are the
 integration's responsibility.
+
+Issue #77 supplies direct timestamped crash-boundary evidence: the integration
+reports an inactive receiver, the dependency fails in `urlsafe_b64decode` with
+`Incorrect padding` two seconds later and shuts that client down. Source
+inspection establishes the local causal chain: dependency shutdown → watchdog
+observes inactive receiver → unbounded client recreation → repeated dependency
+traceback. This design contains that amplification; it does not claim to fix
+the upstream parser.
 
 ## Goals
 
@@ -35,8 +43,8 @@ integration's responsibility.
 - Patch, fork, or vendor `firebase-messaging` in this change.
 - Guarantee that an unsupported FCM payload can be decrypted.
 - Add an automated Repair flow that rotates FCM credentials.
-- Change dependency constraints, config entry version, entity IDs, or public
-  services.
+- Change config entry version, entity IDs, or public services. The dependency is
+  pinned to the verified `firebase-messaging==0.4.5` contract used by this design.
 
 ## Decision
 
@@ -50,13 +58,12 @@ delay FCM for another account.
 ### State model
 
 ```text
-HEALTHY -> SUSPECT -> RETRYING -> HEALTHY
+HEALTHY -> SUSPECT -> VERIFYING -> HEALTHY
                         |
                         v
-                      OPEN -> PROBING -> HEALTHY
-                                |
-                                v
-                              OPEN
+                      OPEN -- deadline/reconnect --> VERIFYING
+                        ^                            |
+                        +--------- inactive --------+
 ```
 
 - **HEALTHY:** `client.is_started()` is true. Failure counters and backoff are
@@ -64,14 +71,13 @@ HEALTHY -> SUSPECT -> RETRYING -> HEALTHY
 - **SUSPECT:** the first inactive watchdog observation records the condition but
   does not recreate the client. This gives the dependency time to recover from
   a transient connection reset.
-- **RETRYING:** if the client is still inactive on the next watchdog tick, the
-  integration performs one disconnect/connect cycle.
+- **VERIFYING:** after either the immediate reconnect or a scheduled probe, the
+  integration waits for the next watchdog tick to confirm the replacement.
 - **OPEN:** if the replacement is still inactive on the following tick, the
   circuit opens. The integration stops frequent reconnects, creates one Repair
-  issue, and records the next probe time.
-- **PROBING:** when the backoff expires, the integration performs one reconnect
-  and waits until the next watchdog tick. Success closes the circuit; failure
-  reopens it with the next delay.
+  issue, and records the next probe time. When the backoff expires, one
+  reconnect moves the listener back to VERIFYING; success closes the circuit
+  and failure reopens it with the next delay.
 
 At most the original dependency failure and one immediate recovery failure are
 expected before the circuit opens. Calls to the upstream logger are not
@@ -105,7 +111,7 @@ When the circuit first enters OPEN, create one persistent Repairs issue:
 
 - domain: `elektronny_gorod`
 - issue ID: `fcm_receiver_unavailable_<entry_id>`
-- severity: warning
+- severity: error (realtime doorbell notifications are already unavailable)
 - fixable: false for this change
 - translation placeholder: the config entry title only
 
@@ -142,20 +148,43 @@ observations, backoff index, and next probe time. It adds no timer and no
 background task. In OPEN, the failed FCM client is stopped, so the number of
 active tasks decreases.
 
-The Repairs registry is touched only when the issue is created, replaced after
-a meaningful state change, or deleted. There is no per-tick registry or disk
-write.
+The integration performs an idempotent delete on a healthy tick so the HA issue
+registry remains the only source of truth. Deleting an absent issue produces no
+registry event or disk write.
 
 ## Error handling
 
 - Exceptions from disconnect/connect remain contained by the existing graceful
-  degradation boundary.
+  degradation boundary and log only their class, never dependency-provided text.
+- If the dependency raises while stopping a client, the listener retains that
+  client reference, opens the circuit and does not create a replacement. Later
+  scheduled probes may retry the same stop, so a failed stop cannot multiply
+  receiver tasks or restore the log loop.
 - A failed probe must leave the listener in OPEN and advance backoff; it must not
   escape the watchdog callback.
-- Watchdog overlap remains prevented by `_reconnecting`.
-- `async_stop()` cancels the existing interval timer and stops the current
-  client in every phase.
+- Startup, watchdog transitions and unload are serialized by a per-entry lock;
+  overlapping watchdog ticks are skipped and cannot advance backoff twice.
+- If unload begins during FCM check-in or the awaited operator bind, startup
+  observes the stop request before client start. The unstarted dependency client
+  remains local, is discarded without calling its incompatible pre-start
+  `stop()`, and no watchdog is scheduled.
+- `async_stop()` marks the listener as stopping, cancels the existing interval,
+  waits for any active transition and performs a final disconnect. If dependency
+  stop fails, config-entry unload fails and HA cannot create an overlapping
+  listener on reload; a later unload may retry the same retained client.
+- The unstarted listener claims per-entry ownership only after the last fallible
+  setup await. If a prior owner cannot stop, setup still completes with only
+  realtime FCM disabled for that entry, a Repairs issue is shown, and the old
+  owner is not replaced. This path must not raise `ConfigEntryNotReady`, because
+  HA setup retries would recreate the log loop outside the circuit breaker.
+- Setup-unwind releases ownership only after a confirmed stop. Normal unload
+  likewise fails rather than replacing a dependency client that may still run.
 - Removing one config entry deletes only that entry's Repairs issue.
+- If ordinary unload cannot confirm dependency shutdown, HA blocks replacement
+  and reports that removal requires restart. `async_remove_entry` performs one
+  final stop attempt but retains ownership if that also fails, rather than
+  orphaning a live receiver. The stopping listener ignores late callbacks and
+  cannot schedule recovery or a replacement before restart.
 - The existing FCM token is not logged or exposed by the circuit breaker.
 
 The circuit breaker intentionally treats repeated inactivity generically. It
@@ -172,7 +201,11 @@ permanent disablement.
   - Repairs issue creation/deletion helpers;
   - cleanup of the active client.
 - `custom_components/elektronny_gorod/__init__.py`
+  - own the listener through config-entry unload/reload;
+  - fail unload if a started dependency client cannot stop;
   - delete the per-entry persistent issue on config entry removal.
+- `custom_components/elektronny_gorod/const.py`
+  - per-entry FCM listener registry key.
 - `custom_components/elektronny_gorod/strings.json`
 - `custom_components/elektronny_gorod/translations/ru.json`
 - `custom_components/elektronny_gorod/translations/en.json`
@@ -206,18 +239,27 @@ Required cases:
 9. Two listener instances maintain independent counters, deadlines, clients,
    and issue IDs.
 10. Startup/check-in failures remain contained and enter bounded recovery.
-11. `async_stop()` is idempotent in HEALTHY, OPEN, and PROBING.
-12. Config entry removal deletes the matching issue only.
-13. Logs and issue placeholders contain no FCM credentials or tokens.
-14. Existing notification parsing and healthy-start tests remain green.
+11. `async_stop()` is idempotent in HEALTHY, OPEN, and VERIFYING.
+12. A failed dependency stop blocks config-entry unload/reload and retains the
+    same client for a later stop attempt.
+13. A surviving prior owner is not replaced; setup completes with only FCM
+    degraded, shows Repairs, and does not enter HA's setup-retry loop.
+14. FCM ownership/start occurs after the last fallible setup await; setup errors
+    before that point cannot strand a newly registered receiver.
+15. Removal after a failed unload retries stop; another failure retains the
+    owner and HA reports that restart is required.
+16. A late dependency notification after terminal stop is ignored.
+17. Logs and issue placeholders contain no FCM credentials or tokens; the only
+    placeholder is the config-entry title shown to the same HA user.
+18. Existing notification parsing and healthy-start tests remain green.
 
 ## Documentation updates with implementation
 
 - Record the incident and mitigation in `docs/audit/project-audit.md`, updating
   A-80/A-86 rather than creating duplicate sources of truth.
 - Update `docs/architecture/overview.md` with bounded FCM recovery.
-- Update `docs/testing/strategy.md` and `docs/aidd/quality-gates.md` with the new
-  regression coverage and test result.
+- Update `docs/testing/strategy.md` with the new regression coverage and test
+  result.
 - Add the user-visible fix to `CHANGELOG.md`.
 
 ## Alternatives considered
@@ -253,6 +295,7 @@ registrations if cleanup fails.
 2. A repeated failure produces at most one immediate reconnect before backoff.
 3. Automatic recovery remains possible without user action.
 4. One account's failure cannot affect another account.
-5. The user receives one actionable, translated Repairs warning.
+5. The user receives one actionable, translated Repairs issue naming the
+   affected config entry.
 6. Non-FCM integration functionality remains loaded and operational.
 7. The complete test suite passes with no secret-bearing logs or diagnostics.

@@ -139,7 +139,7 @@ pt=8). Транскод — наш слой при любом исходе сп�
 
 ```json
   "requirements": [
-    "firebase-messaging>=0.4",
+    "firebase-messaging==0.4.5",
     "audioop-lts>=0.2.1;python_version>='3.13'"
   ],
 ```

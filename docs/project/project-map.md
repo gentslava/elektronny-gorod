@@ -1,7 +1,6 @@
 Status: Active
 Owner: Project Cartographer Agent
-Last reviewed: 2026-07-16 (external RTSP preload lifecycle, in-place policy,
-producer health, cleanup and diagnostics synchronized)
+Last reviewed: 2026-08-10 (bounded FCM recovery and per-entry Repairs lifecycle)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -176,7 +175,7 @@ elektronny-gorod/
 |---|---|
 | [`go2rtc.py`](../../custom_components/elektronny_gorod/go2rtc.py) | `Go2RtcClient`: sanitized stream list/get/PATCH/DELETE, preload list/enable/disable, producer health, transport-config identity + credential-aware RTSP URL; raw producer source отбрасывается; validation/audio helpers — отдельные границы |
 | [`stream_manager.py`](../../custom_components/elektronny_gorod/stream_manager.py) | Один `CameraStreamManager` per entry: background/on-demand gates, per-camera refresh dedup, in-place policy update, 28:30 PATCH, retry, one-minute stream/preload/producer reconcile и unload quiescence ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
-| [`fcm.py`](../../custom_components/elektronny_gorod/fcm.py) | `DoorbellFcmListener` (ADR-0011): эмуляция регистрации Android-устройства в FCM (`firebase-messaging`, Firebase-конфиг приложения в `const.py:FCM_*`) → привязка токена у оператора (`api.register_push_device`) → MTalk-сокет. Парсит `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → `SIGNAL_DOORBELL`. Весь флоу под graceful degradation (приватные API Google) — сбой не валит setup. FCM-creds персистятся в `entry.data` |
+| [`fcm.py`](../../custom_components/elektronny_gorod/fcm.py) | `DoorbellFcmListener` (ADR-0011): FCM register/bind/MTalk → `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → `SIGNAL_DOORBELL`. Весь флоу под graceful degradation; per-entry circuit breaker ограничивает fatal reconnect-loop, делает capped probes 15m/1h/6h/24h и ведёт persistent Repairs issue. Startup/watchdog/unload сериализованы; используется shared HA session; pre-start client не получает несовместимый `stop()`, а failed stop started-client сохраняет ссылку и блокирует replacement при unload. Owner claim/start выполняются после последнего fallible setup-await; surviving owner не заменяется, а entry загружается без realtime FCM и без setup-retry loop. Removal после failed unload повторяет stop; repeated failure сохраняет owner и требует restart. FCM-creds персистятся в `entry.data`, recovery-state — только in-memory |
 
 ### SIP / two-way audio (приём вызова + показ экрана)
 
@@ -253,7 +252,7 @@ elektronny-gorod/
 | [`tests/test_sensor_call_state.py`](../../tests/test_sensor_call_state.py) | `sensor.*_call_state` (Slice 3a): создание, дефолт `idle`, отражение `EVENT_CALL_STATE` (ringing/active + `started_at`/`call_id`), сброс `started_at` на `ended`, игнор чужого AC |
 | [`tests/test_api_push.py`](../../tests/test_api_push.py) | `register_push_device` / `unregister_push_device`: HAR 9.9 body split (`deviceType` только subscriberNotifications), DELETE без `pushToken`, graceful False |
 | [`tests/test_api_camera.py`](../../tests/test_api_camera.py) | HAR 9.9 live-stream contract: `LightStream=0&Format=H264` |
-| [`tests/test_fcm.py`](../../tests/test_fcm.py) | `DoorbellFcmListener`: парсинг `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` → SIGNAL, graceful degradation при недоступной `firebase-messaging` / сбое start, персист FCM-creds в `entry.data` |
+| [`tests/test_fcm.py`](../../tests/test_fcm.py) | `DoorbellFcmListener`: push parsing, graceful pre-start failure, watchdog state machine, capped backoff, quiet OPEN, named Repairs lifecycle, multi-entry isolation, startup/unload races, failed-stop retention/due probe и no-secret recovery output |
 | [`tests/test_sip_audio.py`](../../tests/test_sip_audio.py) | G.711 PCMU/PCMA ↔ PCM (A-81) |
 | [`tests/test_sip_stun.py`](../../tests/test_sip_stun.py) | STUN parse / keepalive (A-81) |
 | [`tests/test_sip_digest.py`](../../tests/test_sip_digest.py) | Digest MD5 non-qop golden vectors (A-81) |
@@ -303,7 +302,7 @@ Pytest CI настроен; актуальный локальный baseline и 
 
 **Python-зависимости:**
 - из HA core (`aiohttp`, `voluptuous`, `yarl`);
-- `manifest.json:requirements` — `firebase-messaging>=0.4` (FCM-приём события вызова, ADR-0011; тянет protobuf / http_ece / cryptography);
+- `manifest.json:requirements` — `firebase-messaging==0.4.5` (FCM-приём события вызова, ADR-0011; зафиксированная проверенная версия с shared `aiohttp` session; тянет protobuf / http_ece / cryptography);
 - `audioop-lts>=0.2.1` (только Python 3.13+) — `audioop` удалён из stdlib в PEP 594; нужен для `sip/audio.py` (G.711 транскод, A-81).
 
 ## Maintenance rules

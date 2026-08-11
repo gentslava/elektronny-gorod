@@ -1,7 +1,7 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-07-16 (go2rtc preload/producer lifecycle regressions,
-549-test backend suite and revised live acceptance synchronized)
+Last reviewed: 2026-08-11 (FCM circuit-breaker/Repairs regressions and
+579-test backend suite synchronized)
 
 Source files:
 - `tests/**` (54 test-модуля + `conftest.py`)
@@ -33,7 +33,7 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **549 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-07-16; 131 focused preload/manager tests + 151 related regressions) |
+| Локальный suite | **579 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-11) |
 | Test modules | 54 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
@@ -109,11 +109,17 @@ config-entry `VERSION`.
 
 ### 3. Init / migrations (`test_init.py`)
 
-- `test_setup_and_unload` — setup → unload.
-- `test_migration_v1_to_v2` — старый entry без `user_agent` → миграция → есть `user_agent` в data.
-- `test_migration_v2_to_v3` — старый entry без `use_go2rtc` → миграция → дефолты go2rtc.
-- `test_migration_chained_v1_to_v3` — v1 → v3 одним проходом.
-- `test_unload_releases_coordinator` — после unload `coordinator.async_unsubscribe` должен быть вызван (после фикса).
+- v1 → v3, v2 → v3 и актуальный v3 no-op без потери entry data.
+- Failed FCM stop блокирует обычный unload/reload и сохраняет owner.
+- Setup-unwind через HA core удаляет owner только после successful stop; failed
+  stop сохраняет его и блокирует replacement на следующей регистрации.
+- Surviving owner не заменяется: entry загружается с остальными платформами,
+  FCM остаётся degraded с Repairs и не создаёт HA setup-retry loop.
+- FCM claim/start отложены до последнего fallible setup-await.
+- Removal после failed unload повторяет stop старого owner; повторный failure
+  сохраняет ownership и возвращает HA `require_restart`.
+- Поздний FCM callback после terminal stop не публикует событие звонка.
+- Удаление entry очищает только его persistent FCM Repair до best-effort remote cleanup.
 
 ### 4. Coordinator (`test_coordinator_no_double_http.py` + entity regressions)
 
@@ -227,7 +233,14 @@ PATCH and go2rtc restart recovery within 60 seconds.
 
 ### 9. Realtime intercom (`test_fcm.py`, `test_sip_*.py`, `test_call_camera.py`)
 
-- FCM parse/reconnect/watchdog и dispatcher lifecycle.
+- FCM parsing и dispatcher lifecycle; bounded watchdog state machine
+  `HEALTHY → SUSPECT → VERIFYING → OPEN → VERIFYING → HEALTHY`.
+- Capped 15m/1h/6h/24h backoff, quiet OPEN до deadline, persistent Repairs
+  create/retain/delete, multi-entry isolation, removal cleanup и no-secret output.
+- Startup/check-in/operator-bind/watchdog/unload races serialized per entry;
+  pre-start clients are discarded without dependency `stop()`, while a failed
+  started-client stop retains ownership and blocks replacement on both ordinary
+  reload and setup-unwind.
 - REGISTER profile: FCM `Call-Id`, `Accept: application/sdp`, Contact push-params
   без лишнего `transport` parameter.
 - INVITE pre-answer: немедленный `100 Trying`; `200 OK` только в `accept()`.
@@ -281,7 +294,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 549 passed (2026-07-16).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 579 passed (2026-08-11).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

@@ -13,7 +13,8 @@
 ## File map
 
 - Modify `custom_components/elektronny_gorod/fcm.py` — per-entry state machine, bounded reconnect/probe schedule, Repairs helpers and recovery logging.
-- Modify `custom_components/elektronny_gorod/__init__.py` — remove the persistent FCM issue when the config entry is deleted.
+- Modify `custom_components/elektronny_gorod/__init__.py` — own the listener through config-entry unload and remove the persistent FCM issue when the entry is deleted.
+- Modify `custom_components/elektronny_gorod/const.py` — add the per-entry FCM listener registry key.
 - Modify `custom_components/elektronny_gorod/strings.json` — English source text for the Repairs issue.
 - Modify `custom_components/elektronny_gorod/translations/en.json` — English Repairs translation.
 - Modify `custom_components/elektronny_gorod/translations/ru.json` — Russian Repairs translation.
@@ -22,7 +23,6 @@
 - Modify `docs/audit/project-audit.md` — update A-80/A-86 with issue #77 and the bounded-recovery mitigation.
 - Modify `docs/architecture/overview.md` — document per-entry recovery state and degraded mode.
 - Modify `docs/testing/strategy.md` — record the new FCM regression scope.
-- Modify `docs/aidd/quality-gates.md` — record the fresh test baseline only after the full suite passes.
 - Modify `CHANGELOG.md` — add the user-visible fix under `Unreleased`.
 
 `manifest.json`, requirements, config-entry version, config flow, entity IDs and public README files remain unchanged.
@@ -34,7 +34,7 @@
 - Modify: `tests/test_fcm.py`
 - Modify: `custom_components/elektronny_gorod/fcm.py`
 
-- [ ] **Step 1: Make the listener fixture identify a real config entry**
+- [x] **Step 1: Make the listener fixture identify a real config entry**
 
 In `tests/test_fcm.py`, add explicit entry identity while preserving the existing two-value helper return:
 
@@ -66,7 +66,7 @@ def _listener(
 
 Keep all existing notification parsing and startup tests. Replace the old immediate-reconnect expectation with the bounded two-observation contract.
 
-- [ ] **Step 2: Write failing tests for SUSPECT and RETRYING**
+- [x] **Step 2: Write failing tests for SUSPECT and VERIFYING**
 
 Add focused tests:
 
@@ -103,7 +103,7 @@ async def test_watchdog_second_inactive_tick_reconnects_once(
         await listener._async_watchdog(NOW)
         await listener._async_watchdog(NOW + timedelta(minutes=2))
 
-    assert listener._recovery_phase is _FcmRecoveryPhase.RETRYING
+    assert listener._recovery_phase is _FcmRecoveryPhase.VERIFYING
     disconnect.assert_awaited_once()
     connect.assert_awaited_once()
 
@@ -112,7 +112,7 @@ async def test_healthy_replacement_resets_recovery_state(
     hass: HomeAssistant,
 ) -> None:
     listener, _ = _listener(hass)
-    listener._recovery_phase = _FcmRecoveryPhase.RETRYING
+    listener._recovery_phase = _FcmRecoveryPhase.VERIFYING
     listener._client = MagicMock()
     listener._client.is_started.return_value = True
 
@@ -121,7 +121,7 @@ async def test_healthy_replacement_resets_recovery_state(
     assert listener._recovery_phase is _FcmRecoveryPhase.HEALTHY
 ```
 
-- [ ] **Step 3: Run the focused tests and verify RED**
+- [x] **Step 3: Run the focused tests and verify RED**
 
 Run:
 
@@ -134,7 +134,7 @@ rtk env PYTHONPATH=. .venv/bin/pytest \
 
 Expected: collection or assertion failures because `_FcmRecoveryPhase` and the new state transitions do not exist yet.
 
-- [ ] **Step 4: Add explicit phases and state fields**
+- [x] **Step 4: Add explicit phases and state fields**
 
 In `fcm.py`, change the datetime import and add the enum:
 
@@ -146,9 +146,8 @@ from enum import StrEnum
 class _FcmRecoveryPhase(StrEnum):
     HEALTHY = "healthy"
     SUSPECT = "suspect"
-    RETRYING = "retrying"
+    VERIFYING = "verifying"
     OPEN = "open"
-    PROBING = "probing"
 ```
 
 Add these fields to `DoorbellFcmListener.__init__`:
@@ -161,7 +160,7 @@ self._backoff_index = 0
 
 The explicit `SUSPECT` phase is the first inactive observation; a separate counter is unnecessary.
 
-- [ ] **Step 5: Replace immediate reconnect with state transitions**
+- [x] **Step 5: Replace immediate reconnect with state transitions**
 
 Add these helpers before `_async_watchdog`:
 
@@ -170,9 +169,8 @@ Add these helpers before `_async_watchdog`:
 def _async_mark_healthy(self) -> None:
     """Reset transient recovery state after a confirmed healthy tick."""
     recovered = self._recovery_phase in {
-        _FcmRecoveryPhase.RETRYING,
+        _FcmRecoveryPhase.VERIFYING,
         _FcmRecoveryPhase.OPEN,
-        _FcmRecoveryPhase.PROBING,
     }
     self._recovery_phase = _FcmRecoveryPhase.HEALTHY
     self._next_probe_at = None
@@ -180,13 +178,13 @@ def _async_mark_healthy(self) -> None:
     if recovered:
         LOGGER.info("FCM: push-receiver восстановлен")
 
-async def _async_reconnect(self, phase: _FcmRecoveryPhase) -> None:
+async def _async_reconnect(self) -> None:
     """Perform one guarded disconnect/connect cycle."""
     self._reconnecting = True
     try:
         await self._async_disconnect()
         await self._async_connect()
-        self._recovery_phase = phase
+        self._recovery_phase = _FcmRecoveryPhase.VERIFYING
     finally:
         self._reconnecting = False
 ```
@@ -212,12 +210,14 @@ async def _async_watchdog(self, _now: datetime | None = None) -> None:
         LOGGER.warning(
             "FCM: push-receiver неактивен — выполняю одну попытку восстановления"
         )
-        await self._async_reconnect(_FcmRecoveryPhase.RETRYING)
+        await self._async_reconnect()
 ```
 
-Task 2 completes the `RETRYING`, `OPEN` and `PROBING` branches. Do not inspect dependency-private exceptions or log text.
+Task 2 completes the shared `VERIFYING` and `OPEN` branches. The same
+verification phase follows both the immediate reconnect and scheduled probes;
+do not inspect dependency-private exceptions or log text.
 
-- [ ] **Step 6: Run all FCM tests and verify GREEN**
+- [x] **Step 6: Run all FCM tests and verify GREEN**
 
 Run:
 
@@ -227,7 +227,7 @@ rtk env PYTHONPATH=. .venv/bin/pytest tests/test_fcm.py -q
 
 Expected: all existing parsing/start tests plus the three new state tests pass. The replaced legacy watchdog test must now use two inactive ticks.
 
-- [ ] **Step 7: Commit the state-machine foundation**
+- [x] **Step 7: Commit the state-machine foundation**
 
 ```bash
 rtk git add tests/test_fcm.py custom_components/elektronny_gorod/fcm.py
@@ -244,7 +244,7 @@ rtk git commit -m "fix: bound immediate FCM reconnect attempts"
 - Modify: `custom_components/elektronny_gorod/translations/en.json`
 - Modify: `custom_components/elektronny_gorod/translations/ru.json`
 
-- [ ] **Step 1: Write failing tests for OPEN and the first 15-minute deadline**
+- [x] **Step 1: Write failing tests for OPEN and the first 15-minute deadline**
 
 Add imports and assertions using the real HA issue registry:
 
@@ -268,7 +268,7 @@ async def test_inactive_replacement_opens_circuit_and_creates_issue(
     client.is_started.return_value = False
     client.stop = AsyncMock()
     listener._client = client
-    listener._recovery_phase = _FcmRecoveryPhase.RETRYING
+    listener._recovery_phase = _FcmRecoveryPhase.VERIFYING
 
     await listener._async_watchdog(NOW)
 
@@ -279,13 +279,13 @@ async def test_inactive_replacement_opens_circuit_and_creates_issue(
         DOMAIN, fcm_repair_issue_id("entry-1")
     )
     assert issue is not None
-    assert issue.severity is ir.IssueSeverity.WARNING
+    assert issue.severity is ir.IssueSeverity.ERROR
     assert issue.is_fixable is False
     assert issue.is_persistent is True
     assert issue.translation_placeholders == {"entry_title": "Аккаунт 1"}
 ```
 
-- [ ] **Step 2: Write failing tests for quiet OPEN ticks and capped backoff**
+- [x] **Step 2: Write failing tests for quiet OPEN ticks and capped backoff**
 
 Cover both no-op polling and the full sequence:
 
@@ -322,9 +322,8 @@ async def test_failed_probes_advance_and_cap_backoff(
 
     observed: list[timedelta] = []
     for _ in range(5):
-        await listener._async_open_circuit(NOW)
+        listener._async_open_circuit(NOW)
         observed.append(listener._next_probe_at - NOW)
-        listener._recovery_phase = _FcmRecoveryPhase.PROBING
 
     assert FCM_RETRY_BACKOFFS == (
         timedelta(minutes=15),
@@ -341,14 +340,23 @@ async def test_failed_probes_advance_and_cap_backoff(
     ]
 ```
 
-- [ ] **Step 3: Write a failing test for probe confirmation and issue removal**
+- [x] **Step 3: Write a failing test for probe confirmation and issue removal**
 
 ```python
 async def test_successful_probe_removes_issue_only_on_next_healthy_tick(
     hass: HomeAssistant,
 ) -> None:
     listener, _ = _listener(hass)
-    listener._async_create_repair_issue()
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        fcm_repair_issue_id("entry-1"),
+        is_fixable=False,
+        is_persistent=True,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="fcm_receiver_unavailable",
+        translation_placeholders={"entry_title": self._entry.title},
+    )
     listener._recovery_phase = _FcmRecoveryPhase.OPEN
     listener._next_probe_at = NOW
     healthy = MagicMock()
@@ -365,7 +373,7 @@ async def test_successful_probe_removes_issue_only_on_next_healthy_tick(
 
     registry = ir.async_get(hass)
     issue_id = fcm_repair_issue_id("entry-1")
-    assert listener._recovery_phase is _FcmRecoveryPhase.PROBING
+    assert listener._recovery_phase is _FcmRecoveryPhase.VERIFYING
     assert registry.async_get_issue(DOMAIN, issue_id) is not None
 
     await listener._async_watchdog(NOW + timedelta(minutes=2))
@@ -374,7 +382,7 @@ async def test_successful_probe_removes_issue_only_on_next_healthy_tick(
     assert registry.async_get_issue(DOMAIN, issue_id) is None
 ```
 
-- [ ] **Step 4: Run the new tests and verify RED**
+- [x] **Step 4: Run the new tests and verify RED**
 
 Run:
 
@@ -382,9 +390,10 @@ Run:
 rtk env PYTHONPATH=. .venv/bin/pytest tests/test_fcm.py -q
 ```
 
-Expected: failures for missing backoff constants, Repairs helpers and OPEN/PROBING behavior.
+Expected: failures for missing backoff constants, Repairs helpers and
+OPEN/VERIFYING behavior.
 
-- [ ] **Step 5: Add backoff constants and Repairs helpers**
+- [x] **Step 5: Add backoff constants and Repairs helpers**
 
 In `fcm.py`, import the registry and HA UTC helper, and add `DOMAIN` to the existing const import:
 
@@ -416,46 +425,31 @@ def async_delete_fcm_repair_issue(
     ir.async_delete_issue(hass, DOMAIN, fcm_repair_issue_id(entry_id))
 ```
 
-Initialize the cached issue flag without writing the registry:
-
-```python
-self._repair_issue_active = (
-    ir.async_get(hass).async_get_issue(
-        DOMAIN, fcm_repair_issue_id(entry.entry_id)
-    )
-    is not None
-)
-```
-
-Add the creation and open helpers:
+Add the open helper. The HA issue registry is the source of truth and already
+deduplicates unchanged `async_create_issue` calls, so no parallel boolean flag
+is maintained:
 
 ```python
 @callback
-def _async_create_repair_issue(self) -> None:
-    if self._repair_issue_active:
+def _async_open_circuit(self, now: datetime) -> None:
+    """Schedule one later probe and expose the persistent Repairs issue."""
+    if self._stopping:
         return
-    ir.async_create_issue(
-        self._hass,
-        DOMAIN,
-        fcm_repair_issue_id(self._entry.entry_id),
-        is_fixable=False,
-        is_persistent=True,
-        severity=ir.IssueSeverity.WARNING,
-        translation_key="fcm_receiver_unavailable",
-        translation_placeholders={"entry_title": self._entry.title},
-    )
-    self._repair_issue_active = True
-
-async def _async_open_circuit(self, now: datetime) -> None:
-    """Stop the failed client and schedule one later probe."""
-    await self._async_disconnect()
     delay = FCM_RETRY_BACKOFFS[self._backoff_index]
     self._backoff_index = min(
         self._backoff_index + 1, len(FCM_RETRY_BACKOFFS) - 1
     )
     self._next_probe_at = now + delay
     self._recovery_phase = _FcmRecoveryPhase.OPEN
-    self._async_create_repair_issue()
+    ir.async_create_issue(
+        self._hass,
+        DOMAIN,
+        fcm_repair_issue_id(self._entry.entry_id),
+        is_fixable=False,
+        is_persistent=True,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="fcm_receiver_unavailable",
+    )
     LOGGER.warning(
         "FCM: частые попытки восстановления приостановлены; "
         "следующая проверка через %s",
@@ -463,15 +457,14 @@ async def _async_open_circuit(self, now: datetime) -> None:
     )
 ```
 
-Extend `_async_mark_healthy` so it deletes an active issue only on the confirmed healthy tick:
+Extend `_async_mark_healthy` so it idempotently deletes the issue only on the
+confirmed healthy tick:
 
 ```python
-if self._repair_issue_active:
-    async_delete_fcm_repair_issue(self._hass, self._entry.entry_id)
-    self._repair_issue_active = False
+async_delete_fcm_repair_issue(self._hass, self._entry.entry_id)
 ```
 
-- [ ] **Step 6: Complete the OPEN and PROBING watchdog branches**
+- [x] **Step 6: Complete the OPEN and VERIFYING watchdog branches**
 
 Use the callback timestamp when supplied and HA UTC otherwise:
 
@@ -482,28 +475,27 @@ if self._recovery_phase is _FcmRecoveryPhase.OPEN:
     if self._next_probe_at is not None and now < self._next_probe_at:
         return
     LOGGER.info("FCM: выполняю пробную попытку восстановления")
-    await self._async_reconnect(_FcmRecoveryPhase.PROBING)
+    if not await self._async_reconnect():
+        self._async_open_circuit(now)
     return
 
-if self._recovery_phase in {
-    _FcmRecoveryPhase.RETRYING,
-    _FcmRecoveryPhase.PROBING,
-}:
-    await self._async_open_circuit(now)
+if self._recovery_phase is _FcmRecoveryPhase.VERIFYING:
+    await self._async_disconnect()
+    self._async_open_circuit(now)
     return
 ```
 
 Place these branches after the healthy-client check and before the HEALTHY/SUSPECT branches. `_async_connect()` already contains setup exceptions, so a failed probe remains inside the watchdog boundary.
 
-- [ ] **Step 7: Add the user-facing Repairs translations**
+- [x] **Step 7: Add the user-facing Repairs translations**
 
 Add this top-level object to both `strings.json` and `translations/en.json`:
 
 ```json
 "issues": {
   "fcm_receiver_unavailable": {
-    "title": "Doorbell notifications are temporarily unavailable",
-    "description": "Realtime doorbell notifications for {entry_title} are temporarily unavailable. The integration stopped frequent reconnection attempts to prevent repeated log errors. Cameras, locks, balance, history, and other features continue to work. The connection will be retried automatically. Reload the integration to try immediately. If the problem returns, reconnect the same account."
+    "title": "Doorbell notifications are unavailable for {entry_title}",
+    "description": "Realtime doorbell notifications for {entry_title} are temporarily unavailable. The integration stopped frequent reconnection attempts to prevent repeated log errors. Cameras, locks, balance, history, and other features continue to work. Reload this account to try again. If the problem returns, reconnect it."
   }
 }
 ```
@@ -513,15 +505,15 @@ Add the matching object to `translations/ru.json`:
 ```json
 "issues": {
   "fcm_receiver_unavailable": {
-    "title": "Уведомления о звонках временно недоступны",
-    "description": "Уведомления о звонках для аккаунта «{entry_title}» временно недоступны. Интеграция несколько раз не смогла запустить канал уведомлений и приостановила частые попытки, чтобы не заполнять журнал ошибками. Камеры, замки, баланс, история и остальные функции продолжают работать. Подключение будет проверяться автоматически. Чтобы попробовать сразу, перезагрузите интеграцию. Если ошибка повторяется, подключите этот аккаунт заново."
+    "title": "Уведомления о звонках недоступны: {entry_title}",
+    "description": "Уведомления о звонках для аккаунта {entry_title} временно недоступны. Интеграция приостановила частые попытки подключения, чтобы не заполнять журнал ошибками. Камеры, замки, баланс, история и остальные функции продолжают работать. Перезагрузите этот аккаунт, чтобы попробовать снова. Если ошибка повторяется, переподключите его."
   }
 }
 ```
 
 Preserve valid JSON commas and the existing top-level ordering.
 
-- [ ] **Step 8: Run the FCM tests and JSON validation**
+- [x] **Step 8: Run the FCM tests and JSON validation**
 
 Run:
 
@@ -534,7 +526,7 @@ rtk python -m json.tool custom_components/elektronny_gorod/translations/ru.json
 
 Expected: all FCM tests pass and all three JSON commands exit successfully.
 
-- [ ] **Step 9: Commit backoff, Repairs and translations**
+- [x] **Step 9: Commit backoff, Repairs and translations**
 
 ```bash
 rtk git add \
@@ -554,7 +546,7 @@ rtk git commit -m "fix: pause repeated FCM failures per account"
 - Modify: `tests/test_init.py`
 - Modify: `custom_components/elektronny_gorod/__init__.py`
 
-- [ ] **Step 1: Add a failing multi-account isolation test**
+- [x] **Step 1: Add a failing multi-account isolation test**
 
 Create two listeners with distinct entry IDs. Open only the failing listener and keep the second healthy:
 
@@ -564,7 +556,7 @@ async def test_recovery_state_and_issue_are_isolated_per_entry(
 ) -> None:
     failing, _ = _listener(hass, entry_id="entry-a", title="Аккаунт A")
     healthy, _ = _listener(hass, entry_id="entry-b", title="Аккаунт B")
-    failing._recovery_phase = _FcmRecoveryPhase.RETRYING
+    failing._recovery_phase = _FcmRecoveryPhase.VERIFYING
     failing._client = MagicMock()
     failing._client.is_started.return_value = False
     failing._client.stop = AsyncMock()
@@ -585,7 +577,7 @@ async def test_recovery_state_and_issue_are_isolated_per_entry(
     assert healthy._recovery_phase is _FcmRecoveryPhase.HEALTHY
 ```
 
-- [ ] **Step 2: Add lifecycle tests for startup failure and idempotent stop**
+- [x] **Step 2: Add lifecycle tests for startup failure and idempotent stop**
 
 Keep `test_async_start_graceful_on_error` and extend lifecycle coverage:
 
@@ -621,7 +613,7 @@ async def test_async_stop_is_idempotent_while_circuit_open(
 
 The OPEN issue must survive ordinary unload/reload until a healthy tick; `async_stop()` therefore does not delete it.
 
-- [ ] **Step 3: Add a secret-safety regression**
+- [x] **Step 3: Add a secret-safety regression**
 
 Use deliberately recognizable secret values and assert they appear neither in logs nor issue placeholders:
 
@@ -634,7 +626,7 @@ async def test_recovery_logs_and_issue_do_not_expose_credentials(
         "fcm_credentials": {"token": "FCM-CREDENTIAL-SECRET"}
     }
     listener.fcm_token = "FCM-PUSH-TOKEN-SECRET"
-    listener._recovery_phase = _FcmRecoveryPhase.RETRYING
+    listener._recovery_phase = _FcmRecoveryPhase.VERIFYING
 
     await listener._async_watchdog(NOW)
 
@@ -649,7 +641,7 @@ async def test_recovery_logs_and_issue_do_not_expose_credentials(
 
 This exercises only integration-owned output. The dependency's original traceback is outside the integration logger and is bounded by the circuit breaker.
 
-- [ ] **Step 4: Add a failing config-entry removal test**
+- [x] **Step 4: Add a failing config-entry removal test**
 
 In `tests/test_init.py`, import `async_remove_entry`, `issue_registry`, `UserAgent` and the issue helper, then add:
 
@@ -686,9 +678,8 @@ async def test_remove_entry_deletes_fcm_repair_issue(
         issue_id,
         is_fixable=False,
         is_persistent=True,
-        severity=ir.IssueSeverity.WARNING,
+        severity=ir.IssueSeverity.ERROR,
         translation_key="fcm_receiver_unavailable",
-        translation_placeholders={"entry_title": entry.title},
     )
 
     await async_remove_entry(hass, entry)
@@ -697,7 +688,7 @@ async def test_remove_entry_deletes_fcm_repair_issue(
     mock_remove_entry_api.return_value.unregister_push_device.assert_awaited_once()
 ```
 
-- [ ] **Step 5: Run the lifecycle tests and verify RED**
+- [x] **Step 5: Run the lifecycle tests and verify RED**
 
 Run:
 
@@ -707,7 +698,7 @@ rtk env PYTHONPATH=. .venv/bin/pytest tests/test_fcm.py tests/test_init.py -q
 
 Expected: only the removal-cleanup test fails because `async_remove_entry` does not yet delete the issue. Any other failure indicates a circuit-breaker lifecycle bug and must be fixed before proceeding.
 
-- [ ] **Step 6: Delete the per-entry issue before best-effort remote cleanup**
+- [x] **Step 6: Delete the per-entry issue before best-effort remote cleanup**
 
 Change the import in `__init__.py`:
 
@@ -723,7 +714,7 @@ async_delete_fcm_repair_issue(hass, entry.entry_id)
 
 This local cleanup is deterministic and must not be skipped if the operator unregister request or stored user-agent parsing fails.
 
-- [ ] **Step 7: Run both test modules and verify GREEN**
+- [x] **Step 7: Run both test modules and verify GREEN**
 
 ```bash
 rtk env PYTHONPATH=. .venv/bin/pytest tests/test_fcm.py tests/test_init.py -q
@@ -731,7 +722,7 @@ rtk env PYTHONPATH=. .venv/bin/pytest tests/test_fcm.py tests/test_init.py -q
 
 Expected: all tests pass with no pending-task or cleanup warnings.
 
-- [ ] **Step 8: Commit lifecycle and isolation coverage**
+- [x] **Step 8: Commit lifecycle and isolation coverage**
 
 ```bash
 rtk git add \
@@ -750,19 +741,19 @@ rtk git commit -m "test: cover isolated FCM recovery lifecycle"
 - Modify: `docs/testing/strategy.md`
 - Modify: `CHANGELOG.md`
 
-- [ ] **Step 1: Update A-80 and A-86 without creating a duplicate finding**
+- [x] **Step 1: Update A-80 and A-86 without creating a duplicate finding**
 
 In `docs/audit/project-audit.md`:
 
-- add issue #77 as field evidence under A-80: `firebase-messaging 0.4.5` can terminate the client on malformed Base64URL encryption headers;
+- add issue #77 as field evidence under A-80: `firebase-messaging` can terminate the client on malformed Base64URL encryption headers;
 - explain that the external parsing defect remains upstream, while retry amplification is mitigated locally;
 - amend A-86 so the old immediate watchdog recovery is described as bounded by a per-entry circuit breaker;
-- record the 15m → 1h → 6h → 24h probe schedule, persistent warning Repair, confirmed-healthy cleanup and independent multi-account behavior;
+- record the 15m → 1h → 6h → 24h probe schedule, persistent per-entry error Repair, confirmed-healthy cleanup and independent multi-account behavior;
 - replace the old fixed `9 tests` evidence with the actual test count obtained after Task 3.
 
 Do not mark the upstream dependency bug resolved.
 
-- [ ] **Step 2: Update the architecture overview**
+- [x] **Step 2: Update the architecture overview**
 
 In `docs/architecture/overview.md`:
 
@@ -770,17 +761,17 @@ In `docs/architecture/overview.md`:
 - add `DoorbellFcmListener` phase, backoff index and next-probe deadline to the state-management table with TTL `listener session; reset on reload/restart`;
 - update weak point 6 to state that private Google API compatibility is still not guaranteed, but failures no longer cause an unbounded two-minute restart loop.
 
-- [ ] **Step 3: Update the testing strategy**
+- [x] **Step 3: Update the testing strategy**
 
 In `docs/testing/strategy.md`, replace `FCM parse/reconnect/watchdog` with an explicit list covering:
 
 - notification parsing and dispatcher lifecycle;
-- SUSPECT → RETRYING → OPEN → PROBING → HEALTHY transitions;
+- SUSPECT → VERIFYING → OPEN → VERIFYING → HEALTHY transitions;
 - 15m/1h/6h/24h capped backoff and quiet pre-deadline ticks;
 - persistent Repairs create/retain/delete behavior;
 - multi-entry isolation, removal cleanup and no-secret output.
 
-- [ ] **Step 4: Add the Unreleased changelog entry**
+- [x] **Step 4: Add the Unreleased changelog entry**
 
 Under `## [Unreleased]`, add:
 
@@ -795,7 +786,7 @@ Under `## [Unreleased]`, add:
   Камеры, замки, баланс, история и остальные аккаунты продолжают работать.
 ```
 
-- [ ] **Step 5: Review the documentation diff and commit it**
+- [x] **Step 5: Review the documentation diff and commit it**
 
 Run:
 
@@ -822,10 +813,9 @@ rtk git commit -m "docs: document bounded FCM recovery"
 
 **Files:**
 
-- Modify: `docs/aidd/quality-gates.md`
-- Modify: `docs/testing/strategy.md` only if its suite count is stored there
+- Modify: `docs/testing/strategy.md`
 
-- [ ] **Step 1: Run focused FCM and lifecycle tests**
+- [x] **Step 1: Run focused FCM and lifecycle tests**
 
 ```bash
 rtk env PYTHONPATH=. .venv/bin/pytest tests/test_fcm.py tests/test_init.py -q
@@ -833,7 +823,7 @@ rtk env PYTHONPATH=. .venv/bin/pytest tests/test_fcm.py tests/test_init.py -q
 
 Expected: all focused tests pass.
 
-- [ ] **Step 2: Run the full backend suite**
+- [x] **Step 2: Run the full backend suite**
 
 ```bash
 rtk env PYTHONPATH=. .venv/bin/pytest tests/ -q
@@ -841,7 +831,7 @@ rtk env PYTHONPATH=. .venv/bin/pytest tests/ -q
 
 Expected: the entire suite passes with no failures, errors, leaked tasks or cleanup warnings. Record the exact passed-test count from this run; do not reuse the old baseline.
 
-- [ ] **Step 3: Run formatting, translation and secret-output checks**
+- [x] **Step 3: Run formatting, translation and secret-output checks**
 
 ```bash
 rtk git diff --check
@@ -855,11 +845,14 @@ rtk rg -n 'LOGGER\..*(fcm_token|CONF_FCM_CREDENTIALS|entry\.data|headers)' \
 
 Expected: diff and JSON checks succeed; the `rg` command prints no matches.
 
-- [ ] **Step 4: Update the quality-gate evidence**
+- [x] **Step 4: Update the test evidence**
 
-In `docs/aidd/quality-gates.md`, update `Last reviewed` with date `2026-08-10`, the exact backend suite count, and a short note that bounded FCM recovery regressions were added. If `docs/testing/strategy.md` states a suite count, update it to the same number.
+Update `docs/testing/strategy.md` with the exact backend suite count and a short
+note that bounded FCM recovery regressions were added. Synchronize the compact
+test baselines in `docs/summary.md`, `docs/aidd/quality-gates.md`, and the audit
+header as required by the project maintenance contract.
 
-- [ ] **Step 5: Perform final self-review against the approved design**
+- [x] **Step 5: Perform final self-review against the approved design**
 
 Check every invariant:
 
@@ -871,12 +864,19 @@ Check every invariant:
 - issue ID and runtime state are independent per `entry_id`;
 - ordinary unload preserves the persistent issue, confirmed health removes it, entry removal cleans it unconditionally;
 - `client.start()` alone does not remove the issue;
-- no credential, token, header, payload, phone number or full `entry.data` is logged or placed in Repairs.
+- stop during check-in or operator bind cannot start a client or leave a timer;
+- a dependency `stop()` failure retains the client reference, blocks config-entry unload/reload and cannot create a replacement;
+- owner claim and network start happen after the last fallible setup await;
+- a surviving owner is never replaced: only FCM degrades, the entry remains loaded, Repairs is shown, and no HA setup-retry loop starts;
+- setup cleanup and normal unload release ownership only after confirmed stop;
+- removal after a failed unload retries retained-owner stop; another failure keeps ownership and HA reports that restart is required;
+- a late dependency callback after terminal stop cannot publish a doorbell event;
+- no credential, token, header, payload, phone number or full `entry.data` is logged or placed in Repairs; the only placeholder is the config-entry title.
 
-- [ ] **Step 6: Commit final verification evidence**
+- [x] **Step 6: Commit final verification evidence**
 
 ```bash
-rtk git add docs/aidd/quality-gates.md docs/testing/strategy.md
+rtk git add docs/testing/strategy.md
 rtk git commit -m "docs: record FCM recovery quality gate"
 rtk git status --short
 ```
@@ -885,11 +885,11 @@ Expected: the commit succeeds and the final status is clean.
 
 ## Acceptance checklist
 
-- [ ] A poison or otherwise fatal FCM message can produce only a bounded initial failure sequence for its config entry.
-- [ ] A transient network failure still receives one automatic recovery attempt and later automatic probes.
-- [ ] OPEN performs no FCM reconnect before its deadline and owns no additional timer/task.
-- [ ] Other config entries and non-FCM integration features remain operational.
-- [ ] Home Assistant Repairs shows one localized warning for the affected entry.
-- [ ] The warning survives unload/reload, disappears after a confirmed healthy tick, and is removed with the entry.
-- [ ] Focused and full pytest suites pass.
-- [ ] Audit, architecture, testing, quality-gate and changelog sources are synchronized.
+- [x] A poison or otherwise fatal FCM message can produce only a bounded initial failure sequence for its config entry.
+- [x] A transient network failure still receives one automatic recovery attempt and later automatic probes.
+- [x] OPEN performs no FCM reconnect before its deadline and owns no additional timer/task.
+- [x] Other config entries and non-FCM integration features remain operational.
+- [x] Home Assistant Repairs shows one localized error naming the affected entry.
+- [x] The issue survives unload/reload, disappears after a confirmed healthy tick, and is removed with the entry.
+- [x] Focused and full pytest suites pass.
+- [x] Audit, architecture, testing and changelog sources are synchronized.
