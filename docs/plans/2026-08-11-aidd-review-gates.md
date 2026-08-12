@@ -1,6 +1,6 @@
-Status: In review
+Status: Pending approval
 Owner: Root orchestrator
-Last reviewed: 2026-08-11 (revision 2 after independent critic findings)
+Last reviewed: 2026-08-11 (revision 3 after second independent critic pass)
 
 Source files:
 - `docs/decisions/0015-independent-review-candidate.md`
@@ -26,13 +26,12 @@ Quality gates:
 
 ## Approval record
 
-- **Revision:** 2.
-- **Approver:** @gentslava.
-- **Date:** 2026-08-11.
-- **Evidence:** direct session approval to separate product PR #78 from the
-  process/tooling changes, move portable artifacts to `docs/specs` and
-  `docs/plans`, consolidate the iterative review ADRs, deduplicate hooks, and
-  run independent reviewers/critics automatically.
+- **Revision:** 3.
+- **Approver:** pending direct approval from @gentslava.
+- **Date:** pending.
+- **Evidence:** revision 3 must be presented in full and approved directly in
+  the current session before its remaining remediation tasks start; the exact
+  reply will be quoted in durable PR evidence.
 - **Execution mode:** subagent-driven implementation/review where isolated
   ownership is useful; root orchestrator owns integration and publication.
 
@@ -51,7 +50,7 @@ adapters, without coupling this process remediation to the FCM product fix.
 - One canonical secret-log scanner and one canonical audit-reconciliation hook;
   tool-specific wrappers contain no duplicate logic.
 - Regression tests for scanner, reconciliation and cross-tool invariants.
-- A product-only PR #78 plus a stacked `chore/aidd-review-gates` PR.
+- A product-only PR #78 plus a separate stacked process/tooling PR.
 
 ## Non-goals
 
@@ -74,13 +73,20 @@ non-participation in implementation, and reissue a verdict after any change.
 ## Tasks
 
 - [x] Separate product commits from AIDD/process changes.
-- [x] Consolidate ADR-0015..0018 into final ADR-0015 semantics.
+- [x] Consolidate the iterative review decisions into final ADR-0015 semantics.
 - [x] Move portable specs/plans into repository-owned `docs/` directories.
 - [x] Deduplicate Claude/Codex hooks around canonical implementations.
 - [x] Add deterministic secret-log and reconciliation regressions.
 - [x] Synchronize active Claude/Codex profiles and operational adapters.
 - [x] Bind release checks to PR head SHA and support stacked `<target-ref>`.
 - [x] Reconcile hook/tool/roadmap docs and remove tool-specific plan mandates.
+- [ ] Recheck PR `headRefOid` after `gh pr checks --watch` to close the
+  stale-head race.
+- [ ] Remove stale `READY_FOR_RELEASE`/Silver claims from roadmap summaries.
+- [ ] Extend portability regression coverage to feature-local plans and finish
+  metadata/`Next reading` for the new plan.
+- [ ] Rewrite the two commit messages with real paragraph breaks while
+  preserving the exact final tree.
 - [ ] Freeze the remediated clean candidate and obtain new process/docs/QA/
   security verdicts on the same tuple.
 - [ ] Publish the stacked branch, add durable review evidence and wait for CI.
