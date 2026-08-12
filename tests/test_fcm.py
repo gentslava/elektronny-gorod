@@ -15,6 +15,8 @@ from homeassistant.helpers import issue_registry as ir
 
 from custom_components.elektronny_gorod.const import DOMAIN, LOGGER, SIGNAL_DOORBELL
 from custom_components.elektronny_gorod.fcm import (
+    FCM_ABORT_AFTER_ERRORS,
+    FCM_RETRY_BACKOFFS,
     DoorbellFcmListener,
     _FcmRecoveryPhase,
     async_delete_fcm_repair_issue,
@@ -249,8 +251,13 @@ async def test_import_failure_does_not_log_exception_message(
     assert "ImportError" in caplog.text
 
 
-async def test_async_start_disables_abort_count(hass: HomeAssistant):
-    """abort_on_sequential_error_count=None — receiver не умирает после N ошибок."""
+async def test_async_start_keeps_finite_abort_count(hass: HomeAssistant):
+    """Предохранитель библиотеки конечен: иначе _listen зацикливается (#77).
+
+    При `None` проверка в `_try_increment_error_count` всегда ложна, `_terminate()`
+    недостижим, и библиотека бесконечно перечитывает мёртвый StreamReader, печатая
+    растущий traceback в общем event loop.
+    """
     listener, _ = _listener(hass)
     fake_client = MagicMock()
     fake_client.checkin_or_register = AsyncMock(return_value="T")
@@ -260,8 +267,54 @@ async def test_async_start_disables_abort_count(hass: HomeAssistant):
          patch("firebase_messaging.FcmRegisterConfig"), \
          patch("firebase_messaging.FcmPushClientConfig") as cfg_cls:
         await listener.async_start()
-        cfg_cls.assert_called_once_with(abort_on_sequential_error_count=None)
+        cfg_cls.assert_called_once_with(
+            abort_on_sequential_error_count=FCM_ABORT_AFTER_ERRORS
+        )
         await listener.async_stop()
+
+    assert FCM_ABORT_AFTER_ERRORS is not None
+    assert FCM_ABORT_AFTER_ERRORS > 0
+
+
+async def test_library_terminated_receiver_enters_bounded_recovery(
+    hass: HomeAssistant,
+) -> None:
+    """Регрессия #77: клиент, погашенный предохранителем, доходит до OPEN.
+
+    Так выглядит receiver после `_terminate()`: объект жив, но `is_started()`
+    False. Именно этот путь раньше был недостижим при `abort=None`.
+    """
+    listener, _ = _listener(hass)
+    terminated = MagicMock()
+    terminated.is_started.return_value = False
+    terminated.stop = AsyncMock()
+    listener._client = terminated
+
+    replacement = MagicMock()
+    replacement.is_started.return_value = False
+    replacement.checkin_or_register = AsyncMock(return_value="T")
+    replacement.start = AsyncMock()
+    replacement.stop = AsyncMock()
+
+    with (
+        patch("firebase_messaging.FcmPushClient", return_value=replacement),
+        patch("firebase_messaging.FcmRegisterConfig"),
+        patch("firebase_messaging.FcmPushClientConfig"),
+    ):
+        await listener._async_watchdog(NOW)
+        assert listener._recovery_phase is _FcmRecoveryPhase.SUSPECT
+
+        await listener._async_watchdog(NOW + timedelta(minutes=2))
+        assert listener._recovery_phase is _FcmRecoveryPhase.VERIFYING
+        terminated.stop.assert_awaited_once()
+
+        await listener._async_watchdog(NOW + timedelta(minutes=4))
+
+    assert listener._recovery_phase is _FcmRecoveryPhase.OPEN
+    assert listener._next_probe_at == NOW + timedelta(minutes=4) + FCM_RETRY_BACKOFFS[0]
+    assert ir.async_get(hass).async_get_issue(
+        DOMAIN, fcm_repair_issue_id("entry-1")
+    ) is not None
 
 
 async def test_watchdog_first_inactive_tick_only_observes(

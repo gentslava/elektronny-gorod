@@ -27,6 +27,30 @@ observes inactive receiver → unbounded client recreation → repeated dependen
 traceback. This design contains that amplification; it does not claim to fix
 the upstream parser.
 
+### Second failure mode: the disabled dependency fuse
+
+Field evidence from 2026-08-12 shows a different shape of the same issue: Home
+Assistant becomes unresponsive while the log fills with one repeating traceback
+`_listen → _receive_msg → readexactly → raise self._exception`, whose frame list
+grows on every repetition.
+
+That path is invisible to the watchdog. The integration previously passed
+`abort_on_sequential_error_count=None`, which makes the guard in
+`_try_increment_error_count` (`fcmpushclient.py:568`) permanently false and
+`_terminate()` unreachable. The `while self.do_listen` loop in `_listen` then
+re-reads a dead `StreamReader`; `readexactly` re-raises the single stored
+`_exception` object, appending a frame to its traceback each time, and the
+dependency prints the whole thing through `_logger.exception` on every
+iteration. The loop runs in the shared event loop, so Home Assistant starves and
+traceback formatting degrades quadratically. Meanwhile `run_state` returns to
+`STARTED` after each successful login (`fcmpushclient.py:600`), so
+`is_started()` — which is exactly `run_state == STARTED` (`fcmpushclient.py:790`)
+— keeps reporting a healthy receiver and the circuit never opens.
+
+The bounded state machine below is therefore necessary but not sufficient. It
+only engages once the dependency has actually stopped its client, which requires
+the dependency's own fuse to remain enabled.
+
 ## Goals
 
 1. Stop unbounded FCM restart and traceback loops per config entry.
@@ -56,6 +80,26 @@ timer owned by `DoorbellFcmListener`.
 
 Each listener instance owns its own state, so one failing account cannot stop or
 delay FCM for another account.
+
+### Keep the dependency fuse enabled
+
+`abort_on_sequential_error_count` stays finite (`FCM_ABORT_AFTER_ERRORS = 3`,
+the dependency default). The integration must not disable it.
+
+It was disabled on 2026-06-24 because a terminated receiver died silently and
+the user never learned that doorbell calls had stopped. This design removes that
+reason: the watchdog restarts a stopped client, the circuit breaker bounds how
+often, and Repairs tells the user. A finite fuse converts the invisible
+event-loop starvation described above into the visible `is_started() == False`
+state the state machine is built to handle.
+
+The fuse does not misfire on a healthy socket.
+`_reset_error_count(ErrorType.CONNECTION)` runs at the end of `_handle_message`
+(`fcmpushclient.py:619`), after the early `return` taken for `LoginResponse`, so
+only genuine data or heartbeat traffic clears the counter — and that traffic
+arrives every 10–20 seconds under the configured heartbeat intervals. A
+connect → login → drop loop, which produces no such traffic, reaches the limit
+and stops the client as intended.
 
 ### State model
 

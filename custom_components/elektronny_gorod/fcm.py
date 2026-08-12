@@ -5,9 +5,14 @@ ntk-myhome), привязывает токен у оператора (api.regist
 MTalk-сокет. На CALL_INCOMING / CALL_END_ANSWERED_MOBILE рассылает SIGNAL_DOORBELL
 → event-сущность (event.py).
 
-⚠️ Флоу опирается на приватные API Google (ADR-0011) — весь он под graceful
-degradation: при любом сбое логируем warning, интеграция продолжает работать
-(polling-данные), событие вызова просто не стреляет. Setup entry не падает.
+⚠️ Флоу опирается на приватные API Google (ADR-0011) и работает под graceful
+degradation: сбой подключения логируется warning'ом, setup entry не падает,
+polling-данные (камеры, замки, баланс, история) продолжают работать — не
+стреляет только событие вызова. Единственное исключение из «сбой не мешает
+ничему» — неподтверждённая остановка receiver'а при выгрузке: `async_stop()`
+вернёт False, `async_unload_entry` в `__init__.py` тоже вернёт False, и HA
+сообщит, что нужен рестарт. Так мы не оставляем два живых receiver'а на один
+аккаунт — см. `docs/specs/2026-08-10-fcm-circuit-breaker-design.md`.
 
 Источник канала и payload — research/intercom-call-probe/FINDINGS.md.
 """
@@ -46,18 +51,39 @@ _PUSH_TYPE_EVENT = {
     "CALL_END_ANSWERED_MOBILE": "ended",
 }
 
-# Watchdog: интервал контроля живости FCM-сокета. С
-# abort_on_sequential_error_count=None библиотека не умирает от сетевых сбоев,
-# но watchdog ловит фатальную смерть клиента (или провал первичного checkin) и
-# поднимает заново — иначе пуши о вызове молча отвалятся (инцидент 2026-06-24:
-# сетевой блип → 3 ошибки подряд → receiver выключился, юзер не узнал).
+# Предохранитель самой firebase-messaging: после N подряд ошибок соединения
+# библиотека сама останавливает receiver (`_terminate()` → run_state STOPPING).
+#
+# Его нельзя отключать (`None`). При `None` проверка в `_try_increment_error_count`
+# становится всегда-ложной, `_terminate()` недостижим, и `_listen` бесконечно
+# перечитывает мёртвый StreamReader: `readexactly` мгновенно перевыбрасывает
+# сохранённый `_exception`, дописывая фрейм в его traceback, а библиотека на
+# каждой итерации печатает его целиком через `_logger.exception`. Петля живёт в
+# общем event loop, поэтому HA подвисает, а стоимость форматирования растёт
+# квадратично (инцидент 2026-08-12, issue #77).
+#
+# Счётчик CONNECTION обнуляется только реальным сообщением от сервера
+# (`_handle_message`, после раннего `return` для LoginResponse), поэтому на
+# здоровом сокете heartbeat'ы каждые 10-20 с держат его на нуле, а петля
+# «connect → login → разрыв» упирается в лимит и честно гасит receiver.
+# Дальше подхватывает watchdog ниже: мёртвый клиент = `is_started() == False`.
+FCM_ABORT_AFTER_ERRORS = 3
+
+# Watchdog: интервал контроля живости FCM-сокета. Ловит остановленный
+# библиотекой receiver и провал первичного checkin (`client is None`) —
+# иначе пуши о вызове молча отвалятся (инцидент 2026-06-24). Восстановление
+# ограничено: см. `_async_watchdog` и backoff ниже.
 FCM_WATCHDOG_INTERVAL = timedelta(minutes=2)
+
+# Пауза между пробами после того, как circuit разомкнут. Последнее значение
+# повторяется бесконечно.
 FCM_RETRY_BACKOFFS = (
     timedelta(minutes=15),
     timedelta(hours=1),
     timedelta(hours=6),
     timedelta(hours=24),
 )
+
 _FCM_REPAIR_ISSUE_PREFIX = "fcm_receiver_unavailable"
 
 
@@ -129,6 +155,8 @@ class DoorbellFcmListener:
                 return
             await self._async_connect()
             if self._stopping:
+                # Выгрузка успела начаться уже после успешного start() —
+                # здесь клиент реальный и его надо закрыть.
                 await self._async_disconnect()
                 return
             self._watchdog_unsub = async_track_time_interval(
@@ -138,8 +166,9 @@ class DoorbellFcmListener:
     async def _async_connect(self) -> None:
         """checkin/register → привязка токена у оператора → start MTalk-сокет.
 
-        `abort_on_sequential_error_count=None` — библиотека НЕ выключает receiver
-        после N подряд ошибок соединения (дефолт 3), а продолжает переподключаться.
+        Полностью contained: любая ошибка здесь — warning, `self._client`
+        остаётся `None`, и watchdog разбирается дальше по своей state machine.
+        Клиент публикуется в `self._client` только после успешного `start()`.
         """
         try:
             from firebase_messaging import (
@@ -170,30 +199,34 @@ class DoorbellFcmListener:
                 register_config,
                 credentials,
                 self._on_credentials_updated,
-                config=FcmPushClientConfig(abort_on_sequential_error_count=None),
+                config=FcmPushClientConfig(
+                    abort_on_sequential_error_count=FCM_ABORT_AFTER_ERRORS
+                ),
                 http_client_session=async_get_clientsession(self._hass),
             )
             fcm_token = await client.checkin_or_register()
             self.fcm_token = fcm_token
+            # Начатую выгрузку видно только здесь: `async_stop()` выставляет
+            # флаг до захвата lock'а и ждёт нас. Нестартовавший клиент просто
+            # отбрасываем — `stop()` до `start()` упадёт на `stopping_lock`.
             if self._stopping:
-                await self._async_disconnect()
                 return
             if not await self._api.register_push_device(fcm_token):
                 LOGGER.warning(
                     "FCM: привязка push-токена у оператора не удалась — пуши могут не прийти"
                 )
             if self._stopping:
-                await self._async_disconnect()
                 return
             await client.start()
             self._client = client
             LOGGER.info("FCM doorbell listener запущен")
         except Exception as err:  # noqa: BLE001
+            # Текст исключения зависимости может нести credentials/payload —
+            # логируем только класс (ADR-0004).
             LOGGER.warning(
                 "FCM: не удалось запустить listener (%s) — событие вызова отключено",
                 type(err).__name__,
             )
-            await self._async_disconnect()
 
     @callback
     def _async_mark_healthy(self) -> None:
@@ -239,7 +272,12 @@ class DoorbellFcmListener:
         return True
 
     async def _async_watchdog(self, _now: datetime | None = None) -> None:
-        """Наблюдать receiver и выполнять bounded automatic recovery."""
+        """Наблюдать receiver и выполнять bounded automatic recovery.
+
+        Один тик = один переход. Живой клиент всегда возвращает в HEALTHY;
+        мёртвый идёт HEALTHY → SUSPECT → VERIFYING → OPEN, где OPEN пробует
+        восстановиться по backoff-расписанию.
+        """
         if self._stopping or self._transition_lock.locked():
             return
         async with self._transition_lock:
@@ -252,29 +290,30 @@ class DoorbellFcmListener:
 
             now = _now or dt_util.utcnow()
 
-            if self._recovery_phase is _FcmRecoveryPhase.OPEN:
-                if self._next_probe_at is not None and now < self._next_probe_at:
-                    return
-                LOGGER.info("FCM: выполняю пробную попытку восстановления")
-                if not await self._async_reconnect():
+            match self._recovery_phase:
+                case _FcmRecoveryPhase.HEALTHY:
+                    # Первая неактивность — только наблюдаем: даём библиотеке
+                    # тик на самостоятельное переподключение.
+                    self._recovery_phase = _FcmRecoveryPhase.SUSPECT
+
+                case _FcmRecoveryPhase.SUSPECT:
+                    LOGGER.warning(
+                        "FCM: push-receiver неактивен — выполняю одну попытку восстановления"
+                    )
+                    if not await self._async_reconnect():
+                        self._async_open_circuit(now)
+
+                case _FcmRecoveryPhase.VERIFYING:
+                    # Замена не ожила к следующему тику — размыкаем circuit.
+                    await self._async_disconnect()
                     self._async_open_circuit(now)
-                return
 
-            if self._recovery_phase is _FcmRecoveryPhase.VERIFYING:
-                await self._async_disconnect()
-                self._async_open_circuit(now)
-                return
-
-            if self._recovery_phase is _FcmRecoveryPhase.HEALTHY:
-                self._recovery_phase = _FcmRecoveryPhase.SUSPECT
-                return
-
-            if self._recovery_phase is _FcmRecoveryPhase.SUSPECT:
-                LOGGER.warning(
-                    "FCM: push-receiver неактивен — выполняю одну попытку восстановления"
-                )
-                if not await self._async_reconnect():
-                    self._async_open_circuit(now)
+                case _FcmRecoveryPhase.OPEN:
+                    if self._next_probe_at is not None and now < self._next_probe_at:
+                        return
+                    LOGGER.info("FCM: выполняю пробную попытку восстановления")
+                    if not await self._async_reconnect():
+                        self._async_open_circuit(now)
 
     async def _async_disconnect(self) -> bool:
         """Остановить текущий MTalk-сокет (watchdog НЕ трогаем)."""

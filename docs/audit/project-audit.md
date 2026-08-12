@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
 Last reviewed: 2026-08-11 (A-80/A-86: field incident #77 and bounded per-entry
-FCM recovery; 579-test product baseline reconciled)
+FCM recovery; 580-test product baseline reconciled)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1195,12 +1195,40 @@ Quality gates:
   клиент, двухминутный watchdog создаёт новый, а тот снова попадает в фатальную
   ошибку. Цикл повторяется для каждого затронутого config entry и может раздувать
   журнал Home Assistant до гигабайт.
+- **Новый симптом 2026-08-12 (issue #77, вторая форма):** Home Assistant
+  подвисает, а в журнал уходит один и тот же traceback
+  `_listen → _receive_msg → readexactly → raise self._exception` с растущим
+  числом повторяющихся фреймов. Это **не** тот путь, который закрывал circuit
+  breaker: клиент не остановлен, `run_state` циклически возвращается в `STARTED`,
+  поэтому двухминутный watchdog видит здоровый receiver и никогда не размыкает
+  circuit.
 - **Исходный root cause (confirmed):** `FcmPushClientConfig.abort_on_sequential_error_count`
   по умолчанию `3` → библиотека выключает receiver навсегда после 3 ошибок
   подряд. `async_start` был fire-and-forget — контроля живости нет → молчаливая
   смерть.
-- **Fix:** прежний `abort_on_sequential_error_count=None` и один двухминутный
-  watchdog сохранены, но восстановление стало конечным per entry:
+- **Root cause второй формы (confirmed source inspection,
+  firebase-messaging 0.4.5):** causal chain —
+  `abort_on_sequential_error_count=None` → условие в
+  `_try_increment_error_count` (`fcmpushclient.py:568`) всегда ложно →
+  `_terminate()` недостижим → цикл `while self.do_listen` в `_listen`
+  перечитывает мёртвый `StreamReader`, чей `_exception` перевыбрасывается тем же
+  объектом и накапливает фреймы → `_logger.exception` печатает растущий traceback
+  на каждой итерации в общем event loop → HA голодает, стоимость форматирования
+  растёт квадратично. Наш watchdog слеп к этому состоянию, потому что
+  `is_started()` — это `run_state == STARTED` (`fcmpushclient.py:790`), а
+  `run_state` возвращается в `STARTED` после каждого успешного login
+  (`fcmpushclient.py:600`). Иначе говоря, снятый предохранитель библиотеки был
+  необходимым условием обеих форм инцидента.
+- **Fix второй формы:** `abort_on_sequential_error_count` возвращён к конечному
+  значению (`FCM_ABORT_AFTER_ERRORS = 3`). Причина, по которой его сняли в
+  2026-06-24 («receiver умирает молча»), устранена самим этим PR: мёртвого
+  клиента теперь поднимает watchdog, частоту ограничивает circuit breaker, а
+  пользователя извещает Repairs. Ложных срабатываний на живом сокете нет:
+  `_reset_error_count(CONNECTION)` вызывается в `_handle_message`
+  (`fcmpushclient.py:619`) после раннего `return` для `LoginResponse`, поэтому
+  счётчик обнуляют только реальные data/heartbeat-сообщения — а они идут каждые
+  10–20 с (`server_heartbeat_interval` / `client_heartbeat_interval`).
+- **Fix:** один двухминутный watchdog сохранён, восстановление конечное per entry:
   `HEALTHY → SUSPECT → VERIFYING → OPEN`; scheduled probe также возвращает
   listener в общий `VERIFYING`. Первая inactive-проверка
   наблюдает, вторая делает ровно один disconnect/connect, следующая неудача
@@ -1223,7 +1251,7 @@ Quality gates:
   как P3 UX/privacy trade-off без расширения authenticated HA audience;
   обязательный control — redaction `title` в user-shared diagnostics. См.
   [`security.md#S-23`](security.md#s-23-config-entry-title-в-persistent-fcm-repairs).
-- **Evidence:** focused FCM/removal suite — **42 passed**: state transitions,
+- **Evidence:** focused FCM/removal suite — **43 passed**: state transitions,
   capped backoff, quiet OPEN, named Repairs lifecycle, multi-account isolation,
   shared session, no-secret output, pre-start cleanup, failed-unload/setup-unwind
   ownership/degraded-setup/removal guards, late-callback suppression и
