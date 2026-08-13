@@ -38,7 +38,6 @@ from custom_components.elektronny_gorod.fcm import (
     _patch_push_headers,
     async_delete_fcm_repair_issue,
     fcm_repair_issue_id,
-    _format_delay,
 )
 
 NOW = datetime(2026, 8, 10, 9, 0, tzinfo=UTC)
@@ -192,35 +191,15 @@ async def test_async_start_uses_ha_shared_http_session(
     await listener.async_stop()
 
 
-async def test_connect_failure_does_not_log_exception_message(
-    hass: HomeAssistant,
-    caplog,
-) -> None:
-    """External exception text may contain credentials and must stay out of logs."""
-    listener, _ = _listener(hass)
-    secret = "FCM-EXCEPTION-SECRET"
-    fake_client = MagicMock()
-    fake_client.checkin_or_register = AsyncMock(
-        side_effect=RuntimeError(secret)
-    )
-    fake_client.stop = AsyncMock()
-
-    with (
-        patch("firebase_messaging.FcmPushClient", return_value=fake_client),
-        patch("firebase_messaging.FcmRegisterConfig"),
-    ):
-        await listener.async_start()
-
-    assert secret not in caplog.text
-    assert "RuntimeError" in caplog.text
-    await listener.async_stop()
-
-
 async def test_retry_and_probe_failures_do_not_log_exception_message(
     hass: HomeAssistant,
     caplog,
 ) -> None:
-    """Initial, immediate retry and scheduled probe all redact exception text."""
+    """Initial, immediate retry and scheduled probe all redact exception text.
+
+    Покрывает и первичный connect: `_async_connect` логирует ошибку ровно в
+    одном месте, а этот тест проходит через него трижды.
+    """
     listener, _ = _listener(hass)
     secret = "REPEATED-FCM-EXCEPTION-SECRET"
     fake_client = MagicMock()
@@ -319,59 +298,28 @@ async def test_library_terminated_receiver_enters_bounded_recovery(
         patch("firebase_messaging.FcmRegisterConfig"),
         patch("firebase_messaging.FcmPushClientConfig"),
     ):
+        # Первый тик только наблюдает: ни disconnect, ни connect.
         await listener._async_watchdog(NOW)
         assert listener._recovery_phase is _FcmRecoveryPhase.SUSPECT
+        terminated.stop.assert_not_awaited()
+        replacement.checkin_or_register.assert_not_awaited()
 
+        # Второй — ровно один reconnect.
         await listener._async_watchdog(NOW + timedelta(minutes=2))
         assert listener._recovery_phase is _FcmRecoveryPhase.VERIFYING
         terminated.stop.assert_awaited_once()
+        replacement.checkin_or_register.assert_awaited_once()
 
         await listener._async_watchdog(NOW + timedelta(minutes=4))
 
     assert listener._recovery_phase is _FcmRecoveryPhase.OPEN
-    assert listener._next_probe_at == NOW + timedelta(minutes=4) + FCM_RETRY_BACKOFFS[0]
+    assert (
+        listener._next_probe_at
+        == NOW + timedelta(minutes=4) + FCM_RETRY_BACKOFFS[0][0]
+    )
     assert ir.async_get(hass).async_get_issue(
         DOMAIN, fcm_repair_issue_id("entry-1")
     ) is not None
-
-
-async def test_watchdog_first_inactive_tick_only_observes(
-    hass: HomeAssistant,
-) -> None:
-    """Первая неактивность только переводит listener в suspect."""
-    listener, _ = _listener(hass)
-    listener._client = MagicMock()
-    listener._client.is_started.return_value = False
-
-    with (
-        patch.object(listener, "_async_disconnect", new=AsyncMock()) as disconnect,
-        patch.object(listener, "_async_connect", new=AsyncMock()) as connect,
-    ):
-        await listener._async_watchdog(NOW)
-
-    disconnect.assert_not_awaited()
-    connect.assert_not_awaited()
-    assert listener._recovery_phase is _FcmRecoveryPhase.SUSPECT
-
-
-async def test_watchdog_second_inactive_tick_reconnects_once(
-    hass: HomeAssistant,
-) -> None:
-    """Вторая подряд неактивность выполняет ровно один reconnect."""
-    listener, _ = _listener(hass)
-    listener._client = MagicMock()
-    listener._client.is_started.return_value = False
-
-    with (
-        patch.object(listener, "_async_disconnect", new=AsyncMock()) as disconnect,
-        patch.object(listener, "_async_connect", new=AsyncMock()) as connect,
-    ):
-        await listener._async_watchdog(NOW)
-        await listener._async_watchdog(NOW + timedelta(minutes=2))
-
-    disconnect.assert_awaited_once()
-    connect.assert_awaited_once()
-    assert listener._recovery_phase is _FcmRecoveryPhase.VERIFYING
 
 
 async def test_healthy_replacement_resets_recovery_state(
@@ -763,68 +711,37 @@ async def test_async_start_idempotent_single_watchdog(hass: HomeAssistant):
         await listener.async_stop()
 
 
-async def test_stop_during_start_does_not_leave_client_or_watchdog(
-    hass: HomeAssistant,
+@pytest.mark.parametrize("gate", ["checkin", "operator_bind"])
+async def test_stop_during_start_leaves_listener_fully_stopped(
+    hass: HomeAssistant, gate: str
 ) -> None:
-    """Unload racing with initial check-in leaves the listener fully stopped."""
+    """Выгрузка, догнавшая старт на любом из двух await'ов, не оставляет хвостов.
+
+    Guard стоит после каждого: после checkin — чтобы не пойти к оператору,
+    после привязки токена — чтобы не поднять MTalk-клиент.
+    """
     listener, api = _listener(hass)
-    checkin_entered = asyncio.Event()
-    allow_checkin = asyncio.Event()
+    entered = asyncio.Event()
+    allow = asyncio.Event()
     client = MagicMock()
+    client.start = AsyncMock()
+    client.stop = AsyncMock()
 
     async def gated_checkin() -> str:
-        checkin_entered.set()
-        await allow_checkin.wait()
+        entered.set()
+        await allow.wait()
         return "T"
 
-    client.checkin_or_register = gated_checkin
-    client.start = AsyncMock()
-    client.stop = AsyncMock()
-
-    with (
-        patch("firebase_messaging.FcmPushClient", return_value=client),
-        patch("firebase_messaging.FcmRegisterConfig"),
-        patch(
-            "custom_components.elektronny_gorod.fcm.async_track_time_interval",
-            return_value=MagicMock(),
-        ) as track,
-    ):
-        start_task = asyncio.create_task(listener.async_start())
-        await checkin_entered.wait()
-        stop_task = asyncio.create_task(listener.async_stop())
-        await asyncio.sleep(0)
-        allow_checkin.set()
-        await asyncio.gather(start_task, stop_task)
-
-    client.stop.assert_not_awaited()
-    client.start.assert_not_awaited()
-    track.assert_not_called()
-    # Guard сразу после checkin: во время выгрузки не ходим к оператору.
-    # Без этой проверки его удаление не роняет ни один тест.
-    api.register_push_device.assert_not_awaited()
-    assert listener._client is None
-    assert listener._watchdog_unsub is None
-    assert listener._stopping is True
-
-
-async def test_stop_during_operator_bind_does_not_start_client(
-    hass: HomeAssistant,
-) -> None:
-    """Unload racing with operator bind must not start the MTalk client."""
-    listener, api = _listener(hass)
-    bind_entered = asyncio.Event()
-    allow_bind = asyncio.Event()
-    client = MagicMock()
-
     async def gated_bind(_token: str) -> bool:
-        bind_entered.set()
-        await allow_bind.wait()
+        entered.set()
+        await allow.wait()
         return True
 
-    api.register_push_device = gated_bind
-    client.checkin_or_register = AsyncMock(return_value="T")
-    client.start = AsyncMock()
-    client.stop = AsyncMock()
+    if gate == "checkin":
+        client.checkin_or_register = gated_checkin
+    else:
+        client.checkin_or_register = AsyncMock(return_value="T")
+        api.register_push_device = gated_bind
 
     with (
         patch("firebase_messaging.FcmPushClient", return_value=client),
@@ -835,18 +752,21 @@ async def test_stop_during_operator_bind_does_not_start_client(
         ) as track,
     ):
         start_task = asyncio.create_task(listener.async_start())
-        await bind_entered.wait()
+        await entered.wait()
         stop_task = asyncio.create_task(listener.async_stop())
         await asyncio.sleep(0)
-        allow_bind.set()
+        allow.set()
         await asyncio.gather(start_task, stop_task)
 
-    client.start.assert_not_awaited()
     client.stop.assert_not_awaited()
+    client.start.assert_not_awaited()
     track.assert_not_called()
     assert listener._client is None
     assert listener._watchdog_unsub is None
     assert listener._stopping is True
+    if gate == "checkin":
+        # Без этой проверки удаление guard'а не роняет ни один тест.
+        api.register_push_device.assert_not_awaited()
 
 
 async def test_stop_failure_keeps_client_and_opens_circuit(
@@ -892,34 +812,14 @@ async def test_async_stop_reports_dependency_stop_failure(
     assert listener._client is client
 
 
-@pytest.mark.parametrize(
-    ("delay", "expected"),
-    [
-        (timedelta(minutes=15), "15 минут"),
-        (timedelta(hours=1), "1 час"),
-        (timedelta(hours=6), "6 часов"),
-        (timedelta(hours=24), "24 часа"),
-        (timedelta(minutes=1), "1 минуту"),
-        (timedelta(minutes=2), "2 минуты"),
-        (timedelta(minutes=11), "11 минут"),
-        (timedelta(hours=2), "2 часа"),
-        (timedelta(hours=5), "5 часов"),
-        (timedelta(hours=11), "11 часов"),
-        (timedelta(hours=21), "21 час"),
-        (timedelta(hours=1, minutes=30), "1 час 30 минут"),
-    ],
-)
-def test__format_delay(delay: timedelta, expected: str) -> None:
-    """Пауза печатается словами, а не как 0:15:00."""
-    assert _format_delay(delay) == expected
-
-
-def test_every_backoff_formats_readably() -> None:
-    """Каждое значение расписания читаемо и не содержит сырого timedelta."""
-    for delay in FCM_RETRY_BACKOFFS:
-        text = _format_delay(delay)
+def test_every_backoff_has_a_readable_label() -> None:
+    """У каждой паузы есть подпись, и она не сырой timedelta."""
+    for delay, text in FCM_RETRY_BACKOFFS:
         assert ":" not in text
         assert text[0].isdigit()
+        # Подпись обязана описывать именно это значение, иначе лог соврёт.
+        assert str(int(delay.total_seconds()) // 3600 or
+                   int(delay.total_seconds()) // 60) == text.split()[0]
 
 
 async def test_open_circuit_logs_human_readable_delay(

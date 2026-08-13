@@ -120,7 +120,14 @@ async def test_setup_with_surviving_fcm_owner_loads_without_replacement(
             )
             is not None
         )
-        assert call_controller_cls.call_args.args[2]() is None
+        # SIP-контроллер получает геттер токена, а не сам токен: пока
+        # listener не запущен, он обязан вернуть то, что у listener'а
+        # действительно лежит в `fcm_token`, а не закэшированное значение.
+        token_getter = call_controller_cls.call_args.args[2]
+        replacement.fcm_token = None
+        assert token_getter() is None
+        replacement.fcm_token = "T"
+        assert token_getter() == "T"
 
         previous.async_stop.side_effect = None
         previous.async_stop.return_value = True

@@ -1,6 +1,6 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-08-11 (bounded per-entry FCM recovery and 612-test backend
+Last reviewed: 2026-08-11 (bounded per-entry FCM recovery and 597-test backend
 evidence synchronized; 4.0.0 remains the current release)
 
 Source files:
@@ -47,7 +47,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | HA hassfest CI | ✅ зелёный |
 | HACS validation CI | ✅ зелёный |
 | pytest CI | ✅ есть (`python-tests.yaml`, matrix HA 2024.10 + 2026.5) |
-| Реальные тесты | ✅ 612 backend + 62 frontend тестов зелёные локально; TypeScript check и production build зелёные |
+| Реальные тесты | ✅ 597 backend + 62 frontend тестов зелёные локально; TypeScript check и production build зелёные |
 | Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
 | Документация для пользователя | ✅ RU/EN README и release notes 4.0.0 описывают FCM/SIP, экран вызова, durable history и opt-in внешний RTSP; добавлены runtime screenshots |

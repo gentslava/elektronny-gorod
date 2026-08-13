@@ -75,13 +75,18 @@ FCM_ABORT_AFTER_ERRORS = 3
 # ограничено: см. `_async_watchdog` и backoff ниже.
 FCM_WATCHDOG_INTERVAL = timedelta(minutes=2)
 
-# Пауза между пробами после того, как circuit разомкнут. Последнее значение
-# повторяется бесконечно.
+# Пауза между пробами после того, как circuit разомкнут, и её подпись для
+# лога. Последняя пара повторяется бесконечно.
+#
+# Подпись лежит рядом со значением, а не считается форматтером: `str(timedelta)`
+# даёт нечитаемое `0:15:00`, а склонять произвольную длительность незачем —
+# значений ровно четыре, и забыть подпись при добавлении новой паузы нельзя.
+# Винительный падеж, чтобы строка вставала после «через».
 FCM_RETRY_BACKOFFS = (
-    timedelta(minutes=15),
-    timedelta(hours=1),
-    timedelta(hours=6),
-    timedelta(hours=24),
+    (timedelta(minutes=15), "15 минут"),
+    (timedelta(hours=1), "1 час"),
+    (timedelta(hours=6), "6 часов"),
+    (timedelta(hours=24), "24 часа"),
 )
 
 _FCM_REPAIR_ISSUE_PREFIX = "fcm_receiver_unavailable"
@@ -159,37 +164,6 @@ def _patch_push_headers(client: Any) -> None:
         return original(msg)
 
     client._handle_data_message = _handle_with_normalized_headers
-
-
-def _plural(count: int, one: str, few: str, many: str) -> str:
-    """Выбрать форму русского существительного для числительного."""
-    if count % 100 // 10 == 1:
-        return many
-    last = count % 10
-    if last == 1:
-        return one
-    if 2 <= last <= 4:
-        return few
-    return many
-
-
-def _format_delay(delay: timedelta) -> str:
-    """Отформатировать паузу для лога: «15 минут», «1 час», «24 часа».
-
-    `str(timedelta)` даёт `0:15:00` — нечитаемо в journal'е. Винительный падеж,
-    чтобы строка вставала после «через».
-    """
-    total = int(delay.total_seconds())
-    hours, remainder = divmod(total, 3600)
-    minutes = remainder // 60
-    parts = []
-    if hours:
-        parts.append(f"{hours} {_plural(hours, 'час', 'часа', 'часов')}")
-    if minutes or not hours:
-        parts.append(
-            f"{minutes} {_plural(minutes, 'минуту', 'минуты', 'минут')}"
-        )
-    return " ".join(parts)
 
 
 def fcm_repair_issue_id(entry_id: str) -> str:
@@ -357,7 +331,7 @@ class DoorbellFcmListener:
         """Назначить следующую пробу и показать persistent Repairs issue."""
         if self._stopping:
             return
-        delay = FCM_RETRY_BACKOFFS[self._backoff_index]
+        delay, delay_text = FCM_RETRY_BACKOFFS[self._backoff_index]
         self._backoff_index = min(
             self._backoff_index + 1, len(FCM_RETRY_BACKOFFS) - 1
         )
@@ -367,7 +341,7 @@ class DoorbellFcmListener:
         LOGGER.warning(
             "FCM: частые попытки восстановления приостановлены; "
             "следующая проверка через %s",
-            _format_delay(delay),
+            delay_text,
         )
 
     async def _async_reconnect(self) -> bool:

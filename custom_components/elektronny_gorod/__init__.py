@@ -172,7 +172,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Build the optional realtime listener now so SIP can read its token later,
     # but do not claim/start FCM until all fallible setup awaits have completed.
     fcm_listener = DoorbellFcmListener(hass, entry, coordinator.api)
-    fcm_registered = False
 
     # Two-way audio: контроллер приёма вызова (REGISTER-on-ring). Трекает
     # активный FCM-вызов (SIGNAL_DOORBELL) и драйвит SipManager по сервису
@@ -180,7 +179,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     sip_controller = DoorbellCallController(
         hass,
         coordinator.api,
-        lambda: fcm_listener.fcm_token if fcm_registered else None,
+        # `fcm_token` присваивается только внутри `_async_connect`, а тот
+        # достижим лишь после успешной регистрации ниже — до неё токен и так
+        # `None`, отдельный флаг ничего не добавлял.
+        lambda: fcm_listener.fcm_token,
         go2rtc=_build_go2rtc_config(entry),
         camera_resolver=lambda ac: _resolve_call_camera_id(coordinator, ac),
     )
@@ -213,8 +215,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # ConfigEntryNotReady: HA would retry setup forever and recreate log churn.
     # Claim/start only after every fallible setup await, so a later setup unwind
     # cannot strand a newly registered dependency-owned receiver.
-    fcm_registered = await _async_register_fcm_listener(hass, entry, fcm_listener)
-    if fcm_registered:
+    if await _async_register_fcm_listener(hass, entry, fcm_listener):
         entry.async_create_background_task(
             hass, fcm_listener.async_start(), name=f"{DOMAIN}_fcm_listener"
         )
