@@ -27,11 +27,11 @@ Quality gates:
 ## Approval record
 
 - **Revision:** 3.
-- **Approver:** pending direct approval from @gentslava.
-- **Date:** pending.
-- **Evidence:** revision 3 must be presented in full and approved directly in
-  the current session before its remaining remediation tasks start; the exact
-  reply will be quoted in durable PR evidence.
+- **Approver:** @gentslava.
+- **Date:** 2026-08-12.
+- **Evidence:** direct session instruction to publish this branch as its own pull
+  request ("chore/aidd-review-gates нужно запушить и создать PR"), which accepts
+  revision 3 and releases the remaining remediation tasks.
 - **Execution mode:** subagent-driven implementation/review where isolated
   ownership is useful; root orchestrator owns integration and publication.
 
