@@ -34,7 +34,6 @@ from custom_components.elektronny_gorod.fcm import (
     DoorbellFcmListener,
     _FcmRecoveryPhase,
     _b64_pad,
-    _header_component,
     _normalize_push_header,
     _patch_push_headers,
     async_delete_fcm_repair_issue,
@@ -768,7 +767,7 @@ async def test_stop_during_start_does_not_leave_client_or_watchdog(
     hass: HomeAssistant,
 ) -> None:
     """Unload racing with initial check-in leaves the listener fully stopped."""
-    listener, _ = _listener(hass)
+    listener, api = _listener(hass)
     checkin_entered = asyncio.Event()
     allow_checkin = asyncio.Event()
     client = MagicMock()
@@ -800,6 +799,9 @@ async def test_stop_during_start_does_not_leave_client_or_watchdog(
     client.stop.assert_not_awaited()
     client.start.assert_not_awaited()
     track.assert_not_called()
+    # Guard сразу после checkin: во время выгрузки не ходим к оператору.
+    # Без этой проверки его удаление не роняет ни один тест.
+    api.register_push_device.assert_not_awaited()
     assert listener._client is None
     assert listener._watchdog_unsub is None
     assert listener._stopping is True
@@ -979,30 +981,16 @@ def real_decrypt_raw_data():
 @pytest.mark.parametrize(
     ("header", "label", "expected"),
     [
-        # Форма с прода 2026-08-13 (DIAG-проба, issue #77).
-        ("dh=AAA; p256ecdsa=BBB", "dh", "AAA"),
-        ("dh=AAA; p256ecdsa=BBB", "p256ecdsa", "BBB"),
-        # Порядок сегментов не гарантирован спецификацией.
-        ("p256ecdsa=BBB;dh=AAA", "dh", "AAA"),
-        # Единственный сегмент — форма, которая приходила до июня 2026.
-        ("dh=AAA", "dh", "AAA"),
-        ("salt=CCC==", "salt", "CCC=="),
-        # Нет такой метки — не выдумываем значение.
-        ("p256ecdsa=BBB", "dh", None),
-        ("AAA", "dh", None),
-        ("", "dh", None),
-    ],
-)
-def test_header_component(header: str, label: str, expected: str | None) -> None:
-    """Сегмент достаётся по метке независимо от позиции и пробелов."""
-    assert _header_component(header, label) == expected
-
-
-@pytest.mark.parametrize(
-    ("header", "label", "expected"),
-    [
         # Лишний сегмент отброшен, dh дополнен до кратности 4.
         ("dh=" + "a" * 87 + "; p256ecdsa=" + "b" * 87, "dh", "dh=" + "a" * 87 + "="),
+        # Выбор по метке, а не по позиции: порядок сегментов спецификацией
+        # не закреплён, и VAPID-сегмент достаётся так же, как dh.
+        ("dh=AAA; p256ecdsa=BBB", "p256ecdsa", "p256ecdsa=BBB="),
+        ("p256ecdsa=BBB;dh=AAA", "dh", "dh=AAA="),
+        # Единственный сегмент — форма, которая приходила до июня 2026.
+        ("dh=AAA", "dh", "dh=AAA="),
+        # Метки нет, но и голым значением строка быть не может — не трогаем.
+        ("p256ecdsa=BBB", "dh", "p256ecdsa=BBB"),
         # Уже корректный salt проходит без изменений.
         ("salt=" + "c" * 22 + "==", "salt", "salt=" + "c" * 22 + "=="),
         # Значение без метки: метку восстанавливаем, иначе слепой срез
@@ -1113,20 +1101,25 @@ def _fake_message(**app_data: str) -> MagicMock:
     return msg
 
 
-def _patched_target():
-    class _Target:
-        seen: list[list[tuple[str, str]]] = []
+class _FakeClient:
+    """Двойник `FcmPushClient`: только то, что видит патч."""
 
-        def _handle_data_message(self, msg):  # noqa: ANN001, ANN202
-            _Target.seen.append([(i.key, i.value) for i in msg.app_data])
+    def __init__(self) -> None:
+        self.seen: list[list[tuple[str, str]]] = []
 
-    _patch_push_headers(_Target)
-    return _Target
+    def _handle_data_message(self, msg):  # noqa: ANN001, ANN202
+        self.seen.append([(i.key, i.value) for i in msg.app_data])
+
+
+def _patched_client() -> _FakeClient:
+    client = _FakeClient()
+    _patch_push_headers(client)
+    return client
 
 
 def test_patch_normalizes_app_data_before_library_reads_it() -> None:
     """Библиотека получает уже приведённые заголовки, прочее не тронуто."""
-    target = _patched_target()
+    client = _patched_client()
     msg = _fake_message(
         **{
             "crypto-key": "dh=" + "a" * 87 + "; p256ecdsa=" + "b" * 87,
@@ -1135,9 +1128,9 @@ def test_patch_normalizes_app_data_before_library_reads_it() -> None:
         }
     )
 
-    target()._handle_data_message(msg)
+    client._handle_data_message(msg)
 
-    assert target.seen == [
+    assert client.seen == [
         [
             ("crypto-key", "dh=" + "a" * 87 + "="),
             ("encryption", "salt=" + "c" * 22 + "=="),
@@ -1146,21 +1139,21 @@ def test_patch_normalizes_app_data_before_library_reads_it() -> None:
     ]
 
 
-def test_patch_push_headers_is_idempotent() -> None:
-    """Повторный вызов не оборачивает патч поверх патча."""
+def test_patch_is_scoped_to_one_client() -> None:
+    """Патч живёт на экземпляре: чужие клиенты того же класса не затронуты.
 
-    class _Target:
-        calls = 0
+    `firebase-messaging` тянет не только эта интеграция — её же использует
+    `ring_doorbell[listen]`. Классовый патч чинил бы и чужие клиенты.
+    """
+    patched = _patched_client()
+    untouched = _FakeClient()
+    header = "dh=" + "a" * 87 + "; p256ecdsa=" + "b" * 87
 
-        def _handle_data_message(self, msg):  # noqa: ANN001, ANN202
-            _Target.calls += 1
+    patched._handle_data_message(_fake_message(**{"crypto-key": header}))
+    untouched._handle_data_message(_fake_message(**{"crypto-key": header}))
 
-    _patch_push_headers(_Target)
-    _patch_push_headers(_Target)
-    _patch_push_headers(_Target)
-    _Target()._handle_data_message(_fake_message(**{"crypto-key": "dh=AAA"}))
-
-    assert _Target.calls == 1
+    assert patched.seen == [[("crypto-key", "dh=" + "a" * 87 + "=")]]
+    assert untouched.seen == [[("crypto-key", header)]]
 
 
 @pytest.fixture
@@ -1192,7 +1185,7 @@ def real_data_message_stanza():
 
 def test_patch_mutates_real_protobuf_app_data(real_data_message_stanza) -> None:
     """Правка `app_data` держится на настоящем protobuf, а не только на моке."""
-    target = _patched_target()
+    client = _patched_client()
     msg = real_data_message_stanza()
     for key, value in (
         ("crypto-key", "dh=" + "a" * 87 + "; p256ecdsa=" + "b" * 87),
@@ -1202,7 +1195,7 @@ def test_patch_mutates_real_protobuf_app_data(real_data_message_stanza) -> None:
         item.key = key
         item.value = value
 
-    target()._handle_data_message(msg)
+    client._handle_data_message(msg)
 
     assert msg.app_data[0].value == "dh=" + "a" * 87 + "="
     assert msg.app_data[1].value == "salt=" + "c" * 22 + "=="

@@ -87,44 +87,33 @@ FCM_RETRY_BACKOFFS = (
 _FCM_REPAIR_ISSUE_PREFIX = "fcm_receiver_unavailable"
 
 
-_PUSH_HEADER_PATCH_MARKER = "_eg_push_headers_patched"
-
-
 def _b64_pad(value: str) -> str:
     """Дополнить base64url-строку `=` до длины, кратной 4."""
     return value + "=" * (-len(value) % 4)
 
 
-def _header_component(header: str, label: str) -> str | None:
-    """Достать сегмент `label=<value>` из Web Push заголовка.
+def _normalize_push_header(header: str, label: str) -> str:
+    """Свести Web Push заголовок к одному сегменту с корректным padding.
 
     `Crypto-Key` и `Encryption` — списки параметров через `;` (RFC 8188 §2.1,
-    RFC 8291 §4), а не одиночные значения. Возвращаем `None`, если сегмента
-    нет: незнакомую форму лучше отдать библиотеке нетронутой, чем угадывать.
+    RFC 8291 §4), а не одиночные значения, поэтому нужный сегмент выбираем по
+    метке независимо от его позиции.
     """
     for segment in header.split(";"):
         name, sep, payload = segment.strip().partition("=")
         if sep and name == label:
-            return payload
-    return None
+            return f"{label}={_b64_pad(payload.strip())}"
+    # Метки нет. Библиотека всё равно срежет 3/5 символов, то есть съест
+    # реальные байты ключа, поэтому метку восстанавливаем — но только если
+    # строка вообще может быть голым значением: `=` в base64url встречается
+    # лишь как хвостовой padding. Незнакомую форму отдаём нетронутой.
+    bare = header.strip()
+    if not bare or "=" in bare.rstrip("="):
+        return header
+    return f"{label}={_b64_pad(bare)}"
 
 
-def _normalize_push_header(header: str, label: str) -> str:
-    """Свести заголовок к одному сегменту с корректным base64url padding."""
-    value = _header_component(header, label)
-    if value is None:
-        # Значение без метки. Библиотека всё равно срежет 3/5 символов, то есть
-        # съест реальные байты ключа, поэтому метку восстанавливаем. Списком
-        # параметров такая строка быть не может: `=` в ней встречается только
-        # как хвостовой padding.
-        if header.strip() and "=" not in header.strip().rstrip("="):
-            value = header.strip()
-        else:
-            return header
-    return f"{label}={_b64_pad(value)}"
-
-
-def _patch_push_headers(client_cls: Any) -> None:
+def _patch_push_headers(client: Any) -> None:
     """Нормализовать crypto-key/encryption до формы, которую ждёт библиотека.
 
     firebase-messaging 0.4.5 читает оба заголовка как одиночное значение и
@@ -150,24 +139,26 @@ def _patch_push_headers(client_cls: Any) -> None:
     научится разбирать список параметров, патч станет no-op. Обновиться
     некуда: 0.4.5 — последняя версия на PyPI.
 
+    Патчим **экземпляр**, а не класс: `firebase-messaging` тянет за собой не
+    только нас (её же использует `ring_doorbell[listen]`, то есть core-
+    интеграция `ring` в том же процессе). Классовый патч чинил бы и чужие
+    клиенты, и переживал бы выгрузку нашего entry — радиус шире, чем нужно.
+
     Форма заголовков снята с прода 2026-08-13 (DIAG-проба, issue #77);
     в июне 2026 сегмента `p256ecdsa` ещё не было — см. `research/
     intercom-call-probe/logs/fcm.log` с 16 расшифрованными `CALL_INCOMING`.
     """
-    if getattr(client_cls, _PUSH_HEADER_PATCH_MARKER, False):
-        return
-    original = client_cls._handle_data_message
+    original = client._handle_data_message
 
-    def _handle_with_normalized_headers(self: Any, msg: Any) -> Any:
+    def _handle_with_normalized_headers(msg: Any) -> Any:
         for item in msg.app_data:
             if item.key == "crypto-key":
                 item.value = _normalize_push_header(item.value, "dh")
             elif item.key == "encryption":
                 item.value = _normalize_push_header(item.value, "salt")
-        return original(self, msg)
+        return original(msg)
 
-    client_cls._handle_data_message = _handle_with_normalized_headers
-    setattr(client_cls, _PUSH_HEADER_PATCH_MARKER, True)
+    client._handle_data_message = _handle_with_normalized_headers
 
 
 def _plural(count: int, one: str, few: str, many: str) -> str:
@@ -297,8 +288,6 @@ class DoorbellFcmListener:
             )
             return
 
-        _patch_push_headers(FcmPushClient)
-
         try:
             register_config = FcmRegisterConfig(
                 project_id=FCM_PROJECT_ID,
@@ -320,6 +309,11 @@ class DoorbellFcmListener:
                 ),
                 http_client_session=async_get_clientsession(self._hass),
             )
+            # Внутри `try`: патч читает приватный метод зависимости, а верхней
+            # границы версии в manifest нет. Если апстрим его переименует,
+            # ошибка должна уйти в graceful degradation, а не оборвать
+            # `_async_connect` до постановки watchdog'а.
+            _patch_push_headers(client)
             fcm_token = await client.checkin_or_register()
             self.fcm_token = fcm_token
             # Начатую выгрузку видно только здесь: `async_stop()` выставляет
@@ -462,7 +456,14 @@ class DoorbellFcmListener:
 
     @callback
     def _on_credentials_updated(self, credentials: dict, *_: Any) -> None:
-        """Персист FCM-creds в entry.data — стабильный токен между рестартами."""
+        """Персист FCM-creds в entry.data — стабильный токен между рестартами.
+
+        Тот же guard, что и в `_on_notification`: при неподтверждённой
+        остановке клиент остаётся живым и после удаления entry, а запись в
+        чужой/удалённый entry бросит `UnknownEntry` внутри чужой таски.
+        """
+        if self._stopping:
+            return
         self._hass.config_entries.async_update_entry(
             self._entry,
             data={**self._entry.data, CONF_FCM_CREDENTIALS: credentials},

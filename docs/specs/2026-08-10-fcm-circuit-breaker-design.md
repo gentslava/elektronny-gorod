@@ -361,14 +361,22 @@ Padding alone is neither necessary nor sufficient: `salt` already arrives padded
 (24 characters, a multiple of four), while `dh` arrives unpadded (87) and only
 becomes decodable once it has been separated from the VAPID segment.
 
-The integration therefore wraps `FcmPushClient._handle_data_message` and rewrites
-both headers in `app_data` before the library reads them: the requested segment
-is selected by label — position-independent — and padded to a multiple of four.
-The library's positional strip then lands exactly on `dh` and `salt`. It touches
-no cryptography, no call order and no protocol state; it is idempotent, it leaves
-unrecognised shapes untouched, and it becomes a no-op the moment upstream parses
-the parameter list. Coupling to a private method is accepted because the
+The integration therefore wraps `_handle_data_message` on **its own client
+instance** and rewrites both headers in `app_data` before the library reads them:
+the requested segment is selected by label — position-independent — and padded to
+a multiple of four. The library's positional strip then lands exactly on `dh` and
+`salt`. It touches no cryptography, no call order and no protocol state, it
+leaves unrecognised shapes untouched, and it becomes a no-op the moment upstream
+parses the parameter list. Coupling to a private method is accepted because the
 alternative is a permanently broken doorbell.
+
+Instance scope is deliberate. `firebase-messaging` is not ours exclusively —
+`ring_doorbell[listen]` pulls it in, so the core `ring` integration can hold its
+own `FcmPushClient` in the same process. Patching the class would silently
+reroute those clients too and would outlive the unload of our entry; patching the
+instance keeps the blast radius at the object we created. `FcmPushClient` defines
+no `__slots__`, and the library calls `self._handle_data_message(msg)`, so the
+instance attribute wins.
 
 The bug is not a library regression: `_decrypt_raw_data` is byte-identical across
 0.4.0–0.4.5. It is a change on the sender's side — on 2026-06-22 the same code

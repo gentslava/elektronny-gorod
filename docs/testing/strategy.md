@@ -1,7 +1,7 @@
 Status: Active
 Owner: QA / Testing Agent
 Last reviewed: 2026-08-11 (FCM circuit-breaker/Repairs regressions and
-616-test backend suite synchronized)
+612-test backend suite synchronized)
 
 Source files:
 - `tests/**` (54 test-модуля + `conftest.py`)
@@ -33,7 +33,7 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **616 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-13) |
+| Локальный suite | **612 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-13) |
 | Test modules | 54 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
@@ -241,8 +241,9 @@ PATCH and go2rtc restart recovery within 60 seconds.
   `binascii.Error` без padding и `Invalid EC key.` с ним — и то, что
   нормализация их снимает. Плюс выбор сегмента по метке независимо от порядка,
   восстановление метки у значения без неё, правка `app_data` на настоящем
-  protobuf и идемпотентность патча. Тесты с реальной зависимостью берут её в
-  обход `conftest`-мока и скипаются, если её нет.
+  protobuf и изоляция патча: соседний клиент того же класса остаётся нетронутым.
+  Тесты с реальной зависимостью берут её в обход `conftest`-мока и скипаются,
+  если её нет.
 - Конечный `abort_on_sequential_error_count`: сам факт передачи значения в
   `FcmPushClientConfig` и полный проход terminated-клиента до OPEN. Отключённый
   предохранитель делает этот путь недостижимым и подвешивает event loop (#77).
@@ -309,7 +310,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 616 passed (2026-08-13).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 612 passed (2026-08-13).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

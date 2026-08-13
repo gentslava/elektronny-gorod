@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
 Last reviewed: 2026-08-11 (A-80/A-86: field incident #77 and bounded per-entry
-FCM recovery; 616-test product baseline reconciled)
+FCM recovery; 612-test product baseline reconciled)
 
 Source files:
 - `custom_components/elektronny_gorod/**`

@@ -568,8 +568,20 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     (см. audit A-16).
     """
     fcm_listener = hass.data.get(_FCM_DATA, {}).get(entry.entry_id)
-    if fcm_listener is not None and not await fcm_listener.async_stop():
-        return False
+    if fcm_listener is not None:
+        # Как и в двух других точках остановки: текст исключения зависимости
+        # наружу не выпускаем — HA положил бы `str(exc)` в `reason` записи и
+        # показал его пользователю (ADR-0004).
+        try:
+            stopped = await fcm_listener.async_stop()
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning(
+                "FCM: listener не завершён при выгрузке (%s)",
+                type(err).__name__,
+            )
+            stopped = False
+        if not stopped:
+            return False
 
     stream_manager = hass.data.get(STREAM_MANAGER_DATA, {}).get(entry.entry_id)
     if stream_manager is not None:
