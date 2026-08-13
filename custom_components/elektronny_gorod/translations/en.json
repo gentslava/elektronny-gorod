@@ -3,7 +3,7 @@
   "issues": {
     "fcm_receiver_unavailable": {
       "title": "Doorbell notifications are unavailable for {entry_title}",
-      "description": "Realtime doorbell notifications for {entry_title} are temporarily unavailable. The integration stopped frequent reconnection attempts to prevent repeated log errors. Cameras, locks, balance, history, and other features continue to work. Reload this account to try again. If the problem returns, reconnect it."
+      "description": "Doorbell calls are not reaching Home Assistant — account {entry_title}. Cameras, locks, balance and history work as usual.\n\nThe integration is already trying to reconnect. If this warning stays:\n\n1. Reload the account — that usually does it.\n2. Still there? Reconnect it.\n3. Still there? Update the integration and report the problem."
     }
   },
   "config": {
