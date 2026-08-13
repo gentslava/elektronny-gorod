@@ -1,6 +1,4 @@
-Status: Template
-Owner: QA Agent
-Last reviewed: 2026-08-11 (ADR-0015 immutable candidate evidence)
+Status: Template Owner: QA Agent Last reviewed: 2026-08-11 (ADR-0015 immutable candidate evidence)
 
 Source files:
 - exact clean committed candidate and its tests
@@ -62,10 +60,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ -q
 | F-001 | Critical / Important / Minor | ... | `file:line` |
 | ... | ... | ... | ... |
 
-`Critical` и `Important` всегда блокируют approval: нужен fix, новый frozen
-candidate и повторный review. Отложить можно только `Minor`, явно записав
-evidence, влияние и владельца follow-up; такое решение не должно требовать
-изменения проверяемого candidate.
+`Critical` и `Important` всегда блокируют approval: нужен fix, новый frozen candidate и повторный review. Отложить можно только `Minor`, явно записав evidence, влияние и владельца follow-up; такое решение не должно требовать изменения проверяемого candidate.
 
 ## Manual verification
 

@@ -1,7 +1,4 @@
-Status: Active
-Owner: Home Assistant Expert Agent
-Last reviewed: 2026-08-11 (FCM Repairs and shared-session review reconciled;
-declared scale unchanged)
+Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-08-11 (FCM Repairs and shared-session review reconciled; declared scale unchanged)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -31,15 +28,11 @@ External reference:
 
 ## Текущая оценка
 
-**Bronze** — заявлен в `manifest.json` и подтверждается текущей архитектурой:
-реальный polling, `CoordinatorEntity`, stable `unique_id`, diagnostics с
-redaction и тесты config flow/миграций присутствуют. Актуальный test baseline
-ведётся только в [`testing/strategy.md`](../testing/strategy.md).
+**Bronze** — заявлен в `manifest.json` и подтверждается текущей архитектурой: реальный polling, `CoordinatorEntity`, stable `unique_id`, diagnostics с redaction и тесты config flow/миграций присутствуют. Актуальный test baseline ведётся только в [`testing/strategy.md`](../testing/strategy.md).
 
 ## Bronze
 
-Минимальный уровень, shipped. История реализации — в
-[`roadmap.md`](../roadmap.md); ниже только актуальный snapshot.
+Минимальный уровень, shipped. История реализации — в [`roadmap.md`](../roadmap.md); ниже только актуальный snapshot.
 
 | Правило | Статус | Файл |
 |---|---|---|
@@ -62,9 +55,7 @@ redaction и тесты config flow/миграций присутствуют. �
 | `test-before-setup` | ✅ `async_config_entry_first_refresh` | `__init__.py:async_setup_entry` |
 | `unique-config-entry` | ✅ проверка дубликата | `config_flow.py` |
 
-**Bronze blockers:** подтверждённых блокеров нет. Перед формальной внешней
-подачей остаётся перепроверить brand и добавить явную removal-инструкцию в
-пользовательскую документацию.
+**Bronze blockers:** подтверждённых блокеров нет. Перед формальной внешней подачей остаётся перепроверить brand и добавить явную removal-инструкцию в пользовательскую документацию.
 
 ## Silver
 
@@ -117,10 +108,8 @@ redaction и тесты config flow/миграций присутствуют. �
 
 После Gold. Требует:
 - 100% type hints;
-- async dependency rule: 🟡 `firebase-messaging` async и получает shared HA
-  session; полный Platinum-аудит всех pip dependencies ещё не выполнен;
-- websocket API rule: applicability нужно переоценить с учётом HA history/uplink
-  commands и provider transport REST/FCM/SIP;
+- async dependency rule: 🟡 `firebase-messaging` async и получает shared HA session; полный Platinum-аудит всех pip dependencies ещё не выполнен;
+- websocket API rule: applicability нужно переоценить с учётом HA history/uplink commands и provider transport REST/FCM/SIP;
 - strict typing;
 - очень высокий test coverage.
 

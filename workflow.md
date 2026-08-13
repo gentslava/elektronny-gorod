@@ -92,16 +92,9 @@ merge → merged-state reconciliation / release
 
 Для Claude Code — использовать TodoWrite. Каждая таска — verifiable.
 
-**Default execution policy:** если доступны subagents, нетривиальный план
-исполняется subagent-driven. После явной рекомендации короткий ответ пользователя
-«го» / «да» / «начинай» принимает рекомендованный режим. Inline execution —
-только по прямому выбору пользователя либо при отсутствии subagents. План заранее
-маршрутизирует обязательные независимые review: `code-reviewer` всегда;
-`ha-expert`, `security-auditor` и `qa-engineer` — по затронутым областям.
+**Default execution policy:** если доступны subagents, нетривиальный план исполняется subagent-driven. После явной рекомендации короткий ответ пользователя «го» / «да» / «начинай» принимает рекомендованный режим. Inline execution — только по прямому выбору пользователя либо при отсутствии subagents. План заранее маршрутизирует обязательные независимые review: `code-reviewer` всегда; `ha-expert`, `security-auditor` и `qa-engineer` — по затронутым областям.
 
-Такой короткий ответ закрывает `PLAN_APPROVED` только если он дан прямо на полный
-план со scope, acceptance, execution mode и reviewer matrix. План сохраняет
-approver, дату, revision и назначенных исполнителей/reviewers (ADR-0015).
+Такой короткий ответ закрывает `PLAN_APPROVED` только если он дан прямо на полный план со scope, acceptance, execution mode и reviewer matrix. План сохраняет approver, дату, revision и назначенных исполнителей/reviewers (ADR-0015).
 
 ### 5. Implementation
 
@@ -127,9 +120,7 @@ approver, дату, revision и назначенных исполнителей/
 | Gate | `TESTS_PASS` |
 | Required | Локально `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный; дополнительные локальные проверки — по test plan. Remote matrix/hassfest/HACS относятся к post-push `CI_GREEN` |
 
-QA участвует в reviewer matrix, если diff добавляет/меняет тесты, fixtures или
-test plan. TDD остаётся частью implementation; этот этап подтверждает весь
-candidate после завершения slices.
+QA участвует в reviewer matrix, если diff добавляет/меняет тесты, fixtures или test plan. TDD остаётся частью implementation; этот этап подтверждает весь candidate после завершения slices.
 
 ### 7. Security precheck
 
@@ -171,15 +162,7 @@ candidate после завершения slices.
 | README | `summary.md`, `index.md` |
 | security-чувствительный код | `security.md`, `project-audit.md` |
 
-Плюс **ось B (событие состояния → docs)** — ADR-0010, см.
-[`project-map.md#maintenance-rules`](docs/project/project-map.md#maintenance-rules):
-finding→RESOLVED ⇒ `summary.md` риски + release-state CHANGELOG + снять метку в `AGENTS.md`;
-finding→resolved-in-branch ⇒ только `project-audit.md` (не трогать риски до merge).
-Candidate-bound feature docs и `CHANGELOG.md` `[Unreleased]` входят в тот же PR,
-но не утверждают availability в `master` (ADR-0015).
-🔴 Не дублировать состояние: findings/status — `project-audit.md`, live test
-baseline — только `testing/strategy.md`, краткая качественная сводка без count —
-`summary.md` (ADR-0015).
+Плюс **ось B (событие состояния → docs)** — ADR-0010, см. [`project-map.md#maintenance-rules`](docs/project/project-map.md#maintenance-rules): finding→RESOLVED ⇒ `summary.md` риски + release-state CHANGELOG + снять метку в `AGENTS.md`; finding→resolved-in-branch ⇒ только `project-audit.md` (не трогать риски до merge). Candidate-bound feature docs и `CHANGELOG.md` `[Unreleased]` входят в тот же PR, но не утверждают availability в `master` (ADR-0015). 🔴 Не дублировать состояние: findings/status — `project-audit.md`, live test baseline — только `testing/strategy.md`, краткая качественная сводка без count — `summary.md` (ADR-0015).
 
 ### 9. Candidate freeze and independent review
 
@@ -192,8 +175,7 @@ baseline — только `testing/strategy.md`, краткая качестве
 | Gates | `CANDIDATE_FROZEN`, затем `REVIEW_OK` |
 | Required | 5 осей code review; профильные HA/security/QA reviews по matrix; Critical/Important закрыты и перепроверены |
 
-До freeze завершить `HISTORY_CLEAN`: commit structure/rebase/squash больше не
-должны менять будущий head. Затем зафиксировать evidence (ADR-0015):
+До freeze завершить `HISTORY_CLEAN`: commit structure/rebase/squash больше не должны менять будущий head. Затем зафиксировать evidence (ADR-0015):
 
 ```bash
 git status --short
@@ -202,27 +184,11 @@ git rev-parse HEAD
 git rev-parse 'HEAD^{tree}'
 ```
 
-`git status --short` должен быть пустым. Reviewer получает base SHA, head SHA,
-tree SHA и проверяет exact `base..head` diff в read-only режиме. Все финальные
-reviewers проверяют один candidate. Self-review implementer-а выполняется до
-freeze, но не является evidence для `REVIEW_OK`.
+`git status --short` должен быть пустым. Reviewer получает base SHA, head SHA, tree SHA и проверяет exact `base..head` diff в read-only режиме. Все финальные reviewers проверяют один candidate. Self-review implementer-а выполняется до freeze, но не является evidence для `REVIEW_OK`.
 
-Любое содержательное изменение после approval создаёт новый candidate:
-затронутые implementation gates запускаются повторно, SHA обновляются, а каждый
-обязательный reviewer выдаёт новый candidate-bound verdict/attestation.
-Re-review неизменившегося scope может сверить blob IDs и быть delta-scoped, но
-его итоговый verdict всегда относится к новому tuple (ADR-0015). Для
-HA-sensitive diff обязателен HA review; для
-secret/token/FCM-sensitive — security review; для tests/test plan — QA review.
-Именно post-freeze security review закрывает `SECURITY_OK`; pre-freeze этап
-закрывает только `SECURITY_PRECHECK_OK`, поэтому циклической зависимости нет.
+Любое содержательное изменение после approval создаёт новый candidate: затронутые implementation gates запускаются повторно, SHA обновляются, а каждый обязательный reviewer выдаёт новый candidate-bound verdict/attestation. Re-review неизменившегося scope может сверить blob IDs и быть delta-scoped, но его итоговый verdict всегда относится к новому tuple (ADR-0015). Для HA-sensitive diff обязателен HA review; для secret/token/FCM-sensitive — security review; для tests/test plan — QA review. Именно post-freeze security review закрывает `SECURITY_OK`; pre-freeze этап закрывает только `SECURITY_PRECHECK_OK`, поэтому циклической зависимости нет.
 
-По умолчанию локальные subagents завершают review до push/PR. Если независимому
-человеку нужен remote diff, владелец может явно разрешить только review branch
-или draft PR: `REVIEW_OK` остаётся красным, merge/release запрещены. Уже открытый
-PR переводится в тот же recovery flow: freeze → review → fixes → новый freeze →
-re-attestation всех обязательных reviewers. Обычный waiver не заменяет
-независимый review.
+По умолчанию локальные subagents завершают review до push/PR. Если независимому человеку нужен remote diff, владелец может явно разрешить только review branch или draft PR: `REVIEW_OK` остаётся красным, merge/release запрещены. Уже открытый PR переводится в тот же recovery flow: freeze → review → fixes → новый freeze → re-attestation всех обязательных reviewers. Обычный waiver не заменяет независимый review.
 
 ### 10. Publication and CI
 
@@ -234,16 +200,9 @@ re-attestation всех обязательных reviewers. Обычный waive
 | Gates | `REVIEW_EVIDENCE_PUBLISHED`, `CI_GREEN` |
 | Required | PR comment и required checks относятся к текущему head/tree |
 
-После approvals Validator выполняет обычный push/PR и публикует validation
-comment с base/head/tree, plan/spec revision, local gates и candidate-bound
-verdicts всех обязательных reviewers. Этот комментарий — канонический off-tree
-журнал evidence; session transcript до публикации является provisional.
+После approvals Validator выполняет обычный push/PR и публикует validation comment с base/head/tree, plan/spec revision, local gates и candidate-bound verdicts всех обязательных reviewers. Этот комментарий — канонический off-tree журнал evidence; session transcript до публикации является provisional.
 
-Затем дождаться GitHub checks для текущего head: Python Tests, hassfest и HACS.
-PR Pre-Release обязателен, только когда workflow применим к diff; корректно
-skipped job не является failure. Новый commit требует нового freeze/reviews,
-нового evidence comment и нового CI run. Без `CI_GREEN` merge запрещён
-(ADR-0015).
+Затем дождаться GitHub checks для текущего head: Python Tests, hassfest и HACS. PR Pre-Release обязателен, только когда workflow применим к diff; корректно skipped job не является failure. Новый commit требует нового freeze/reviews, нового evidence comment и нового CI run. Без `CI_GREEN` merge запрещён (ADR-0015).
 
 ### 11. Release
 

@@ -21,13 +21,10 @@ bash .codex/hooks/check-secret-logs.sh
 
 Затем вручную проверь изменённый security-sensitive diff:
 
-1. auth/token/credentials/headers/response-body не попали в logs, diagnostics,
-   exception messages или Repairs placeholders;
+1. auth/token/credentials/headers/response-body не попали в logs, diagnostics, exception messages или Repairs placeholders;
 2. новые HTTP-клиенты используют HA shared session;
-3. новые redaction keys синхронизированы между `_logging.py` и
-   `diagnostics.py`;
-4. scanner не подменяет review: динамические aliases и third-party output
-   оцениваются отдельно.
+3. новые redaction keys синхронизированы между `_logging.py` и `diagnostics.py`;
+4. scanner не подменяет review: динамические aliases и third-party output оцениваются отдельно.
 
 ## Каждый finding
 

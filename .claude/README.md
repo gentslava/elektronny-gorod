@@ -40,8 +40,7 @@
     └── check-audit-reconciliation.sh  (SessionStart + /audit + /release-check; ADR-0010)
 ```
 
-Канонические реализации secret-log и reconciliation checks находятся в
-`.codex/hooks/`; Claude-файлы делегируют им и не дублируют логику.
+Канонические реализации secret-log и reconciliation checks находятся в `.codex/hooks/`; Claude-файлы делегируют им и не дублируют логику.
 
 ## settings.json
 

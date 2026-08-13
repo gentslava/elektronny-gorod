@@ -35,8 +35,7 @@
 
 ### 1. Существующий стрим go2rtc (критический блокер)
 
-`go2rtc ?dst=<stream>` НЕ создаёт стрим автоматически — `streams.Get` вернёт 404
-если стрима нет. Нужен один из вариантов:
+`go2rtc ?dst=<stream>` НЕ создаёт стрим автоматически — `streams.Get` вернёт 404 если стрима нет. Нужен один из вариантов:
 
 **Вариант A (рекомендуется): использовать стрим камеры домофона из Frigate**
 ```
@@ -56,17 +55,14 @@ streams:
 
 ### 2. TURN-сервер для 4G
 
-WHIP ICE negotiation требует TURN при NAT (4G телефон → go2rtc за firewall).
-В `mic_whip.html` закомментирован блок `iceServers` — раскомментировать и вставить
-TURN-адрес перед тестом с телефона:
+WHIP ICE negotiation требует TURN при NAT (4G телефон → go2rtc за firewall). В `mic_whip.html` закомментирован блок `iceServers` — раскомментировать и вставить TURN-адрес перед тестом с телефона:
 ```js
 iceServers: [{ urls: 'turn:your.turn.server:3478', username: 'u', credential: 'p' }],
 ```
 
 ### 3. go2rtc доступен из браузера
 
-Браузер делает `fetch(go2rtcUrl + '/api/webrtc?dst=...')` — go2rtc должен быть
-доступен по HTTP(S) из браузера. Если go2rtc за Traefik/auth — нужен токен (GO2RTC_TOKEN).
+Браузер делает `fetch(go2rtcUrl + '/api/webrtc?dst=...')` — go2rtc должен быть доступен по HTTP(S) из браузера. Если go2rtc за Traefik/auth — нужен токен (GO2RTC_TOKEN).
 
 ## Процедура live-теста
 
@@ -114,14 +110,12 @@ python variant2_whip/probe_mic_whip.py
 3. Ожидаемый ответ: `200 OK` + SDP answer от go2rtc.
 4. Проверить в логе probe: `ffmpeg | ...` строки с RTSP.
 
-**Если 404:** стрим не существует → создай (см. Блокер 1).  
+**Если 404:** стрим не существует → создай (см. Блокер 1).
 **Если ICE failed:** нет TURN → проверь TURN-конфиг (Блокер 2).
 
 ### Шаг 5: Позвонить в домофон
 
-После успешного WHIP-publish: позвонить в домофон.
-Probe ответит (FCM → SIP → 200 OK → RTP uplink).
-В логе искать: `RTP[+Ns]: downlink=N` + отсутствие underrun-спайков.
+После успешного WHIP-publish: позвонить в домофон. Probe ответит (FCM → SIP → 200 OK → RTP uplink). В логе искать: `RTP[+Ns]: downlink=N` + отсутствие underrun-спайков.
 
 ### Шаг 6: Оценить (критерии сравнения с #1)
 
@@ -136,21 +130,15 @@ Probe ответит (FCM → SIP → 200 OK → RTP uplink).
 
 ## Известные ограничения / вопросы
 
-1. **Микс downlink + uplink в RTSP**: при WHIP-publish браузер становится producer
-   к существующему стриму камеры. Не ясно, добавляет ли go2rtc аудио-producer к
-   видео-consumer или создаёт отдельный audio-track. Нужно проверить SDP от go2rtc.
+1. **Микс downlink + uplink в RTSP**: при WHIP-publish браузер становится producer к существующему стриму камеры. Не ясно, добавляет ли go2rtc аудио-producer к видео-consumer или создаёт отдельный audio-track. Нужно проверить SDP от go2rtc.
 
-2. **go2rtc bag #2084 (send-only)**: актуален для exec-backchannel (#3), не для #2.
-   Но общий вопрос go2rtc audio-routing применим.
+2. **go2rtc bag #2084 (send-only)**: актуален для exec-backchannel (#3), не для #2. Но общий вопрос go2rtc audio-routing применим.
 
-3. **Кодек в RTSP**: ffmpeg декодирует что есть. Если go2rtc раздаёт Opus в RTSP —
-   ffmpeg перекодирует в PCM s16le (норм). Если PCMU — audioop тоже справится.
+3. **Кодек в RTSP**: ffmpeg декодирует что есть. Если go2rtc раздаёт Opus в RTSP — ffmpeg перекодирует в PCM s16le (норм). Если PCMU — audioop тоже справится.
 
-4. **WHIP ICE на 4G**: без TURN ICE не пройдёт через симметричный NAT 4G-оператора.
-   #1 этой проблемы не имеет (HA-WS через 443/WSS).
+4. **WHIP ICE на 4G**: без TURN ICE не пройдёт через симметричный NAT 4G-оператора. #1 этой проблемы не имеет (HA-WS через 443/WSS).
 
-5. **Авторизация WHIP**: go2rtc принимает WHIP без токена если auth выключен.
-   Если включён — нужен Bearer, передаётся из mic_whip.html.
+5. **Авторизация WHIP**: go2rtc принимает WHIP без токена если auth выключен. Если включён — нужен Bearer, передаётся из mic_whip.html.
 
 ## Связь
 

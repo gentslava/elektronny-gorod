@@ -1,6 +1,4 @@
-Status: Template
-Owner: Research Agent
-Last reviewed: 2026-08-11 (standard metadata and link-safe placeholder paths)
+Status: Template Owner: Research Agent Last reviewed: 2026-08-11 (standard metadata and link-safe placeholder paths)
 
 Source files:
 - evidence listed in the copied research document

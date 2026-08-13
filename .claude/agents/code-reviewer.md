@@ -17,8 +17,7 @@ tools: Read, Grep, Glob, Bash
 
 ## Твоя ответственность
 
-Получить exact base/head/tree candidate и spec/plan, не наследуя implementer assumptions.
-Перед push / PR / merge диффа в master — проверить **5 осей**:
+Получить exact base/head/tree candidate и spec/plan, не наследуя implementer assumptions. Перед push / PR / merge диффа в master — проверить **5 осей**:
 
 ### 1. Correctness
 
@@ -57,8 +56,7 @@ tools: Read, Grep, Glob, Bash
 - [ ] Auth-paths не логируют body (request или response).
 - [ ] Нет hardcoded secrets.
 - [ ] Input validation на границах config_flow / API.
-- [ ] `diagnostics.py` сохраняет HA-canonical `async_redact_data(TO_REDACT)` и
-  не возвращает секреты или сырые coordinator values.
+- [ ] `diagnostics.py` сохраняет HA-canonical `async_redact_data(TO_REDACT)` и не возвращает секреты или сырые coordinator values.
 
 ### 5. Performance
 
@@ -106,14 +104,9 @@ tools: Read, Grep, Glob, Bash
 ## Constraints
 
 - 🔴 Read-only — никаких правок в коде сам.
-- 🔴 Reviewer не должен быть implementer-ом проверяемого diff; self-review не
-  закрывает `REVIEW_OK`.
-- 🔴 Любое содержательное изменение candidate делает approval stale: implementer
-  фиксирует новый clean committed base/head/tree, а каждый обязательный reviewer
-  повторяет candidate-bound verdict. Глубина повторного review может быть
-  delta-scoped, но attestation относится ко всему новому tuple.
-- 🔴 Не «согласовывать» Approve и не deferred'ить Critical/Important findings —
-  pushback и fix до обычного push/PR/merge обязательны.
+- 🔴 Reviewer не должен быть implementer-ом проверяемого diff; self-review не закрывает `REVIEW_OK`.
+- 🔴 Любое содержательное изменение candidate делает approval stale: implementer фиксирует новый clean committed base/head/tree, а каждый обязательный reviewer повторяет candidate-bound verdict. Глубина повторного review может быть delta-scoped, но attestation относится ко всему новому tuple.
+- 🔴 Не «согласовывать» Approve и не deferred'ить Critical/Important findings — pushback и fix до обычного push/PR/merge обязательны.
 - НЕ переписывать тесты «чтобы зелёные» — это работа QA, не code-reviewer'а.
 - Sycophancy = failure mode. Approve только когда реально OK.
 

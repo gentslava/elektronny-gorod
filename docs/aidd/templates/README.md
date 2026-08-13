@@ -1,6 +1,4 @@
-Status: Active
-Owner: Documentation / AIDD Agent
-Last reviewed: 2026-08-11 (placeholder paths made link-validator safe)
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-11 (placeholder paths made link-validator safe)
 
 Source files:
 - `*.template.md` in this directory
@@ -43,8 +41,4 @@ Quality gates:
 
 ## Placeholder paths внутри шаблонов
 
-Связанные артефакты записаны как literal paths вида
-`docs/features/<feature>/prd.md`. После копирования шаблона замени `<feature>`
-на реальный каталог и при желании преврати path в Markdown link. Так сами
-templates остаются совместимы с link-validator без специальных исключений.
-Готовый образец — в [`../../features/example/`](../../features/example/).
+Связанные артефакты записаны как literal paths вида `docs/features/<feature>/prd.md`. После копирования шаблона замени `<feature>` на реальный каталог и при желании преврати path в Markdown link. Так сами templates остаются совместимы с link-validator без специальных исключений. Готовый образец — в [`../../features/example/`](../../features/example/).

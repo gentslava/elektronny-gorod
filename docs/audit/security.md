@@ -1,7 +1,4 @@
-Status: Active
-Owner: Security & Privacy Agent
-Last reviewed: 2026-08-11 (canonical AST/CLI secret-log gate; FCM Repairs title
-privacy boundary accepted; 9.9.0 parity credential classification retained)
+Status: Active Owner: Security & Privacy Agent Last reviewed: 2026-08-11 (canonical AST/CLI secret-log gate; FCM Repairs title privacy boundary accepted; 9.9.0 parity credential classification retained)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -38,10 +35,7 @@ Quality gates:
 
 ## Сводка по состоянию на 2026-08-11
 
-Проверка по текущему product candidate: grep всех `LOGGER.*` в чувствительных файлах,
-построчный разбор `_logging.py`/`http.py`/`config_flow.py`/`api.py`/
-`camera.py`/`go2rtc.py`/`diagnostics.py`, а также поиск credential-like
-значений в документации перед релизом.
+Проверка по текущему `master`: grep всех `LOGGER.*` в чувствительных файлах, построчный разбор `_logging.py`/`http.py`/`config_flow.py`/`api.py`/ `camera.py`/`go2rtc.py`/`diagnostics.py`, а также поиск credential-like значений в документации перед релизом.
 
 | ID | Статус | Кратко |
 |---|---|---|
@@ -63,35 +57,23 @@ Quality gates:
 
 ### S-01. Утечка access_token в логи
 
-- **Status:** ✅ **RESOLVED**.
-  `config_flow.py:ElektronnyGorodConfigFlow.async_step_user` теперь
-  `LOGGER.debug("Credentials captured (length=%d)", len(self.access_token))` —
-  логируется только длина.
+- **Status:** ✅ **RESOLVED**. `config_flow.py:ElektronnyGorodConfigFlow.async_step_user` теперь `LOGGER.debug("Credentials captured (length=%d)", len(self.access_token))` — логируется только длина.
 - **Original Severity:** P0 — при `debug` токен попадал в `home-assistant.log`.
 
 ### S-02. Утечка headers (Authorization: Bearer) и payload в логи
 
-- **Status:** ✅ **RESOLVED**. `HTTP._log_request` использует
-  `_logging.redact(headers)`; body не логируется (только размер /
-  `<auth-path-redacted>`).
-- **9.9.0 cross-check:** Bearer также не отправляется на pre-auth public
-  `device-installations`; regression покрыта `tests/test_http.py`. Allowlist
-  намеренно не совпадает с post-auth `/public/cameras`.
-- **Original Severity:** P0 — `headers` содержал `Authorization: Bearer`,
-  `data` auth-POST содержал пароль/SMS-код.
+- **Status:** ✅ **RESOLVED**. `HTTP._log_request` использует `_logging.redact(headers)`; body не логируется (только размер / `<auth-path-redacted>`).
+- **9.9.0 cross-check:** Bearer также не отправляется на pre-auth public `device-installations`; regression покрыта `tests/test_http.py`. Allowlist намеренно не совпадает с post-auth `/public/cameras`.
+- **Original Severity:** P0 — `headers` содержал `Authorization: Bearer`, `data` auth-POST содержал пароль/SMS-код.
 
 ### S-03. Утечка response body на DEBUG
 
-- **Status:** ✅ **RESOLVED**. `http.py:HTTP._log_response` логирует только
-  status + Content-Length; body не читается; для auth-path размер пропущен.
+- **Status:** ✅ **RESOLVED**. `http.py:HTTP._log_response` логирует только status + Content-Length; body не читается; для auth-path размер пропущен.
 - **Original Severity:** P0 — debug-логи содержали `accessToken`/`refreshToken`.
 
 ### S-04. Утечка `entry.data` в логи
 
-- **Status:** ✅ **RESOLVED**.
-  `config_flow.py:ElektronnyGorodConfigFlow.get_account` теперь использует
-  `entry.entry_id`.
-  Grep `LOGGER.*entry\.(data|options)` по компоненту → 0 совпадений.
+- **Status:** ✅ **RESOLVED**. `config_flow.py:ElektronnyGorodConfigFlow.get_account` теперь использует `entry.entry_id`. Grep `LOGGER.*entry\.(data|options)` по компоненту → 0 совпадений.
 - **Original Severity:** P0 — `entry.data` содержал токены/user_agent/operator_id.
 
 ### S-05. Per-request `ClientSession` без `async_get_clientsession`
@@ -104,24 +86,15 @@ Quality gates:
 
 ### S-06. Утечка `contract` объекта
 
-- **Status:** ✅ **RESOLVED**.
-  `config_flow.py:ElektronnyGorodConfigFlow.async_step_contract` теперь
-  `LOGGER.debug("Selected contract subscriberId=%s", selected_id)` — только ID,
-  не contract object.
-- **Original Impact:** `contract` содержал accountId, subscriberId, address,
-  operatorId (PII).
+- **Status:** ✅ **RESOLVED**. `config_flow.py:ElektronnyGorodConfigFlow.async_step_contract` теперь `LOGGER.debug("Selected contract subscriberId=%s", selected_id)` — только ID, не contract object.
+- **Original Impact:** `contract` содержал accountId, subscriberId, address, operatorId (PII).
 
 ### S-A71-01. Operator-токен в traceback при go2rtc PUT (NEW, RESOLVED)
 
 - **Status:** ✅ **RESOLVED** (ветка `fix/a71-camera-stream-auto-recovery`).
-- **Файл:** `go2rtc.py:Go2RtcClient.async_patch_stream` и
-  `stream_manager.py:CameraStreamManager` refresh/reconcile paths.
-- **Impact (предотвращённый):** forpost RTSP-URL с токеном (`https://forpost-N.
-  novotelecom.ru:18081/rtsp/a<NNNNNN>/<token>/...`) передаётся в go2rtc PUT;
-  при `ClientError` он мог попасть в traceback/RuntimeError.
-- **Fix:** `except ClientError as exc: raise RuntimeError(f"...{type(exc).__name__}") from None`
-  — цепочка оборвана `from None`, в RuntimeError только имя класса исключения и
-  `resp.status` (без body). PATCH-ошибки swallowed.
+- **Файл:** `go2rtc.py:Go2RtcClient.async_patch_stream` и `stream_manager.py:CameraStreamManager` refresh/reconcile paths.
+- **Impact (предотвращённый):** forpost RTSP-URL с токеном (`https://forpost-N. novotelecom.ru:18081/rtsp/a<NNNNNN>/<token>/...`) передаётся в go2rtc PUT; при `ClientError` он мог попасть в traceback/RuntimeError.
+- **Fix:** `except ClientError as exc: raise RuntimeError(f"...{type(exc).__name__}") from None` — цепочка оборвана `from None`, в RuntimeError только имя класса исключения и `resp.status` (без body). PATCH-ошибки swallowed.
 
 ### S-07. Отсутствие auto-refresh на 401
 
@@ -131,12 +104,7 @@ Quality gates:
 
 ### S-08. Отсутствие diagnostics.py с redaction
 
-- **Status:** ✅ **RESOLVED** — добавлен `diagnostics.py` (3.3.0).
-  `async_get_config_entry_diagnostics` → `async_redact_data(entry.as_dict(), TO_REDACT)`.
-  `TO_REDACT = SENSITIVE_KEYS ∪ {phone, contract, operator_id, account_id,
-  subscriber_id, title, name, address}` (синхронизирован с `_logging.py`; есть тест
-  `test_to_redact_covers_sensitive_keys`). Coordinator-снимок — только счётчики.
-  6 тестов `tests/test_diagnostics.py`. Разблокирует `SECURITY_OK`.
+- **Status:** ✅ **RESOLVED** — добавлен `diagnostics.py` (3.3.0). `async_get_config_entry_diagnostics` → `async_redact_data(entry.as_dict(), TO_REDACT)`. `TO_REDACT = SENSITIVE_KEYS ∪ {phone, contract, operator_id, account_id, subscriber_id, title, name, address}` (синхронизирован с `_logging.py`; есть тест `test_to_redact_covers_sensitive_keys`). Coordinator-снимок — только счётчики. 6 тестов `tests/test_diagnostics.py`. Разблокирует `SECURITY_OK`.
 - **Файл:** [`diagnostics.py`](../../custom_components/elektronny_gorod/diagnostics.py)
 - **Original Impact:** когда пользователь экспортирует diagnostics через UI — HA по умолчанию пытается дампить `entry.data` целиком (через `async_get_config_entry_diagnostics`). Без нашего `diagnostics.py` пользователь не может безопасно поделиться диагностикой.
 - **Fix:** создать `diagnostics.py`:
@@ -153,31 +121,19 @@ Quality gates:
 
 ### S-16. go2rtc credentials в `entry.data` plaintext
 
-- **Status:** 🟡 **MITIGATED** — `go2rtc_username`/`go2rtc_password` в `TO_REDACT`
-  → больше **не утекают** в diagnostics-выгрузку (S-08 RESOLVED). Остаётся
-  plaintext в `.storage`/backup (HA-storage limitation) — полное шифрование
-  (`Store`/pin) в backlog, не блокер.
-- **Файлы:** `config_flow.py:ElektronnyGorodConfigFlow.async_step_go2rtc`,
-  `ElektronnyGorodOptionsFlowHandler.async_step_init`,
-  `camera.py:_get_go2rtc_cfg`
+- **Status:** 🟡 **MITIGATED** — `go2rtc_username`/`go2rtc_password` в `TO_REDACT` → больше **не утекают** в diagnostics-выгрузку (S-08 RESOLVED). Остаётся plaintext в `.storage`/backup (HA-storage limitation) — полное шифрование (`Store`/pin) в backlog, не блокер.
+- **Файлы:** `config_flow.py:ElektronnyGorodConfigFlow.async_step_go2rtc`, `ElektronnyGorodOptionsFlowHandler.async_step_init`, `camera.py:_get_go2rtc_cfg`
 - **Severity:** P1 → P3 (после mitigation)
 - **Impact:** `go2rtc_password` (Basic Auth) хранится в `entry.data` без шифрования. ~~Попадёт в diagnostics-выгрузку (S-08)~~ — закрыто redaction.
 - **Fix:** ✅ ключи в `TO_REDACT`. Долгосрочно — рассмотреть HA `Store` с pin-кодом.
-- **Дополнительно:** camera setup передаёт credentials только в
-  `go2rtc_auth_headers`; raw auth-header не логируется и не попадает в
-  diagnostics.
+- **Дополнительно:** camera setup передаёт credentials только в `go2rtc_auth_headers`; raw auth-header не логируется и не попадает в diagnostics.
 
 ### S-09. Нет timeout на HTTP-запросы
 
-- **Status:** ✅ **RESOLVED**. `http.py` использует `_REST_TIMEOUT`
-  (`total=30`, `connect=10`) и `_BINARY_TIMEOUT` (`total=60`, `connect=10`)
-  и передаёт выбранный timeout во все GET/POST/DELETE запросы.
+- **Status:** ✅ **RESOLVED**. `http.py` использует `_REST_TIMEOUT` (`total=30`, `connect=10`) и `_BINARY_TIMEOUT` (`total=60`, `connect=10`) и передаёт выбранный timeout во все GET/POST/DELETE запросы.
 - **Файл:** `http.py:_REST_TIMEOUT`, `_BINARY_TIMEOUT`, `HTTP.__request`
-- **Original Impact:** один зависший запрос к `myhome.proptech.ru` мог надолго
-  задержать setup/coordinator tick.
-- **Остаток:** retry/backoff вынесен в S-10/A-21 и применяется только к
-  потенциально идемпотентным операциям; POST/login/open_lock автоматически
-  ретраить нельзя.
+- **Original Impact:** один зависший запрос к `myhome.proptech.ru` мог надолго задержать setup/coordinator tick.
+- **Остаток:** retry/backoff вынесен в S-10/A-21 и применяется только к потенциально идемпотентным операциям; POST/login/open_lock автоматически ретраить нельзя.
 
 ### S-10. Нет retry / backoff на 5xx / network errors
 
@@ -188,77 +144,41 @@ Quality gates:
 
 ### S-20. Production credential-like literal в публичном audit evidence
 
-- **Status:** ✅ **RESOLVED** в текущем дереве 2026-07-13: фактическое значение
-  заменено на `[REDACTED]` в `project-audit.md`.
-- **Original Severity:** P0, если credential активен; публичный репозиторий
-  содержит историю файла с production snapshot.
-- **Verification:** SHA-256 отпечаток исторического значения безопасно сравнен
-  с настроенными `go2rtc_password` двух production config entries — совпадений
-  нет (`active_match=false`), само значение не выводилось.
-- **Residual:** старое неактивное значение остаётся в git history. Историю
-  `master` не переписываем; credential нельзя повторно использовать.
+- **Status:** ✅ **RESOLVED** в текущем дереве 2026-07-13: фактическое значение заменено на `[REDACTED]` в `project-audit.md`.
+- **Original Severity:** P0, если credential активен; публичный репозиторий содержит историю файла с production snapshot.
+- **Verification:** SHA-256 отпечаток исторического значения безопасно сравнен с настроенными `go2rtc_password` двух production config entries — совпадений нет (`active_match=false`), само значение не выводилось.
+- **Residual:** старое неактивное значение остаётся в git history. Историю `master` не переписываем; credential нельзя повторно использовать.
 
 ### S-21. Mobile-app parity credential surfaces
 
-- **Status:** 🟡 **DESIGN GATE** для archive/guest/key/private-camera slices;
-  durable history poll + browse boundary реализованы в
-  `feat/durable-event-history`.
-- **Scope:** [mobile-app-parity](../features/mobile-app-parity/README.md):
-  archive/media, guest invitations, access keys and private-camera controls.
+- **Status:** 🟡 **DESIGN GATE** для archive/guest/key/private-camera slices; durable history poll + browse boundary реализованы в `feat/durable-event-history`.
+- **Scope:** [mobile-app-parity](../features/mobile-app-parity/README.md): archive/media, guest invitations, access keys and private-camera controls.
 - **Credential classes:**
   - guest `link`/invite UUID grants household access;
   - `accessKeyCode` identifies a physical access credential;
   - forpost playback/download URL contains a short-lived signed token.
-- **Forbidden sinks:** entity state/attributes, recorder, config-entry data,
-  `Store`, diagnostics, logs, exception text and persistent notifications.
-- **Required controls:** guest link only as response-only action result;
-  `accessKeyCode` discarded at parser boundary and never used as unique ID;
-  signed media URL resolved on demand and preferably hidden behind an
-  authenticated/short-lived HA proxy; sentinel propagation tests for all three.
-- **PII note:** resident names, nicknames and account IDs from place-scoped
-  `subscriber-places` are excluded from entity attributes by default.
-- **History control implemented:** API dataclasses намеренно не содержат
-  backend `message`; entity attrs заданы allowlist, а HA `Store` schema v1
-  сохраняет только максимум 200 opaque event IDs на stream. Camera response
-  `Message` и general event `message` не доходят до dispatcher/state/storage.
-  On-demand browse дополнительно проверяет `POLICY_READ` выбранной EventEntity,
-  резолвит её config entry и exact place/access-control через registry, принимает
-  только page `0..100` и возвращает allowlist `{event_id,event_type,occurred_at}`.
-  Frontend повторно нормализует response и отклоняет cross-entity ответ.
-- **Merge gate:** the guest action has a sanitized runtime fixture but still
-  needs security review and caplog/diagnostics/state sentinel scans before
-  merge. Remaining static-only key/camera write paths additionally need a
-  decrypted HAR before implementation.
+- **Forbidden sinks:** entity state/attributes, recorder, config-entry data, `Store`, diagnostics, logs, exception text and persistent notifications.
+- **Required controls:** guest link only as response-only action result; `accessKeyCode` discarded at parser boundary and never used as unique ID; signed media URL resolved on demand and preferably hidden behind an authenticated/short-lived HA proxy; sentinel propagation tests for all three.
+- **PII note:** resident names, nicknames and account IDs from place-scoped `subscriber-places` are excluded from entity attributes by default.
+- **History control implemented:** API dataclasses намеренно не содержат backend `message`; entity attrs заданы allowlist, а HA `Store` schema v1 сохраняет только максимум 200 opaque event IDs на stream. Camera response `Message` и general event `message` не доходят до dispatcher/state/storage. On-demand browse дополнительно проверяет `POLICY_READ` выбранной EventEntity, резолвит её config entry и exact place/access-control через registry, принимает только page `0..100` и возвращает allowlist `{event_id,event_type,occurred_at}`. Frontend повторно нормализует response и отклоняет cross-entity ответ.
+- **Merge gate:** the guest action has a sanitized runtime fixture but still needs security review and caplog/diagnostics/state sentinel scans before merge. Remaining static-only key/camera write paths additionally need a decrypted HAR before implementation.
 
 ## P2 — желательно
 
 ### S-22. Frontend dev-toolchain advisories
 
 - **Status:** 🟡 **OPEN** (pre-existing; not shipped in the HACS runtime).
-- **Severity:** P2 effective project risk; `npm audit` rates the dependency
-  chain as 3 moderate / 1 high / 1 critical.
+- **Severity:** P2 effective project risk; `npm audit` rates the dependency chain as 3 moderate / 1 high / 1 critical.
 - **Area:** Development dependencies.
-- **Evidence (2026-07-15):** `vitest@2.1.9` pulls vulnerable Vite/Vitest server
-  code (`GHSA-5xrq-8626-4rwp`, `GHSA-fx2h-pf6j-xcff` and related advisories),
-  while direct `esbuild@0.24.2` is affected by `GHSA-67mh-4wv8-2f99`.
-- **Impact:** production/HACS receives only the prebuilt static JS bundle and
-  none of these packages. Repository scripts use `vitest run`, not the Vitest
-  UI server, so the critical server path is not exposed by the documented
-  workflow. A developer who exposes a Vite/Vitest dev server to an untrusted
-  network remains at risk.
-- **Recommended fix:** separate dependency-only change to supported
-  `vitest@4` and current esbuild, followed by all 56 frontend tests, TypeScript
-  check, production build and bundle diff review. Do not use
-  `npm audit fix --force` without reviewing the major-version migration.
+- **Evidence (2026-07-15):** `vitest@2.1.9` pulls vulnerable Vite/Vitest server code (`GHSA-5xrq-8626-4rwp`, `GHSA-fx2h-pf6j-xcff` and related advisories), while direct `esbuild@0.24.2` is affected by `GHSA-67mh-4wv8-2f99`.
+- **Impact:** production/HACS receives only the prebuilt static JS bundle and none of these packages. Repository scripts use `vitest run`, not the Vitest UI server, so the critical server path is not exposed by the documented workflow. A developer who exposes a Vite/Vitest dev server to an untrusted network remains at risk.
+- **Recommended fix:** separate dependency-only change to supported `vitest@4` and current esbuild, followed by all 56 frontend tests, TypeScript check, production build and bundle diff review. Do not use `npm audit fix --force` without reviewing the major-version migration.
 - **First step:** approve the dependency upgrade as its own focused task/commit.
 
 ### S-11. Логирование `Failed to fetch balance: %s` f-string
 
-- **Status:** ✅ **RESOLVED** — прежнего exception-log в `sensor.py` больше нет;
-  balance читается из coordinator snapshot. Secret-log scanner дополнительно
-  блокирует f-string и unsafe exception values в `LOGGER.*`.
-- **Original Impact:** `e` мог содержать ClientResponse с URL → утечка через
-  `repr()`.
+- **Status:** ✅ **RESOLVED** — прежнего exception-log в `sensor.py` больше нет; balance читается из coordinator snapshot. Secret-log scanner дополнительно блокирует f-string и unsafe exception values в `LOGGER.*`.
+- **Original Impact:** `e` мог содержать ClientResponse с URL → утечка через `repr()`.
 
 ### S-12. SHA1 для пароля
 
@@ -312,55 +232,32 @@ Quality gates:
 
 - **Файл:** `go2rtc.py:cleanup_go2rtc_stream`.
 - **Код:** `LOGGER.debug("go2rtc cleanup request failed: %s", err)`
-- **Impact:** `str(ClientError)` может содержать URL. В **текущем** flow URL =
-  `{base_url}/api/streams?src=ha_check_<uuid>` (validation cleanup, synthetic
-  stream name, креды в Authorization header а не в URL) → реальной утечки нет.
-  Паттерн фрагильный, противоречит defense-in-depth из `camera.py` (`from None`).
+- **Impact:** `str(ClientError)` может содержать URL. В **текущем** flow URL = `{base_url}/api/streams?src=ha_check_<uuid>` (validation cleanup, synthetic stream name, креды в Authorization header а не в URL) → реальной утечки нет. Паттерн фрагильный, противоречит defense-in-depth из `camera.py` (`from None`).
 - **Fix:** логировать `type(err).__name__` вместо `err`. НЕ блокер.
 
 ### S-18. go2rtc.py — сырой response body в логе (NEW)
 
 - **Файл:** `go2rtc.py:validate_go2rtc`, `cleanup_go2rtc_stream`.
 - **Код:** `LOGGER.debug("...failed: %s %s", resp.status, body)`
-- **Impact:** body от go2rtc в validation/cleanup flow = echo dummy src
-  (`rtsp://127.0.0.1...` / `ha_check_<uuid>`) без operator-токена → безопасно в
-  текущем использовании. Unbounded body-логирование — фрагильно.
+- **Impact:** body от go2rtc в validation/cleanup flow = echo dummy src (`rtsp://127.0.0.1...` / `ha_check_<uuid>`) без operator-токена → безопасно в текущем использовании. Unbounded body-логирование — фрагильно.
 - **Fix:** логировать только `resp.status`. НЕ блокер.
 
 ### S-19. Uplink-микрофон: AuthZ + AudioBridge LAN-exposure (ADR-0013, A-85)
 
-- **Status:** 🟢 **ACCEPTED-by-design** (решение пользователя — accept-risk +
-  документировать; guard **не** добавляется). Связано с
-  [audit A-85](project-audit.md) + [ADR-0013](../decisions/0013-uplink-mic-transport.md).
+- **Status:** 🟢 **ACCEPTED-by-design** (решение пользователя — accept-risk + документировать; guard **не** добавляется). Связано с [audit A-85](project-audit.md) + [ADR-0013](../decisions/0013-uplink-mic-transport.md).
 - **Severity:** low/medium.
-- **Файлы:** `uplink_ws.py` (WS-команда `elektronny_gorod/intercom_uplink`),
-  `sip/call_controller.py` (`feed_uplink`), `sip/bridge.py` (`AudioBridge`).
+- **Файлы:** `uplink_ws.py` (WS-команда `elektronny_gorod/intercom_uplink`), `sip/call_controller.py` (`feed_uplink`), `sip/bridge.py` (`AudioBridge`).
 
-**S-UP-01 — uplink AuthZ (accept-risk).** WS-команда `intercom_uplink` доверяет
-**любому authenticated HA-юзеру**: любой авторизованный пользователь HA может
-«говорить» (стримить микрофон) в активный вызов домофона.
+**S-UP-01 — uplink AuthZ (accept-risk).** WS-команда `intercom_uplink` доверяет **любому authenticated HA-юзеру**: любой авторизованный пользователь HA может «говорить» (стримить микрофон) в активный вызов домофона.
 
-- **Обоснование принятия:** паттерн **зеркалит штатный HA voice-assistant**
-  (`connection.async_register_binary_handler` — тот же авторизованный WebSocket,
-  через который проходит весь UI). HA-модель доверия: authenticated = trusted.
-  Per-call AuthZ-разграничение поверх этого было бы **отклонением** от платформы,
-  не митигацией реальной угрозы.
-- **Окно атаки эфемерно:** uplink работает только при активном вызове (~120с),
-  вне вызова команда возвращает error (нет активного контроллера/sink).
-- **Mitigation:** ничего не добавляем (by-design). Документировано как
-  known-limitation в A-85. Если в будущем появится multi-tenant сценарий — тогда
-  пересмотр через новый ADR.
+- **Обоснование принятия:** паттерн **зеркалит штатный HA voice-assistant** (`connection.async_register_binary_handler` — тот же авторизованный WebSocket, через который проходит весь UI). HA-модель доверия: authenticated = trusted. Per-call AuthZ-разграничение поверх этого было бы **отклонением** от платформы, не митигацией реальной угрозы.
+- **Окно атаки эфемерно:** uplink работает только при активном вызове (~120с), вне вызова команда возвращает error (нет активного контроллера/sink).
+- **Mitigation:** ничего не добавляем (by-design). Документировано как known-limitation в A-85. Если в будущем появится multi-tenant сценарий — тогда пересмотр через новый ADR.
 
-**AudioBridge LAN-exposure (downlink-аудио).** `AudioBridge` (`sip/bridge.py`)
-поднимает HTTP-сервер на `0.0.0.0:40020` (mpegts/aac-аудио гостя) для доступа
-go2rtc по LAN.
+**AudioBridge LAN-exposure (downlink-аудио).** `AudioBridge` (`sip/bridge.py`) поднимает HTTP-сервер на `0.0.0.0:40020` (mpegts/aac-аудио гостя) для доступа go2rtc по LAN.
 
-- **Severity:** low — bind на все интерфейсы, но: (1) **эфемерно** на время вызова
-  (teardown на hangup/BYE); (2) контент = аудио гостя у двери, не секрет/токен;
-  (3) bind `0.0.0.0` нужен, чтобы go2rtc (отдельный процесс/контейнер) дотянулся
-  по LAN-адресу хоста (`detect_lan_ip()`).
-- **Status:** accepted-by-design. Возможное hardening (bind на конкретный
-  LAN-IP вместо `0.0.0.0`) — polish-backlog, не блокер.
+- **Severity:** low — bind на все интерфейсы, но: (1) **эфемерно** на время вызова (teardown на hangup/BYE); (2) контент = аудио гостя у двери, не секрет/токен; (3) bind `0.0.0.0` нужен, чтобы go2rtc (отдельный процесс/контейнер) дотянулся по LAN-адресу хоста (`detect_lan_ip()`).
+- **Status:** accepted-by-design. Возможное hardening (bind на конкретный LAN-IP вместо `0.0.0.0`) — polish-backlog, не блокер.
 
 ## CI / Secrets
 
@@ -373,22 +270,11 @@ go2rtc по LAN.
 
 ## MCP / Tools
 
-Репозиторий содержит `.claude/`, `.cursor/` и
-`.github/copilot-instructions.md`; модель прав и запрещённые операции описаны в
-[`aidd/mcp-tools.md`](../aidd/mcp-tools.md). Agent/tool contracts не должны
-читать или выводить ignored `research/scripts/auth.env` и capture artifacts.
-Pre-commit secret hook всё ещё backlog; до него обязательны diff-scoped secret
-scan и review перед коммитом.
+Репозиторий содержит `.claude/`, `.cursor/` и `.github/copilot-instructions.md`; модель прав и запрещённые операции описаны в [`aidd/mcp-tools.md`](../aidd/mcp-tools.md). Agent/tool contracts не должны читать или выводить ignored `research/scripts/auth.env` и capture artifacts. Pre-commit secret hook всё ещё backlog; до него обязательны diff-scoped secret scan и review перед коммитом.
 
 ## Dependency vulnerabilities
 
-`manifest.json:requirements` больше не пуст: `firebase-messaging>=0.4.5` (FCM-вызов,
-ADR-0011 — `0.4.5` является проверенным минимумом, а обновления выше него
-разрешены; тянет protobuf / http_ece / cryptography; «серая зона» приватных API
-Google задокументирована в [A-80](project-audit.md)) + `audioop-lts>=0.2.1`
-(G.711-транскод SIP, A-81; только Python 3.13+). Остальное — `aiohttp`/`voluptuous`/
-`yarl` из HA core. CVE-risk core-зависимостей управляется HA core; внешние pip-deps
-обновляются по линии поддержки upstream (см. A-80 §Watch).
+`manifest.json:requirements` больше не пуст: `firebase-messaging>=0.4.5` (FCM-вызов, ADR-0011 — `0.4.5` является проверенным минимумом, а обновления выше него разрешены; тянет protobuf / http_ece / cryptography; «серая зона» приватных API Google задокументирована в [A-80](project-audit.md)) + `audioop-lts>=0.2.1` (G.711-транскод SIP, A-81; только Python 3.13+). Остальное — `aiohttp`/`voluptuous`/`yarl` из HA core. CVE-risk core-зависимостей управляется HA core; внешние pip-deps обновляются по линии поддержки upstream (см. A-80 §Watch).
 
 ## Сводный план
 
@@ -409,22 +295,17 @@ Google задокументирована в [A-80](project-audit.md)) + `audioo
 
 - [x] **S-01..S-04, S-06 исправлены** (ветка `hotfix/p0-security`; верифицировано по коду 2026-05-30).
 - [x] Добавлен helper `_logging.py` с `SENSITIVE_KEYS` + `redact()` (ADR-0004).
-- [x] `bash .codex/hooks/check-secret-logs.sh` проходит: прямые sensitive
-  values в `LOGGER.*` не найдены; безопасные `len(value)`/`redact(value)`
-  не считаются утечками.
+- [x] `bash .codex/hooks/check-secret-logs.sh` проходит: прямые sensitive values в `LOGGER.*` не найдены; безопасные `len(value)`/`redact(value)` не считаются утечками.
 - [x] S-05 (shared ClientSession) — RESOLVED (ADR-0008).
 - [x] S-A71-01 (operator-токен в traceback go2rtc PUT) — RESOLVED (`from None`).
 - [x] **S-08 — `diagnostics.py` с redaction** (RESOLVED в 3.3.0).
 - [x] **S-09 — `ClientTimeout` на основном API** (RESOLVED; retry отдельно S-10).
-- [x] **S-16 diagnostics mitigation** — go2rtc credentials входят в `TO_REDACT`;
-  plaintext HA storage остаётся accepted backlog.
-- [ ] **S-21** — применить credential constraints и sentinel tests при
-  реализации mobile-app-parity slices.
+- [x] **S-16 diagnostics mitigation** — go2rtc credentials входят в `TO_REDACT`; plaintext HA storage остаётся accepted backlog.
+- [ ] **S-21** — применить credential constraints и sentinel tests при реализации mobile-app-parity slices.
 - [ ] S-07 (auto-refresh на 401) — Итерация 3 после HAR-сценария истечения.
 - [ ] S-17/S-18 (go2rtc.py raw logging) — P3, defense-in-depth, по мере touch.
 
-S-21 — gate будущего кода и не отменяет текущий `SECURITY_OK`: запрещённые
-credential surfaces пока не реализованы.
+S-21 — gate будущего кода и не отменяет текущий `SECURITY_OK`: запрещённые credential surfaces пока не реализованы.
 
 ## Next reading
 

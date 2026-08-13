@@ -57,8 +57,7 @@
 
 ### Slice 5: Pre-commit hook
 
-- **Файлы:** `.codex/hooks/check-secret-logs.py`,
-  `.codex/hooks/check-secret-logs.sh`, tool-specific wrappers/settings.
+- **Файлы:** `.codex/hooks/check-secret-logs.py`, `.codex/hooks/check-secret-logs.sh`, tool-specific wrappers/settings.
 - **Что:** bash-скрипт, блокирующий commit при прямом логировании sensitive ключей.
 - **Acceptance:** ручной dry-run на staged diff с заведомой утечкой → блокирует.
 - **Risk:** низкий.

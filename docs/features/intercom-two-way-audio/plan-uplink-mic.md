@@ -153,8 +153,7 @@ def test_clear_resets_buffer_and_state():
 
 - [ ] **Step 2: Запустить — убедиться, что падают**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_uplink.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named '...sip.uplink'`.
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_uplink.py -q` Expected: FAIL — `ModuleNotFoundError: No module named '...sip.uplink'`.
 
 - [ ] **Step 3: Реализовать `UplinkSink`**
 
@@ -218,13 +217,11 @@ class UplinkSink:
 
 - [ ] **Step 4: Запустить — убедиться, что проходят**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_uplink.py -q`
-Expected: PASS (9 passed).
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_uplink.py -q` Expected: PASS (9 passed).
 
 - [ ] **Step 5: Полный набор не сломан**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/ -q`
-Expected: PASS (предыдущие 273 + новые).
+Run: `PYTHONPATH=. .venv/bin/pytest tests/ -q` Expected: PASS (предыдущие 273 + новые).
 
 - [ ] **Step 6: Commit**
 
@@ -272,8 +269,7 @@ ffmpeg в `bridge.py`, прямой вызов появится при опти�
 
 - [ ] **Step 2: Тесты `audio.py` зелёные (без изменений поведения)**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_audio.py tests/test_sip_uplink.py -q`
-Expected: PASS.
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_audio.py tests/test_sip_uplink.py -q` Expected: PASS.
 
 - [ ] **Step 3: Commit**
 

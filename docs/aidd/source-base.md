@@ -1,6 +1,4 @@
-Status: Active
-Owner: Documentation / AIDD Agent
-Last reviewed: 2026-05-22
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-05-22
 
 Source files:
 - этот документ — индекс внешних источников

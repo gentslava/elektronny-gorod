@@ -1,6 +1,4 @@
-Status: Active
-Owner: Documentation / AIDD Agent
-Last reviewed: 2026-08-11 (canonical Codex hooks and Claude adapters)
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-11 (canonical Codex hooks and Claude adapters)
 
 Source files:
 - этот документ
@@ -112,8 +110,7 @@ Quality gates:
 
 ## Конфигурация
 
-`.claude/settings.json` хранит allow-list разрешённых команд / MCP-серверов на уровне проекта.
-Не коммитить `.claude/settings.local.json` (пользовательские настройки).
+`.claude/settings.json` хранит allow-list разрешённых команд / MCP-серверов на уровне проекта. Не коммитить `.claude/settings.local.json` (пользовательские настройки).
 
 ## Hooks
 
@@ -121,16 +118,11 @@ Quality gates:
 
 Активные hooks проекта:
 
-- `.codex/hooks/check-secret-logs.py` +
-  `.codex/hooks/check-secret-logs.sh` — канонический AST scanner для всего
-  candidate; Claude/Codex security-команды вызывают его.
-- `.codex/hooks/post-edit-redaction-check.sh` — быстрый adapter после правки;
-  `.claude/hooks/post-edit-redaction-check.sh` делегирует канонической проверке.
-- `.codex/hooks/check-audit-reconciliation.sh` — каноническая сверка audit↔git;
-  одноимённый Claude hook является тонким wrapper.
+- `.codex/hooks/check-secret-logs.py` + `.codex/hooks/check-secret-logs.sh` — канонический AST scanner для всего candidate; Claude/Codex security-команды вызывают его.
+- `.codex/hooks/post-edit-redaction-check.sh` — быстрый adapter после правки; `.claude/hooks/post-edit-redaction-check.sh` делегирует канонической проверке.
+- `.codex/hooks/check-audit-reconciliation.sh` — каноническая сверка audit↔git; одноимённый Claude hook является тонким wrapper.
 
-Новые hooks добавляются в `.codex/hooks/`; tool-specific каталог содержит
-только adapter, если формат события инструмента этого требует.
+Новые hooks добавляются в `.codex/hooks/`; tool-specific каталог содержит только adapter, если формат события инструмента этого требует.
 
 См. [`../../.claude/hooks/`](../../.claude/hooks/).
 

@@ -56,14 +56,9 @@ grep 'TO_REDACT' custom_components/elektronny_gorod/diagnostics.py
 
 ## Gate modes
 
-- До freeze выполнить security precheck; он закрывает только
-  `SECURITY_PRECHECK_OK` и не заменяет независимый review.
-- Для `SECURITY_OK` финального candidate доступный `Edit` не используется:
-  review строго read-only по base/head/tree. Отчёт фиксирует reviewer identity,
-  `Participated in implementation: no` и scoped verdict.
-- Critical/Important нельзя deferred'ить. Findings исправляет implementer;
-  после изменения candidate каждый обязательный reviewer выдаёт новый verdict
-  на новый base/head/tree (глубина security re-review может быть delta-scoped).
+- До freeze выполнить security precheck; он закрывает только `SECURITY_PRECHECK_OK` и не заменяет независимый review.
+- Для `SECURITY_OK` финального candidate доступный `Edit` не используется: review строго read-only по base/head/tree. Отчёт фиксирует reviewer identity, `Participated in implementation: no` и scoped verdict.
+- Critical/Important нельзя deferred'ить. Findings исправляет implementer; после изменения candidate каждый обязательный reviewer выдаёт новый verdict на новый base/head/tree (глубина security re-review может быть delta-scoped).
 
 ## Формат output
 

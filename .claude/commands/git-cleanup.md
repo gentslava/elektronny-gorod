@@ -2,26 +2,18 @@
 description: Запустить git-historian для аудита и чистки git истории текущей feature-ветки перед merge.
 ---
 
-Цель: схлопнуть «иттерационные» коммиты (hotfix-цепочки, DIAG-логи, typo-
-правки) в логичные substantive единицы. После — клонированная история выглядит
-так, как будто человек писал её сразу набело.
+Цель: схлопнуть «иттерационные» коммиты (hotfix-цепочки, DIAG-логи, typo- правки) в логичные substantive единицы. После — клонированная история выглядит так, как будто человек писал её сразу набело.
 
 ## Шаги
 
-1. Прочитай [`.claude/agents/git-historian.md`](../agents/git-historian.md) —
-   контракт агента.
-2. Прочитай [`.claude/rules/git-history.md`](../rules/git-history.md) —
-   критерии gate `HISTORY_CLEAN`.
+1. Прочитай [`.claude/agents/git-historian.md`](../agents/git-historian.md) — контракт агента.
+2. Прочитай [`.claude/rules/git-history.md`](../rules/git-history.md) — критерии gate `HISTORY_CLEAN`.
 3. Запусти subagent через `subagent_type=git-historian` с задачей:
-   - сначала зафиксировать явный `<target-ref>` (PR base; для stacked PR —
-     parent feature branch, не `master`);
+   - сначала зафиксировать явный `<target-ref>` (PR base; для stacked PR — parent feature branch, не `master`);
    - проанализировать текущую ветку `git log --oneline <target-ref>..HEAD`,
    - предложить план rebase (squash / fixup / reword / drop),
-   - **спросить подтверждение** у user'а перед выполнением (не делать rebase
-     автоматически без явного approval),
-   - после rebase — verify diff vs `<target-ref>`, объявить прежние approvals
-     stale и остановиться до нового freeze/review; не push-ить переписанный
-     candidate напрямую.
+   - **спросить подтверждение** у user'а перед выполнением (не делать rebase автоматически без явного approval),
+   - после rebase — verify diff vs `<target-ref>`, объявить прежние approvals stale и остановиться до нового freeze/review; не push-ить переписанный candidate напрямую.
 
 ## Что обязательно сделать перед rebase
 

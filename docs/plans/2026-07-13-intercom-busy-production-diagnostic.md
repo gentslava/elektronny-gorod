@@ -291,8 +291,7 @@ def __init__(
     self._register_expires = REGISTER_EXPIRES
 ```
 
-Create `unregistered` in `connection_made`, pass the opt-in fields from `send_register`,
-and preserve the requested expires value across a 401/407 challenge:
+Create `unregistered` in `connection_made`, pass the opt-in fields from `send_register`, and preserve the requested expires value across a 401/407 challenge:
 
 ```python
 def send_register(self, auth: str | None = None, *, expires: int = REGISTER_EXPIRES) -> None:
@@ -314,8 +313,7 @@ def send_register(self, auth: str | None = None, *, expires: int = REGISTER_EXPI
     self.transport.sendto(reg.encode())
 ```
 
-Create `self.unregistered = loop.create_future()` in `connection_made`. In
-`_on_response`, keep the existing challenge parsing and replace its final branch with:
+Create `self.unregistered = loop.create_future()` in `connection_made`. In `_on_response`, keep the existing challenge parsing and replace its final branch with:
 
 ```python
 auth = build_register_authorization(
@@ -522,13 +520,7 @@ async def async_run_registration_probe(
     )
 ```
 
-Implement `_open_endpoint` as the only function that resolves `creds["realm"]`, derives
-the outbound local IP, and calls `loop.create_datagram_endpoint` with an ephemeral local
-UDP port (`local_addr=("0.0.0.0", 0)`), `remote_addr=(registrar_ip, SIP_PORT)`, and the
-opt-in `SipProtocol` arguments. The OFFICIAL profile passes
-`include_contact_transport=False`; CURRENT preserves `transport=udp`. This boundary lets
-tests inject `open_endpoint` without DNS or socket I/O. Do not log `creds`, Contact,
-headers or tokens.
+Implement `_open_endpoint` as the only function that resolves `creds["realm"]`, derives the outbound local IP, and calls `loop.create_datagram_endpoint` with an ephemeral local UDP port (`local_addr=("0.0.0.0", 0)`), `remote_addr=(registrar_ip, SIP_PORT)`, and the opt-in `SipProtocol` arguments. The OFFICIAL profile passes `include_contact_transport=False`; CURRENT preserves `transport=udp`. This boundary lets tests inject `open_endpoint` without DNS or socket I/O. Do not log `creds`, Contact, headers or tokens.
 
 - [ ] **Step 4: Run probe tests and selected SIP tests**
 
@@ -555,8 +547,7 @@ git commit -m "feat: add non-answering SIP registration probe"
 
 - [ ] **Step 1: Write failing state-machine tests**
 
-Cover the complete schedule with an injected `wait_until` that records offsets instead
-of sleeping:
+Cover the complete schedule with an injected `wait_until` that records offsets instead of sleeping:
 
 ```python
 import asyncio
@@ -685,8 +676,7 @@ Expected: collection fails because `busy_diagnostic.py` does not exist.
 
 - [ ] **Step 3: Implement modes, signal correlation and fixed offsets**
 
-Create `busy_diagnostic.py` with explicit constants and no configurable arbitrary SIP
-payloads:
+Create `busy_diagnostic.py` with explicit constants and no configurable arbitrary SIP payloads:
 
 ```python
 ARM_TIMEOUT_SEC = 20 * 60.0
@@ -712,9 +702,7 @@ class TargetCall:
     access_control_id: str
 ```
 
-The constructor accepts two wait dependencies with production defaults pointing to the
-same monotonic `_wait_until`; tests pass `_wait_forever` for the watchdog so it cannot
-race the main schedule:
+The constructor accepts two wait dependencies with production defaults pointing to the same monotonic `_wait_until`; tests pass `_wait_forever` for the watchdog so it cannot race the main schedule:
 
 ```python
 WaitUntil = Callable[[float], Awaitable[None]]
@@ -740,9 +728,7 @@ def __init__(
     self._run_register = run_register
 ```
 
-`handle_signal` must accept the same payload shape as `DoorbellCallController`, bind
-the first ring, accept `ended` only when call/access-control match, and never store the
-entire FCM payload. Its ring path starts two HA tasks:
+`handle_signal` must accept the same payload shape as `DoorbellCallController`, bind the first ring, accept `ended` only when call/access-control match, and never store the entire FCM payload. Its ring path starts two HA tasks:
 
 ```python
 self.task = self.hass.async_create_task(
@@ -753,9 +739,7 @@ self.watchdog_task = self.hass.async_create_task(
 )
 ```
 
-The main sequence uses the injected `_wait(offset)` for every absolute offset, requires the
-first `ended` event before `MINT_OFFSET_SEC`, obtains a fresh mint for each REGISTER
-profile, and stores only stage names/results:
+The main sequence uses the injected `_wait(offset)` for every absolute offset, requires the first `ended` event before `MINT_OFFSET_SEC`, obtains a fresh mint for each REGISTER profile, and stores only stage names/results:
 
 ```python
 await asyncio.wait_for(
@@ -790,8 +774,7 @@ self.mode = DiagnosticMode.CURRENT
 self._mark("restored")
 ```
 
-Implement `_run_profile` completely so credentials never leave the method and any
-ambiguous or non-unregistered result aborts later stages:
+Implement `_run_profile` completely so credentials never leave the method and any ambiguous or non-unregistered result aborts later stages:
 
 ```python
 async def _run_profile(self, profile: RegistrationProfile) -> None:
@@ -814,10 +797,7 @@ async def _run_profile(self, profile: RegistrationProfile) -> None:
         raise RuntimeError(f"diagnostic {profile.value} probe unsafe result")
 ```
 
-`_async_watchdog` must wait independently until `WATCHDOG_OFFSET_SEC`, set mode to
-CURRENT, and call `async_setup(entry_id)` whenever the entry is not loaded. Both main
-and watchdog paths catch exceptions, log only stage/type, and call the same idempotent
-`_async_restore()`.
+`_async_watchdog` must wait independently until `WATCHDOG_OFFSET_SEC`, set mode to CURRENT, and call `async_setup(entry_id)` whenever the entry is not loaded. Both main and watchdog paths catch exceptions, log only stage/type, and call the same idempotent `_async_restore()`.
 
 - [ ] **Step 4: Run runner tests and verify GREEN**
 
@@ -948,8 +928,7 @@ def __init__(
     self._diagnostic = diagnostic
 ```
 
-At the beginning of `handle_signal`, notify the diagnostic. On the `ring` branch keep
-all existing active-call and HA-state logic, but guard only the hold task:
+At the beginning of `handle_signal`, notify the diagnostic. On the `ring` branch keep all existing active-call and HA-state logic, but guard only the hold task:
 
 ```python
 if self._diagnostic is not None:
@@ -997,10 +976,7 @@ if await async_consume_busy_diagnostic_marker(hass):
     await diagnostic.async_arm()
 ```
 
-Pass `diagnostic=diagnostic` to `DoorbellCallController`. The runner task must be
-created with `hass.async_create_task`, not `entry.async_create_background_task`, so the
-watchdog survives the deliberate config-entry unload. No runner is created without the
-marker.
+Pass `diagnostic=diagnostic` to `DoorbellCallController`. The runner task must be created with `hass.async_create_task`, not `entry.async_create_background_task`, so the watchdog survives the deliberate config-entry unload. No runner is created without the marker.
 
 - [ ] **Step 6: Run focused setup/controller tests**
 
@@ -1074,8 +1050,7 @@ Expected: the analyzer module does not exist.
 
 - [ ] **Step 3: Implement structural summaries with lazy dpkt import**
 
-The analyzer must expose a pure helper for tests and import `dpkt` only inside
-`iter_pcap_summaries`:
+The analyzer must expose a pure helper for tests and import `dpkt` only inside `iter_pcap_summaries`:
 
 ```python
 def summarize_sip_message(message: str) -> dict[str, object]:
@@ -1100,15 +1075,9 @@ def summarize_sip_message(message: str) -> dict[str, object]:
     }
 ```
 
-`main()` prints JSON lines containing relative time, redacted endpoint role
-(`HA`/`SIP_SERVER`), UDP ports, and the helper output. It must never print raw Contact,
-Authorization, login, realm, FCM Call-ID, token, packet bytes or SDP.
+`main()` prints JSON lines containing relative time, redacted endpoint role (`HA`/`SIP_SERVER`), UDP ports, and the helper output. It must never print raw Contact, Authorization, login, realm, FCM Call-ID, token, packet bytes or SDP.
 
-`iter_pcap_summaries` must inspect `reader.datalink()` and decode all formats used by
-the project captures: DLT_RAW as IPv4 directly, DLT_EN10MB through
-`dpkt.ethernet.Ethernet`, DLT_LINUX_SLL through `dpkt.sll.SLL`, and
-DLT_LINUX_SLL2 by stripping its 20-byte cooked header before `dpkt.ip.IP`. Unknown
-link types raise a descriptive error before any packet content is printed.
+`iter_pcap_summaries` must inspect `reader.datalink()` and decode all formats used by the project captures: DLT_RAW as IPv4 directly, DLT_EN10MB through `dpkt.ethernet.Ethernet`, DLT_LINUX_SLL through `dpkt.sll.SLL`, and DLT_LINUX_SLL2 by stripping its 20-byte cooked header before `dpkt.ip.IP`. Unknown link types raise a descriptive error before any packet content is printed.
 
 - [ ] **Step 4: Run analyzer tests and security scan**
 
@@ -1148,13 +1117,11 @@ git diff --check
 git status --short
 ```
 
-Expected: targeted and full suites pass, diff check is clean, only intentional files are
-modified or committed.
+Expected: targeted and full suites pass, diff check is clean, only intentional files are modified or committed.
 
 - [ ] **Step 2: Inspect the production version and create a timestamped backup**
 
-Run read-only checksum comparison first, then create a backup only after confirming the
-deployed component matches the expected pre-diagnostic revision:
+Run read-only checksum comparison first, then create a backup only after confirming the deployed component matches the expected pre-diagnostic revision:
 
 ```bash
 ssh home.server sudo sha256sum \
@@ -1169,8 +1136,7 @@ Expected: backup exists and no Home Assistant process has been restarted yet.
 
 - [ ] **Step 3: Deploy only the tested integration files without arming**
 
-Use `rsync --checksum` over SSH from the repository component directory to the
-production component directory. Do not copy `.git`, tests, docs, captures or secrets.
+Use `rsync --checksum` over SSH from the repository component directory to the production component directory. Do not copy `.git`, tests, docs, captures or secrets.
 
 ```bash
 rsync -a --checksum \
@@ -1181,8 +1147,7 @@ ssh home.server sudo rsync -a --checksum \
   /opt/homeassistant/custom_components/elektronny_gorod/
 ```
 
-Expected: files are present but running HA behavior is unchanged until restart; marker
-does not exist.
+Expected: files are present but running HA behavior is unchanged until restart; marker does not exist.
 
 - [ ] **Step 4: Prepare capture and production rollback checks**
 
@@ -1194,8 +1159,7 @@ ssh home.server sudo timeout 660 /usr/bin/tcpdump -i any -s 0 -U \
   -w /tmp/eg_busy_diagnostic.pcap 'udp port 5060 or udp port 5066'
 ```
 
-Run tcpdump in a managed background session so its PID/output remain available to the
-agent. Separately tail timestamped Home Assistant logs from the restart point.
+Run tcpdump in a managed background session so its PID/output remain available to the agent. Separately tail timestamped Home Assistant logs from the restart point.
 
 - [ ] **Step 5: Arm only after the user writes `пошёл`**
 
@@ -1207,13 +1171,11 @@ ssh home.server sudo install -m 600 /dev/null \
 ssh home.server sudo docker restart home-assistant-core-skdjyi-homeassistant-1
 ```
 
-Poll health and logs. Invite the user to leave only after the log contains the sanitized
-`Busy diagnostic armed for 1200s` marker and the normal coordinator refresh succeeds.
+Poll health and logs. Invite the user to leave only after the log contains the sanitized `Busy diagnostic armed for 1200s` marker and the normal coordinator refresh succeeds.
 
 - [ ] **Step 6: Observe the autonomous schedule without additional user messages**
 
-Correlate stage markers with SIP packet metadata. Do not intervene unless one of these
-abort conditions occurs:
+Correlate stage markers with SIP packet metadata. Do not intervene unless one of these abort conditions occurs:
 
 - marker consumed but runner not armed;
 - first call has not ended by `T0 + 45s`;
@@ -1222,8 +1184,7 @@ abort conditions occurs:
 - config-entry unload/setup returns false;
 - Home Assistant health check fails.
 
-On an abort, stop active probes, ensure the config entry is set up, restore CURRENT mode,
-and tell the user after they return; do not start later stages.
+On an abort, stop active probes, ensure the config entry is set up, restore CURRENT mode, and tell the user after they return; do not start later stages.
 
 - [ ] **Step 7: Verify automatic functional restoration at `T0 + 9m`**
 
@@ -1236,14 +1197,11 @@ ssh home.server sudo docker logs --since 12m --timestamps \
   home-assistant-core-skdjyi-homeassistant-1
 ```
 
-Filter the returned output in-memory before displaying it. Required facts: stage
-`restored`, config entry loaded, FCM listener started, coordinator refresh successful,
-no active/held SIP manager.
+Filter the returned output in-memory before displaying it. Required facts: stage `restored`, config entry loaded, FCM listener started, coordinator refresh successful, no active/held SIP manager.
 
 - [ ] **Step 8: Produce a sanitized result matrix and delete raw capture**
 
-Copy the pcap to local `/tmp`, run the safe analyzer, record only structural results in
-the task response, then remove both raw copies:
+Copy the pcap to local `/tmp`, run the safe analyzer, record only structural results in the task response, then remove both raw copies:
 
 ```bash
 scp home.server:/tmp/eg_busy_diagnostic.pcap /tmp/eg_busy_diagnostic.pcap
@@ -1257,8 +1215,7 @@ Expected: no raw pcap remains and no secret appears in terminal/chat output.
 
 - [ ] **Step 9: Restore the pre-diagnostic source after evidence is secured**
 
-Atomically move the diagnostic tree aside, restore the timestamped backup and restart
-HA. This avoids deleting files and preserves the diagnostic tree for inspection:
+Atomically move the diagnostic tree aside, restore the timestamped backup and restart HA. This avoids deleting files and preserves the diagnostic tree for inspection:
 
 ```bash
 ssh home.server sudo mv \
@@ -1270,14 +1227,11 @@ ssh home.server sudo mv \
 ssh home.server sudo docker restart home-assistant-core-skdjyi-homeassistant-1
 ```
 
-Delete the preserved diagnostic tree only after checks pass and after explicit
-confirmation; otherwise keep it for rollback evidence.
+Delete the preserved diagnostic tree only after checks pass and after explicit confirmation; otherwise keep it for rollback evidence.
 
 - [ ] **Step 10: Commit any implementation-driven spec correction**
 
-If no correction was needed, make no docs-only commit. If exact timings or an HA lifecycle
-constraint changed, update the design with observed implementation facts and commit only
-that change:
+If no correction was needed, make no docs-only commit. If exact timings or an HA lifecycle constraint changed, update the design with observed implementation facts and commit only that change:
 
 ```bash
 git add docs/specs/2026-07-13-intercom-busy-production-diagnostic-design.md
@@ -1286,8 +1240,7 @@ git commit -m "docs: align busy diagnostic with implementation"
 
 ## Completion criteria
 
-- The default integration emits the same SIP packets and follows the same control flow
-  when the marker is absent.
+- The default integration emits the same SIP packets and follows the same control flow when the marker is absent.
 - The marker is one-shot and consumed through executor-backed file I/O.
 - No path sends `200 OK` to INVITE, RTP, DTMF or door-open commands.
 - Every diagnostic REGISTER is followed by `Expires: 0`, including exception paths.

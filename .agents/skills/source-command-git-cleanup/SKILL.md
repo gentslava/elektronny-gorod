@@ -9,28 +9,18 @@ Use this skill when the user asks to run the migrated source command `git-cleanu
 
 ## Command Template
 
-Цель: схлопнуть «иттерационные» коммиты (hotfix-цепочки, DIAG-логи, typo-
-правки) в логичные substantive единицы. После — клонированная история выглядит
-так, как будто человек писал её сразу набело.
+Цель: схлопнуть «иттерационные» коммиты (hotfix-цепочки, DIAG-логи, typo- правки) в логичные substantive единицы. После — клонированная история выглядит так, как будто человек писал её сразу набело.
 
 ## Шаги
 
-1. Прочитай [`.claude/agents/git-historian.md`](../../../.claude/agents/git-historian.md) —
-   контракт агента.
-2. Прочитай [`.claude/rules/git-history.md`](../../../.claude/rules/git-history.md) —
-   критерии gate `HISTORY_CLEAN`.
-3. Запусти независимого subagent с контрактом Git Historian (dedicated
-   `git-historian`, если такой тип доступен; иначе general-purpose agent с тем
-   же read-only заданием) с задачей:
-   - сначала зафиксировать явный `<target-ref>` (PR base; для stacked PR —
-     parent feature branch, не `master`);
+1. Прочитай [`.claude/agents/git-historian.md`](../../../.claude/agents/git-historian.md) — контракт агента.
+2. Прочитай [`.claude/rules/git-history.md`](../../../.claude/rules/git-history.md) — критерии gate `HISTORY_CLEAN`.
+3. Запусти независимого subagent с контрактом Git Historian (dedicated `git-historian`, если такой тип доступен; иначе general-purpose agent с тем же read-only заданием) с задачей:
+   - сначала зафиксировать явный `<target-ref>` (PR base; для stacked PR — parent feature branch, не `master`);
    - проанализировать текущую ветку `git log --oneline <target-ref>..HEAD`,
    - предложить план rebase (squash / fixup / reword / drop),
-   - **спросить подтверждение** у user'а перед выполнением (не делать rebase
-     автоматически без явного approval),
-   - после rebase — verify diff vs `<target-ref>`, объявить прежние approvals
-     stale и остановиться до нового freeze/review; не push-ить переписанный
-     candidate напрямую.
+   - **спросить подтверждение** у user'а перед выполнением (не делать rebase автоматически без явного approval),
+   - после rebase — verify diff vs `<target-ref>`, объявить прежние approvals stale и остановиться до нового freeze/review; не push-ить переписанный candidate напрямую.
 
 ## Что обязательно сделать перед rebase
 

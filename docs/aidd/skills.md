@@ -1,6 +1,4 @@
-Status: Active
-Owner: Documentation / AIDD Agent
-Last reviewed: 2026-08-11 (independent review and FCM/security routing updated)
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-11 (independent review and FCM/security routing updated)
 
 Source files:
 - глобальные skills плагина `agent-skills:*`

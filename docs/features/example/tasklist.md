@@ -19,12 +19,9 @@
 
 ### Slice 3 — `config_flow.py`
 
-- [ ] **T-005** В `ElektronnyGorodConfigFlow.async_step_user` удалить raw-log
-  access token. _Audit:_ S-01.
-- [ ] **T-006** В `ElektronnyGorodConfigFlow.get_account` заменить полный
-  `entry.data` на `entry.entry_id`. _Audit:_ S-04.
-- [ ] **T-007** В `ElektronnyGorodConfigFlow.async_step_contract` оставить в
-  логе только `selected_id`, без contract object. _Audit:_ S-06.
+- [ ] **T-005** В `ElektronnyGorodConfigFlow.async_step_user` удалить raw-log access token. _Audit:_ S-01.
+- [ ] **T-006** В `ElektronnyGorodConfigFlow.get_account` заменить полный `entry.data` на `entry.entry_id`. _Audit:_ S-04.
+- [ ] **T-007** В `ElektronnyGorodConfigFlow.async_step_contract` оставить в логе только `selected_id`, без contract object. _Audit:_ S-06.
 
 ### Slice 4 — `diagnostics.py`
 
@@ -33,8 +30,7 @@
 
 ### Slice 5 — Pre-commit hook
 
-- [x] **T-010** Создать canonical `.codex/hooks/check-secret-logs.py/.sh` и
-  thin tool-specific adapters (см. [ADR-0004](../../decisions/0004-token-redaction.md)).
+- [x] **T-010** Создать canonical `.codex/hooks/check-secret-logs.py/.sh` и thin tool-specific adapters (см. [ADR-0004](../../decisions/0004-token-redaction.md)).
 - [ ] **T-011** Зарегистрировать hook в `.claude/settings.json` для events `PreToolUse: Bash(git commit:*)` или эквивалентного.
 - [ ] **T-012** Ручной dry-run: создать локальный коммит с заведомой утечкой → hook блокирует.
 

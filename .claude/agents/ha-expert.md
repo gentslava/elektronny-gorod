@@ -23,8 +23,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch
 - `coordinator.py` — paragraph 0001 (CoordinatorEntity pattern). См. ADR-0002.
 - Entity: `unique_id` стабильный, `device_info`, `has_entity_name`, `translation_key`.
 - Translations: `strings.json` + `translations/*.json` синхронизированы.
-- Repairs / issue registry: lifecycle, persistence, translation placeholders и
-  совместимость с minimum HA version.
+- Repairs / issue registry: lifecycle, persistence, translation placeholders и совместимость с minimum HA version.
 - Integration Quality Scale progression.
 
 ## Когда сверяться с external docs
@@ -45,13 +44,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write, WebFetch
 
 ## Final review mode
 
-Если агент вызван как обязательный HA reviewer финального candidate, доступные
-`Edit`/`Write` не используются: review строго read-only по переданным
-base/head/tree. В отчёте обязательны reviewer identity,
-`Participated in implementation: no`, candidate SHA, findings и scoped verdict.
-Critical/Important нельзя deferred'ить. Исправления возвращаются implementer-у;
-после изменения candidate каждый обязательный reviewer выдаёт новый verdict на
-новый base/head/tree (глубина повторного review может быть delta-scoped).
+Если агент вызван как обязательный HA reviewer финального candidate, доступные `Edit`/`Write` не используются: review строго read-only по переданным base/head/tree. В отчёте обязательны reviewer identity, `Participated in implementation: no`, candidate SHA, findings и scoped verdict. Critical/Important нельзя deferred'ить. Исправления возвращаются implementer-у; после изменения candidate каждый обязательный reviewer выдаёт новый verdict на новый base/head/tree (глубина повторного review может быть delta-scoped).
 
 ## Формат output
 

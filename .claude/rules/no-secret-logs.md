@@ -39,14 +39,11 @@ LOGGER.info("Entry %s exists", entry.entry_id)
 
 ## Где `_logging.py`
 
-Реализован в `custom_components/elektronny_gorod/_logging.py`; контракт
-зафиксирован в [`docs/decisions/0004-token-redaction.md`](../../docs/decisions/0004-token-redaction.md).
+Реализован в `custom_components/elektronny_gorod/_logging.py`; контракт зафиксирован в [`docs/decisions/0004-token-redaction.md`](../../docs/decisions/0004-token-redaction.md).
 
 ## Pre-commit hook
 
-`.claude/hooks/post-edit-redaction-check.sh` и Codex-адаптер делегируют единой
-AST-проверке `.codex/hooks/check-secret-logs.py`. Единый worktree-aware entrypoint
-`bash .codex/hooks/check-secret-logs.sh` сам выбирает проектный Python 3.12+.
+`.claude/hooks/post-edit-redaction-check.sh` и Codex-адаптер делегируют единой AST-проверке `.codex/hooks/check-secret-logs.py`. Единый worktree-aware entrypoint `bash .codex/hooks/check-secret-logs.sh` сам выбирает проектный Python 3.12+.
 
 ## Связь
 

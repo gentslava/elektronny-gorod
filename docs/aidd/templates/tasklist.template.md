@@ -1,6 +1,4 @@
-Status: Template
-Owner: Lead Architect Agent
-Last reviewed: 2026-08-11 (ADR-0015 reviewer matrix and publication evidence)
+Status: Template Owner: Lead Architect Agent Last reviewed: 2026-08-11 (ADR-0015 reviewer matrix and publication evidence)
 
 Source files:
 - copied plan/task scope
@@ -77,12 +75,9 @@ T-002 ─► T-003
 
 - `PLAN_APPROVED` — необходим перед началом.
 - `IMPLEMENTATION_STEP_OK` — за каждую отдельную таску.
-- `TESTS_PASS`, `SECURITY_PRECHECK_OK`, `DOCS_UPDATED`, `HISTORY_CLEAN` — до
-  candidate freeze.
-- `CANDIDATE_FROZEN`, `REVIEW_OK`, `SECURITY_OK` — перед обычным push /
-  ready-for-review PR / merge.
-- После любого candidate change все обязательные reviewers переиздают verdict
-  для нового base/head/tree; глубина unchanged scope может быть delta-scoped.
+- `TESTS_PASS`, `SECURITY_PRECHECK_OK`, `DOCS_UPDATED`, `HISTORY_CLEAN` — до candidate freeze.
+- `CANDIDATE_FROZEN`, `REVIEW_OK`, `SECURITY_OK` — перед обычным push / ready-for-review PR / merge.
+- После любого candidate change все обязательные reviewers переиздают verdict для нового base/head/tree; глубина unchanged scope может быть delta-scoped.
 
 ## Next reading
 

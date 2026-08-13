@@ -1,7 +1,4 @@
-Status: Active
-Owner: Lead Architect Agent
-Last reviewed: 2026-08-11 (default subagent execution, independent review and
-ADR-0015 publication/evidence ownership clarified after A-97)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-11 (default subagent execution, independent review and ADR-0015 publication/evidence ownership clarified after A-97)
 
 Source files:
 - `.claude/agents/**`
@@ -27,39 +24,20 @@ Quality gates:
 
 # Multi-agent workflow
 
-Кто за что отвечает и как они взаимодействуют. У проекта **один codeowner**,
-но инструмент может запускать несколько изолированных subagents. Переключение
-skills/modes внутри одного implementer-контекста остаётся self-review и не
-создаёт независимого reviewer-а.
+Кто за что отвечает и как они взаимодействуют. У проекта **один codeowner**, но инструмент может запускать несколько изолированных subagents. Переключение skills/modes внутри одного implementer-контекста остаётся self-review и не создаёт независимого reviewer-а.
 
 ## Принцип
 
-Один человек + agentic tool = команда ролей. Каждая роль имеет узкие boundaries,
-чёткие inputs/outputs и привязана к quality gate. Переключение роли внутри того
-же implementer-контекста подходит для self-review, но **не считается независимым
-review**. Когда subagents доступны, reviewer запускается с отдельным контекстом;
-иначе `REVIEW_OK` требует human reviewer.
+Один человек + agentic tool = команда ролей. Каждая роль имеет узкие boundaries, чёткие inputs/outputs и привязана к quality gate. Переключение роли внутри того же implementer-контекста подходит для self-review, но **не считается независимым review**. Когда subagents доступны, reviewer запускается с отдельным контекстом; иначе `REVIEW_OK` требует human reviewer.
 
 ## Default execution policy
 
-- Нетривиальный утверждённый план выполняется subagent-driven, если платформа
-  предоставляет subagents. Inline — только explicit user choice или техническая
-  недоступность subagents.
-- После рекомендации короткое подтверждение «го» / «да» / «начинай» принимает
-  рекомендованный режим; оркестратор не переинтерпретирует его как inline.
-- До начала implementation план фиксирует approval revision, concrete ownership
-  slices и reviewer matrix.
-- После implementation + tests/security prechecks/docs/history cleanup
-  замораживается clean committed candidate. Обязательны independent
-  `code-reviewer`; `ha-expert` для HA
-  lifecycle/Repairs/config/entity, `security-auditor` для auth/token/FCM и
-  `qa-engineer` для tests/fixtures/test plan.
-- Reviewers работают read-only по одному exact base/head/tree candidate.
-  Implementer исправляет findings, повторяет затронутые gates, замораживает
-  новый candidate и получает новую tuple-bound аттестацию каждого обязательного
-  reviewer-а; unchanged scope допускает delta-review.
-- После approvals Validator публикует ordinary PR, переносит provisional
-  transcript в durable candidate-bound PR comment и ждёт `CI_GREEN` до merge.
+- Нетривиальный утверждённый план выполняется subagent-driven, если платформа предоставляет subagents. Inline — только explicit user choice или техническая недоступность subagents.
+- После рекомендации короткое подтверждение «го» / «да» / «начинай» принимает рекомендованный режим; оркестратор не переинтерпретирует его как inline.
+- До начала implementation план фиксирует approval revision, concrete ownership slices и reviewer matrix.
+- После implementation + tests/security prechecks/docs/history cleanup замораживается clean committed candidate. Обязательны independent `code-reviewer`; `ha-expert` для HA lifecycle/Repairs/config/entity, `security-auditor` для auth/token/FCM и `qa-engineer` для tests/fixtures/test plan.
+- Reviewers работают read-only по одному exact base/head/tree candidate. Implementer исправляет findings, повторяет затронутые gates, замораживает новый candidate и получает новую tuple-bound аттестацию каждого обязательного reviewer-а; unchanged scope допускает delta-review.
+- После approvals Validator публикует ordinary PR, переносит provisional transcript в durable candidate-bound PR comment и ждёт `CI_GREEN` до merge.
 
 ## Candidate freeze
 
@@ -72,23 +50,9 @@ git rev-parse HEAD
 git rev-parse 'HEAD^{tree}'
 ```
 
-Первый вывод пуст; остальные три значения записываются в review evidence. Любой
-содержательный commit после verdict инвалидирует все обязательные candidate
-approvals. SHA здесь
-— immutable evidence конкретного review (ADR-0015), не live-state
-документа. После нового candidate каждый обязательный reviewer выдаёт новый
-tuple-bound verdict; unchanged scope можно подтвердить короткой delta-attestation.
-Конкретный инструмент подставляет целевую ветку и обязательный command wrapper,
-если он задан локальным окружением.
+Первый вывод пуст; остальные три значения записываются в review evidence. Любой содержательный commit после verdict инвалидирует все обязательные candidate approvals. SHA здесь — immutable evidence конкретного review (ADR-0015), не live-state документа. После нового candidate каждый обязательный reviewer выдаёт новый tuple-bound verdict; unchanged scope можно подтвердить короткой delta-attestation. Конкретный инструмент подставляет целевую ветку и обязательный command wrapper, если он задан локальным окружением.
 
-Обычный push/PR выполняется после локальных reviews. Узкое исключение для human
-review — явно разрешённая review-only branch/draft PR с незакрытым `REVIEW_OK`,
-запретом merge/release и последующим тем же freeze/re-review циклом. Уже открытый
-PR восстанавливается через этот flow, а не получает self-approval постфактум.
-После ordinary push Validator публикует review evidence для текущего tuple в PR
-comment. Это канонический журнал до merge; session transcript до публикации —
-только provisional evidence. Новый candidate требует нового comment и CI run
-(ADR-0015).
+Обычный push/PR выполняется после локальных reviews. Узкое исключение для human review — явно разрешённая review-only branch/draft PR с незакрытым `REVIEW_OK`, запретом merge/release и последующим тем же freeze/re-review циклом. Уже открытый PR восстанавливается через этот flow, а не получает self-approval постфактум. После ordinary push Validator публикует review evidence для текущего tuple в PR comment. Это канонический журнал до merge; session transcript до публикации — только provisional evidence. Новый candidate требует нового comment и CI run (ADR-0015).
 
 ## Роли
 
@@ -172,9 +136,7 @@ comment. Это канонический журнал до merge; session transc
 | Outputs | агрегированный validation report; после push — durable PR comment текущего tuple |
 | Gate | проверяет все gates, закрывает `REVIEW_EVIDENCE_PUBLISHED` и `CI_GREEN` |
 
-Validator — обязанность root/lead orchestrator во всех поддерживаемых
-инструментах; отдельный adapter не требуется. Он собирает identities/verdicts,
-не подменяя независимых reviewers, и публикует evidence после обычного push.
+Validator — обязанность root/lead orchestrator во всех поддерживаемых инструментах; отдельный adapter не требуется. Он собирает identities/verdicts, не подменяя независимых reviewers, и публикует evidence после обычного push.
 
 ### 9. Git Historian Agent
 
@@ -186,8 +148,7 @@ Validator — обязанность root/lead orchestrator во всех под
 | Gate | `HISTORY_CLEAN` |
 | Subagent files | `.claude/agents/git-historian.md`, `.codex/agents/git-historian.toml` |
 
-Если отдельная роль недоступна, те же проверки выполняет Validator/root. Любой
-history rewrite инвалидирует candidate и все прежние approvals.
+Если отдельная роль недоступна, те же проверки выполняет Validator/root. Любой history rewrite инвалидирует candidate и все прежние approvals.
 
 ### 10. Reverse Engineer Agent
 
@@ -300,11 +261,7 @@ Merge owner:
 
 ## Когда роль не нужна
 
-Если изменение тривиально (опечатка, форматирование, механическая правка одного
-документа), не привлекать всю «команду» — одного агента достаточно.
-Multi-agent обязателен для risk-bearing изменений production behavior/lifecycle,
-security/privacy, persistent data, HA/public contracts, CI/release и связанных
-миграций источников правды (ADR-0015).
+Если изменение тривиально (опечатка, форматирование, механическая правка одного документа), не привлекать всю «команду» — одного агента достаточно. Multi-agent обязателен для risk-bearing изменений production behavior/lifecycle, security/privacy, persistent data, HA/public contracts, CI/release и связанных миграций источников правды (ADR-0015).
 
 ## Next reading
 

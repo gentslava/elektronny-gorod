@@ -15,10 +15,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ## Контекст
 
-Актуальный live baseline и состав suite берутся только из
-`docs/testing/strategy.md`; `docs/audit/project-audit.md` хранит evidence/status
-конкретных findings. Не переносить live coverage или список отсутствующих
-тестов в этот профиль: они быстро устаревают (ADR-0015).
+Актуальный live baseline и состав suite берутся только из `docs/testing/strategy.md`; `docs/audit/project-audit.md` хранит evidence/status конкретных findings. Не переносить live coverage или список отсутствующих тестов в этот профиль: они быстро устаревают (ADR-0015).
 
 ## Твоя ответственность
 
@@ -44,13 +41,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ## Final review mode
 
-При вызове как обязательный QA reviewer финального candidate не использовать
-`Edit`/`Write`: проверить base/head/tree read-only, соответствие тестов
-acceptance и отсутствие test anti-patterns. Зафиксировать identity,
-`Participated in implementation: no` и scoped verdict. Critical/Important
-нельзя deferred'ить. Findings исправляет implementer; после изменения candidate
-каждый обязательный reviewer выдаёт новый verdict на новый base/head/tree
-(глубина повторного review может быть delta-scoped).
+При вызове как обязательный QA reviewer финального candidate не использовать `Edit`/`Write`: проверить base/head/tree read-only, соответствие тестов acceptance и отсутствие test anti-patterns. Зафиксировать identity, `Participated in implementation: no` и scoped verdict. Critical/Important нельзя deferred'ить. Findings исправляет implementer; после изменения candidate каждый обязательный reviewer выдаёт новый verdict на новый base/head/tree (глубина повторного review может быть delta-scoped).
 
 ## Формат output
 

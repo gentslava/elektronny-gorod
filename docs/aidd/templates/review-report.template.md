@@ -1,6 +1,4 @@
-Status: Template
-Owner: Code Reviewer Agent
-Last reviewed: 2026-08-11 (ADR-0015 immutable candidate evidence)
+Status: Template Owner: Code Reviewer Agent Last reviewed: 2026-08-11 (ADR-0015 immutable candidate evidence)
 
 Source files:
 - exact clean committed candidate
@@ -84,8 +82,7 @@ Quality gates:
 ## Решение
 
 - [ ] **Approve** — этот review scope закрыт для указанного candidate
-- [ ] **Approve with optional comments** — scope одобрен; комментарии не требуют
-  изменения candidate. Если рекомендация принята, нужен новый freeze/re-review
+- [ ] **Approve with optional comments** — scope одобрен; комментарии не требуют изменения candidate. Если рекомендация принята, нужен новый freeze/re-review
 - [ ] **Changes requested** — нужны изменения
 - [ ] **Block** — критичные проблемы (P0 utечка, regression)
 
@@ -97,11 +94,7 @@ Quality gates:
 
 ## Quality gate
 
-`REVIEW_OK` только если reviewer независим и все Critical/Important findings
-закрыты и перепроверены на том же base/head/tree. Любой новый содержательный
-commit делает verdict stale; каждый обязательный reviewer переиздаёт verdict
-для нового tuple, хотя unchanged scope может быть проверен delta-scoped. Scoped
-approval сам по себе не означает merge-ready.
+`REVIEW_OK` только если reviewer независим и все Critical/Important findings закрыты и перепроверены на том же base/head/tree. Любой новый содержательный commit делает verdict stale; каждый обязательный reviewer переиздаёт verdict для нового tuple, хотя unchanged scope может быть проверен delta-scoped. Scoped approval сам по себе не означает merge-ready.
 
 ## Next reading
 

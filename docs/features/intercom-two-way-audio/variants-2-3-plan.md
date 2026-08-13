@@ -6,10 +6,7 @@
 
 ## Контекст
 
-Выбранный механизм: **#1 WS-binary** (HA WebSocket binary-audio, ADR-0013).
-Механизмы #2 и #3 отвергнуты на этапе ADR, но могут потребоваться для сравнения
-или как fallback если #1 упрётся в ограничения. Scaffolding создан для быстрого
-live-теста без повторного исследования.
+Выбранный механизм: **#1 WS-binary** (HA WebSocket binary-audio, ADR-0013). Механизмы #2 и #3 отвергнуты на этапе ADR, но могут потребоваться для сравнения или как fallback если #1 упрётся в ограничения. Scaffolding создан для быстрого live-теста без повторного исследования.
 
 ## Что есть (scaffolding)
 
@@ -84,10 +81,8 @@ Live-тест #2/#3 оправдан если:
 ## Ограничения scaffolding
 
 Не проверено без go2rtc + домофона:
-- **#2**: реальный WHIP ICE negotiation, go2rtc mix downlink+uplink в RTSP,
-  кодек в RTSP-потоке (Opus vs PCM).
-- **#3**: реальный exec: запуск go2rtc, формат backchannel stdin,
-  TCP-форвард exec_bridge → probe (нужен приёмник в probe_push_answer).
+- **#2**: реальный WHIP ICE negotiation, go2rtc mix downlink+uplink в RTSP, кодек в RTSP-потоке (Opus vs PCM).
+- **#3**: реальный exec: запуск go2rtc, формат backchannel stdin, TCP-форвард exec_bridge → probe (нужен приёмник в probe_push_answer).
 - Оба: latency measurement на 4G, underrun-статистика.
 
 Синтаксис Python проверен (`python3 -m py_compile`).

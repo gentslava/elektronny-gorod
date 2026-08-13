@@ -8,16 +8,14 @@
 
 ## Problem
 
-Это синтетический пример PRD по уже закрытому инциденту ADR-0004. До фикса при
-debug-логировании были зафиксированы четыре класса утечек:
+Это синтетический пример PRD по уже закрытому инциденту ADR-0004. До фикса при debug-логировании были зафиксированы четыре класса утечек:
 
 - raw `access_token` из config flow;
 - HTTP headers с Bearer и auth payload с password/SMS;
 - body auth-ответа с новыми токенами;
 - полный `config_entry.data`.
 
-Это историческое описание, а не характеристика текущего кода. Актуальные
-evidence и статус принадлежат [`security.md`](../../audit/security.md).
+Это историческое описание, а не характеристика текущего кода. Актуальные evidence и статус принадлежат [`security.md`](../../audit/security.md).
 
 ## Users
 
@@ -40,8 +38,7 @@ evidence и статус принадлежат [`security.md`](../../audit/secu
 - Создать `_logging.py` с `redact()` helper и `SENSITIVE_KEYS`.
 - Заменить все прямые логи токенов на `redact(headers/data)` либо удалить.
 - Создать `diagnostics.py` с `TO_REDACT = SENSITIVE_KEYS`.
-- Canonical scanner `.codex/hooks/check-secret-logs.py` с portable shell
-  wrapper и thin tool-specific adapters.
+- Canonical scanner `.codex/hooks/check-secret-logs.py` с portable shell wrapper и thin tool-specific adapters.
 
 См. [ADR-0004](../../decisions/0004-token-redaction.md).
 

@@ -21,10 +21,8 @@ docs/features/
 
 ## Активные feature packages
 
-- [`mobile-app-parity/`](mobile-app-parity/README.md) — implementation hand-off
-  по истории/архиву, гостевым приглашениям, ключам и настройкам личных камер.
-- [`intercom-two-way-audio/`](intercom-two-way-audio/README.md) — реализованный
-  FCM/SIP/two-way audio и call-card scope.
+- [`mobile-app-parity/`](mobile-app-parity/README.md) — implementation hand-off по истории/архиву, гостевым приглашениям, ключам и настройкам личных камер.
+- [`intercom-two-way-audio/`](intercom-two-way-audio/README.md) — реализованный FCM/SIP/two-way audio и call-card scope.
 
 ## Когда заводить feature folder
 

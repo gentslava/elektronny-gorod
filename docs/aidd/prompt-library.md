@@ -1,6 +1,4 @@
-Status: Active
-Owner: Documentation / AIDD Agent
-Last reviewed: 2026-08-11 (candidate-bound security/release plus ADR-0015 evidence/CI prompts)
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-11 (candidate-bound security/release plus ADR-0015 evidence/CI prompts)
 
 Source files:
 - этот документ

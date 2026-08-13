@@ -1,6 +1,4 @@
-Status: Active
-Owner: Developer Experience / QA Agent
-Last reviewed: 2026-08-11 (current test baseline and redacted diagnostics)
+Status: Active Owner: Developer Experience / QA Agent Last reviewed: 2026-08-11 (current test baseline and redacted diagnostics)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -82,9 +80,7 @@ python3 -m venv .venv
 PYTHONPATH=. .venv/bin/pytest tests/ -q
 ```
 
-Точный текущий baseline, состав suite и известные gaps находятся только в
-[`testing/strategy.md`](../../testing/strategy.md). Дополнительные команды и
-mock-стратегия — в [`testing.md`](testing.md).
+Точный текущий baseline, состав suite и известные gaps находятся только в [`testing/strategy.md`](../../testing/strategy.md). Дополнительные команды и mock-стратегия — в [`testing.md`](testing.md).
 
 ### 6. Перезагрузить интеграцию после правок
 
@@ -119,13 +115,9 @@ docker run --rm -v "$(pwd)":/github/workspace ghcr.io/hacs/action:main \
 
 ## Не забыть
 
-- Для issue предпочитать встроенную diagnostics-выгрузку: интеграция редактирует
-  известные секреты и персональные поля.
-- Перед публикацией всё равно проверить diagnostics и лог вручную. Не передавать
-  токены, пароли, SMS-коды, заголовки авторизации и персональные данные:
-  сторонние зависимости могут писать собственные сообщения.
-- Не публиковать полный `home-assistant.log`; достаточно короткого фрагмента с
-  debug только для нужного модуля.
+- Для issue предпочитать встроенную diagnostics-выгрузку: интеграция редактирует известные секреты и персональные поля.
+- Перед публикацией всё равно проверить diagnostics и лог вручную. Не передавать токены, пароли, SMS-коды, заголовки авторизации и персональные данные: сторонние зависимости могут писать собственные сообщения.
+- Не публиковать полный `home-assistant.log`; достаточно короткого фрагмента с debug только для нужного модуля.
 
 ## Next reading
 

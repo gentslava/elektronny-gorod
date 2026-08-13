@@ -42,63 +42,38 @@
 
 ### unique_id — стабильный, без user-facing name
 
-Старые форматы зависели от динамического `name` (приходит от API оператора и
-меняется при переименовании в приложении), что приводило к появлению дублей
-entity:
+Старые форматы зависели от динамического `name` (приходит от API оператора и меняется при переименовании в приложении), что приводило к появлению дублей entity:
 
 - camera: `f"{id}_{name}"` → `f"{DOMAIN}_camera_{id}"`
 - lock: `f"{place_id}_{ac_id}_{entrance_id}_{name}"` → `f"{DOMAIN}_lock_{place_id}_{ac_id}_{entrance_id or 'main'}"`
 - sensor balance: `f"{DOMAIN}_{place_id}_balance"` — уже стабильный, миграции не требует.
 
-Канонический format для lock — функция `entity_migration.lock_unique_id` (одна
-точка истины для производства + миграции; покрыта golden-тестом).
+Канонический format для lock — функция `entity_migration.lock_unique_id` (одна точка истины для производства + миграции; покрыта golden-тестом).
 
 ### Миграция legacy UIDs
 
-Сделано через `entity_registry.async_migrate_entries` в `async_setup_entry`
-после `coordinator.async_config_entry_first_refresh()`, до
-`async_forward_entry_setups`. Алгоритм:
+Сделано через `entity_registry.async_migrate_entries` в `async_setup_entry` после `coordinator.async_config_entry_first_refresh()`, до `async_forward_entry_setups`. Алгоритм:
 
 1. Из свежего `coordinator.data` строим словари известных camera/lock.
 2. Для каждой записи в registry с `platform == DOMAIN`:
    - проверяем, не в новом ли уже формате (если да — skip);
    - если матчится legacy format с какой-то записью — отдаём `{"new_unique_id": ...}`;
    - иначе — None (registry-запись остаётся, HA сообщит «entity not provided by integration», пользователь может удалить).
-3. HA-core переименовывает unique_id; historical data, automation references,
-   `entity_id` пользовательский — сохраняются.
+3. HA-core переименовывает unique_id; historical data, automation references, `entity_id` пользовательский — сохраняются.
 
-Версия `ConfigEntry` НЕ повышается — миграция касается только entity_registry,
-не данных entry.
+Версия `ConfigEntry` НЕ повышается — миграция касается только entity_registry, не данных entry.
 
 ### has_entity_name + device_info
 
-- **sensor balance**: `_attr_has_entity_name=True` + `_attr_translation_key="balance"`.
-  Имя из `strings.json` → `entity.sensor.balance.name`. Device — per place,
-  identifiers `{(DOMAIN, f"place_{place_id}")}`, имя — `place.address.visibleAddress`
-  (address от API — это **dict**, не строка; см. [api-reference](../architecture/api-reference.md#place-shape)).
-- **lock (intercom entrance)**: `_attr_has_entity_name=True`, `_attr_translation_key="lock"`
-  (имя entity = «Замок» / «Lock» из translations; device.name даст префикс
-  «Подъезд 2 Замок»). Device identifier — `(DOMAIN, f"entrance_{place}_{ac}_{eid|main}")` —
-  общий с intercom-camera **того же entrance**. `via_device → place`.
-- **camera (intercom)**: `_attr_name=None` (главный entity домофона), device
-  identifier тот же `(DOMAIN, f"entrance_{place}_{ac}_{eid|main}")` — то есть
-  **в одном устройстве** с lock того же entrance. `model="Intercom"`.
-- **camera (standalone — public/place)**: `_attr_name=None`, device identifier
-  `(DOMAIN, f"camera_{id}")`, `model="IP Camera"`, без via_device.
+- **sensor balance**: `_attr_has_entity_name=True` + `_attr_translation_key="balance"`. Имя из `strings.json` → `entity.sensor.balance.name`. Device — per place, identifiers `{(DOMAIN, f"place_{place_id}")}`, имя — `place.address.visibleAddress` (address от API — это **dict**, не строка; см. [api-reference](../architecture/api-reference.md#place-shape)).
+- **lock (intercom entrance)**: `_attr_has_entity_name=True`, `_attr_translation_key="lock"` (имя entity = «Замок» / «Lock» из translations; device.name даст префикс «Подъезд 2 Замок»). Device identifier — `(DOMAIN, f"entrance_{place}_{ac}_{eid|main}")` — общий с intercom-camera **того же entrance**. `via_device → place`.
+- **camera (intercom)**: `_attr_name=None` (главный entity домофона), device identifier тот же `(DOMAIN, f"entrance_{place}_{ac}_{eid|main}")` — то есть **в одном устройстве** с lock того же entrance. `model="Intercom"`.
+- **camera (standalone — public/place)**: `_attr_name=None`, device identifier `(DOMAIN, f"camera_{id}")`, `model="IP Camera"`, без via_device.
 - **device.name**: для intercom — `entrance.name` (единое для camera + lock).
 
 ### Группировка intercom: entrance, не access_control
 
-API ([api-reference §Access controls](../architecture/api-reference.md#access-controls-домофоны))
-содержит `externalCameraId` **на двух уровнях** — `access_control.externalCameraId`
-и `entrances[*].externalCameraId`. Schema допускает их различие; на практике
-во всех 11 наблюдаемых AC в HAR значения совпадают (1 entrance на AC).
-Однако в реальной установке пользователя `ac.externalCameraId` для одного
-AC указывал на камеру **другой** entrance — приложение использует
-entrance-level. Поэтому **группировка идёт по entrance**, не по ac:
-identifier `entrance_{place}_{ac}_{eid|main}`, источник camera_id —
-`entrance.externalCameraId`. AC-level externalCameraId — fallback только
-для access_controls без entrances.
+API ([api-reference §Access controls](../architecture/api-reference.md#access-controls-домофоны)) содержит `externalCameraId` **на двух уровнях** — `access_control.externalCameraId` и `entrances[*].externalCameraId`. Schema допускает их различие; на практике во всех 11 наблюдаемых AC в HAR значения совпадают (1 entrance на AC). Однако в реальной установке пользователя `ac.externalCameraId` для одного AC указывал на камеру **другой** entrance — приложение использует entrance-level. Поэтому **группировка идёт по entrance**, не по ac: identifier `entrance_{place}_{ac}_{eid|main}`, источник camera_id — `entrance.externalCameraId`. AC-level externalCameraId — fallback только для access_controls без entrances.
 
 ### device_class / state_class / unit (sensor balance — A-14)
 
@@ -106,9 +81,7 @@ identifier `entrance_{place}_{ac}_{eid|main}`, источник camera_id —
 - `state_class = SensorStateClass.TOTAL` (HA long-term statistics для денег)
 - `native_unit_of_measurement = "RUB"` (ISO 4217 — требование `MONETARY` device_class; константа `CURRENCY_RUBLE` удалена из `homeassistant.const`)
 
-`extra_state_attributes` оставлены с Title Case ключами (`"Amount sum"` и т.д.) —
-A-30 (snake_case) перенесён в Итерацию 3 как breaking change для пользовательских
-YAML.
+`extra_state_attributes` оставлены с Title Case ключами (`"Amount sum"` и т.д.) — A-30 (snake_case) перенесён в Итерацию 3 как breaking change для пользовательских YAML.
 
 ## Consequences
 

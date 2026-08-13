@@ -1,6 +1,4 @@
-Status: Active
-Owner: DevOps / Release Agent
-Last reviewed: 2026-08-11 (ADR-0015 candidate-bound evidence and CI release gates)
+Status: Active Owner: DevOps / Release Agent Last reviewed: 2026-08-11 (ADR-0015 candidate-bound evidence and CI release gates)
 
 Source files:
 - `.github/workflows/release.yaml`
@@ -40,8 +38,7 @@ SemVer. Версия живёт в `manifest.json`, обновляется ав�
 Перед созданием release tag убедитесь:
 
 - [ ] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный.
-- [ ] `cd frontend && npm test && npm run typecheck && npm run build` зелёный;
-      собранный bundle не создаёт незакоммиченный diff.
+- [ ] `cd frontend && npm test && npm run typecheck && npm run build` зелёный; собранный bundle не создаёт незакоммиченный diff.
 - [ ] `cd frontend && npm audit --omit=dev` без high/critical findings.
 - [ ] `hassfest` зелёный (CI всегда проверяет).
 - [ ] `HACS validate` зелёный.
@@ -58,12 +55,8 @@ SemVer. Версия живёт в `manifest.json`, обновляется ав�
 
 ### Стандартный flow
 
-1. Убедиться, что `master` чистый, синхронизирован с `origin/master`, и
-   зафиксировать release HEAD. Workflow собирает архив именно из `master`,
-   поэтому до завершения job ветку не менять.
-2. Создать GitHub Release с тегом `X.Y.Z` **без префикса `v`** через GitHub UI
-   (или `gh release create`). Tag name напрямую записывается в
-   `manifest.json`, поэтому `v4.0.0` недопустим:
+1. Убедиться, что `master` чистый, синхронизирован с `origin/master`, и зафиксировать release HEAD. Workflow собирает архив именно из `master`, поэтому до завершения job ветку не менять.
+2. Создать GitHub Release с тегом `X.Y.Z` **без префикса `v`** через GitHub UI (или `gh release create`). Tag name напрямую записывается в `manifest.json`, поэтому `v4.0.0` недопустим:
    ```bash
    gh release create 4.0.0 \
        --title "v4.0.0 — Домофон действительно стал частью умного дома" \
@@ -127,10 +120,7 @@ GitHub auto-generated changelog или вручную.
 
 ## PR pre-release
 
-Workflow [`prerelease.yaml`](../../../.github/workflows/prerelease.yaml)
-выкатывает pre-release zip с тегом `pr-N` только для **не-draft** PR, меняющих
-`custom_components/**`. Blocked review-only draft не публикует пользовательскую
-сборку. Используется для тестирования уже одобренного candidate пользователями.
+Workflow [`prerelease.yaml`](../../../.github/workflows/prerelease.yaml) выкатывает pre-release zip с тегом `pr-N` только для **не-draft** PR, меняющих `custom_components/**`. Blocked review-only draft не публикует пользовательскую сборку. Используется для тестирования уже одобренного candidate пользователями.
 
 Пользователь устанавливает через HACS «Custom repository» → URL PR → ставит `pr-N` версию.
 

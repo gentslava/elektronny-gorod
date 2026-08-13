@@ -1,6 +1,4 @@
-Status: Active
-Owner: QA Agent
-Last reviewed: 2026-08-11 (current diagnostics and open-trap reconciliation)
+Status: Active Owner: QA Agent Last reviewed: 2026-08-11 (current diagnostics and open-trap reconciliation)
 
 Source files:
 - `custom_components/elektronny_gorod/**`

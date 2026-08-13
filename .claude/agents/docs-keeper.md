@@ -18,24 +18,12 @@ tools: Read, Grep, Glob, Edit, Write
 - Синхронизация `docs/` с кодом по maintenance rules (**обе оси** — A и B, ADR-0010).
 - Обновление `Last reviewed:` в front-блоке каждого тронутого документа.
 - Никаких устаревших ссылок (file:line после рефакторинга).
-- Никаких номеров версий в текстах docs (см. conventions.md). SHA допустимы в
-  `project-audit.md` как reconciliation-evidence и в review report/PR как
-  immutable base/head/tree candidate evidence (ADR-0015), но не как
-  live HEAD.
+- Никаких номеров версий в текстах docs (см. conventions.md). SHA допустимы в `project-audit.md` как reconciliation-evidence и в review report/PR как immutable base/head/tree candidate evidence (ADR-0015), но не как live HEAD.
 - ADR — не редактировать после `accepted`. Новые ADR супердиктят старые.
 - `docs/audit/project-audit.md` — все findings актуальны (status, evidence).
-- **Reconciliation (ADR-0010/0015):** `RESOLVED` ставить только если фикс
-  в master. До финальных approvals — `REMEDIATION-IN-REVIEW`.
-  `resolved-in-branch` допустим только внутри нового candidate, на который все
-  обязательные reviewers переиздали tuple-bound verdict. Прогон —
-  `bash .codex/hooks/check-audit-reconciliation.sh`.
-- **Анти-дублирование (D-03/ADR-0015):** findings/status живут в
-  `project-audit.md`, точный live test baseline — только в `testing/strategy.md`,
-  `summary.md` содержит качественную сводку без меняющегося count. Остальные
-  документы дают ссылки, а не копии.
-- **Контракты (D-01):** при правке кода, разрешающей known-антипаттерн, снять
-  соответствующую метку в `AGENTS.md` `Project structure` и обновить self-описание
-  (`стек`, `hooks`, `setup`) в `AGENTS.md`/`CLAUDE.md`.
+- **Reconciliation (ADR-0010/0015):** `RESOLVED` ставить только если фикс в master. До финальных approvals — `REMEDIATION-IN-REVIEW`. `resolved-in-branch` допустим только внутри нового candidate, на который все обязательные reviewers переиздали tuple-bound verdict. Прогон — `bash .codex/hooks/check-audit-reconciliation.sh`.
+- **Анти-дублирование (D-03/ADR-0015):** findings/status живут в `project-audit.md`, точный live test baseline — только в `testing/strategy.md`, `summary.md` содержит качественную сводку без меняющегося count. Остальные документы дают ссылки, а не копии.
+- **Контракты (D-01):** при правке кода, разрешающей known-антипаттерн, снять соответствующую метку в `AGENTS.md` `Project structure` и обновить self-описание (`стек`, `hooks`, `setup`) в `AGENTS.md`/`CLAUDE.md`.
 
 ## Triggers
 
@@ -54,12 +42,7 @@ Maintenance rules ([`project-map.md`](../../docs/project/project-map.md#maintena
 | CI | `aidd/contributing.md`, `aidd/quality-gates.md`, `roadmap.md` |
 | новый/удалённый файл в `custom_components/` | `project-map.md`, `AGENTS.md` `Project structure` |
 
-**Ось B (событие состояния → docs)** — полная таблица в
-[`project-map.md#maintenance-rules`](../../docs/project/project-map.md#maintenance-rules):
-finding→RESOLVED ⇒ `summary.md` + release-state `CHANGELOG` + `AGENTS.md`;
-candidate-bound feature docs и `[Unreleased]` входят в PR, а pre-merge finding
-status меняется только в `project-audit.md`; новый finding ⇒
-`project-audit.md` (+`security.md`).
+**Ось B (событие состояния → docs)** — полная таблица в [`project-map.md#maintenance-rules`](../../docs/project/project-map.md#maintenance-rules): finding→RESOLVED ⇒ `summary.md` + release-state `CHANGELOG` + `AGENTS.md`; candidate-bound feature docs и `[Unreleased]` входят в PR, а pre-merge finding status меняется только в `project-audit.md`; новый finding ⇒ `project-audit.md` (+`security.md`).
 
 ## Чего НЕ делать
 
@@ -70,13 +53,7 @@ status меняется только в `project-audit.md`; новый finding �
 
 ## Final review mode
 
-Если агент назначен независимым docs/AIDD reviewer финального candidate,
-доступные средства редактирования не используются: review строго read-only по
-переданным base/head/tree. Отчёт фиксирует reviewer identity,
-`Participated in implementation: no`, findings и verdict. Critical/Important
-нельзя deferred'ить. Findings исправляет implementer; после изменения candidate
-каждый обязательный reviewer выдаёт новый verdict на новый base/head/tree
-(глубина повторного review может быть delta-scoped).
+Если агент назначен независимым docs/AIDD reviewer финального candidate, доступные средства редактирования не используются: review строго read-only по переданным base/head/tree. Отчёт фиксирует reviewer identity, `Participated in implementation: no`, findings и verdict. Critical/Important нельзя deferred'ить. Findings исправляет implementer; после изменения candidate каждый обязательный reviewer выдаёт новый verdict на новый base/head/tree (глубина повторного review может быть delta-scoped).
 
 ## Формат output
 

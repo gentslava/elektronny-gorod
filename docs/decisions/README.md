@@ -1,6 +1,4 @@
-Status: Active
-Owner: Lead Architect Agent
-Last reviewed: 2026-08-11 (ADR registry synchronized through ADR-0015)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-11 (ADR registry synchronized through ADR-0015)
 
 Source files:
 - `*.md` in this directory
@@ -70,5 +68,4 @@ Quality gates:
 
 - For architecture context: `../architecture/overview.md`
 - For the ADR template: `../aidd/templates/adr.template.md`
-- For process decisions: `0010-aidd-state-reconciliation.md` and the consolidated
-  `0015-independent-review-candidate.md`.
+- For process decisions: `0010-aidd-state-reconciliation.md` and the consolidated `0015-independent-review-candidate.md`.

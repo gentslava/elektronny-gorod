@@ -13,11 +13,7 @@
 
 ## Scope этого плана
 
-Только **downlink** (слышать гостя). Slice 1 research-heavy: механизм моста (A exec vs
-B RTP) снимается **PoC до production-кода** (Task 1) — форма сетевой обвязки (Task 4)
-финализируется после него. Чистые модули, нужные при любом исходе (go2rtc audio-upsert,
-RTP-packetizer моста), — TDD сразу (Task 2–3). Uplink (микрофон), ADR-0012, полный
-two-way — вне scope (Slice 2).
+Только **downlink** (слышать гостя). Slice 1 research-heavy: механизм моста (A exec vs B RTP) снимается **PoC до production-кода** (Task 1) — форма сетевой обвязки (Task 4) финализируется после него. Чистые модули, нужные при любом исходе (go2rtc audio-upsert, RTP-packetizer моста), — TDD сразу (Task 2–3). Uplink (микрофон), ADR-0012, полный two-way — вне scope (Slice 2).
 
 ## File Structure
 
@@ -37,8 +33,7 @@ two-way — вне scope (Slice 2).
 
 ## Task 1: PoC — механизм моста A(exec) vs B(RTP)
 
-**Тип:** research (НЕ TDD). Цель — evidence-based выбор механизма, без production-кода.
-Прогон на **проде** (там go2rtc-контейнер + домофон).
+**Тип:** research (НЕ TDD). Цель — evidence-based выбор механизма, без production-кода. Прогон на **проде** (там go2rtc-контейнер + домофон).
 
 **Files:**
 - Create: `research/intercom-call-probe/probe_audio_bridge.py`
@@ -63,8 +58,7 @@ def pcmu_tone(freq=440, rate=8000):
 
 - [ ] **Step 2: Вариант B — нативный RTP/UDP в go2rtc**
 
-Слать тон как RTP PCMU на UDP-порт; создать go2rtc-стрим, читающий этот RTP по SDP.
-Проверить, играет ли карта.
+Слать тон как RTP PCMU на UDP-порт; создать go2rtc-стрим, читающий этот RTP по SDP. Проверить, играет ли карта.
 
 ```bash
 # B-1: на ХОСТЕ go2rtc — слушаем RTP и пробуем go2rtc-источник.
@@ -89,15 +83,12 @@ exec:ffmpeg -hide_banner -f mulaw -ar 8000 -ac 1 -i tcp://<ha-host>:9101 -c:a op
 # probe_audio_bridge.py A-mode слушает TCP:9101, шлёт тон. Открыть webrtc.
 ```
 
-Зафиксировать: завёлся ли exec на standalone go2rtc, дотянулся ли до моста
-(cross-container сеть!), слышно ли тон.
+Зафиксировать: завёлся ли exec на standalone go2rtc, дотянулся ли до моста (cross-container сеть!), слышно ли тон.
 
 - [ ] **Step 4: Решение D-audio-1**
 
 В `audio-bridge-design.md` (новая секция «PoC-результаты») записать:
-- **D-audio-1 (механизм downlink):** A(exec) ✅ / B(RTP) ✅ — с обоснованием
-  (что чище завелось, задержка, cross-container нюансы, нужен ли транскод или
-  passthrough PCMU).
+- **D-audio-1 (механизм downlink):** A(exec) ✅ / B(RTP) ✅ — с обоснованием (что чище завелось, задержка, cross-container нюансы, нужен ли транскод или passthrough PCMU).
 - Точный go2rtc `src`-шаблон выбранного варианта (для Task 3/4).
 
 - [ ] **Step 5: Commit**
@@ -112,14 +103,9 @@ git commit -m "research(two-way-audio): PoC аудио-моста downlink — A
 ## Task 2: Консолидация go2rtc-клиента → аудио-стрим методы (рефактор + feat)
 
 **Зачем:** go2rtc REST-логика размазана — `_go2rtc_upsert_stream` + `_build_go2rtc_src`
-+ auth-header в `camera.py`, а `validate_go2rtc`/`cleanup_go2rtc_stream` в `go2rtc.py`
-(**3 копии** auth-header + URL-builder). Аудио-upsert стал бы 4-й копией + ручным
-дублем security-guard S-A71-01 (token-leak — опасно). Поэтому **сначала консолидируем
-go2rtc-клиент в `go2rtc.py`** (P1 рефактор-оценки 2026-06-23), потом строим аудио-методы
-поверх. Заодно — A-72 (`ClientTimeout`) + S-17/S-18 (redact body) в `go2rtc.py`.
++ auth-header в `camera.py`, а `validate_go2rtc`/`cleanup_go2rtc_stream` в `go2rtc.py` (**3 копии** auth-header + URL-builder). Аудио-upsert стал бы 4-й копией + ручным дублем security-guard S-A71-01 (token-leak — опасно). Поэтому **сначала консолидируем go2rtc-клиент в `go2rtc.py`** (P1 рефактор-оценки 2026-06-23), потом строим аудио-методы поверх. Заодно — A-72 (`ClientTimeout`) + S-17/S-18 (redact body) в `go2rtc.py`.
 
-⚠️ **Plan Mode + ask-first** (трогает `camera.py` hot path `stream_source`). Рефактор →
-не diagnose-before-fix, но **зелёный `pytest` до и после обязателен** (поведение неизменно).
+⚠️ **Plan Mode + ask-first** (трогает `camera.py` hot path `stream_source`). Рефактор → не diagnose-before-fix, но **зелёный `pytest` до и после обязателен** (поведение неизменно).
 
 **Files:**
 - Modify: `custom_components/elektronny_gorod/go2rtc.py` (принять upsert/src/auth/url + аудио-методы)
@@ -192,8 +178,7 @@ async def test_upsert_audio_stream_put_fallback_on_patch_4xx():
 
 - [ ] **Step 2: Запустить — убедиться, что падает**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_audio.py -q`
-Expected: FAIL — `ImportError: cannot import name 'upsert_audio_stream'`
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_audio.py -q` Expected: FAIL — `ImportError: cannot import name 'upsert_audio_stream'`
 
 - [ ] **Step 3: Реализовать в `go2rtc.py`**
 
@@ -239,8 +224,7 @@ async def remove_audio_stream(base_url: str, name: str, session, headers: dict |
 
 - [ ] **Step 4: Запустить — убедиться, что проходит**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_audio.py -q`
-Expected: PASS (2 теста)
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_go2rtc_audio.py -q` Expected: PASS (2 теста)
 
 - [ ] **Step 5: Commit**
 
@@ -253,9 +237,7 @@ git commit -m "feat(go2rtc): upsert/remove аудио-стрима вызова 
 
 ## Task 3: мост downlink — RTP-packetizer (`sip/bridge.py`)
 
-**Зачем:** мост превращает downlink G.711-кадры в RTP-поток к go2rtc (вариант B) или
-кормит exec-эндпоинт (вариант A). **Чистая часть** (RTP seq/ts инкремент, формат src)
-TDD-ится сразу; сетевой `start/stop` transport — Task 4 (форма из D-audio-1).
+**Зачем:** мост превращает downlink G.711-кадры в RTP-поток к go2rtc (вариант B) или кормит exec-эндпоинт (вариант A). **Чистая часть** (RTP seq/ts инкремент, формат src) TDD-ится сразу; сетевой `start/stop` transport — Task 4 (форма из D-audio-1).
 
 **Files:**
 - Create: `custom_components/elektronny_gorod/sip/bridge.py`
@@ -294,8 +276,7 @@ def test_packetizer_payload_type_in_header():
 
 - [ ] **Step 2: Запустить — убедиться, что падает**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_bridge.py -q`
-Expected: FAIL — `ModuleNotFoundError: ...sip.bridge`
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_bridge.py -q` Expected: FAIL — `ModuleNotFoundError: ...sip.bridge`
 
 - [ ] **Step 3: Реализовать чистую логику в `sip/bridge.py`**
 
@@ -330,13 +311,11 @@ class DownlinkPacketizer:
 
 - [ ] **Step 4: Запустить — убедиться, что проходит**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_bridge.py -q`
-Expected: PASS (2 теста)
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_bridge.py -q` Expected: PASS (2 теста)
 
 - [ ] **Step 5: Прогнать весь suite — нет регрессий**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/ -q`
-Expected: все прежние + новые зелёные
+Run: `PYTHONPATH=. .venv/bin/pytest tests/ -q` Expected: все прежние + новые зелёные
 
 - [ ] **Step 6: Commit**
 
@@ -349,26 +328,18 @@ git commit -m "feat(sip): аудио-мост downlink — RTP-packetizer (чи�
 
 ## Roadmap (после Task 1 PoC — финализируется по D-audio-1)
 
-Сетевые задачи — форма зависит от выбранного механизма (A exec / B RTP). Bite-sized
-шаги дописываются после Task 1, по аналогии с Slice 0-network ([plan.md](plan.md)).
+Сетевые задачи — форма зависит от выбранного механизма (A exec / B RTP). Bite-sized шаги дописываются после Task 1, по аналогии с Slice 0-network ([plan.md](plan.md)).
 
 ### Task 4 — transport + lifecycle (network, live-verify)
 - `sip/bridge.py`: добавить сетевой слой выбранного механизма:
-  - **B (RTP):** `AudioBridge` (asyncio `DatagramProtocol`) — на каждый
-    `feed_downlink` шлёт `DownlinkPacketizer.packetize(frame)` UDP-ом на go2rtc-порт.
+  - **B (RTP):** `AudioBridge` (asyncio `DatagramProtocol`) — на каждый `feed_downlink` шлёт `DownlinkPacketizer.packetize(frame)` UDP-ом на go2rtc-порт.
   - **A (exec):** мост поднимает TCP-сервер, отдающий сырой PCMU; go2rtc exec тянет.
-- `sip/manager.py`: на answer — `on_downlink = bridge.feed_downlink` (вместо счётчика);
-  на teardown — `bridge.stop()`.
-- `sip/call_controller.py`: на answer — `upsert_audio_stream(...)` (src из D-audio-1,
-  имя `eg_intercom_talk`), создать мост, прокинуть в `SipManager`; на hangup —
-  `remove_audio_stream(...)` + `bridge.stop()`. go2rtc-конфиг берётся из entry
-  (`_get_go2rtc_cfg` уже есть). Сбой upsert → log + degrade (вызов живёт).
-- **Live-verify:** деплой на прод (копирование + `docker restart`), звонок →
-  открыть Advanced Camera Card стрима `eg_intercom_talk` → **слышим гостя**.
+- `sip/manager.py`: на answer — `on_downlink = bridge.feed_downlink` (вместо счётчика); на teardown — `bridge.stop()`.
+- `sip/call_controller.py`: на answer — `upsert_audio_stream(...)` (src из D-audio-1, имя `eg_intercom_talk`), создать мост, прокинуть в `SipManager`; на hangup — `remove_audio_stream(...)` + `bridge.stop()`. go2rtc-конфиг берётся из entry (`_get_go2rtc_cfg` уже есть). Сбой upsert → log + degrade (вызов живёт).
+- **Live-verify:** деплой на прод (копирование + `docker restart`), звонок → открыть Advanced Camera Card стрима `eg_intercom_talk` → **слышим гостя**.
 
 ### Task 5 — docs + Advanced Camera Card (трубка)
-- `README.md` фичи: пример карты (`type: custom:advanced-camera-card`, go2rtc live,
-  стрим `eg_intercom_talk`) — динамик (микрофон — Slice 2). HTTPS-напоминание.
+- `README.md` фичи: пример карты (`type: custom:advanced-camera-card`, go2rtc live, стрим `eg_intercom_talk`) — динамик (микрофон — Slice 2). HTTPS-напоминание.
 - `CHANGELOG.md` `[Unreleased]`: downlink (слышим гостя).
 - `project-map.md`: новый `sip/bridge.py`, `test_sip_bridge.py`, `test_go2rtc_audio.py`.
 
@@ -385,14 +356,9 @@ git commit -m "feat(sip): аудио-мост downlink — RTP-packetizer (чи�
 - §7 lifecycle (answer/hangup, degrade) → Task 4. ✅
 - §9 testing (unit packetizer + go2rtc mock, live) → Task 2/3 (unit), Task 4 (live). ✅
 - §10 PoC-вопросы → Task 1. ✅
-- Gap (намеренный): Task 4–5 не bite-sized — зависят от D-audio-1 (как Slice 0-network
-  в plan.md). Зафиксировано в Scope. ✅
+- Gap (намеренный): Task 4–5 не bite-sized — зависят от D-audio-1 (как Slice 0-network в plan.md). Зафиксировано в Scope. ✅
 - Out of scope (Slice 2): uplink/микрофон, ADR-0012 — не здесь. ✅
 
-**2. Placeholder scan:** Task 1–3 — полный код/команды/ожидаемый вывод. Roadmap-секции
-явно «после Task 1» (корректная инкрементальность research-heavy, не плейсхолдеры). ✅
+**2. Placeholder scan:** Task 1–3 — полный код/команды/ожидаемый вывод. Roadmap-секции явно «после Task 1» (корректная инкрементальность research-heavy, не плейсхолдеры). ✅
 
-**3. Type consistency:** `upsert_audio_stream(base_url, name, src, session, headers)` /
-`remove_audio_stream` / `DownlinkPacketizer(payload_type, ssrc).packetize(frame)` /
-`build_rtp_packet`, `FRAME_BYTES` (из rtp.py) — согласованы между тестами, реализацией,
-roadmap. ✅
+**3. Type consistency:** `upsert_audio_stream(base_url, name, src, session, headers)` / `remove_audio_stream` / `DownlinkPacketizer(payload_type, ssrc).packetize(frame)` / `build_rtp_packet`, `FRAME_BYTES` (из rtp.py) — согласованы между тестами, реализацией, roadmap. ✅

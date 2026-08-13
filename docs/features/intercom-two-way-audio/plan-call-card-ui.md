@@ -4,28 +4,16 @@
 > available; otherwise execute the checkboxes inline. TDD обязателен для backend
 > (Slice 3a). Перед push — `.claude/rules/pre-pr-checklist.md`.
 
-**Goal:** Дать (а) единый backend-источник состояния вызова `sensor.<intercom>_call_state`
-для DIY-сборки и автоматизаций, и (б) готовую «из коробки» карточку
-`eg-intercom-call-card` (Lit+TS), повторяющую UX приложения в родном HA-облике.
+**Goal:** Дать (а) единый backend-источник состояния вызова `sensor.<intercom>_call_state` для DIY-сборки и автоматизаций, и (б) готовую «из коробки» карточку `eg-intercom-call-card` (Lit+TS), повторяющую UX приложения в родном HA-облике.
 
 **Дизайн:** [`call-card-ux-spec.md`](call-card-ux-spec.md) (решения владельца 2026-06-24).
 
 **Architecture (заземлено в коде):**
-- `DoorbellCallController` (один на entry, `hass.data[SIP_DATA][entry_id]`) уже —
-  единственный оркестратор вызова: `handle_signal` (ring/ended), `current_call()`,
-  `_manager.in_call`, `async_answer`/`async_hangup`, `_on_cancelled`/`_release`.
-  → Делаем его **единственным автором** состояния: новый сигнал `SIGNAL_CALL_STATE`,
-  испускается в каждой точке перехода. Сейчас контроллер гоняет `input_boolean`
-  (dismiss) — **не трогаем его в 3a** (карточка/дашборд продолжают работать),
-  депрекация helper'а — отдельный поздний cleanup.
-- `sensor.<intercom>_call_state` — **по домофону** (dedup `(place_id, access_control_id)`,
-  как `event.py`), тот же device. Подписывается **только** на `SIGNAL_CALL_STATE`,
-  отражает state если AC совпал, иначе `idle`. Имя берёт из своего `lock_info`.
-- Карточка читает `call_state` + камеры + lock, встраивает HA-native WebRTC,
-  адаптивный open-control, микрофон (логика из текущей `eg-intercom-mic-card.js`).
+- `DoorbellCallController` (один на entry, `hass.data[SIP_DATA][entry_id]`) уже — единственный оркестратор вызова: `handle_signal` (ring/ended), `current_call()`, `_manager.in_call`, `async_answer`/`async_hangup`, `_on_cancelled`/`_release`. → Делаем его **единственным автором** состояния: новый сигнал `SIGNAL_CALL_STATE`, испускается в каждой точке перехода. Сейчас контроллер гоняет `input_boolean` (dismiss) — **не трогаем его в 3a** (карточка/дашборд продолжают работать), депрекация helper'а — отдельный поздний cleanup.
+- `sensor.<intercom>_call_state` — **по домофону** (dedup `(place_id, access_control_id)`, как `event.py`), тот же device. Подписывается **только** на `SIGNAL_CALL_STATE`, отражает state если AC совпал, иначе `idle`. Имя берёт из своего `lock_info`.
+- Карточка читает `call_state` + камеры + lock, встраивает HA-native WebRTC, адаптивный open-control, микрофон (логика из текущей `eg-intercom-mic-card.js`).
 
-**Tech Stack:** HA custom integration (Python 3.13 asyncio, enum SensorEntity,
-dispatcher); фронтенд — **Lit + TypeScript** + Rollup/Vite (бандл → статик-ресурс).
+**Tech Stack:** HA custom integration (Python 3.13 asyncio, enum SensorEntity, dispatcher); фронтенд — **Lit + TypeScript** + Rollup/Vite (бандл → статик-ресурс).
 
 ---
 
@@ -37,24 +25,17 @@ dispatcher); фронтенд — **Lit + TypeScript** + Rollup/Vite (бандл
 | **3b** | Lit-карточка `eg-intercom-call-card` (поглощает mic-card) | средний | ✅ собрано (typecheck+25 unit+smoke); ⏳ дизайн на согласовании + live-проверка видео/микрофона |
 | **3c** (опц.) | fullscreen на панели (auto-view / browser_mod) | низкий | ⏳ позже |
 
-Каждый слайс — отдельный PR (pre-PR checklist). 3a мерджится самостоятельно
-(полезен для DIY даже без карточки).
+Каждый слайс — отдельный PR (pre-PR checklist). 3a мерджится самостоятельно (полезен для DIY даже без карточки).
 
 ---
 
 ## Slice 3a — backend: `sensor.<intercom>_call_state`
 
 **Files:**
-- Modify: `const.py` (+`SIGNAL_CALL_STATE`, enum-значения), `sip/call_controller.py`
-  (`_set_call_state()` + emit в переходах), `sensor.py` (+entity), `strings.json`,
-  `translations/ru.json`/`en.json`.
+- Modify: `const.py` (+`SIGNAL_CALL_STATE`, enum-значения), `sip/call_controller.py` (`_set_call_state()` + emit в переходах), `sensor.py` (+entity), `strings.json`, `translations/ru.json`/`en.json`.
 - Test: `tests/test_sensor_call_state.py` (new), `tests/test_sip_call_controller.py` (+).
 
-**Контракт состояния (enum):**
-`idle | ringing | connecting | active | ended | error`. Атрибуты сенсора:
-`call_id`, `intercom_name` (из своего lock_info), `started_at` (момент `active`),
-`access_control_id`, `place_id`. Длительность считает карточка от `started_at`
-(отдельный duration-сенсор не делаем — решение §17).
+**Контракт состояния (enum):** `idle | ringing | connecting | active | ended | error`. Атрибуты сенсора: `call_id`, `intercom_name` (из своего lock_info), `started_at` (момент `active`), `access_control_id`, `place_id`. Длительность считает карточка от `started_at` (отдельный duration-сенсор не делаем — решение §17).
 
 ### Task 1: Сигнал + переходы в контроллере
 
@@ -108,13 +89,9 @@ def _set_call_state(self, state: str, *, call: ActiveCall | None = None) -> None
     })
 ```
 Вызвать `_set_call_state(...)` в точках перехода (заземлено в текущих хуках):
-- `handle_signal` ветка `ring` (после запоминания call) → `CALL_STATE_RINGING`
-  (+ `self._last_ac/_last_place_id/_last_call_id = ...`).
-- `handle_signal` ветка `ended` / `_on_fcm_ended` / `_on_cancelled` / `_release` /
-  таймаут окна → `CALL_STATE_ENDED`.
-- `async_answer`: в начале → `CALL_STATE_CONNECTING`; после успешного
-  `manager.async_answer(...)` (200 OK, `in_call=True`) → `self._started_at = utcnow()`,
-  `CALL_STATE_ACTIVE`; в `except` → `CALL_STATE_ERROR` затем `CALL_STATE_ENDED`.
+- `handle_signal` ветка `ring` (после запоминания call) → `CALL_STATE_RINGING` (+ `self._last_ac/_last_place_id/_last_call_id = ...`).
+- `handle_signal` ветка `ended` / `_on_fcm_ended` / `_on_cancelled` / `_release` / таймаут окна → `CALL_STATE_ENDED`.
+- `async_answer`: в начале → `CALL_STATE_CONNECTING`; после успешного `manager.async_answer(...)` (200 OK, `in_call=True`) → `self._started_at = utcnow()`, `CALL_STATE_ACTIVE`; в `except` → `CALL_STATE_ERROR` затем `CALL_STATE_ENDED`.
 - `async_hangup` (BYE) → `CALL_STATE_ENDED`.
 
 > ⚠️ **Реализатору:** `_last_ac/_last_place_id/_last_call_id/_started_at` — новые
@@ -175,32 +152,23 @@ class ElektronnyGorodCallStateSensor(CoordinatorEntity[...], SensorEntity):
     @property
     def extra_state_attributes(self): return self._extra
 ```
-Регистрация в `sensor.py:async_setup_entry` — тем же дедупом `(place_id, ac_id)`, что
-`event.py` (можно вынести общий helper `_dedup_doorbells(locks)` — низкорисковый
-extract, опционально).
+Регистрация в `sensor.py:async_setup_entry` — тем же дедупом `(place_id, ac_id)`, что `event.py` (можно вынести общий helper `_dedup_doorbells(locks)` — низкорисковый extract, опционально).
 
 - [ ] **Step 3: прогон** `pytest tests/test_sensor_call_state.py -q` → PASS.
-- [ ] **Step 4: translations** — `call_state` + перевод option-значений (`state.*` /
-  `entity.sensor.call_state.state.{ringing,...}`) в `strings.json` + `ru.json`/`en.json`.
+- [ ] **Step 4: translations** — `call_state` + перевод option-значений (`state.*` / `entity.sensor.call_state.state.{ringing,...}`) в `strings.json` + `ru.json`/`en.json`.
 - [ ] **Step 5: регресс** `pytest tests/ -q` → all pass.
 - [ ] **Step 6: commit** — `feat(sensor): sensor.*_call_state — единый источник состояния вызова`.
 
 ### Task 3: Docs sync (3a)
-- [ ] CHANGELOG `[Unreleased]`, `project-map.md` (+sensor), `api-reference` если нужно,
-  audit (A-NN при наличии), README фичи (статус Slice 3a).
+- [ ] CHANGELOG `[Unreleased]`, `project-map.md` (+sensor), `api-reference` если нужно, audit (A-NN при наличии), README фичи (статус Slice 3a).
 
-**Self-review 3a:** контроллер — единственный автор; сенсор пассивно отражает;
-`input_boolean` не тронут (dashboard работает); enum device_class → нативные графики/
-history; per-doorbell симметрично `event.py`.
+**Self-review 3a:** контроллер — единственный автор; сенсор пассивно отражает; `input_boolean` не тронут (dashboard работает); enum device_class → нативные графики/ history; per-doorbell симметрично `event.py`.
 
 ---
 
 ## Slice 3b — frontend: карточка `eg-intercom-call-card` (Lit + TS)
 
-**Files (new):** `frontend/` (исходники TS) → сборка в
-`custom_components/elektronny_gorod/www/eg-intercom-call-card.js`.
-**Modify:** `www/` раздача (есть), README/`uplink-card-install.md` (инструкция),
-`eg-intercom-mic-card.js` → помечается deprecated (логика мигрирует).
+**Files (new):** `frontend/` (исходники TS) → сборка в `custom_components/elektronny_gorod/www/eg-intercom-call-card.js`. **Modify:** `www/` раздача (есть), README/`uplink-card-install.md` (инструкция), `eg-intercom-mic-card.js` → помечается deprecated (логика мигрирует).
 
 ### Структура
 ```
@@ -219,30 +187,16 @@ frontend/
 ```
 
 ### Поведение (из UX-спеки)
-- [ ] **Видео — HA-native WebRTC** (без обязательной `webrtc-camera`): `call-video.ts`
-  использует WS `camera/webrtc/offer` для `camera.intercom_call` (in-call) и doorbell-
-  камеры (ringing). Реюз `ha-camera-stream`/`ha-web-rtc-player`, если доступны в `hass`.
-- [ ] **State-машина:** `sensor.*_call_state` → `idle/ringing/connecting/active/ended`;
-  слои `opening_door` (по `lock`-state), `audio_unavailable`, `mic_permission`.
-- [ ] **Сброс `error` (контракт из review P2 Slice 3a):** backend оставляет `error`
-  терминальным (не авто-переходит в `ended`). Карточка показывает «Ошибка вызова»
-  ~3–5с, затем сама гасит экран (локальный таймер) — чтобы `error` не «залипал» в UI
-  до следующего вызова.
-- [ ] **Open-control адаптивный** (`open_action: auto`): тач → slide (на стиле
-  `ha-control-slider`); десктоп → hold(`lock.unlock` по удержанию) или tap+confirm.
-  Прогресс/успех(`mdi:lock-open-check`)/ошибка(`mdi:lock-alert`) — overlay.
-- [ ] **Микрофон:** при `active` авто-`getUserMedia`, **если** `permissions=granted` +
-  `isSecureContext`; иначе CTA «Разрешить микрофон». Тогл выкл. Логика AudioWorklet+WS —
-  перенос из `eg-intercom-mic-card.js` (slot-leak guard сохранить).
-- [ ] **Звук гостя:** автоплей muted → оверлей «Включить звук»; тап «Принять» = жест
-  (снимает mute). 
-- [ ] **Действия:** Принять→`elektronny_gorod.answer`; Отклонить/Завершить→`...hangup`;
-  Открыть→`lock.unlock`. На `active` «Принять» исчезает.
-- [ ] **Таймер:** `timer: auto` — секундомер от `started_at`, по умолчанию ненавязчивый;
-  поведение финализировать live (§17 п.6).
+- [ ] **Видео — HA-native WebRTC** (без обязательной `webrtc-camera`): `call-video.ts` использует WS `camera/webrtc/offer` для `camera.intercom_call` (in-call) и doorbell- камеры (ringing). Реюз `ha-camera-stream`/`ha-web-rtc-player`, если доступны в `hass`.
+- [ ] **State-машина:** `sensor.*_call_state` → `idle/ringing/connecting/active/ended`; слои `opening_door` (по `lock`-state), `audio_unavailable`, `mic_permission`.
+- [ ] **Сброс `error` (контракт из review P2 Slice 3a):** backend оставляет `error` терминальным (не авто-переходит в `ended`). Карточка показывает «Ошибка вызова» ~3–5с, затем сама гасит экран (локальный таймер) — чтобы `error` не «залипал» в UI до следующего вызова.
+- [ ] **Open-control адаптивный** (`open_action: auto`): тач → slide (на стиле `ha-control-slider`); десктоп → hold(`lock.unlock` по удержанию) или tap+confirm. Прогресс/успех(`mdi:lock-open-check`)/ошибка(`mdi:lock-alert`) — overlay.
+- [ ] **Микрофон:** при `active` авто-`getUserMedia`, **если** `permissions=granted` + `isSecureContext`; иначе CTA «Разрешить микрофон». Тогл выкл. Логика AudioWorklet+WS — перенос из `eg-intercom-mic-card.js` (slot-leak guard сохранить).
+- [ ] **Звук гостя:** автоплей muted → оверлей «Включить звук»; тап «Принять» = жест (снимает mute).
+- [ ] **Действия:** Принять→`elektronny_gorod.answer`; Отклонить/Завершить→`...hangup`; Открыть→`lock.unlock`. На `active` «Принять» исчезает.
+- [ ] **Таймер:** `timer: auto` — секундомер от `started_at`, по умолчанию ненавязчивый; поведение финализировать live (§17 п.6).
 - [ ] **Тема:** только theme-токены (§12); адаптив по ширине контейнера (`ResizeObserver`).
-- [ ] **Конфиг + auto-discovery** (см. Приложение B спеки): `call_state`, `camera`,
-  `doorbell_camera`, `lock`, `open_action`, `mic`, `mic_autostart`, `timer`.
+- [ ] **Конфиг + auto-discovery** (см. Приложение B спеки): `call_state`, `camera`, `doorbell_camera`, `lock`, `open_action`, `mic`, `mic_autostart`, `timer`.
 
 ### Сборка / установка
 - [ ] `npm i` (lit, rollup/vite, typescript) → `npm run build` → один бандл в `www/`.
@@ -250,26 +204,18 @@ frontend/
 - [ ] `window.customCards.push({type:"eg-intercom-call-card", ...})`.
 
 ### Тестирование 3b
-- [ ] **Unit (vitest + @open-wc/testing):** state-machine (call_state→ViewState),
-  open-control (slide-порог/hold-таймер/confirm), pointer-детект, mic permission-gate.
-- [ ] **Live (прод, 4G):** звонок → ringing видео (без звука) → Принять → connecting →
-  active видео+звук (1 тап unmute) → микрофон авто (если granted) → Открыть (slide на
-  телефоне / hold на десктопе) → Завершить. Повторный вход. go2rtc наружу не торчит.
+- [ ] **Unit (vitest + @open-wc/testing):** state-machine (call_state→ViewState), open-control (slide-порог/hold-таймер/confirm), pointer-детект, mic permission-gate.
+- [ ] **Live (прод, 4G):** звонок → ringing видео (без звука) → Принять → connecting → active видео+звук (1 тап unmute) → микрофон авто (если granted) → Открыть (slide на телефоне / hold на десктопе) → Завершить. Повторный вход. go2rtc наружу не торчит.
 - [ ] **Desktop:** проверить, что slide НЕ используется (hold/tap), всё без прокрутки.
 
-- [ ] **Commits (порядок):** `chore(frontend): scaffold Lit+TS сборки карточки` →
-  `feat(card): eg-intercom-call-card — экран вызова (state/video/actions)` →
-  `feat(card): open-control адаптив + микрофон (порт mic-card)` →
-  `docs: инструкция установки карточки; mic-card → deprecated`.
+- [ ] **Commits (порядок):** `chore(frontend): scaffold Lit+TS сборки карточки` → `feat(card): eg-intercom-call-card — экран вызова (state/video/actions)` → `feat(card): open-control адаптив + микрофон (порт mic-card)` → `docs: инструкция установки карточки; mic-card → deprecated`.
 
 ---
 
 ## Slice 3c (опционально) — fullscreen на панели
 
-- [ ] **Базово (zero-dep):** пример automation в README — по `sensor.*_call_state ==
-  ringing` `navigate`/`lovelace`-переход на выделенный fullscreen-view с карточкой.
-- [ ] **Опц. `browser_mod`:** пример `browser_mod.popup` поверх всего на конкретных
-  панелях (документируем как опциональную зависимость, не из коробки).
+- [ ] **Базово (zero-dep):** пример automation в README — по `sensor.*_call_state == ringing` `navigate`/`lovelace`-переход на выделенный fullscreen-view с карточкой.
+- [ ] **Опц. `browser_mod`:** пример `browser_mod.popup` поверх всего на конкретных панелях (документируем как опциональную зависимость, не из коробки).
 - [ ] Не блокирует 3a/3b; чистые docs + примеры.
 
 ---

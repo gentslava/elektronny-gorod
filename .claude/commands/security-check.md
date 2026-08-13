@@ -68,6 +68,5 @@ grep -E '^### S-' docs/audit/security.md
 ## Constraints
 
 - Read-only — никаких правок кода.
-- Не заменять AST-checker более грубым grep: он отличает прямую
-  передачу secret value от безопасного `len(value)`/`redact(value)`.
+- Не заменять AST-checker более грубым grep: он отличает прямую передачу secret value от безопасного `len(value)`/`redact(value)`.
 - Не игнорировать False Positives, если они вообще возможны: явно отметить «FP: ...» с обоснованием.

@@ -26,13 +26,10 @@ Use this skill when the user asks to run the migrated source command `docs-updat
    - перечитай актуальную часть кода;
    - обнови ссылки `file:line` (если рефакторинг сдвинул — использовать функцию/класс);
    - обнови `Last reviewed:` в front-блоке (если документ существенно обновлён);
-   - обнови `audit/project-audit.md`: `REMEDIATION-IN-REVIEW` до обязательных
-     reviews/publication/CI, `resolved-in-branch` после них, `RESOLVED` только
-     после merge в target master; либо добавь new finding.
+   - обнови `audit/project-audit.md`: `REMEDIATION-IN-REVIEW` до обязательных reviews/publication/CI, `resolved-in-branch` после них, `RESOLVED` только после merge в target master; либо добавь new finding.
 4. **Не фиксировать**:
    - конкретные версии (`3.0.X`) — кроме changelog-style исторических разделов;
-   - SHA коммитов — кроме ADR, incident reports, audit reconciliation evidence
-     и immutable candidate evidence в review report/PR.
+   - SHA коммитов — кроме ADR, incident reports, audit reconciliation evidence и immutable candidate evidence в review report/PR.
 5. **Финальная проверка**:
    ```bash
    # Битые ссылки на .md

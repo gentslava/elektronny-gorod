@@ -1,7 +1,4 @@
-Status: Active
-Owner: Architecture Agent
-Last reviewed: 2026-08-11 (bounded per-entry FCM lifecycle and consolidated
-ADR-0015 candidate/review/publication contract)
+Status: Active Owner: Architecture Agent Last reviewed: 2026-08-11 (bounded per-entry FCM lifecycle and consolidated ADR-0015 candidate/review/publication contract)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -249,28 +246,17 @@ async_unload_entry:
 
 - ✅ Все методы корректно `async`/`await`.
 - ✅ HTTP через `async_get_clientsession(hass)` ([ADR-0008](../decisions/0008-shared-client-session.md)) — никаких per-request `ClientSession()`.
-- ✅ `Authorization: Bearer` не отправляется на pre-auth paths (`/auth/*` и
-  public `device-installations`) — иначе backend может отклонить reauth/bootstrap.
-  Узкий allowlist не затрагивает post-auth `/public/cameras` (см. `HTTP.__request`).
+- ✅ `Authorization: Bearer` не отправляется на pre-auth paths (`/auth/*` и public `device-installations`) — иначе backend может отклонить reauth/bootstrap. Узкий allowlist не затрагивает post-auth `/public/cameras` (см. `HTTP.__request`).
 - ✅ Token-redaction: `_logging.redact()` для headers (case + dash-insensitive), `_logging.redact_path()` маскирует PII в `/auth/v*/*/{phone|contract|account_id}` URL-path.
 - ✅ Lock `async_unlock` использует `async_call_later` для возврата state→LOCKED (без `asyncio.sleep` в event loop).
-- ✅ Stream manager использует HA-managed task с `eager_start=False`
-  для per-camera dedup; unload отменяет tasks/timers/listeners, ждёт running
-  reconcile и снимает pending preload.
-- ✅ External RTSP background traffic default-off; retry capped at 300s,
-  cold-start mint распределён deterministic jitter <60s; interactive policy-on
-  использует короткий 0.5s stagger.
-- ✅ Background-excluded hidden cameras are gated before operator mint/go2rtc
-  PATCH, including the platform-forwarding window before visibility sync;
-  explicit HA playback during or after setup remains available without preload.
-- ✅ Compatible publication-policy saves update the current manager in place;
-  existing eligible producers and HA platform lifecycle are preserved.
+- ✅ Stream manager использует HA-managed task с `eager_start=False` для per-camera dedup; unload отменяет tasks/timers/listeners, ждёт running reconcile и снимает pending preload.
+- ✅ External RTSP background traffic default-off; retry capped at 300s, cold-start mint распределён deterministic jitter <60s; interactive policy-on использует короткий 0.5s stagger.
+- ✅ Background-excluded hidden cameras are gated before operator mint/go2rtc PATCH, including the platform-forwarding window before visibility sync; explicit HA playback during or after setup remains available without preload.
+- ✅ Compatible publication-policy saves update the current manager in place; existing eligible producers and HA platform lifecycle are preserved.
 - ✅ `LOGGER.exception(...)` вместо блокирующего `traceback.format_exc()` в hot path.
 - ⚠️ **Serial-per-place refresh** в `_async_update_data`: parallelize нельзя без рефакторинга, т.к. `self._api.http.user_agent.place_id` — shared state, читаемое в момент построения HTTP-headers. См. module docstring `coordinator.py`. Race-free, но не оптимально по latency.
-- ✅ Operator API использует явные REST/binary `ClientTimeout` (A-21/S-09);
-  retry/backoff для идемпотентных GET остаётся follow-up.
-- ✅ History interval не наслаивает запросы: новый tick пропускается, пока
-  предыдущий poll активен; сбои general/camera stream изолируются.
+- ✅ Operator API использует явные REST/binary `ClientTimeout` (A-21/S-09); retry/backoff для идемпотентных GET остаётся follow-up.
+- ✅ History interval не наслаивает запросы: новый tick пропускается, пока предыдущий poll активен; сбои general/camera stream изолируются.
 
 ## Data flow
 
@@ -488,36 +474,16 @@ const + go2rtc ← config_flow
 2. **`available_sections`** игнорируются (`api.query_sections` исторически вызывался без потребления результата; в текущем `coordinator` вызов удалён, но endpoint в `api.py` остался — кандидат на cleanup при следующем touch coordinator).
 3. **Сильная связанность `coordinator` ↔ `api` ↔ `http`** — coordinator unit-тестируется только с mock `aioresponses` (см. `tests/`); inject-абстракции пока нет.
 4. **UA shared state в `user_agent.place_id`** — кросс-слойная связанность через `self._api.http.user_agent.place_id = place_id`. Из-за этого refresh идёт сериально по places (см. async-паттерны). Лучше прокидывать `place_id` через параметры HTTP-вызовов; рефакторинг open.
-5. **Нет retry/backoff для идемпотентных GET** (остаток A-21). Явный
-   `ClientTimeout` уже есть; POST/login/open_lock намеренно не ретраятся автоматически.
-6. **FCM опирается на приватные API Google** (A-80) — realtime-вызов работает
-   под graceful degradation, но долгосрочная совместимость не гарантирована.
-   Фатальные ошибки зависимости теперь ограничены per-entry circuit breaker:
-   они временно отключают только realtime-уведомления затронутого аккаунта и не
-   создают бесконечный двухминутный restart-loop. Startup, watchdog и unload
-   проходят под одним transition lock; если dependency-клиент не подтвердил
-   остановку, интеграция не теряет ссылку на него, возвращает failed unload и не
-   позволяет HA запустить замену. Claim и start происходят только после последнего
-   fallible setup-await. Если прежний owner не остановился, entry остаётся loaded,
-   но realtime FCM для него отключён с Repairs warning — без setup-retry loop.
-   Removal после failed unload повторяет stop; при повторном failure HA требует
-   restart, а ownership сохраняется до него.
-7. **go2rtc config persistence после повторных PATCH требует live check**
-   (остаток A-84) — preload/lifecycle и external idle RTSP приняты live в A-96,
-   но ещё нужно доказать, что конкретная сборка go2rtc не накапливает duplicate
-   YAML после длительных циклов обновления source.
+5. **Нет retry/backoff для идемпотентных GET** (остаток A-21). Явный `ClientTimeout` уже есть; POST/login/open_lock намеренно не ретраятся автоматически.
+6. **FCM опирается на приватные API Google** (A-80) — realtime-вызов работает под graceful degradation, но долгосрочная совместимость не гарантирована. Фатальные ошибки зависимости теперь ограничены per-entry circuit breaker: они временно отключают только realtime-уведомления затронутого аккаунта и не создают бесконечный двухминутный restart-loop. Startup, watchdog и unload проходят под одним transition lock; если dependency-клиент не подтвердил остановку, интеграция не теряет ссылку на него, возвращает failed unload и не позволяет HA запустить замену. Claim и start происходят только после последнего fallible setup-await. Если прежний owner не остановился, entry остаётся loaded, но realtime FCM для него отключён с Repairs warning — без setup-retry loop. Removal после failed unload повторяет stop; при повторном failure HA требует restart, а ownership сохраняется до него.
+7. **go2rtc config persistence после повторных PATCH требует live check** (остаток A-84) — preload/lifecycle и external idle RTSP приняты live в A-96, но ещё нужно доказать, что конкретная сборка go2rtc не накапливает duplicate YAML после длительных циклов обновления source.
 
 Добавлено с момента предыдущего ревью (2026-06-24):
 - ✅ **Uplink-микрофон — two-way audio завершён** (A-85, ADR-0013) — `uplink_ws.py` (WS-команда `intercom_uplink` + Lovelace-карта `www/eg-intercom-mic-card.js`), `sip/uplink.py` `UplinkSink`, дрейф-компенсированный RTP-uplink (`sip/rtp.py`). Механизм #1 (HA WebSocket binary-audio) — без go2rtc/TURN/новых зависимостей. Live-прод 2026-06-24 (микрофон дошёл до домофона). #2/#3/#4 эмпирически отвергнуты.
 - ✅ **SIP two-way audio фундамент** (A-81, ADR-0012) — `sip/` пакет (14 модулей), `DoorbellCallController`, `AudioBridge`, `ElektronnyGorodCallCamera`. Приём вызова live + показ экрана вызова (видео + звук гостя) через HA-native WebRTC + downlink.
-- ✅ **FCM-событие вызова** (A-54/A-58, ADR-0011) — `fcm.py`, `event`-сущность
-  DOORBELL и push-регистрация находятся в master.
-- ✅ **Надёжность вызова PR #69** — один video producer на звонок с concurrent
-  first-open dedup/teardown (A-88), смена звонящего во время held (A-89),
-  игнор FCM `ended` в живом SIP-разговоре (A-90).
-- ✅ **Pre-answer профиль подтверждён полным Android PCAP** (A-91): FCM ring →
-  REGISTER (`Call-Id`, `Accept: application/sdp`, stock Contact) → INVITE →
-  `100 Trying`; `200 OK` только по явному ответу.
+- ✅ **FCM-событие вызова** (A-54/A-58, ADR-0011) — `fcm.py`, `event`-сущность DOORBELL и push-регистрация находятся в master.
+- ✅ **Надёжность вызова PR #69** — один video producer на звонок с concurrent first-open dedup/teardown (A-88), смена звонящего во время held (A-89), игнор FCM `ended` в живом SIP-разговоре (A-90).
+- ✅ **Pre-answer профиль подтверждён полным Android PCAP** (A-91): FCM ring → REGISTER (`Call-Id`, `Accept: application/sdp`, stock Contact) → INVITE → `100 Trying`; `200 OK` только по явному ответу.
 
 Решённые с момента предыдущего ревью архитектуры:
 - ✅ Coordinator имеет `update_interval` + dict-snapshot (A-08, slice 3a).
@@ -529,18 +495,8 @@ const + go2rtc ← config_flow
 - ✅ Synthetic lock-cycle через `async_call_later` (А-15 частично; полный fix lock→button в [ADR-0005](../decisions/0005-lock-vs-button.md)).
 - 🟡 Тестируемость — частично (90+ тестов на config_flow / coordinator / api / migrations / visibility); coverage growing.
 - ✅ **Reload-каскад при cold start** (A-64, PR #43) — migration flag перенесён в `entry.data` (не триггерит `async_update_options` listener), explicit reload только при `migration_changed`. `_sync_visibility` отслеживает user_shown override через `entity.options[DOMAIN]`.
-- 🟡 **A-63 — Won't fix** (PR #46 final). Возврат `None` из
-  `stream_source()` для hidden cameras несовместим с HA Stream lifecycle
-  (worker pin-ится к URL, не пересоздаёт session). ADR-0014 сохраняет stable
-  go2rtc URL и lazy mint/PATCH во время или после setup для enabled hidden
-  camera, но не включает background preload без отдельной опции. Skip оставлен только в
-  `async_camera_image`.
-- ✅ **go2rtc stream ownership + preload lifecycle в master через PR #71**
-  (A-82/A-96, ADR-0014) — camera делегирует manager'у; background-excluded
-  hidden requests останавливаются до operator mint, explicit HA-open остаётся
-  on-demand, остальные source writes остаются PATCH-only, а dedicated preload
-  сразу потребляет одноразовый URL. Reconcile проверяет stream/preload/producer;
-  owner acceptance после ручного рестарта go2rtc подтвердил восстановление.
+- 🟡 **A-63 — Won't fix** (PR #46 final). Возврат `None` из `stream_source()` для hidden cameras несовместим с HA Stream lifecycle (worker pin-ится к URL, не пересоздаёт session). ADR-0014 сохраняет stable go2rtc URL и lazy mint/PATCH во время или после setup для enabled hidden camera, но не включает background preload без отдельной опции. Skip оставлен только в `async_camera_image`.
+- ✅ **go2rtc stream ownership + preload lifecycle в master через PR #71** (A-82/A-96, ADR-0014) — camera делегирует manager'у; background-excluded hidden requests останавливаются до operator mint, explicit HA-open остаётся on-demand, остальные source writes остаются PATCH-only, а dedicated preload сразу потребляет одноразовый URL. Reconcile проверяет stream/preload/producer; owner acceptance после ручного рестарта go2rtc подтвердил восстановление.
 
 ## Архитектурные решения (ADR)
 

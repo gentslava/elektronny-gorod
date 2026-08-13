@@ -15,49 +15,35 @@ allowed-tools: Read, Grep, Glob, Bash
 
 - [ ] `bash .claude/hooks/check-audit-reconciliation.sh` — зелёный:
   - каждый `✅ RESOLVED` finding имеет commit в `git log master`;
-  - нет `🟢 resolved-in-branch` findings, заявленных как готовые к релизу
-    (они **блокируют** релиз до merge);
+  - нет `🟢 resolved-in-branch` findings, заявленных как готовые к релизу (они **блокируют** релиз до merge);
   - контракты (`AGENTS.md`/`CLAUDE.md`/`workflow.md`) без stale-маркеров.
 
 ### 1. Quality gates
 
 - [ ] `TESTS_PASS` — `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный.
-- [ ] `SECURITY_PRECHECK_OK` был закрыт до candidate freeze: secret/redaction
-  checks зелёные, известных Critical/Important security findings не осталось.
+- [ ] `SECURITY_PRECHECK_OK` был закрыт до candidate freeze: secret/redaction checks зелёные, известных Critical/Important security findings не осталось.
 - [ ] `DOCS_UPDATED` — maintenance rules применены (обе оси, ADR-0010).
-- [ ] `HISTORY_CLEAN` был завершён до freeze; после review не было
-  rebase/squash/history rewrite.
-- [ ] `CANDIDATE_FROZEN` — PR evidence содержит пустой `git status --short`,
-  merge-base SHA, head SHA и tree SHA clean committed candidate.
+- [ ] `HISTORY_CLEAN` был завершён до freeze; после review не было rebase/squash/history rewrite.
+- [ ] `CANDIDATE_FROZEN` — PR evidence содержит пустой `git status --short`, merge-base SHA, head SHA и tree SHA clean committed candidate.
 - [ ] `REVIEW_OK` — каждый обязательный reviewer:
   - явно указал identity и `Participated in implementation: no`;
   - работал read-only;
   - указал identity, один и тот же base/head/tree и scoped verdict;
   - закрыл все Critical/Important findings на текущем candidate.
-- [ ] Routing matrix полная: code-reviewer обязателен; HA/security/QA/docs-AIDD
-  reviewers присутствуют по затронутым областям.
-- [ ] `SECURITY_OK` закрыт **post-freeze** независимым security review того же
-  candidate для auth/token/credentials/logs/FCM/privacy diff:
+- [ ] Routing matrix полная: code-reviewer обязателен; HA/security/QA/docs-AIDD reviewers присутствуют по затронутым областям.
+- [ ] `SECURITY_OK` закрыт **post-freeze** независимым security review того же candidate для auth/token/credentials/logs/FCM/privacy diff:
   ```bash
   bash .codex/hooks/check-secret-logs.sh
   # ⇒ Secret log scan passed (иной результат — blocker, не релизить)
   ```
   И `diagnostics.py` существует с `TO_REDACT` (S-08/S-16).
-- [ ] После последнего approval не было содержательного commit. Если head/tree
-  менялся, есть новый freeze и новые candidate-bound attestations **каждого**
-  обязательного reviewer; повторный analysis мог быть delta-scoped.
-- [ ] Review evidence хранится вне candidate tree. Если evidence было добавлено
-  commit-ом, этот новый candidate заново прошёл всю обязательную matrix.
-- [ ] `REVIEW_EVIDENCE_PUBLISHED` — PR содержит durable validation comment для
-  текущего base/head/tree с local gates и всеми reviewer verdicts.
-- [ ] `CI_GREEN` — Python Tests, hassfest и HACS зелёные на текущем head;
-  PR Pre-Release зелёный либо корректно skipped как неприменимый.
-- [ ] PR не является blocked review-only draft; обычный push/ready-for-review PR
-  произошёл после approval либо recovery flow полностью завершён.
+- [ ] После последнего approval не было содержательного commit. Если head/tree менялся, есть новый freeze и новые candidate-bound attestations **каждого** обязательного reviewer; повторный analysis мог быть delta-scoped.
+- [ ] Review evidence хранится вне candidate tree. Если evidence было добавлено commit-ом, этот новый candidate заново прошёл всю обязательную matrix.
+- [ ] `REVIEW_EVIDENCE_PUBLISHED` — PR содержит durable validation comment для текущего base/head/tree с local gates и всеми reviewer verdicts.
+- [ ] `CI_GREEN` — Python Tests, hassfest и HACS зелёные на текущем head; PR Pre-Release зелёный либо корректно skipped как неприменимый.
+- [ ] PR не является blocked review-only draft; обычный push/ready-for-review PR произошёл после approval либо recovery flow полностью завершён.
 - [ ] `AUDIT_DONE` — `docs/audit/project-audit.md` актуален.
-- [ ] **quality_scale ≤ gate-confirmed (D-05)** — `manifest:quality_scale`
-  не выше реально подтверждённого гейтами уровня. Bronze ⇒ config_flow-тесты
-  существуют. Несоответствие без записанного waiver = blocker.
+- [ ] **quality_scale ≤ gate-confirmed (D-05)** — `manifest:quality_scale` не выше реально подтверждённого гейтами уровня. Bronze ⇒ config_flow-тесты существуют. Несоответствие без записанного waiver = blocker.
 
 ### 2. Manifest / HACS
 
@@ -81,9 +67,7 @@ test "$PR_HEAD_SHA" = "$CANDIDATE_SHA"
 gh pr checks --watch
 ```
 
-В итоговом отчёте отдельно подтвердить оба Python Tests jobs, hassfest, HACS и
-применимый PR Pre-Release. SHA mismatch, pending, failure или cancelled не
-закрывают `CI_GREEN`.
+В итоговом отчёте отдельно подтвердить оба Python Tests jobs, hassfest, HACS и применимый PR Pre-Release. SHA mismatch, pending, failure или cancelled не закрывают `CI_GREEN`.
 
 ### 4. Migration
 

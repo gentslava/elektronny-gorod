@@ -1,6 +1,4 @@
-Status: Template
-Owner: Product / Architecture Agent
-Last reviewed: 2026-08-11 (ADR-0015 plan approval contract)
+Status: Template Owner: Product / Architecture Agent Last reviewed: 2026-08-11 (ADR-0015 plan approval contract)
 
 ---
 

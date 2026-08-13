@@ -1,7 +1,4 @@
-Status: Active
-Owner: Project Cartographer Agent
-Last reviewed: 2026-08-11 (manifest requirements and FCM dependency contract
-reconciled with project/HA compatibility sources)
+Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-11 (manifest requirements and FCM dependency contract reconciled with project/HA compatibility sources)
 
 Source files:
 - весь репозиторий (это карта)
@@ -83,8 +80,7 @@ Quality gates:
 | `manifest.json:10` | `cloud_polling` |
 | `coordinator.py` | `update_interval=5 min`, реальный polling |
 
-**Резолюция:** ✅ закрыт. Polling реализован, `cloud_polling` соответствует
-поведению; решение закреплено в [ADR-0003](../decisions/0003-iot-class-strategy.md).
+**Резолюция:** ✅ закрыт. Polling реализован, `cloud_polling` соответствует поведению; решение закреплено в [ADR-0003](../decisions/0003-iot-class-strategy.md).
 
 ### Конфликт 3: README.md ↔ файловая система
 
@@ -95,8 +91,7 @@ Quality gates:
 | Реальный домен | `elektronny_gorod` — совпадает |
 | `info.md` | краткое подмножество актуальных возможностей RU/EN README |
 
-**Резолюция:** ✅ закрыт. Языковые ссылки и путь ручной установки совпадают с
-файловой системой.
+**Резолюция:** ✅ закрыт. Языковые ссылки и путь ручной установки совпадают с файловой системой.
 
 ### Конфликт 4: тесты ↔ реальный config_flow
 
@@ -105,8 +100,7 @@ Quality gates:
 | `tests/test_config_flow.py` | реальные PHC-тесты password/SMS/token, reauth и abort |
 | `tests/test_init.py` | миграции config entry v1→v2→v3 |
 
-**Резолюция:** ✅ закрыт. Scaffold-stub заменён реальными тестами; актуальный
-baseline — в [`testing/strategy.md`](../testing/strategy.md).
+**Резолюция:** ✅ закрыт. Scaffold-stub заменён реальными тестами; актуальный baseline — в [`testing/strategy.md`](../testing/strategy.md).
 
 ## Принципы при разрешении
 

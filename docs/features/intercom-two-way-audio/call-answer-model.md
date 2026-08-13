@@ -8,9 +8,7 @@
 
 ## 1. Главный вывод (модель приложения)
 
-Штатное приложение использует **register-on-ring с коротким held-окном**:
-после push-wake сразу регистрирует SIP-контакт, получает `INVITE`, отвечает
-`100 Trying` и держит INVITE до ответа или завершения звонка.
+Штатное приложение использует **register-on-ring с коротким held-окном**: после push-wake сразу регистрирует SIP-контакт, получает `INVITE`, отвечает `100 Trying` и держит INVITE до ответа или завершения звонка.
 
 Полный флоу:
 ```
@@ -24,8 +22,7 @@
 6. Завершение — `BYE`; после окна клиент снимает короткую регистрацию.
 ```
 
-🔑 `REGISTER → INVITE → 100 Trying` — это **pre-answer**, а не автоответ.
-`200 OK` появляется только после явного ответа пользователя.
+🔑 `REGISTER → INVITE → 100 Trying` — это **pre-answer**, а не автоответ. `200 OK` появляется только после явного ответа пользователя.
 
 ## 2. Тайминги из полного pcap штатного приложения (2026-07-13)
 
@@ -54,15 +51,10 @@ a=rtpmap:101 telephone-event/8000        # только 101 (0/8 — стати�
 a=rtcp:40498                             # RTCP на ОТДЕЛЬНОМ порту (не audio+1!)
 ```
 
-- **БЕЗ STUN/ICE.** Анонсирует локальный адрес → downlink доходит через **FreeSWITCH
-  RTP-latching**: устройство шлёт uplink первым (+ STUN/RTP-keepalive 20B сразу), сервер
-  «защёлкивает» source и шлёт downlink туда.
+- **БЕЗ STUN/ICE.** Анонсирует локальный адрес → downlink доходит через **FreeSWITCH RTP-latching**: устройство шлёт uplink первым (+ STUN/RTP-keepalive 20B сразу), сервер «защёлкивает» source и шлёт downlink туда.
 - Answer **убирает CN(13)** из offer (offer `0 8 101 13` → answer `0 8 101`).
 - **GRUU** в Contact (`;gr=urn:uuid` + `+sip.instance`) — RFC 5627.
-- INVITE-offer от сервера: `o=FreeSWITCH … IN IP4 {media-SBC}`, `c=IN IP4 {media-SBC}`,
-  `m=audio {port} RTP/AVP 0 8 101 13` (PCMU/PCMA/telephone-event/CN), `ptime:20`.
-  Media-сервер (FreeSWITCH `mod_sofia`) — отдельный публичный IP, меняется по вызову;
-  realm/registrar — другой IP (`:5060/UDP`). BYE приходит от `mod_sofia@{media-SBC}`.
+- INVITE-offer от сервера: `o=FreeSWITCH … IN IP4 {media-SBC}`, `c=IN IP4 {media-SBC}`, `m=audio {port} RTP/AVP 0 8 101 13` (PCMU/PCMA/telephone-event/CN), `ptime:20`. Media-сервер (FreeSWITCH `mod_sofia`) — отдельный публичный IP, меняется по вызову; realm/registrar — другой IP (`:5060/UDP`). BYE приходит от `mod_sofia@{media-SBC}`.
 
 ## 4. REGISTER приложения (точный формат из pcap, +28.23с)
 
@@ -79,27 +71,17 @@ Authorization: Digest realm="{realm}", nonce="...", algorithm=MD5, username="{lo
 ```
 
 - **Expires=30** (короткий) + re-REGISTER + `iterate()` каждые 20мс (держит свежесть).
-- **push-params проприетарные** (НЕ RFC 8599 `pn-provider/pn-prid`!), внутри Contact URI:
-  `app-id=com.novotelecom.domophone; pn-type=google; Call-Id:%20{call_id}; pn-tok={FCM_TOKEN}`.
-  ⚠️ Реверс приблизил `app-id` как «2» — **pcap дал точное `com.novotelecom.domophone`**;
-  `Call-Id:%20…` — это URL-энкод «Call-Id: <id>» прямо в params (особенность Linphone).
+- **push-params проприетарные** (НЕ RFC 8599 `pn-provider/pn-prid`!), внутри Contact URI: `app-id=com.novotelecom.domophone; pn-type=google; Call-Id:%20{call_id}; pn-tok={FCM_TOKEN}`. ⚠️ Реверс приблизил `app-id` как «2» — **pcap дал точное `com.novotelecom.domophone`**; `Call-Id:%20…` — это URL-энкод «Call-Id: <id>» прямо в params (особенность Linphone).
 - **`Supported: replaces, outbound, gruu, path`** — RFC 5626 outbound + GRUU.
 - Digest **MD5 non-qop**; `User-Agent: Myhome/Myhome-android`.
-- SIP-стек **Linphone 5.4.42** (реверс — research-spike.md §D4): голый `accept()`,
-  авто-180 выключен, нет 183/session-timers/re-INVITE; только **UDP**, plain RTP
-  (без SRTP/AVPF/ICE/STUN), видео off (видео — go2rtc).
+- SIP-стек **Linphone 5.4.42** (реверс — research-spike.md §D4): голый `accept()`, авто-180 выключен, нет 183/session-timers/re-INVITE; только **UDP**, plain RTP (без SRTP/AVPF/ICE/STUN), видео off (видео — go2rtc).
 - SIP-креды (login/password/realm) минтятся REST-ом оператора (`/sipdevices`).
 
 ## 5. Почему ранний вывод register-on-answer был ошибочным
 
-Захват 2026-06-23 показывал отвеченный вызов, но не полностью отделял push-wake и
-pre-answer фазу. Задержка до видимого `REGISTER` была ошибочно принята за
-«раздумья до регистрации». Полный захват 2026-07-13 показывает, что приложение
-регистрируется заранее и удерживает INVITE ответом `100 Trying`.
+Захват 2026-06-23 показывал отвеченный вызов, но не полностью отделял push-wake и pre-answer фазу. Задержка до видимого `REGISTER` была ошибочно принята за «раздумья до регистрации». Полный захват 2026-07-13 показывает, что приложение регистрируется заранее и удерживает INVITE ответом `100 Trying`.
 
-Эксперименты с поздним `200 OK` по-прежнему полезны: нельзя просто молчать после
-INVITE или принимать его с большой задержкой без provisional response. Штатный
-контракт — сразу `100 Trying`, затем `200 OK` только по действию пользователя.
+Эксперименты с поздним `200 OK` по-прежнему полезны: нельзя просто молчать после INVITE или принимать его с большой задержкой без provisional response. Штатный контракт — сразу `100 Trying`, затем `200 OK` только по действию пользователя.
 
 **Эксперименты (probe):**
 | Тест | Что | Итог |
@@ -111,32 +93,20 @@ INVITE или принимать его с большой задержкой б�
 | MIRROR_APP (без STUN, Expires=30) | локальный SDP | сервер не рвёт (17с), но downlink 0 |
 | **pcap приложения** | REGISTER→INVITE→100→200OK | ✅ **held, затем latching/разговор** |
 
-Вывод: проблема прототипа была не в самом раннем `REGISTER`, а в неточном
-воспроизведении held-диалога. Правильно — **REGISTER на ring → немедленный
-`100 Trying` → `200 OK` при ответе**.
+Вывод: проблема прототипа была не в самом раннем `REGISTER`, а в неточном воспроизведении held-диалога. Правильно — **REGISTER на ring → немедленный `100 Trying` → `200 OK` при ответе**.
 
 ## 6. Правильная архитектура фичи (mirror приложения)
 
 1. Не держим постоянную регистрацию вне активного окна звонка.
-2. FCM `CALL_INCOMING` → `event`-сущность + mint → **`REGISTER`** (Expires=30,
-   `Call-Id` из FCM, `Accept: application/sdp`) → `INVITE` → **`100 Trying`**.
+2. FCM `CALL_INCOMING` → `event`-сущность + mint → **`REGISTER`** (Expires=30, `Call-Id` из FCM, `Accept: application/sdp`) → `INVITE` → **`100 Trying`**.
 3. По явному **«ответить»** (сервис/кнопка, в окне `CallInvalidated` ~30с):
-   - принять уже держимый `INVITE` → **`200 OK` немедленно** (SDP: локальный
-     адрес, G.711, `sendrecv`);
+   - принять уже держимый `INVITE` → **`200 OK` немедленно** (SDP: локальный адрес, G.711, `sendrecv`);
    - **сразу слать RTP uplink** (+ STUN-keepalive) → активировать latching → downlink;
    - `hangup` → `BYE`.
-4. Кодек **G.711 PCMU/PCMA**, plain RTP/UDP, без STUN/SRTP. Latching обеспечивает
-   downlink за NAT.
-5. 🔴 **Привязка к `Call-ID`:** ответ строго привязан к `Call-ID` из FCM
-   `CALL_INCOMING`; **не отвечать на завершённый/сброшенный вызов**. Иначе запоздалый
-   `REGISTER` (от вызова, который не дождался ответа) поймает `INVITE` *следующего*
-   вызова → ложный «ответ сразу» (баг рассинхрона — наблюдался в probe при сбросе
-   до ответа). В интеграции: один активный «ответ»-флоу на `Call-ID`, отмена по
-   `CallInvalidated`/`CALL_END`.
+4. Кодек **G.711 PCMU/PCMA**, plain RTP/UDP, без STUN/SRTP. Latching обеспечивает downlink за NAT.
+5. 🔴 **Привязка к `Call-ID`:** ответ строго привязан к `Call-ID` из FCM `CALL_INCOMING`; **не отвечать на завершённый/сброшенный вызов**. Иначе запоздалый `REGISTER` (от вызова, который не дождался ответа) поймает `INVITE` *следующего* вызова → ложный «ответ сразу» (баг рассинхрона — наблюдался в probe при сбросе до ответа). В интеграции: один активный «ответ»-флоу на `Call-ID`, отмена по `CallInvalidated`/`CALL_END`.
 
-**✅ Подтверждено штатным приложением (2026-07-13):** три последовательных вызова
-показали одинаковый pre-answer `REGISTER → INVITE → 100 Trying`; один завершён
-серверным `CANCEL`, один отклонён клиентом, один принят `200 OK` с последующим RTP.
+**✅ Подтверждено штатным приложением (2026-07-13):** три последовательных вызова показали одинаковый pre-answer `REGISTER → INVITE → 100 Trying`; один завершён серверным `CANCEL`, один отклонён клиентом, один принят `200 OK` с последующим RTP.
 
 ## 7. Артефакты
 
@@ -148,12 +118,9 @@ INVITE или принимать его с большой задержкой б�
 ## 8. Метод захвата трафика приложения (reusable для будущего reverse)
 
 SIP/RTP приложения идут по **UDP без шифрования** → перехватываются полностью.
-1. **PCAPdroid** (Android, без root): Target app → «Мой Дом» (`ru.inetra.intercom`),
-   dump mode → PCAP file. Start → звонок + ответ → Stop.
+1. **PCAPdroid** (Android, без root): Target app → «Мой Дом» (`ru.inetra.intercom`), dump mode → PCAP file. Start → звонок + ответ → Stop.
 2. **adb pull**: `adb -s <serial> pull /storage/emulated/0/Download/PCAPdroid/<f>.pcap captures/`.
-3. **Анализ**: `analyze_pcap.py` (dpkt, link-layer **DLT_RAW=101**) — SIP-flow + SDP +
-   RTP-timing. Секреты (Digest `response`/`nonce`, `pn-tok`, login, IP) **маскировать**
-   перед документированием.
+3. **Анализ**: `analyze_pcap.py` (dpkt, link-layer **DLT_RAW=101**) — SIP-flow + SDP + RTP-timing. Секреты (Digest `response`/`nonce`, `pn-tok`, login, IP) **маскировать** перед документированием.
 - iOS-альтернатива: Mac + `rvictl -s <udid>` → virtual interface → tcpdump/Wireshark.
 - pcap содержит SIP-пароль/токены → **gitignored** (`captures/`, `*.pcap`).
 

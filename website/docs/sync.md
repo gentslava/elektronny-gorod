@@ -1,7 +1,6 @@
 # Синхронизация данных сайта с репозиторием
 
-Сайт не дублирует репозиторий автоматически — этот документ фиксирует, **что**
-и **когда** нужно синхронизировать вручную (или заскриптовать позже).
+Сайт не дублирует репозиторий автоматически — этот документ фиксирует, **что** и **когда** нужно синхронизировать вручную (или заскриптовать позже).
 
 ## При каждом релизе интеграции
 
@@ -23,17 +22,12 @@
 
 ## При смене домена публикации
 
-`index.html`: `canonical`, `og:url`, `og:image`, JSON-LD `url`. Сейчас указан
-`https://gentslava.github.io/elektronny-gorod/`.
+`index.html`: `canonical`, `og:url`, `og:image`, JSON-LD `url`. Сейчас указан `https://gentslava.github.io/elektronny-gorod/`.
 
 ## Демо-контент
 
-- Фото гостя: `public/assets/guest.jpg` ← `pencil/images/generated-*.png`
-  (сгенерировано, PII нет). Название дома/адрес в демо — «Подъезд 2,
-  ул. Примерная, 1» (как в `frontend/demo`). Реальные адреса и договоры
-  в демо запрещены (см. memory: api-docs-universal-tone).
-- Скриншоты: `public/assets/{wall-panel.jpg,history.png}` ←
-  `docs/features/**/screenshots/`.
+- Фото гостя: `public/assets/guest.jpg` ← `pencil/images/generated-*.png` (сгенерировано, PII нет). Название дома/адрес в демо — «Подъезд 2, ул. Примерная, 1» (как в `frontend/demo`). Реальные адреса и договоры в демо запрещены (см. memory: api-docs-universal-tone).
+- Скриншоты: `public/assets/{wall-panel.jpg,history.png}` ← `docs/features/**/screenshots/`.
 
 ## Проверка после синхронизации
 
@@ -41,5 +35,4 @@
 npm run typecheck && npm test && npm run build
 ```
 
-Тест `automations.test.ts` упадёт, если YAML использует несуществующие домены
-сервисов; `wizard`/`compat` — если сломалась логика ветвления.
+Тест `automations.test.ts` упадёт, если YAML использует несуществующие домены сервисов; `wizard`/`compat` — если сломалась логика ветвления.

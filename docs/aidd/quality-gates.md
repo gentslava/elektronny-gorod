@@ -1,7 +1,4 @@
-Status: Active
-Owner: Validator Agent
-Last reviewed: 2026-08-11 (A-97 candidate freeze/re-attestation and
-publication/CI evidence lifecycle by ADR-0015)
+Status: Active Owner: Validator Agent Last reviewed: 2026-08-11 (A-97 candidate freeze/re-attestation and publication/CI evidence lifecycle by ADR-0015)
 
 Source files:
 - весь репозиторий
@@ -185,8 +182,7 @@ Used by agents:
 | Fail | >3 hotfix-ов подряд на одну фичу; коммиты «WIP», «fix typo», «revert prev»; DIAG/debug код в финальном diff |
 | Stop | не закрывать `CANDIDATE_FROZEN` и не merge-ить без cleanup; force-push в master запрещён |
 
-См. [`.claude/rules/git-history.md`](../../.claude/rules/git-history.md) и
-slash-команду `/git-cleanup`.
+См. [`.claude/rules/git-history.md`](../../.claude/rules/git-history.md) и slash-команду `/git-cleanup`.
 
 ## READY_FOR_RELEASE
 
@@ -230,24 +226,13 @@ slash-команду `/git-cleanup`.
 
 ## Принцип
 
-Gate можно «пропустить» только с **записанным waiver** (ADR-0010, D-05):
-строка в `project-audit.md` / PR body вида «gate X skipped, owner: <…>,
-причина: <…>». Никаких «потом починим». Если gate красный — фиксить gate,
-а не идти дальше.
+Gate можно «пропустить» только с **записанным waiver** (ADR-0010, D-05): строка в `project-audit.md` / PR body вида «gate X skipped, owner: <…>, причина: <…>». Никаких «потом починим». Если gate красный — фиксить gate, а не идти дальше.
 
-**Исключение ADR-0015:** для нетривиального diff `REVIEW_OK`, обязательные
-профильные reviews, `REVIEW_EVIDENCE_PUBLISHED` и `CI_GREEN` non-waivable для
-merge/release. Явное human risk acceptance может разрешить только review-only
-branch/draft PR; оно не создаёт ни один из этих гейтов и не разрешает
-merge/release.
+**Исключение ADR-0015:** для нетривиального diff `REVIEW_OK`, обязательные профильные reviews, `REVIEW_EVIDENCE_PUBLISHED` и `CI_GREEN` non-waivable для merge/release. Явное human risk acceptance может разрешить только review-only branch/draft PR; оно не создаёт ни один из этих гейтов и не разрешает merge/release.
 
 ### quality_scale ≤ gate-confirmed (D-05)
 
-`manifest.json:quality_scale` **не поднимать выше** уровня, реально
-подтверждённого гейтами. Пример: Bronze требует `config-flow-test-coverage`
-(happy path + abort `already_configured` + migrations) — пока этих тестов нет,
-`bronze` в manifest держится как **открытый finding**, а не как факт. Любое
-несоответствие manifest↔гейт — finding в `project-audit.md`.
+`manifest.json:quality_scale` **не поднимать выше** уровня, реально подтверждённого гейтами. Пример: Bronze требует `config-flow-test-coverage` (happy path + abort `already_configured` + migrations) — пока этих тестов нет, `bronze` в manifest держится как **открытый finding**, а не как факт. Любое несоответствие manifest↔гейт — finding в `project-audit.md`.
 
 ## Next reading
 

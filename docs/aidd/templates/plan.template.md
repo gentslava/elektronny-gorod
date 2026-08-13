@@ -1,6 +1,4 @@
-Status: Template
-Owner: Lead Architect Agent
-Last reviewed: 2026-08-11 (ADR-0015 approval, review and publication lifecycle)
+Status: Template Owner: Lead Architect Agent Last reviewed: 2026-08-11 (ADR-0015 approval, review and publication lifecycle)
 
 Source files:
 - approved spec / research for the copied plan
@@ -42,10 +40,7 @@ Quality gates:
 - **Security review:** @<reviewer> / not required, с причиной.
 - **QA review:** @<reviewer> / not required, с причиной.
 
-Короткое подтверждение пользователя после рекомендации («го», «да», «начинай»)
-принимает mode и закрывает `PLAN_APPROVED` только как прямой ответ на этот полный
-план. Записать approver/date/revision/evidence. Self-review не закрывает
-`REVIEW_OK`.
+Короткое подтверждение пользователя после рекомендации («го», «да», «начинай») принимает mode и закрывает `PLAN_APPROVED` только как прямой ответ на этот полный план. Записать approver/date/revision/evidence. Self-review не закрывает `REVIEW_OK`.
 
 ## Vertical slices
 
@@ -80,17 +75,12 @@ Slice 2 ─► Slice 4
 
 ## Candidate freeze and independent review
 
-- [ ] Завершить `TESTS_PASS`, `SECURITY_PRECHECK_OK`, `DOCS_UPDATED` и
-  `HISTORY_CLEAN`; создать clean committed candidate.
+- [ ] Завершить `TESTS_PASS`, `SECURITY_PRECHECK_OK`, `DOCS_UPDATED` и `HISTORY_CLEAN`; создать clean committed candidate.
 - [ ] Записать merge-base/head/tree SHA и пустой `git status --short`.
-- [ ] Перед обычным push / ready-for-review PR / merge передать exact candidate
-  независимому code-reviewer.
-- [ ] Запустить read-only HA/security/QA reviews из reviewer matrix; независимый
-  security reviewer закрывает `SECURITY_OK` только для frozen candidate.
+- [ ] Перед обычным push / ready-for-review PR / merge передать exact candidate независимому code-reviewer.
+- [ ] Запустить read-only HA/security/QA reviews из reviewer matrix; независимый security reviewer закрывает `SECURITY_OK` только для frozen candidate.
 - [ ] Исправить и повторно проверить все Critical/Important findings.
-- [ ] После fixes повторить gates/freeze и получить candidate-bound
-  re-attestation каждого обязательного reviewer-а; unchanged scope может быть
-  проверен delta-scoped.
+- [ ] После fixes повторить gates/freeze и получить candidate-bound re-attestation каждого обязательного reviewer-а; unchanged scope может быть проверен delta-scoped.
 - [ ] Сохранить reviewer identity/independence/SHA evidence для `REVIEW_OK`.
 
 ## Migration plan
