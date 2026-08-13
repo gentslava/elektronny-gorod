@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime, timedelta
+import logging
 from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
@@ -21,6 +24,7 @@ from custom_components.elektronny_gorod.fcm import (
     _FcmRecoveryPhase,
     async_delete_fcm_repair_issue,
     fcm_repair_issue_id,
+    format_delay_ru,
 )
 
 NOW = datetime(2026, 8, 10, 9, 0, tzinfo=UTC)
@@ -869,3 +873,46 @@ async def test_async_stop_reports_dependency_stop_failure(
 
     assert await listener.async_stop() is False
     assert listener._client is client
+
+
+@pytest.mark.parametrize(
+    ("delay", "expected"),
+    [
+        (timedelta(minutes=15), "15 минут"),
+        (timedelta(hours=1), "1 час"),
+        (timedelta(hours=6), "6 часов"),
+        (timedelta(hours=24), "24 часа"),
+        (timedelta(minutes=1), "1 минуту"),
+        (timedelta(minutes=2), "2 минуты"),
+        (timedelta(minutes=11), "11 минут"),
+        (timedelta(hours=2), "2 часа"),
+        (timedelta(hours=5), "5 часов"),
+        (timedelta(hours=11), "11 часов"),
+        (timedelta(hours=21), "21 час"),
+        (timedelta(hours=1, minutes=30), "1 час 30 минут"),
+    ],
+)
+def test_format_delay_ru(delay: timedelta, expected: str) -> None:
+    """Пауза печатается словами, а не как 0:15:00."""
+    assert format_delay_ru(delay) == expected
+
+
+def test_every_backoff_formats_readably() -> None:
+    """Каждое значение расписания читаемо и не содержит сырого timedelta."""
+    for delay in FCM_RETRY_BACKOFFS:
+        text = format_delay_ru(delay)
+        assert ":" not in text
+        assert text[0].isdigit()
+
+
+async def test_open_circuit_logs_human_readable_delay(
+    hass: HomeAssistant, caplog
+) -> None:
+    """В warning'е о паузе — «15 минут», а не «0:15:00»."""
+    listener, _ = _listener(hass)
+
+    with caplog.at_level(logging.WARNING, logger=LOGGER.name):
+        listener._async_open_circuit(NOW)
+
+    assert "через 15 минут" in caplog.text
+    assert "0:15:00" not in caplog.text

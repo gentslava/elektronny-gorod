@@ -87,6 +87,37 @@ FCM_RETRY_BACKOFFS = (
 _FCM_REPAIR_ISSUE_PREFIX = "fcm_receiver_unavailable"
 
 
+def _plural_ru(count: int, one: str, few: str, many: str) -> str:
+    """Выбрать форму русского существительного для числительного."""
+    if count % 100 // 10 == 1:
+        return many
+    last = count % 10
+    if last == 1:
+        return one
+    if 2 <= last <= 4:
+        return few
+    return many
+
+
+def format_delay_ru(delay: timedelta) -> str:
+    """Отформатировать паузу для лога: «15 минут», «1 час», «24 часа».
+
+    `str(timedelta)` даёт `0:15:00` — нечитаемо в journal'е. Винительный падеж,
+    чтобы строка вставала после «через».
+    """
+    total = int(delay.total_seconds())
+    hours, remainder = divmod(total, 3600)
+    minutes = remainder // 60
+    parts = []
+    if hours:
+        parts.append(f"{hours} {_plural_ru(hours, 'час', 'часа', 'часов')}")
+    if minutes or not hours:
+        parts.append(
+            f"{minutes} {_plural_ru(minutes, 'минуту', 'минуты', 'минут')}"
+        )
+    return " ".join(parts)
+
+
 def fcm_repair_issue_id(entry_id: str) -> str:
     """Вернуть стабильный Repairs issue ID для config entry."""
     return f"{_FCM_REPAIR_ISSUE_PREFIX}_{entry_id}"
@@ -257,7 +288,7 @@ class DoorbellFcmListener:
         LOGGER.warning(
             "FCM: частые попытки восстановления приостановлены; "
             "следующая проверка через %s",
-            delay,
+            format_delay_ru(delay),
         )
 
     async def _async_reconnect(self) -> bool:
