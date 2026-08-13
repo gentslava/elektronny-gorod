@@ -1219,6 +1219,29 @@ Quality gates:
   `run_state` возвращается в `STARTED` после каждого успешного login
   (`fcmpushclient.py:600`). Иначе говоря, снятый предохранитель библиотеки был
   необходимым условием обеих форм инцидента.
+- **Controlled reproduce (2026-08-13, прод):** `mtalk.google.com` намеренно
+  заблокирован пользовательским правилом на роутере (AdGuard), чтобы проверить
+  механизм на живой системе. Полученная последовательность точно соответствует
+  проекту:
+
+  ```
+  08:43:40  FCM doorbell listener запущен
+  08:43:45 … 08:45:35  5 × "Could not connected to MCS endpoint … [Errno -3]"
+                       (паузы 3→12→27→48→75 с — start_seconds_before_retry_connect × n²)
+  08:46:50  "Unable to connect to MCS endpoint after 5 tries, aborting"  ← _terminate()
+  08:47:40  "FCM: push-receiver неактивен — выполняю одну попытку восстановления"  ← тик 2, SUSPECT
+  08:47:41  FCM doorbell listener запущен                                ← VERIFYING
+  08:47:46 … 08:49:36  ещё 5 × той же ошибки
+  08:49:40  "частые попытки восстановления приостановлены"               ← тик 3, OPEN + Repairs
+  ```
+
+  Три watchdog-тика по 2 минуты, ровно две попытки восстановления, затем пауза;
+  Repairs issue отрисован с именем затронутого аккаунта. Ключевая строка —
+  `aborting` в 08:46:50: это и есть `_terminate()`, недостижимый при
+  `abort_on_sequential_error_count=None`. Эксперимент подтверждает causal chain
+  выше не только source inspection'ом, но и воспроизведением; за 6 минут
+  degraded-состояния библиотека выдала 11 ERROR-строк вместо неограниченного
+  потока.
 - **Fix второй формы:** `abort_on_sequential_error_count` возвращён к конечному
   значению (`FCM_ABORT_AFTER_ERRORS = 3`). Причина, по которой его сняли в
   2026-06-24 («receiver умирает молча»), устранена самим этим PR: мёртвого

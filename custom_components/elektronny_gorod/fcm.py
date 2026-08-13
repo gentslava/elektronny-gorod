@@ -87,7 +87,7 @@ FCM_RETRY_BACKOFFS = (
 _FCM_REPAIR_ISSUE_PREFIX = "fcm_receiver_unavailable"
 
 
-def _plural_ru(count: int, one: str, few: str, many: str) -> str:
+def _plural(count: int, one: str, few: str, many: str) -> str:
     """Выбрать форму русского существительного для числительного."""
     if count % 100 // 10 == 1:
         return many
@@ -99,7 +99,7 @@ def _plural_ru(count: int, one: str, few: str, many: str) -> str:
     return many
 
 
-def format_delay_ru(delay: timedelta) -> str:
+def _format_delay(delay: timedelta) -> str:
     """Отформатировать паузу для лога: «15 минут», «1 час», «24 часа».
 
     `str(timedelta)` даёт `0:15:00` — нечитаемо в journal'е. Винительный падеж,
@@ -110,10 +110,10 @@ def format_delay_ru(delay: timedelta) -> str:
     minutes = remainder // 60
     parts = []
     if hours:
-        parts.append(f"{hours} {_plural_ru(hours, 'час', 'часа', 'часов')}")
+        parts.append(f"{hours} {_plural(hours, 'час', 'часа', 'часов')}")
     if minutes or not hours:
         parts.append(
-            f"{minutes} {_plural_ru(minutes, 'минуту', 'минуты', 'минут')}"
+            f"{minutes} {_plural(minutes, 'минуту', 'минуты', 'минут')}"
         )
     return " ".join(parts)
 
@@ -288,7 +288,7 @@ class DoorbellFcmListener:
         LOGGER.warning(
             "FCM: частые попытки восстановления приостановлены; "
             "следующая проверка через %s",
-            format_delay_ru(delay),
+            _format_delay(delay),
         )
 
     async def _async_reconnect(self) -> bool:
