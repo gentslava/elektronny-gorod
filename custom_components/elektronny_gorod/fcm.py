@@ -87,6 +87,89 @@ FCM_RETRY_BACKOFFS = (
 _FCM_REPAIR_ISSUE_PREFIX = "fcm_receiver_unavailable"
 
 
+_PUSH_HEADER_PATCH_MARKER = "_eg_push_headers_patched"
+
+
+def _b64_pad(value: str) -> str:
+    """Дополнить base64url-строку `=` до длины, кратной 4."""
+    return value + "=" * (-len(value) % 4)
+
+
+def _header_component(header: str, label: str) -> str | None:
+    """Достать сегмент `label=<value>` из Web Push заголовка.
+
+    `Crypto-Key` и `Encryption` — списки параметров через `;` (RFC 8188 §2.1,
+    RFC 8291 §4), а не одиночные значения. Возвращаем `None`, если сегмента
+    нет: незнакомую форму лучше отдать библиотеке нетронутой, чем угадывать.
+    """
+    for segment in header.split(";"):
+        name, sep, payload = segment.strip().partition("=")
+        if sep and name == label:
+            return payload
+    return None
+
+
+def _normalize_push_header(header: str, label: str) -> str:
+    """Свести заголовок к одному сегменту с корректным base64url padding."""
+    value = _header_component(header, label)
+    if value is None:
+        # Значение без метки. Библиотека всё равно срежет 3/5 символов, то есть
+        # съест реальные байты ключа, поэтому метку восстанавливаем. Списком
+        # параметров такая строка быть не может: `=` в ней встречается только
+        # как хвостовой padding.
+        if header.strip() and "=" not in header.strip().rstrip("="):
+            value = header.strip()
+        else:
+            return header
+    return f"{label}={_b64_pad(value)}"
+
+
+def _patch_push_headers(client_cls: Any) -> None:
+    """Нормализовать crypto-key/encryption до формы, которую ждёт библиотека.
+
+    firebase-messaging 0.4.5 читает оба заголовка как одиночное значение и
+    срезает префикс вслепую — `[3:]` для `dh=`, `[5:]` для `salt=`
+    (`fcmpushclient.py:425-426`), после чего декодирует остаток без padding
+    (`:378-379`). На реальном пуше оператора это ломается дважды:
+
+    * `crypto-key` пришёл в VAPID-форме `dh=<87>; p256ecdsa=<87>` — после
+      среза остаётся `<dh>; p256ecdsa=<...>`, и base64-декодер молча
+      выбрасывает `;`, пробел и буквы метки, собирая 137 байт вместо 65;
+    * `dh` передан без `=`-padding (87 символов), тогда как `salt` — с ним
+      (24 символа), так что одного лишь padding'а недостаточно.
+
+    Итог до фикса — `Invalid EC key.` (а без padding'а `Incorrect padding`)
+    на каждом зашифрованном пуше, то есть на каждом звонке в домофон.
+    Падение происходит до `self.callback(...)`: событие не доезжает до
+    интеграции, ACK не отправляется, и Google переигрывает то же сообщение
+    при каждом переподключении, роняя клиент по кругу (issue #77).
+
+    Правим заголовки в `app_data` до того, как их прочитает библиотека —
+    достаём нужный сегмент по метке независимо от его позиции и дополняем
+    padding. Криптографию и порядок вызовов не трогаем; когда апстрим
+    научится разбирать список параметров, патч станет no-op. Обновиться
+    некуда: 0.4.5 — последняя версия на PyPI.
+
+    Форма заголовков снята с прода 2026-08-13 (DIAG-проба, issue #77);
+    в июне 2026 сегмента `p256ecdsa` ещё не было — см. `research/
+    intercom-call-probe/logs/fcm.log` с 16 расшифрованными `CALL_INCOMING`.
+    """
+    if getattr(client_cls, _PUSH_HEADER_PATCH_MARKER, False):
+        return
+    original = client_cls._handle_data_message
+
+    def _handle_with_normalized_headers(self: Any, msg: Any) -> Any:
+        for item in msg.app_data:
+            if item.key == "crypto-key":
+                item.value = _normalize_push_header(item.value, "dh")
+            elif item.key == "encryption":
+                item.value = _normalize_push_header(item.value, "salt")
+        return original(self, msg)
+
+    client_cls._handle_data_message = _handle_with_normalized_headers
+    setattr(client_cls, _PUSH_HEADER_PATCH_MARKER, True)
+
+
 def _plural(count: int, one: str, few: str, many: str) -> str:
     """Выбрать форму русского существительного для числительного."""
     if count % 100 // 10 == 1:
@@ -213,6 +296,8 @@ class DoorbellFcmListener:
                 type(err).__name__,
             )
             return
+
+        _patch_push_headers(FcmPushClient)
 
         try:
             register_config = FcmRegisterConfig(

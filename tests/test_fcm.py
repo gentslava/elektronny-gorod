@@ -6,12 +6,23 @@
 from __future__ import annotations
 
 import asyncio
+from base64 import urlsafe_b64encode
+import binascii
 from datetime import UTC, datetime, timedelta
+import json
 import logging
+import os
+import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
+from cryptography.hazmat.primitives.asymmetric import ec
+from cryptography.hazmat.primitives.serialization import (
+    Encoding,
+    NoEncryption,
+    PrivateFormat,
+    PublicFormat,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers import issue_registry as ir
@@ -22,6 +33,10 @@ from custom_components.elektronny_gorod.fcm import (
     FCM_RETRY_BACKOFFS,
     DoorbellFcmListener,
     _FcmRecoveryPhase,
+    _b64_pad,
+    _header_component,
+    _normalize_push_header,
+    _patch_push_headers,
     async_delete_fcm_repair_issue,
     fcm_repair_issue_id,
     _format_delay,
@@ -916,3 +931,278 @@ async def test_open_circuit_logs_human_readable_delay(
 
     assert "через 15 минут" in caplog.text
     assert "0:15:00" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("a" * 87, "a" * 87 + "="),      # dh: 65 байт → 87 символов
+        ("a" * 22, "a" * 22 + "=="),     # salt: 16 байт → 22 символа
+        ("a" * 88, "a" * 88),            # уже кратно 4 — не трогаем
+        ("", ""),
+    ],
+)
+def test_b64_pad(value: str, expected: str) -> None:
+    """Padding добивается только до кратности 4 и не портит корректный вход."""
+    assert _b64_pad(value) == expected
+
+
+@pytest.fixture
+def real_decrypt_raw_data():
+    """Отдать НАСТОЯЩИЙ `_decrypt_raw_data` в обход мока из conftest.
+
+    `conftest.py` кладёт MagicMock в `sys.modules["firebase_messaging"]` до
+    любых импортов, иначе тесты ходили бы в Google. Здесь нужен реальный код
+    зависимости, поэтому мок временно снимаем и возвращаем обратно. Если
+    библиотека не установлена (CI не ставит manifest-deps) — тест скипается.
+    """
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "firebase_messaging" or name.startswith("firebase_messaging.")
+    }
+    for name in saved:
+        del sys.modules[name]
+    try:
+        from firebase_messaging import FcmPushClient as real_cls
+    except ImportError:
+        pytest.skip("firebase-messaging не установлена (CI не ставит manifest-deps)")
+        return
+    finally:
+        sys.modules.update(saved)
+
+    if isinstance(real_cls, MagicMock):  # pragma: no cover - защита от подмены
+        pytest.skip("firebase-messaging подменена моком")
+    yield real_cls.__dict__["_decrypt_raw_data"].__func__
+
+
+@pytest.mark.parametrize(
+    ("header", "label", "expected"),
+    [
+        # Форма с прода 2026-08-13 (DIAG-проба, issue #77).
+        ("dh=AAA; p256ecdsa=BBB", "dh", "AAA"),
+        ("dh=AAA; p256ecdsa=BBB", "p256ecdsa", "BBB"),
+        # Порядок сегментов не гарантирован спецификацией.
+        ("p256ecdsa=BBB;dh=AAA", "dh", "AAA"),
+        # Единственный сегмент — форма, которая приходила до июня 2026.
+        ("dh=AAA", "dh", "AAA"),
+        ("salt=CCC==", "salt", "CCC=="),
+        # Нет такой метки — не выдумываем значение.
+        ("p256ecdsa=BBB", "dh", None),
+        ("AAA", "dh", None),
+        ("", "dh", None),
+    ],
+)
+def test_header_component(header: str, label: str, expected: str | None) -> None:
+    """Сегмент достаётся по метке независимо от позиции и пробелов."""
+    assert _header_component(header, label) == expected
+
+
+@pytest.mark.parametrize(
+    ("header", "label", "expected"),
+    [
+        # Лишний сегмент отброшен, dh дополнен до кратности 4.
+        ("dh=" + "a" * 87 + "; p256ecdsa=" + "b" * 87, "dh", "dh=" + "a" * 87 + "="),
+        # Уже корректный salt проходит без изменений.
+        ("salt=" + "c" * 22 + "==", "salt", "salt=" + "c" * 22 + "=="),
+        # Значение без метки: метку восстанавливаем, иначе слепой срез
+        # библиотеки съест реальные байты ключа.
+        ("a" * 87, "dh", "dh=" + "a" * 87 + "="),
+        ("c" * 22 + "==", "salt", "salt=" + "c" * 22 + "=="),
+        # Незнакомую форму отдаём библиотеке нетронутой.
+        ("foo=bar; baz=qux", "dh", "foo=bar; baz=qux"),
+        ("", "dh", ""),
+    ],
+)
+def test_normalize_push_header(header: str, label: str, expected: str) -> None:
+    """Нормализация оставляет один сегмент с корректным padding."""
+    assert _normalize_push_header(header, label) == expected
+
+
+def _library_slices(crypto_key_header: str, encryption_header: str) -> tuple[str, str]:
+    """Повторить слепой срез префикса из `fcmpushclient.py:425-426`.
+
+    Библиотека читает заголовки как одиночные значения: `[3:]` вместо разбора
+    `dh=`, `[5:]` вместо `salt=`. Тест обязан пройти ровно этот путь, иначе он
+    проверяет не то, что ломается на проде.
+    """
+    return crypto_key_header[3:], encryption_header[5:]
+
+
+def test_prod_header_shape_decrypts_only_after_normalization(
+    real_decrypt_raw_data,
+) -> None:
+    """Регрессия #77 на настоящей криптографии, а не на моке.
+
+    Воспроизводим форму заголовков, снятую DIAG-пробой с прода 2026-08-13:
+    `crypto-key: dh=<87>; p256ecdsa=<87>` (dh без padding) и
+    `encryption: salt=<24>` (salt уже с padding). Проверяем обе исторические
+    ошибки и то, что нормализация их снимает.
+    """
+    # http_ece приходит транзитивно с firebase-messaging, а CI её не ставит —
+    # поэтому импорт локальный, под тем же skip'ом, что и сама зависимость.
+    from http_ece import encrypt as http_encrypt
+
+    priv = ec.generate_private_key(ec.SECP256R1())
+    der = priv.private_bytes(
+        Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
+    )
+    auth_secret = os.urandom(16)
+    credentials = {
+        "keys": {
+            "private": urlsafe_b64encode(der).decode().rstrip("="),
+            "secret": urlsafe_b64encode(auth_secret).decode().rstrip("="),
+        }
+    }
+    salt = os.urandom(16)
+    server_key = ec.generate_private_key(ec.SECP256R1())
+    dh_public = server_key.public_key().public_bytes(
+        Encoding.X962, PublicFormat.UncompressedPoint
+    )
+    payload = json.dumps({"PushType": "CALL_INCOMING"}).encode()
+    raw_data = http_encrypt(
+        payload,
+        salt=salt,
+        private_key=server_key,
+        dh=priv.public_key().public_bytes(
+            Encoding.X962, PublicFormat.UncompressedPoint
+        ),
+        auth_secret=auth_secret,
+        version="aesgcm",
+    )
+    dh_b64 = urlsafe_b64encode(dh_public).decode().rstrip("=")
+    vapid_b64 = urlsafe_b64encode(os.urandom(65)).decode().rstrip("=")
+    crypto_key_header = f"dh={dh_b64}; p256ecdsa={vapid_b64}"
+    encryption_header = f"salt={urlsafe_b64encode(salt).decode()}"
+
+    # Ровно то, что показала проба: dh без padding, salt с ним.
+    assert len(dh_b64) % 4 == 3
+    assert len(encryption_header[5:]) % 4 == 0
+
+    raw_key, raw_salt = _library_slices(crypto_key_header, encryption_header)
+
+    # Симптом до 0bd2f29: срез оставил хвост `; p256ecdsa=…`, длина не кратна 4.
+    with pytest.raises(binascii.Error):
+        real_decrypt_raw_data(credentials, raw_key, raw_salt, raw_data)
+
+    # Симптом после 0bd2f29: padding позволил декодировать мусор — 137 байт
+    # вместо 65, точка не на кривой.
+    with pytest.raises(ValueError, match="Invalid EC key"):
+        real_decrypt_raw_data(credentials, _b64_pad(raw_key), raw_salt, raw_data)
+
+    # С нормализацией слепой срез попадает ровно в dh и salt.
+    norm_key, norm_salt = _library_slices(
+        _normalize_push_header(crypto_key_header, "dh"),
+        _normalize_push_header(encryption_header, "salt"),
+    )
+    decrypted = real_decrypt_raw_data(credentials, norm_key, norm_salt, raw_data)
+    assert json.loads(decrypted) == {"PushType": "CALL_INCOMING"}
+
+
+class _FakeAppDataItem:
+    """Минимальный двойник protobuf-записи `app_data` (есть .key и .value)."""
+
+    def __init__(self, key: str, value: str) -> None:
+        self.key = key
+        self.value = value
+
+
+def _fake_message(**app_data: str) -> MagicMock:
+    msg = MagicMock()
+    msg.app_data = [_FakeAppDataItem(k, v) for k, v in app_data.items()]
+    return msg
+
+
+def _patched_target():
+    class _Target:
+        seen: list[list[tuple[str, str]]] = []
+
+        def _handle_data_message(self, msg):  # noqa: ANN001, ANN202
+            _Target.seen.append([(i.key, i.value) for i in msg.app_data])
+
+    _patch_push_headers(_Target)
+    return _Target
+
+
+def test_patch_normalizes_app_data_before_library_reads_it() -> None:
+    """Библиотека получает уже приведённые заголовки, прочее не тронуто."""
+    target = _patched_target()
+    msg = _fake_message(
+        **{
+            "crypto-key": "dh=" + "a" * 87 + "; p256ecdsa=" + "b" * 87,
+            "encryption": "salt=" + "c" * 22 + "==",
+            "subtype": "не трогаем",
+        }
+    )
+
+    target()._handle_data_message(msg)
+
+    assert target.seen == [
+        [
+            ("crypto-key", "dh=" + "a" * 87 + "="),
+            ("encryption", "salt=" + "c" * 22 + "=="),
+            ("subtype", "не трогаем"),
+        ]
+    ]
+
+
+def test_patch_push_headers_is_idempotent() -> None:
+    """Повторный вызов не оборачивает патч поверх патча."""
+
+    class _Target:
+        calls = 0
+
+        def _handle_data_message(self, msg):  # noqa: ANN001, ANN202
+            _Target.calls += 1
+
+    _patch_push_headers(_Target)
+    _patch_push_headers(_Target)
+    _patch_push_headers(_Target)
+    _Target()._handle_data_message(_fake_message(**{"crypto-key": "dh=AAA"}))
+
+    assert _Target.calls == 1
+
+
+@pytest.fixture
+def real_data_message_stanza():
+    """Отдать настоящий protobuf-класс в обход мока из conftest.
+
+    Тот же приём, что и в `real_decrypt_raw_data`: мок снимаем на время
+    импорта и возвращаем обратно. Без библиотеки (CI) — skip.
+    """
+    saved = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "firebase_messaging" or name.startswith("firebase_messaging.")
+    }
+    for name in saved:
+        del sys.modules[name]
+    try:
+        from firebase_messaging.proto.mcs_pb2 import DataMessageStanza
+    except ImportError:
+        pytest.skip("firebase-messaging не установлена (CI не ставит manifest-deps)")
+        return
+    finally:
+        sys.modules.update(saved)
+
+    if isinstance(DataMessageStanza, MagicMock):  # pragma: no cover
+        pytest.skip("firebase-messaging подменена моком")
+    yield DataMessageStanza
+
+
+def test_patch_mutates_real_protobuf_app_data(real_data_message_stanza) -> None:
+    """Правка `app_data` держится на настоящем protobuf, а не только на моке."""
+    target = _patched_target()
+    msg = real_data_message_stanza()
+    for key, value in (
+        ("crypto-key", "dh=" + "a" * 87 + "; p256ecdsa=" + "b" * 87),
+        ("encryption", "salt=" + "c" * 22 + "=="),
+    ):
+        item = msg.app_data.add()
+        item.key = key
+        item.value = value
+
+    target()._handle_data_message(msg)
+
+    assert msg.app_data[0].value == "dh=" + "a" * 87 + "="
+    assert msg.app_data[1].value == "salt=" + "c" * 22 + "=="

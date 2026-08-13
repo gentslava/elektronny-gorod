@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
 Last reviewed: 2026-08-11 (A-80/A-86: field incident #77 and bounded per-entry
-FCM recovery; 580-test product baseline reconciled)
+FCM recovery; 616-test product baseline reconciled)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1113,6 +1113,21 @@ Quality gates:
   исправление обсуждается в
   [upstream PR #37](https://github.com/sdb9696/firebase-messaging/pull/37).
   Первопричина остаётся во внешней зависимости и этим изменением не закрывается.
+- **Field evidence 2026-08-13 (DIAG-проба на проде):** истинная форма дефекта —
+  не padding, а неразобранный список параметров. Оператор перешёл на VAPID, и
+  `crypto-key` приходит как `dh=<87>; p256ecdsa=<87>`, тогда как библиотека
+  срезает префикс по позиции (`[3:]` / `[5:]`, `fcmpushclient.py:425-426`).
+  Остаток декодируется в 137 байт вместо 65 → `ValueError: Invalid EC key.`
+  Апстрим этой формы не покрывает: в PR #37 разбор `;`-параметров **снят
+  автором как спекулятивный** («never saw `;`-parameters»), а
+  [issue #42](https://github.com/sdb9696/firebase-messaging/issues/42)
+  предлагает `removeprefix("dh=")` — на нашем заголовке это оставляет хвост
+  `; p256ecdsa=…` и не помогает. Per-message изоляция из PR #37 сняла бы
+  падение, но ACK отправляется только при штатном возврате
+  `_handle_data_message` (`fcmpushclient.py:605-608`), поэтому пуш о вызове
+  был бы подтверждён и **молча потерян**. Наша нормализация заголовков в
+  `fcm.py` выбирает сегмент по метке независимо от позиции; проверено на
+  проде 2026-08-13.
 - **Risk 3 — ToS.** Эмуляция клиента приложения формально не «официально
   поддержана» (как и весь mirror-app-подход, ADR-0006).
 - **Mitigation:** весь FCM-флоу под graceful degradation — остальная интеграция

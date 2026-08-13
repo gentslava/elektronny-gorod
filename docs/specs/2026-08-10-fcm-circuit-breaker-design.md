@@ -329,10 +329,56 @@ unbounded restart loop and poor degraded-state UX remain integration concerns.
 
 ### Local compatibility adapter
 
-Deferred. Normalizing the encrypted headers and containing one bad payload could
-restore realtime notifications, but it couples the integration to private
-methods of `firebase-messaging`. It can be reconsidered independently after
-field feedback or if the upstream fix remains unreleased.
+**Adopted on 2026-08-13**, after the field feedback this section was waiting for.
+
+The deferral assumed the parser bug only produced log noise. A production call on
+2026-08-13 showed it destroys the feature itself: every encrypted push fails to
+decrypt, so the callback never runs, no doorbell event reaches Home Assistant,
+and the message is never acknowledged — Google redelivers it on every reconnect
+and the client dies again.
+
+The defect is a header the library never learned to parse. `Crypto-Key` and
+`Encryption` are parameter lists separated by `;` (RFC 8188 §2.1, RFC 8291 §4),
+but `_handle_data_message` (`fcmpushclient.py:425-426`) treats each as a single
+value and strips the prefix by position — `[3:]` for `dh=`, `[5:]` for `salt=` —
+then decodes the remainder without base64url padding (`:378-379`).
+
+A DIAG probe on production (2026-08-13) captured the actual shapes:
+
+```text
+crypto-key: len=189 shape=dh=87, p256ecdsa=87
+encryption: len=29  shape=salt=24
+```
+
+The operator's backend now signs pushes with VAPID, so `crypto-key` carries a
+second `p256ecdsa` segment. After the positional strip the value is
+`<dh>; p256ecdsa=<…>`; the base64 decoder silently discards `;`, the space and
+the letters of the label, yielding 137 bytes where a P-256 point needs 65 —
+`ValueError: Invalid EC key.` Without padding it fails one step earlier with
+`binascii.Error: Incorrect padding`. Both are deterministic, not intermittent.
+
+Padding alone is neither necessary nor sufficient: `salt` already arrives padded
+(24 characters, a multiple of four), while `dh` arrives unpadded (87) and only
+becomes decodable once it has been separated from the VAPID segment.
+
+The integration therefore wraps `FcmPushClient._handle_data_message` and rewrites
+both headers in `app_data` before the library reads them: the requested segment
+is selected by label — position-independent — and padded to a multiple of four.
+The library's positional strip then lands exactly on `dh` and `salt`. It touches
+no cryptography, no call order and no protocol state; it is idempotent, it leaves
+unrecognised shapes untouched, and it becomes a no-op the moment upstream parses
+the parameter list. Coupling to a private method is accepted because the
+alternative is a permanently broken doorbell.
+
+The bug is not a library regression: `_decrypt_raw_data` is byte-identical across
+0.4.0–0.4.5. It is a change on the sender's side — on 2026-06-22 the same code
+decrypted 16 real `CALL_INCOMING` pushes (`research/intercom-call-probe/logs/
+fcm.log`), when `crypto-key` still carried only the `dh` segment.
+
+Upstream carries no fix as of this change: 0.4.5 is the newest release on PyPI.
+The bounded recovery above remains necessary — it still contains any other fatal
+dependency failure — but it is not sufficient on its own, and this design no
+longer claims that containing the log storm restores service.
 
 ### Fork or vendor `firebase-messaging`
 
