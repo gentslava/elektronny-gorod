@@ -4,7 +4,7 @@
 export const project = {
   name: "Электронный город и Дом.ру для Home Assistant",
   shortName: "elektronny-gorod",
-  version: "4.0.0",
+  version: "4.0.1",
   minHomeAssistant: "2024.10.4",
   license: "MIT",
   domain: "elektronny_gorod",
@@ -19,8 +19,8 @@ export const project = {
     "https://github.com/gentslava/elektronny-gorod/blob/master/docs/features/intercom-two-way-audio/call-screen-setup.md",
   historyCardDocs:
     "https://github.com/gentslava/elektronny-gorod/blob/master/docs/features/mobile-app-parity/history-card.md",
-  releaseNotes400:
-    "https://github.com/gentslava/elektronny-gorod/blob/master/docs/releases/4.0.0.md",
+  releaseNotesLatest:
+    "https://github.com/gentslava/elektronny-gorod/blob/master/docs/releases/4.0.1.md",
   // Официальные deep links my.home-assistant.io — уже используются в README.
   hacsDeepLink:
     "https://my.home-assistant.io/redirect/hacs_repository/?owner=gentslava&repository=elektronny-gorod&category=integration",

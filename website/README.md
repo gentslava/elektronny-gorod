@@ -2,7 +2,7 @@
 
 Одностраничный продуктовый хаб «Электронный город и Дом.ру для Home Assistant»: живая демонстрация настоящей карточки вызова, интерактивный сценарий звонка, playground, библиотека автоматизаций, мастер установки, проверка совместимости, FAQ и блок доверия.
 
-Сайт **изолирован от интеграции**: не трогает `custom_components/`, manifest, HACS-конфигурацию и CI. Единственная связь — импорт production-бандла карточки `custom_components/elektronny_gorod/www/eg-intercom-call-card.js` (сайт демонстрирует именно shipped-артефакт, а не копию интерфейса).
+Сайт **изолирован от runtime-интеграции**: не меняет `custom_components/`, manifest или HACS-конфигурацию. Он импортирует production-бандл карточки `custom_components/elektronny_gorod/www/eg-intercom-call-card.js` (демонстрирует shipped-артефакт, а не копию интерфейса) и публикуется отдельным GitHub Pages workflow `.github/workflows/website.yml`.
 
 Концепция и арт-дирекшн — [`docs/concept.md`](docs/concept.md). Синхронизация данных с репозиторием — [`docs/sync.md`](docs/sync.md). Публикация — [`docs/deploy.md`](docs/deploy.md).
 

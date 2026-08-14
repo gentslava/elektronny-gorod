@@ -1,8 +1,9 @@
-Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-14 (neutral `.agents/**` source and tool adapter layout mapped)
+Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-14 (4.0.1 release surfaces and product website/Pages workflow mapped)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
 - `tests/**`
+- `frontend/**`, `website/**`
 - `.github/workflows/**`
 - `.agents/**`, `.claude/**`, `.codex/**`, `.cursor/**`
 - `manifest.json`, `hacs.json`, `info.md`
@@ -27,7 +28,7 @@ Quality gates:
 
 ## Тип проекта
 
-**Home Assistant custom integration** (`integration_type: hub` — фактически, но не указан в manifest).
+**Home Assistant custom integration** (`integration_type: hub` — зафиксирован в manifest и соответствует модели «одна config entry → несколько устройств»).
 
 - Distribution: **HACS** (см. [`../../hacs.json`](../../hacs.json)).
 - Установка: HACS Repository → restart HA → UI config flow.
@@ -102,11 +103,20 @@ elektronny-gorod/
 │   ├── conftest.py
 │   └── …                          ← см. таблицу тестов ниже
 │
+├── frontend/                       ← исходники и Vitest production Lovelace bundle
+├── website/                        ← продуктовый сайт: Vite, Vitest, GitHub Pages
+│   ├── index.html                  ← SEO/контент и JSON-LD version
+│   ├── src/data/project.ts         ← ссылки, версия, entity/service constants
+│   ├── test/                       ← compat/wizard/scenario/automation tests
+│   └── docs/                       ← concept/sync/deploy/design audit
+│
 ├── .github/workflows/
 │   ├── hassfest.yaml              ← manifest validation
 │   ├── hacs.yaml                  ← HACS validation
+│   ├── python-tests.yaml           ← pytest matrix min/current HA
 │   ├── release.yaml               ← release zip + auto-commit (на event release)
-│   └── prerelease.yaml            ← PR pre-release zip (на event pull_request)
+│   ├── prerelease.yaml            ← PR pre-release zip (на event pull_request)
+│   └── website.yml                ← build + GitHub Pages deploy
 │
 ├── .agents/                       ← canonical cross-tool contracts
 │   ├── roles/                     ← полные role contracts
@@ -128,10 +138,11 @@ elektronny-gorod/
 
 | Файл | Назначение | Evidence |
 |---|---|---|
-| [`manifest.json`](../../custom_components/elektronny_gorod/manifest.json) | HA integration manifest: domain, version, iot_class, config_flow | строки 1-14 |
+| [`manifest.json`](../../custom_components/elektronny_gorod/manifest.json) | HA integration manifest: domain, version, iot_class, config_flow | поля JSON; версия обновляется release workflow |
 | [`hacs.json`](../../hacs.json) | HACS publishing: min HA version, zip release, country=RU | строки 1-7 |
-| [`info.md`](../../info.md) | краткий HACS feature/config overview со ссылкой на README | — |
+| [`info.md`](../../info.md) | краткий HACS feature/config overview, latest upgrade notice и ссылки на README/release notes | — |
 | [`README.md`](../../README.md) / [`README.en_EN.md`](../../README.en_EN.md) | полная пользовательская документация RU/EN | — |
+| [`website/`](../../website/) | статический продуктовый сайт; версия/release links синхронизируются по `website/docs/sync.md` | `index.html`, `src/data/project.ts` |
 | [`LICENSE`](../../LICENSE) | MIT | — |
 
 ### Entry points
@@ -284,8 +295,9 @@ elektronny-gorod/
 | [`python-tests.yaml`](../../.github/workflows/python-tests.yaml) | push / PR | pytest matrix: минимальная и текущая HA |
 | [`prerelease.yaml`](../../.github/workflows/prerelease.yaml) | PR opened / sync | pre-release ZIP с тегом `pr-N` для тестирования |
 | [`release.yaml`](../../.github/workflows/release.yaml) | release published | zip + GH release + автокоммит версии |
+| [`website.yml`](../../.github/workflows/website.yml) | push `master` с `website/**` / dispatch | typecheck + Vitest + Vite build → GitHub Pages |
 
-Pytest CI настроен; актуальный локальный baseline и состав suite ведутся в [`testing/strategy.md`](../testing/strategy.md), без дублирования здесь.
+Backend, integration frontend и website checks настроены; актуальный локальный baseline и состав suite ведутся в [`testing/strategy.md`](../testing/strategy.md), без дублирования здесь.
 
 ## Внешние API и зависимости
 

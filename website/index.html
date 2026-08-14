@@ -24,7 +24,7 @@
     "name": "Электронный город и Дом.ру для Home Assistant",
     "operatingSystem": "Home Assistant 2024.10.4+",
     "applicationCategory": "SmartHomeApplication",
-    "softwareVersion": "4.0.0",
+    "softwareVersion": "4.0.1",
     "license": "https://opensource.org/license/mit/",
     "isAccessibleForFree": true,
     "offers": { "@type": "Offer", "price": "0", "priceCurrency": "RUB" },
@@ -80,6 +80,7 @@
           <div class="hero-badges">
             <span class="chip">Электронный город · Дом.ру</span>
             <span class="chip">Home Assistant 2024.10+</span>
+            <span class="chip">4.0.1 · исправлен FCM</span>
             <span class="chip">Open source · MIT</span>
           </div>
           <p class="hero-strip">видео · разговор · открытие двери · события · история · автоматизации</p>
@@ -468,9 +469,11 @@
               карточка истории даже объединяет их в одну ленту.</p></div>
           </details>
           <details>
-            <summary>Что делать после обновления интеграции?</summary>
-            <div class="faq-a"><p>Ничего особенного: обновитесь через HACS и перезапустите Home Assistant.
-              Перенастраивать аккаунт не нужно — обновление 4.0.0 прошло без breaking changes.</p></div>
+            <summary>Нужно ли обновляться с 4.0.0?</summary>
+            <div class="faq-a"><p>Да. Версия 4.0.1 восстанавливает доставку FCM-звонков и не даёт
+              ошибочному соединению подвесить Home Assistant или бесконечно раздувать журнал.
+              Обновитесь через HACS и перезапустите Home Assistant; перенастраивать аккаунт и
+              проходить авторизацию заново не нужно. <a href="https://github.com/gentslava/elektronny-gorod/blob/master/docs/releases/4.0.1.md" rel="noopener">Что исправлено в 4.0.1</a>.</p></div>
           </details>
           <details>
             <summary>Долгий просмотр камеры замирает через полчаса. Это баг?</summary>

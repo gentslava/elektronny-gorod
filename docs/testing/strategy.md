@@ -1,10 +1,12 @@
-Status: Active Owner: QA / Testing Agent Last reviewed: 2026-08-14 (canonical agent-contract parity/path/thin-adapter regressions; 686-test backend suite synchronized)
+Status: Active Owner: QA / Testing Agent Last reviewed: 2026-08-14 (backend, integration frontend, website and canonical agent-contract suites synchronized)
 
 Source files:
 - `tests/**` (57 test-модулей + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
+- `frontend/test/**`, `frontend/package.json`
+- `website/test/**`, `website/package.json`
 
 Related docs:
 - `ha-compatibility.md`
@@ -32,6 +34,7 @@ Quality gates:
 | Локальный suite | **686 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-14) |
 | Test modules | 57 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
+| Product website | **69 passed**, `tsc --noEmit` и Vite production build (`website/`) |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction including production-format config-entry title, diagnostics, HTTP no-leak, golden vectors helpers, deterministic secret-log scanner |
 | AIDD gates | Canonical secret/reconciliation hooks; Claude/Codex adapters; candidate-SHA CI, stacked target-ref, role/command/rule parity, thin adapters и path-fence contracts |
@@ -39,6 +42,7 @@ Quality gates:
 | Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
+| Website CI | `website.yml`: typecheck + Vitest + production build перед GitHub Pages deploy |
 | Coverage | Процент намеренно не фиксируется без свежего coverage-run; каноническая команда приведена ниже |
 
 Остающиеся gap-и: нет полностью автоматизированного live-теста против оператора и физического домофона; часть широкого REST API покрыта точечными контрактными тестами. Live/PCAP evidence хранится отдельно в `research/intercom-call-probe/`.
@@ -57,6 +61,9 @@ tests/
 ├── test_secret_log_gate.py / test_audit_reconciliation_gate.py
 ├── test_aidd_contracts.py
 └── entity, visibility, balance, DND, helpers и migration regressions
+
+frontend/test/                      # 62 Vitest: call card/history/mic/i18n/build
+website/test/                       # 69 Vitest: compat/wizard/scenario/automations
 ```
 
 ## Coverage checklist по слоям
@@ -184,7 +191,7 @@ Mocked tests prove policy and orchestration, not end-to-end playback. Before mer
 
 - FCM parsing и dispatcher lifecycle; bounded watchdog state machine `HEALTHY → SUSPECT → VERIFYING → OPEN → VERIFYING → HEALTHY`.
 - Разбор Web Push заголовков `crypto-key`/`encryption`: реальная http_ece-криптография без мока, на форме, снятой с прода (`dh=<87>; p256ecdsa=<87>`). Проверяются обе исторические ошибки — `binascii.Error` без padding и `Invalid EC key.` с ним — и то, что нормализация их снимает. Плюс выбор сегмента по метке независимо от порядка, восстановление метки у значения без неё, правка `app_data` на настоящем protobuf и изоляция патча: соседний клиент того же класса остаётся нетронутым. Тесты с реальной зависимостью берут её в обход `conftest`-мока и скипаются, если её нет.
-- Конечный `abort_on_sequential_error_count`: сам факт передачи значения в `FcmPushClientConfig` и полный проход terminated-клиента до OPEN. Отключённый предохранитель делает этот путь недостижимым и подвешивает event loop (#77).
+- Конечный `abort_on_sequential_error_count`: сам факт передачи значения в `FcmPushClientConfig` и полный проход terminated-клиента до OPEN. Отключённый предохранитель делает этот путь недостижимым и подвешивает event loop.
 - Capped 15m/1h/6h/24h backoff, quiet OPEN до deadline, persistent Repairs create/retain/delete, multi-entry isolation, removal cleanup и no-secret output.
 - Startup/check-in/operator-bind/watchdog/unload races serialized per entry; pre-start clients are discarded without dependency `stop()`, while a failed started-client stop retains ownership and blocks replacement on both ordinary reload and setup-unwind.
 - REGISTER profile: FCM `Call-Id`, `Accept: application/sdp`, Contact push-params без лишнего `transport` parameter.

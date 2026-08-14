@@ -4,9 +4,9 @@
 
 ## 1. Итоги исследования
 
-### Подтверждённые возможности (stable, 4.0.0)
+### Подтверждённые возможности (stable, 4.0.1)
 
-Источники: `README.md`, `info.md`, `docs/releases/4.0.0.md`, код `custom_components/`.
+Источники: `README.md`, `info.md`, `docs/releases/4.0.1.md`, код `custom_components/`.
 
 | Возможность | Evidence |
 |---|---|

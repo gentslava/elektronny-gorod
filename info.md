@@ -18,7 +18,9 @@ Custom integration for the My Home — Elektronny Gorod (Novotelecom) and Umnyy 
 - Monitor balance, blocked status and days until blocking.
 - Control do-not-disturb settings for intercom and management-company calls.
 
-The upcoming 4.0.0 release adds call answering, two-way audio and event history. Existing config entries do not need to be recreated, and there are no breaking changes. See the full [README](README.en_EN.md) and [4.0.0 release notes](docs/releases/4.0.0.md).
+**4.0.1 is recommended for every 4.0.0 user.** It restores FCM doorbell delivery after an operator-side header format change and prevents a failed push connection from hanging Home Assistant or growing the log without bounds. Update through HACS and restart Home Assistant; existing config entries do not need to be recreated or reauthenticated. See the [4.0.1 release notes](docs/releases/4.0.1.md).
+
+The 4.0 line adds call answering, two-way audio, event history, and opt-in external RTSP camera publishing. See the full [README](README.en_EN.md) and the original [4.0.0 feature overview](docs/releases/4.0.0.md).
 
 ## Configuration
 - Use this button:<br>

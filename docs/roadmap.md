@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (A-97 agent contracts consolidated under neutral `.agents/**`; merge status remains canonical in project-audit)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (4.0.1 candidate reviews/CI complete; A-97 awaits PR #80 merge reconciliation)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -180,7 +180,7 @@ Quality gates:
 
 #### AIDD Full
 
-- [ ] **A-97** Independent review candidate lifecycle: durable plan approval, tests/security prechecks/docs/history cleanup before freeze, immutable base/head/tree, non-waivable read-only post-freeze security/code/profile reviews and mandatory candidate-bound re-attestation (ADR-0015). Complete after the process changeset itself passes those reviews and merges.
+- [ ] **A-97** 🟢 resolved-in-branch: current release candidate получил candidate-bound code/security/HA/QA/docs approvals, durable evidence и зелёный CI в PR #80. После merge перевести finding в `RESOLVED` (ADR-0015).
 - [x] Роли, rules и operational commands имеют один нейтральный source of truth в `.agents/**`; Claude/Codex/Cursor/Copilot файлы — thin adapters.
 - [x] Final review mode требует exact tuple, independence и Critical/Important closure в canonical role contracts.
 - [x] Canonical hooks живут в `.agents/hooks/`; Claude/Codex hooks — wrappers без дублирования implementations.
@@ -207,9 +207,18 @@ Quality gates:
 
 **Двусторонний звук (разговор по домофону)** — ✅ реализован: приём + downlink (A-81, ADR-0012) + uplink-микрофон (A-85, ADR-0013, HA WS-binary #1, live-прод 2026-06-24). Реализация находится в master после PR #69. PRD — `research/intercom-call-probe/PRD-two-way-audio.md`.
 
-### Что НЕ решено (открытые research-вопросы)
+### Patch 4.0.1 — FCM reliability
 
-**Real push** через FCM не отброшен — требует исследования:
+- [x] Production root cause подтверждён: `Crypto-Key` стал списком `dh=…; p256ecdsa=…`, который `firebase-messaging` 0.4.5 читает как один Base64URL-ключ.
+- [x] PR #78 merged: instance-scoped нормализация Web Push headers, конечный dependency fuse, per-entry circuit breaker и Repairs.
+- [x] Полный backend suite и production-вызов подтверждают восстановленную доставку; актуальный baseline принадлежит [`testing/strategy.md`](testing/strategy.md).
+- [x] Подготовлены CHANGELOG, RU/EN README, HACS info, сайт и [`releases/4.0.1.md`](releases/4.0.1.md).
+- [x] Release candidate прошёл обязательные review/CI gates; candidate-bound evidence опубликован в PR #80.
+- [ ] После merge и публикации проверить release asset, manifest и доставку через HACS.
+
+### Итоги FCM-research
+
+**Real push** через FCM подтверждён и реализован; исследование дало следующие выводы:
 
 - **`google-services.json`** внутри APK содержит Firebase config (`project_id`, `app_id`, `api_key`, `sender_id`). Декомпиляция APK (apktool/jadx) — стандартная процедура, не требует обфускации-bypass.
 - **Mimicry**: технически возможно зарегистрировать HA-instance как «FCM client» приложения «Мой Дом», получая push **напрямую**. Реализация: Python библиотеки типа `firebase_messaging` / `aiohttp`

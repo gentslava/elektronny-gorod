@@ -1,4 +1,4 @@
-Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-14 (agent contracts consolidated under neutral `.agents/**` source)
+Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-14 (4.0.1 README/HACS/website derivatives reconciled; release workflow remains version owner)
 
 Source files:
 - весь репозиторий (это карта)
@@ -30,7 +30,7 @@ Quality gates:
 | Знание | Source of truth | Кто пишет | Кто читает |
 |---|---|---|---|
 | Domain интеграции | [`manifest.json:2`](../../custom_components/elektronny_gorod/manifest.json#L2) | разработчик | HA core, тесты, весь код |
-| Version интеграции | [`manifest.json:13`](../../custom_components/elektronny_gorod/manifest.json#L13) | release workflow | HACS, HA core |
+| Version интеграции | [`manifest.json:version`](../../custom_components/elektronny_gorod/manifest.json#L18) | release workflow | HACS, HA core |
 | `iot_class` | [`manifest.json:10`](../../custom_components/elektronny_gorod/manifest.json#L10) | разработчик | HA core |
 | Min HA version | [`hacs.json:3`](../../hacs.json#L3) | разработчик | HACS |
 | Codeowners | [`manifest.json:5`](../../custom_components/elektronny_gorod/manifest.json#L5) | разработчик | GitHub, HA QS |
@@ -56,7 +56,10 @@ Quality gates:
 | Release pipeline | [`.github/workflows/release.yaml`](../../.github/workflows/release.yaml) | разработчик | GitHub Actions |
 | Brand assets | brands.home-assistant.io/elektronny_gorod/ | разработчик (через PR в brands repo) | HA UI, README badge |
 | Пользовательская документация | [`README.md`](../../README.md) + [`README.en_EN.md`](../../README.en_EN.md) | разработчик | пользователь |
-| Краткая HACS feature card | [`info.md`](../../info.md), производна от README | разработчик | HACS-пользователь |
+| Краткая HACS feature card | [`info.md`](../../info.md), производна от README и latest release notes | разработчик | HACS-пользователь |
+| Контент продуктового сайта | [`website/index.html`](../../website/index.html) + [`website/src/data/*`](../../website/src/data/) | разработчик сайта | GitHub Pages visitor |
+| Версия и release link сайта | [`manifest.json:version`](../../custom_components/elektronny_gorod/manifest.json#L18) + latest `docs/releases/X.Y.Z.md`; производные поля перечислены в [`website/docs/sync.md`](../../website/docs/sync.md) | release/docs owner | `website/index.html`, `website/src/data/project.ts` |
+| Публикация продуктового сайта | [`.github/workflows/website.yml`](../../.github/workflows/website.yml) | GitHub Actions | GitHub Pages |
 | Общий agent contract | [`AGENTS.md`](../../AGENTS.md) | Lead Architect | все agents и adapters |
 | Agent roles | [`.agents/roles/*.md`](../../.agents/roles/) | owner роли | Claude/Codex adapters |
 | Engineering/process rules | [`.agents/rules/*.md`](../../.agents/rules/) | owner правила | все agents |

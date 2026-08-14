@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (cross-tool agent contracts consolidated under neutral `.agents/**`; live test baseline delegated to testing strategy)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (4.0.1 FCM hotfix and user-facing documentation synchronized; live test baseline delegated to testing strategy)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -33,7 +33,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - **Codeowner:** [@gentslava](https://github.com/gentslava).
 - **PR pre-release:** workflow [`prerelease.yaml`](../.github/workflows/prerelease.yaml) выкатывает pre-release zip для каждого открытого PR.
 
-## Состояние (на 2026-08-11)
+## Состояние (на 2026-08-14)
 
 | Аспект | Статус |
 |---|---|
@@ -44,7 +44,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | Реальные тесты | ✅ pytest CI и локальный gate настроены; актуальные команды, состав и последний baseline — в [`testing/strategy.md`](testing/strategy.md) |
 | Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
-| Документация для пользователя | ✅ RU/EN README и release notes 4.0.0 описывают FCM/SIP, экран вызова, durable history и opt-in внешний RTSP; добавлены runtime screenshots |
+| Документация для пользователя | ✅ RU/EN README, HACS info и release notes 4.0.1 дают обязательную информацию по FCM hotfix; обзор 4.0.0 сохраняет экран вызова, durable history и opt-in внешний RTSP |
 | AIDD документация для агентов | ✅ process/source-of-truth контракты синхронизированы; актуальные findings — в [`project-audit.md`](audit/project-audit.md) |
 
 Этот обзор фиксирует возможности и риски, но не владеет живым количеством тестов. Единственный источник текущего test baseline — [`testing/strategy.md`](testing/strategy.md); evidence закрытых findings хранится в [`project-audit.md`](audit/project-audit.md).
@@ -65,9 +65,10 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - **Итерация 3 (Silver feature gaps + runtime polish):** DND switches (A-56), balance attrs + binary_sensor (A-57), double-HTTP fix (A-61), visibility/reload cascade (A-64), log throttling (A-65), go2rtc lifecycle (A-66), concurrent stream dedup (A-68), camera auto-recovery для long-open freeze ~30 мин (A-71, ADR-0009).
 - **Итерация 4 (realtime intercom):** FCM doorbell event, SIP two-way audio (ADR-0012/0013), экран и карточка вызова, uplink-микрофон, video anti-churn, смена звонящего во время held и точное зеркало stock pre-answer `REGISTER → INVITE → 100 Trying` (A-81/A-85/A-88/A-89/A-90/A-91, PR #69).
 - **Итерация 5 (durable history):** polling с per-source silent baseline, restart dedup, config-entry-scoped dispatcher, opt-in camera motion, place-scoped EventEntity, авторизованный browse старых вызовов и `custom:eg-event-history-card` для нескольких мест/аккаунтов (A-50/A-58, PR #70).
-- **External RTSP track:** PATCH-only registration провалилась live на пяти lazy streams. Revised per-entry manager делает initial mint→PATCH→preload, проверяет stream/preload/active producer, сохраняет 28:30 non-disruptive PATCH и снимает preloads при cleanup/unload. Pre-mint publication gate не даёт excluded hidden cameras кратковременно попадать в go2rtc и убирает их setup-time operator requests. Publication checkbox changes применяются к живому manager без config-entry reload и массового producer churn; ручное включение запускает missing cameras коротким 0.5s ramp вместо jitter до 60s. Background gate не мешает явному открытию enabled hidden camera в HA даже во время setup: она лениво регистрируется без preload. Для proxy recovery manager обновляет upstream PATCH-ем, не вызывая `Stream.update_source()` с тем же стабильным URL и не оставляя orphan HA worker. Stop дожидается running reconcile и снимает pending preload; manager-eligible streams не дублируют 28:30 entity proactive timer (A-82/A-96, ADR-0014). Повторный production checklist ещё не закрыт, поэтому release status пока не заявляется; реализация уже находится в master через PR #71.
+- **FCM reliability hotfix (4.0.1):** production-формат `Crypto-Key: dh=…; p256ecdsa=…` нормализуется до чтения зависимостью; конечный dependency fuse исключает горячий цикл на мёртвом socket, а per-entry circuit breaker ограничивает повторные подключения и публикует Repairs (A-80/A-86, PR #78).
+- **External RTSP track:** PATCH-only registration провалилась live на пяти lazy streams. Revised per-entry manager делает initial mint→PATCH→preload, проверяет stream/preload/active producer, сохраняет 28:30 non-disruptive PATCH и снимает preloads при cleanup/unload. Pre-mint publication gate не даёт excluded hidden cameras кратковременно попадать в go2rtc и убирает их setup-time operator requests. Publication checkbox changes применяются к живому manager без config-entry reload и массового producer churn; ручное включение запускает missing cameras коротким 0.5s ramp вместо jitter до 60s. Background gate не мешает явному открытию enabled hidden camera в HA даже во время setup: она лениво регистрируется без preload. Для proxy recovery manager обновляет upstream PATCH-ем, не вызывая `Stream.update_source()` с тем же стабильным URL и не оставляя orphan HA worker. Stop дожидается running reconcile и снимает pending preload; manager-eligible streams не дублируют 28:30 entity proactive timer (A-82/A-96, ADR-0014). Повторный production checklist и релиз 4.0.0 завершены 2026-07-16.
 
-## Главные риски (на 2026-08-10)
+## Главные риски (на 2026-08-14)
 
 > Все исторические P0 token-leaks **закрыты** (verified по коду). Текущие
 > открытые риски — reliability + test-debt, не утечки секретов.
@@ -84,6 +85,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 
 ### P2 — желательно
 
+- FCM остаётся на приватных Google API и неофициальном operator push-контракте. Зафиксированный production-дефект исправлен локальной нормализацией и bounded recovery, но долгосрочная совместимость внешней зависимости не гарантируется (A-80).
 - go2rtc persistent-config bloat частично mitigated PATCH-only path, но требует live persistence check (A-84).
 - `api.py` — `e.args[0]` antipattern + широкий `except Exception` (A-19/A-20).
 - HTML service-pipe/VPN block пока превращается в generic `ClientError` и может выглядеть как пустой список камер (A-92; нужен воспроизводимый HAR).

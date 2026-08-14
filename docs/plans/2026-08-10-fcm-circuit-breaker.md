@@ -21,7 +21,7 @@
 - Modify `custom_components/elektronny_gorod/translations/ru.json` — Russian Repairs translation.
 - Modify `tests/test_fcm.py` — state-machine, backoff, Repairs, lifecycle, privacy and account-isolation regressions.
 - Modify `tests/test_init.py` — config-entry removal cleanup regression.
-- Modify `docs/audit/project-audit.md` — update A-80/A-86 with issue #77 and the bounded-recovery mitigation.
+- Modify `docs/audit/project-audit.md` — update A-80/A-86 with the production report and bounded-recovery mitigation.
 - Modify `docs/architecture/overview.md` — document per-entry recovery state and degraded mode.
 - Modify `docs/testing/strategy.md` — record the new FCM regression scope.
 - Modify `CHANGELOG.md` — add the user-visible fix under `Unreleased`.
@@ -740,7 +740,7 @@ rtk git commit -m "test: cover isolated FCM recovery lifecycle"
 
 In `docs/audit/project-audit.md`:
 
-- add issue #77 as field evidence under A-80: `firebase-messaging` can terminate the client on malformed Base64URL encryption headers;
+- add the production report as field evidence under A-80: `firebase-messaging` can terminate the client on malformed Base64URL encryption headers;
 - explain that the external parsing defect remains upstream, while retry amplification is mitigated locally;
 - amend A-86 so the old immediate watchdog recovery is described as bounded by a per-entry circuit breaker;
 - record the 15m → 1h → 6h → 24h probe schedule, persistent per-entry error Repair, confirmed-healthy cleanup and independent multi-account behavior;

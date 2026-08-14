@@ -3,7 +3,7 @@
 - **Status:** approved design
 - **Date:** 2026-08-10
 - **Scope:** per-config-entry resilience for `DoorbellFcmListener`
-- **Related:** issue #77, ADR-0011, audit A-80/A-86, upstream `firebase-messaging` issues #40/#42 and PR #37
+- **Related:** production FCM incident, ADR-0011, audit A-80/A-86, upstream `firebase-messaging` issues #40/#42 and PR #37
 
 ## Problem
 
@@ -11,7 +11,7 @@
 
 The upstream parsing bug is outside the integration, but bounding retries, isolating accounts, and explaining the degraded state to the user are the integration's responsibility.
 
-Issue #77 supplies direct timestamped crash-boundary evidence: the integration reports an inactive receiver, the dependency fails in `urlsafe_b64decode` with `Incorrect padding` two seconds later and shuts that client down. Source inspection establishes the local causal chain: dependency shutdown → watchdog observes inactive receiver → unbounded client recreation → repeated dependency traceback. This design contains that amplification; it does not claim to fix the upstream parser.
+The timestamped production report supplies direct crash-boundary evidence: the integration reports an inactive receiver, the dependency fails in `urlsafe_b64decode` with `Incorrect padding` two seconds later and shuts that client down. Source inspection establishes the local causal chain: dependency shutdown → watchdog observes inactive receiver → unbounded client recreation → repeated dependency traceback. This design contains that amplification; it does not claim to fix the upstream parser.
 
 ### Second failure mode: the disabled dependency fuse
 
@@ -265,7 +265,7 @@ Deferred as a last resort. The package is small and MIT-licensed, but owning the
 
 ### Automatic token rotation
 
-Deferred until issue #77 confirms whether reconnecting the account clears the condition. Rotation can discard a token-bound poison message, but it cannot fix a message format that the operator sends repeatedly and can leave stale remote registrations if cleanup fails.
+Deferred until field verification confirms whether reconnecting the account clears the condition. Rotation can discard a token-bound poison message, but it cannot fix a message format that the operator sends repeatedly and can leave stale remote registrations if cleanup fails.
 
 ## Acceptance criteria
 

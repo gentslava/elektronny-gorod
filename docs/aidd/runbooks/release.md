@@ -40,6 +40,7 @@ SemVer. Версия живёт в `manifest.json`, обновляется ав�
 - [ ] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный.
 - [ ] `cd frontend && npm test && npm run typecheck && npm run build` зелёный; собранный bundle не создаёт незакоммиченный diff.
 - [ ] `cd frontend && npm audit --omit=dev` без high/critical findings.
+- [ ] Если менялся `website/**`: `cd website && npm test && npm run typecheck && npm run build` зелёный, `npm audit --omit=dev` без high/critical findings.
 - [ ] `hassfest` зелёный (CI всегда проверяет).
 - [ ] `HACS validate` зелёный.
 - [ ] Все Critical/Important findings обязательных reviews закрыты.
@@ -72,7 +73,8 @@ SemVer. Версия живёт в `manifest.json`, обновляется ав�
    - `manifest.json:version` равен tag;
    - auto-commit GitHub Actions появился в `master`;
    - HACS/hassfest/python-tests на новом HEAD зелёные.
-5. HACS подхватит release автоматически.
+5. Если релиз менял `website/**`, дождаться зелёного workflow `Deploy website` и проверить на опубликованном сайте номер версии и ссылку на GitHub Release.
+6. HACS подхватит release автоматически.
 
 ### Hotfix flow
 

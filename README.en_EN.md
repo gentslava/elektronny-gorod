@@ -39,17 +39,18 @@ Your **intercoms, cameras and locks** from Elektronny Gorod (Novotelecom) and Do
 
 The integration mirrors the APIs of the official My Home and Umnyy Dom.ru apps: watch cameras with sound, answer and end calls, browse answered and missed call history and build any Home Assistant automation on top.
 
-> 🎉 **4.0.0 is out** — the project's biggest release yet: a complete call
-> screen, SIP answering with two-way audio, realtime doorbell events (FCM),
-> a call history card and opt-in external RTSP camera publishing.
-> See the [overview below](#whats-new-in-400) or read the full
-> [release notes](docs/releases/4.0.0.md).
+> 🛠️ **4.0.1 is out** — an important fix for 4.0.0 users: doorbell calls reach
+> Home Assistant through FCM again, and a broken connection can no longer hang
+> Home Assistant or grow the log without bounds. Update through HACS and
+> restart Home Assistant; no reauthentication is required. See the full
+> [release notes](docs/releases/4.0.1.md).
 
 ## Contents
 
 - [Installation](#installation)
 - [Configuration](#configuration)
-- [What's new in 4.0.0](#whats-new-in-400)
+- [What's new in 4.0.1](#whats-new-in-401)
+- [Highlights of the 4.0 line](#highlights-of-the-40-line)
 - [Features](#features)
 - [Camera connection via go2rtc](#camera-connection-via-go2rtc)
 - [🔔 Doorbell call event (FCM push)](#-doorbell-call-event-fcm-push)
@@ -59,7 +60,17 @@ The integration mirrors the APIs of the official My Home and Umnyy Dom.ru apps: 
 - [Issues and Contributions](#issues-and-contributions)
 - [License](#license)
 
-## What's new in 4.0.0
+## What's new in 4.0.1
+
+- **Doorbell calls arrive again:** the integration handles the new VAPID form of the FCM service headers that previously dropped a call before it reached Home Assistant.
+- **Home Assistant stays responsive:** a finite safety fuse now closes a broken FCM connection instead of allowing a hot loop with an ever-growing traceback to starve the event loop.
+- **Logs stay bounded:** after one verification attempt, a per-account circuit breaker pauses repeated reconnects and creates a clear Repairs notice.
+- **Other features keep working:** cameras, locks, balances, history, and other accounts remain available when one config entry loses FCM.
+- **No reconfiguration:** install 4.0.1 through HACS and restart Home Assistant. You do not need to remove the integration or sign in again.
+
+There are no breaking changes. The root cause, live verification, and upgrade steps are documented in [`docs/releases/4.0.1.md`](docs/releases/4.0.1.md).
+
+## Highlights of the 4.0 line
 
 - **Calls without polling:** incoming calls arrive through FCM and are immediately available to Home Assistant automations.
 - **Answer and talk:** SIP answer/hangup, guest video and audio, browser microphone uplink, and `elektronny_gorod.answer` / `hangup` services.
@@ -70,7 +81,7 @@ The integration mirrors the APIs of the official My Home and Umnyy Dom.ru apps: 
 - **No reconfiguration:** existing Home Assistant entries do not need to be recreated.
 - **Reliability:** FCM reconnect/watchdog, caller replacement, concurrent call-video access and SIP/go2rtc lifecycle handling were hardened.
 
-There are no breaking changes. Upgrade steps, limitations and the complete list are available in [`docs/releases/4.0.0.md`](docs/releases/4.0.0.md).
+The full overview of features introduced in 4.0.0, their limitations, and initial setup is available in [`docs/releases/4.0.0.md`](docs/releases/4.0.0.md).
 
 ## Installation
 
@@ -168,7 +179,7 @@ Open its options and enable go2rtc. You do not need to add the account or its de
 
 **Note:** Use current versions of go2rtc, WebRTC Camera and Home Assistant for audio and low-latency streaming.
 
-### External RTSP in 4.0.0
+### External RTSP in the 4.0 line
 
 The go2rtc integration settings now contain two separate options:
 

@@ -249,7 +249,7 @@ async def test_import_failure_does_not_log_exception_message(
 
 
 async def test_async_start_keeps_finite_abort_count(hass: HomeAssistant):
-    """Предохранитель библиотеки конечен: иначе _listen зацикливается (#77).
+    """Предохранитель библиотеки конечен: иначе _listen зацикливается.
 
     При `None` проверка в `_try_increment_error_count` всегда ложна, `_terminate()`
     недостижим, и библиотека бесконечно перечитывает мёртвый StreamReader, печатая
@@ -276,7 +276,7 @@ async def test_async_start_keeps_finite_abort_count(hass: HomeAssistant):
 async def test_library_terminated_receiver_enters_bounded_recovery(
     hass: HomeAssistant,
 ) -> None:
-    """Регрессия #77: клиент, погашенный предохранителем, доходит до OPEN.
+    """Погашенный предохранителем клиент доходит до OPEN.
 
     Так выглядит receiver после `_terminate()`: объект жив, но `is_started()`
     False. Именно этот путь раньше был недостижим при `abort=None`.
@@ -920,7 +920,7 @@ def _library_slices(crypto_key_header: str, encryption_header: str) -> tuple[str
 def test_prod_header_shape_decrypts_only_after_normalization(
     real_decrypt_raw_data,
 ) -> None:
-    """Регрессия #77 на настоящей криптографии, а не на моке.
+    """Проверить production-регрессию на настоящей криптографии, не на моке.
 
     Воспроизводим форму заголовков, снятую DIAG-пробой с прода 2026-08-13:
     `crypto-key: dh=<87>; p256ecdsa=<87>` (dh без padding) и
