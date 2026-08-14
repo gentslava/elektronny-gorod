@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (4.0.1 release PR merged; A-97 reconciled; publication verification pending)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (4.0.1 published; release asset, manifest and Pages deployment verified)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -215,7 +215,7 @@ Quality gates:
 - [x] Подготовлены CHANGELOG, RU/EN README, HACS info, сайт и [`releases/4.0.1.md`](releases/4.0.1.md).
 - [x] Release candidate прошёл обязательные review/CI gates; candidate-bound evidence опубликован в PR #80.
 - [x] Release PR #80 слит в `master`; A-97 переведён в `RESOLVED` с merge evidence.
-- [ ] После публикации проверить release asset, manifest и доставку через HACS.
+- [x] 4.0.1 опубликован: Release workflow зелёный, `elektronny_gorod.zip` содержит manifest версии 4.0.1, auto-commit версии появился в `master`, Pages deployment зелёный; HACS `zip_release` contract указывает на проверенный asset с ожидаемым именем.
 
 ### Итоги FCM-research
 
