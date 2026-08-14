@@ -17,7 +17,7 @@
 - **`*-bg` тинты** (badge/banner фон): `color-mix(in srgb, var(--eg-<role>) 18%, transparent)` (эквивалент alpha `2E`/`1A` из макета).
 - **Точные размеры (из `design.pen`, обязательны):** карточка контент `padding [6,16,28,16]`, `gap 20`, radius `16`; шапка: name `fs22 fw700`, addr `fs13 text-2`, close `44×44` elevated; статус-бейдж `pad[5,12] r-full`, dot `8×8`, текст `fs13 fw600`; окно ответа `h4 r-full`; видео `16:9 r-md`; слайдер трек `h80 r-full elevated`, thumb `68×68 primary` (ключ), торец `44×68 lock-open text-3`, «Открыть» `fs17 fw600`, hint `fs12 text-3`; круглая кнопка `68×68 r-full elevated`, иконка `28`, подпись `fs12 fw500 text-2`; ряд действий `gap 28 center`; компакт мини-видео `96×72`.
 - **Иконки — единый набор lucide** через компонент `eg-icon` (инлайн-SVG, `currentColor`, размер `--eg-icon-size`). НЕ mdi/`ha-icon` (по требованию однородности — макеты нарисованы в lucide). Геометрия извлечена из `lucide-static@1.23.0` (dev-only) и вшита в бандл. Набор: `key-round, lock, lock-open, phone, phone-off, mic, mic-off, volume-2, volume-x, x, timer, refresh-cw, door-open, video-off, wifi-off, circle-check, chevron-right, bell-ring`. Новые иконки добавлять тем же способом (извлечь из lucide-static, вписать в `ICONS` в `eg-icon.ts`).
-- **Проект-правила:** `.claude/rules/no-secret-logs.md` (не логировать токены/headers), `ha-best-practices.md` (theme-токены, `unique_id` без локали, a11y), `test-coverage.md` (bug→тест; не упрощать тесты ради зелёного CI), `git-history.md` (conventional commits, substantive). `mic-controller.ts` НЕ править (ADR-0013, two-way audio работает).
+- **Проект-правила:** `.agents/rules/no-secret-logs.md` (не логировать токены/headers), `ha-best-practices.md` (theme-токены, `unique_id` без локали, a11y), `test-coverage.md` (bug→тест; не упрощать тесты ради зелёного CI), `git-history.md` (conventional commits, substantive). `mic-controller.ts` НЕ править (ADR-0013, two-way audio работает).
 - **Проверка сборки:** `cd frontend && node build.mjs` собирает в `custom_components/elektronny_gorod/www/eg-intercom-call-card.js`. Тесты: `cd frontend && npm test`.
 - **A11y:** каждая кнопка — `aria-label`; слайдер — `role="slider"` + `aria-valuenow`; `@media (prefers-reduced-motion: reduce)` отключает анимации.
 - **Референс визуала** — узлы `design.pen` (id для скриншот-сверки указаны в задачах) + `call-card-ux-production.md`. Сверка КАЖДОГО слайса — скриншот узла макета vs рендер в браузере.
@@ -570,7 +570,7 @@ git commit -m "feat(call-card): паритет светлой темы + reduced
 **Files:**
 - Modify/Create: `frontend/test/*`
 
-- [ ] **Step 1:** Полный прогон — Run: `cd frontend && npm test`. Expected: все зелёные. Дописать недостающие (view-model, gesture, call-stage выбор). Не упрощать тесты ради зелёного (`.claude/rules/test-coverage.md`).
+- [ ] **Step 1:** Полный прогон — Run: `cd frontend && npm test`. Expected: все зелёные. Дописать недостающие (view-model, gesture, call-stage выбор). Не упрощать тесты ради зелёного (`.agents/rules/test-coverage.md`).
 - [ ] **Step 2: Финальная сборка** — Run: `cd frontend && node build.mjs` → без ошибок.
 - [ ] **Step 3: Commit** — `test(call-card): покрытие перевёрстки`.
 
@@ -583,9 +583,9 @@ git commit -m "feat(call-card): паритет светлой темы + reduced
 
 ### Task 7.3: Code-review + git-историан
 
-- [ ] **Step 1:** Запустить `code-reviewer` subagent по диффу (`.claude/rules/pre-pr-checklist.md`); применить P0/P1.
+- [ ] **Step 1:** Запустить `code-reviewer` subagent по диффу (`.agents/rules/pre-pr-checklist.md`); применить P0/P1.
 - [ ] **Step 2:** `git-historian` — `HISTORY_CLEAN` (схлопнуть slice-фиксапы если есть).
-- [ ] **Step 3:** Финальный прогон тестов+сборки; отчёт пользователю (без push/PR без явной команды — `.claude/rules/pre-pr-checklist.md`, boundary «Ask first»).
+- [ ] **Step 3:** Финальный прогон тестов+сборки; отчёт пользователю (без push/PR без явной команды — `.agents/rules/pre-pr-checklist.md`, boundary «Ask first»).
 
 ---
 

@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (bounded per-entry FCM recovery and candidate-bound review lifecycle reconciled; live test baseline delegated to testing strategy)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (cross-tool agent contracts consolidated under neutral `.agents/**`; live test baseline delegated to testing strategy)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -109,10 +109,12 @@ Feature backlog независим от reliability queue; порядок заф
 
 ## AIDD-структура
 
-Развёрнут **Full AIDD**: docs/ + `.claude/*` + `.cursor/*` + `.github/copilot-instructions.md` + ADR + templates + runbooks. Подробности — в [`index.md`](index.md).
+Развёрнут **Full AIDD**: canonical `.agents/*` + thin Claude/Codex/Cursor/Copilot adapters + `docs/` + ADR + templates + runbooks. Подробности — в [`index.md`](index.md).
 
 ```
-AGENTS.md / CLAUDE.md / conventions.md / workflow.md  ← корневые контракты
+AGENTS.md / conventions.md / workflow.md              ← корневые контракты
+.agents/                                              ← canonical roles/rules/commands/hooks
+.claude/ .codex/ .cursor/                             ← tool-specific adapters
 docs/
 ├── index.md                       ← точка входа
 ├── summary.md                     ← это

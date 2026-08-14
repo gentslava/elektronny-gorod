@@ -1,4 +1,4 @@
-Status: Active Owner: Security & Privacy Agent Last reviewed: 2026-08-11 (canonical AST/CLI secret-log gate; FCM Repairs title privacy boundary accepted; 9.9.0 parity credential classification retained)
+Status: Active Owner: Security & Privacy Agent Last reviewed: 2026-08-14 (secret-log gate moved to neutral `.agents/hooks`; security behavior unchanged)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -7,8 +7,8 @@ Source files:
 - `custom_components/elektronny_gorod/helpers.py`
 - `custom_components/elektronny_gorod/user_agent.py`
 - `custom_components/elektronny_gorod/fcm.py`
-- `.codex/hooks/check-secret-logs.py`
-- `.codex/hooks/check-secret-logs.sh`
+- `.agents/hooks/check-secret-logs.py`
+- `.agents/hooks/check-secret-logs.sh`
 
 Related docs:
 - `project-audit.md`
@@ -295,7 +295,7 @@ Quality gates:
 
 - [x] **S-01..S-04, S-06 исправлены** (ветка `hotfix/p0-security`; верифицировано по коду 2026-05-30).
 - [x] Добавлен helper `_logging.py` с `SENSITIVE_KEYS` + `redact()` (ADR-0004).
-- [x] `bash .codex/hooks/check-secret-logs.sh` проходит: прямые sensitive values в `LOGGER.*` не найдены; безопасные `len(value)`/`redact(value)` не считаются утечками.
+- [x] `bash .agents/hooks/check-secret-logs.sh` проходит: прямые sensitive values в `LOGGER.*` не найдены; безопасные `len(value)`/`redact(value)` не считаются утечками.
 - [x] S-05 (shared ClientSession) — RESOLVED (ADR-0008).
 - [x] S-A71-01 (operator-токен в traceback go2rtc PUT) — RESOLVED (`from None`).
 - [x] **S-08 — `diagnostics.py` с redaction** (RESOLVED в 3.3.0).

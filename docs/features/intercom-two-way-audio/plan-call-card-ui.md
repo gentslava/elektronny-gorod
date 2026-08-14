@@ -2,7 +2,7 @@
 
 > **Execution mode:** use the active tool's native subagent workflow when
 > available; otherwise execute the checkboxes inline. TDD обязателен для backend
-> (Slice 3a). Перед push — `.claude/rules/pre-pr-checklist.md`.
+> (Slice 3a). Перед push — `.agents/rules/pre-pr-checklist.md`.
 
 **Goal:** Дать (а) единый backend-источник состояния вызова `sensor.<intercom>_call_state` для DIY-сборки и автоматизаций, и (б) готовую «из коробки» карточку `eg-intercom-call-card` (Lit+TS), повторяющую UX приложения в родном HA-облике.
 
@@ -220,7 +220,7 @@ frontend/
 
 ---
 
-## Quality gates (на каждый PR — `.claude/rules/pre-pr-checklist.md`)
+## Quality gates (на каждый PR — `.agents/rules/pre-pr-checklist.md`)
 - TDD: backend-тесты зелёные (3a). Карточка — unit + live.
 - code-reviewer (subagent) до push; P0/P1 применить.
 - Docs sync (CHANGELOG, project-map, README, audit).

@@ -1,4 +1,4 @@
-Status: Active Owner: Validator Agent Last reviewed: 2026-08-11 (A-97 candidate freeze/re-attestation and publication/CI evidence lifecycle by ADR-0015)
+Status: Active Owner: Validator Agent Last reviewed: 2026-08-14 (gate owners and commands linked to canonical `.agents/**` contracts)
 
 Source files:
 - весь репозиторий
@@ -122,7 +122,7 @@ Used by agents:
 |---|---|
 | Purpose | Нет утечек секретов в логи, есть redaction, нет очевидных уязвимостей |
 | Owner | Security & Privacy Agent |
-| Required commands | `bash .codex/hooks/check-secret-logs.sh` → `Secret log scan passed` |
+| Required commands | `bash .agents/hooks/check-secret-logs.sh` → `Secret log scan passed` |
 | Required evidence | `CANDIDATE_FROZEN` + independent read-only security review того же base/head/tree для auth/token/credentials/FCM-sensitive diff |
 | Pass | все Critical/Important security findings закрыты и перепроверены; redaction boundary подтверждена на frozen candidate |
 | Fail | хотя бы один Critical/Important finding не закрыт или review относится к другому candidate |
@@ -176,13 +176,13 @@ Used by agents:
 | Поле | Значение |
 |---|---|
 | Purpose | git-история feature-ветки стабилизирована до candidate freeze и останется чистой перед merge |
-| Owner | Git Historian ([Claude](../../.claude/agents/git-historian.md) / [Codex](../../.codex/agents/git-historian.toml)); Validator/root fallback |
+| Owner | Git Historian (`.agents/roles/git-historian.md`); Validator/root fallback |
 | Required evidence | commit list + diff against `<target-ref>`; нет WIP/DIAG/debug/typo-only цепочек; дальнейший rebase/squash не запланирован; при rewrite создан локальный backup ref |
 | Pass | `git log --oneline <target-ref>..HEAD` показывает logically-grouped conventional commits; rationale понятен из subject/body; после freeze история не меняется |
 | Fail | >3 hotfix-ов подряд на одну фичу; коммиты «WIP», «fix typo», «revert prev»; DIAG/debug код в финальном diff |
 | Stop | не закрывать `CANDIDATE_FROZEN` и не merge-ить без cleanup; force-push в master запрещён |
 
-См. [`.claude/rules/git-history.md`](../../.claude/rules/git-history.md) и slash-команду `/git-cleanup`.
+См. `.agents/rules/git-history.md` и canonical command `.agents/commands/git-cleanup.md`.
 
 ## READY_FOR_RELEASE
 

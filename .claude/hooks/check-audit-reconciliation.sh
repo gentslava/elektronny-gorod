@@ -5,4 +5,4 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel)"
-exec bash "$REPO_ROOT/.codex/hooks/check-audit-reconciliation.sh" "$@"
+exec bash "$REPO_ROOT/.agents/hooks/check-audit-reconciliation.sh" "$@"

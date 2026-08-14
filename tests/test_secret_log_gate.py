@@ -15,8 +15,8 @@ import custom_components.elektronny_gorod  # noqa: F401  # load patch targets
 
 
 REPO_ROOT = Path(__file__).parents[1]
-SCANNER_PATH = REPO_ROOT / ".codex/hooks/check-secret-logs.py"
-WRAPPER_PATH = REPO_ROOT / ".codex/hooks/check-secret-logs.sh"
+SCANNER_PATH = REPO_ROOT / ".agents/hooks/check-secret-logs.py"
+WRAPPER_PATH = REPO_ROOT / ".agents/hooks/check-secret-logs.sh"
 CLAUDE_HOOK_PATH = REPO_ROOT / ".claude/hooks/post-edit-redaction-check.sh"
 
 

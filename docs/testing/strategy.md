@@ -1,4 +1,4 @@
-Status: Active Owner: QA / Testing Agent Last reviewed: 2026-08-14 (FCM/Repairs plus deterministic secret/audit/cross-tool gate regressions; 666-test backend suite synchronized)
+Status: Active Owner: QA / Testing Agent Last reviewed: 2026-08-14 (canonical agent-contract parity/path/thin-adapter regressions; 686-test backend suite synchronized)
 
 Source files:
 - `tests/**` (57 test-модулей + `conftest.py`)
@@ -29,12 +29,12 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **666 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-14) |
+| Локальный suite | **686 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-14) |
 | Test modules | 57 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction including production-format config-entry title, diagnostics, HTTP no-leak, golden vectors helpers, deterministic secret-log scanner |
-| AIDD gates | Secret scanner; Claude/Codex reconciliation adapters; candidate-SHA CI, stacked target-ref, reviewer parity и portable-plan contracts |
+| AIDD gates | Canonical secret/reconciliation hooks; Claude/Codex adapters; candidate-SHA CI, stacked target-ref, role/command/rule parity, thin adapters и path-fence contracts |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
 | Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
@@ -238,7 +238,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 666 passed (2026-08-14).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 686 passed (2026-08-14).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

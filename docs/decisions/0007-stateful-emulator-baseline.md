@@ -93,4 +93,4 @@ Stateful (с baseline snapshot) даёт:
 
 - Связано с [`research/scripts/`](../../research/scripts/) — pipeline реализации.
 - Реализация: [`runbooks/har-collection.md`](../aidd/runbooks/har-collection.md).
-- Роль: [`.claude/agents/reverse-engineer.md`](../../.claude/agents/reverse-engineer.md).
+- Роль: [`.agents/roles/reverse-engineer.md`](../../.agents/roles/reverse-engineer.md).

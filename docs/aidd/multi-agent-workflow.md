@@ -1,8 +1,9 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-11 (default subagent execution, independent review and ADR-0015 publication/evidence ownership clarified after A-97)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (canonical roles/rules moved to neutral `.agents/**`; tool-specific profiles are adapters)
 
 Source files:
-- `.claude/agents/**`
-- `.codex/agents/**`
+- `.agents/roles/**`
+- `.agents/rules/**`
+- `../../AGENTS.md`
 - `quality-gates.md`
 
 Related docs:
@@ -64,7 +65,7 @@ git rev-parse 'HEAD^{tree}'
 | Обязательное чтение | `../index.md`, `../summary.md`, `../audit/project-audit.md`, `../roadmap.md` |
 | Outputs | финальная сводка, обновлённый `summary.md`, обновлённый `audit/project-audit.md` |
 | Gate | `AUDIT_DONE`, `READY_FOR_RELEASE` |
-| Subagent file | `.claude/agents/lead-architect.md` |
+| Canonical role | `.agents/roles/lead-architect.md` |
 
 ### 2. Project Cartographer Agent
 
@@ -83,7 +84,7 @@ git rev-parse 'HEAD^{tree}'
 | Обязательное чтение | `../architecture/ha-compatibility.md`, `../architecture/quality-scale.md`, `source-base.md` (HA-секция) |
 | Outputs | `ha-compatibility.md`, `quality-scale.md`, HA-разделы в `project-audit.md` |
 | Gate | `AUDIT_DONE` |
-| Subagent file | `.claude/agents/ha-expert.md` |
+| Canonical role | `.agents/roles/ha-expert.md` |
 | Final review mode | read-only по base/head/tree; fixes возвращаются implementer-у |
 
 ### 4. Security & Privacy Agent
@@ -94,7 +95,7 @@ git rev-parse 'HEAD^{tree}'
 | Обязательное чтение | `../audit/security.md`, `../audit/project-audit.md` |
 | Outputs | `../audit/security.md`, security-разделы в `project-audit.md` |
 | Gate | `SECURITY_OK` |
-| Subagent file | `.claude/agents/security-auditor.md` |
+| Canonical role | `.agents/roles/security-auditor.md` |
 | Final review mode | read-only по base/head/tree; implementation mode может использовать разрешённые writes |
 
 ### 5. QA / Testing Agent
@@ -105,7 +106,7 @@ git rev-parse 'HEAD^{tree}'
 | Обязательное чтение | `../testing/strategy.md`, `quality-gates.md` (gate TESTS_PASS) |
 | Outputs | новые тесты в `tests/`, обновления `strategy.md` |
 | Gate | `TESTS_PASS` |
-| Subagent file | `.claude/agents/qa-engineer.md` |
+| Canonical role | `.agents/roles/qa-engineer.md` |
 | Final review mode | read-only по base/head/tree; проверка acceptance и test anti-patterns |
 
 ### 6. Documentation / AIDD Agent
@@ -116,7 +117,7 @@ git rev-parse 'HEAD^{tree}'
 | Обязательное чтение | `../project/project-map.md#maintenance-rules`, `../../workflow.md` |
 | Outputs | обновлённые docs/* |
 | Gate | `DOCS_UPDATED` |
-| Subagent file | `.claude/agents/docs-keeper.md` |
+| Canonical role | `.agents/roles/docs-keeper.md` |
 
 ### 7. DevOps / Release Agent
 
@@ -143,10 +144,10 @@ Validator — обязанность root/lead orchestrator во всех под
 | Поле | Значение |
 |---|---|
 | Когда | после implementation/docs и до candidate freeze; при hotfix/WIP/diag history |
-| Обязательное чтение | `.claude/rules/git-history.md`, ADR-0015, `quality-gates.md` |
+| Обязательное чтение | `.agents/rules/git-history.md`, ADR-0015, `quality-gates.md` |
 | Outputs | history audit, backup-ref evidence при rewrite, exact final tree |
 | Gate | `HISTORY_CLEAN` |
-| Subagent files | `.claude/agents/git-historian.md`, `.codex/agents/git-historian.toml` |
+| Canonical role | `.agents/roles/git-historian.md` |
 
 Если отдельная роль недоступна, те же проверки выполняет Validator/root. Любой history rewrite инвалидирует candidate и все прежние approvals.
 
@@ -158,7 +159,7 @@ Validator — обязанность root/lead orchestrator во всех под
 | Обязательное чтение | [ADR-0006](../decisions/0006-mirror-app-behavior.md), [ADR-0007](../decisions/0007-stateful-emulator-baseline.md), `../architecture/api-reference.md`, `runbooks/har-collection.md`, `../../research/scripts/README.md` |
 | Outputs | `../../research/api/*.har` (local-only), обновление `../architecture/api-reference.md` |
 | Gate | (нет своего, hand-off в lead-architect / ha-expert при необходимости правок кода) |
-| Subagent file | `.claude/agents/reverse-engineer.md` |
+| Canonical role | `.agents/roles/reverse-engineer.md` |
 | Slash command | `/capture-har <scenario>` |
 | Tools restriction | НЕ может писать в `custom_components/`, `tests/`, `manifest.json`, `.github/`, `docs/audit/`, accepted ADR |
 
@@ -167,12 +168,12 @@ Validator — обязанность root/lead orchestrator во всех под
 | Поле | Значение |
 |---|---|
 | Когда | после tests/security prechecks/docs/history cleanup и candidate freeze; обязательно перед обычным push / ready-for-review PR / merge нетривиального изменения |
-| Обязательное чтение | `../../conventions.md`, `../audit/project-audit.md`, `../audit/security.md`, `../decisions/*.md`, `../../.claude/rules/*` |
+| Обязательное чтение | `../../conventions.md`, `../audit/project-audit.md`, `../audit/security.md`, `../decisions/*.md`, `.agents/rules/*` |
 | Outputs | review report по [`templates/review-report.template.md`](templates/review-report.template.md) |
 | Gate | `REVIEW_OK` |
-| Subagent file | `.claude/agents/code-reviewer.md` |
+| Canonical role | `.agents/roles/code-reviewer.md` |
 | Tools restriction | **read-only** — не пишет код сам |
-| Skills | `agent-skills:code-review-and-quality` (обязательно), `agent-skills:security-and-hardening` |
+| Skills | `code-review-and-quality` (если доступен), `security-and-hardening` |
 
 ## Hand-off pattern
 
@@ -186,7 +187,7 @@ Lead Architect:
    ↓
 Security & Privacy Agent:
    - читает audit/security.md
-   - применяет skill agent-skills:security-and-hardening
+   - применяет skill security-and-hardening, если он доступен
    - вносит правки в http.py, config_flow.py
    - hand-off → QA Agent (нужны тесты на отсутствие логов)
    ↓
@@ -239,7 +240,7 @@ Merge owner:
 
 ## Boundaries (повтор)
 
-См. [`../../AGENTS.md#safety-rules--boundaries`](../../AGENTS.md). У каждого агента те же базовые правила, плюс role-specific через `.claude/agents/<role>.md` frontmatter (`tools:` whitelist).
+См. [`../../AGENTS.md#safety-rules--boundaries`](../../AGENTS.md). У каждого агента те же базовые правила и canonical role из `.agents/roles/<role>.md`; tool adapter может дополнительно ограничить доступные tools через runtime metadata.
 
 ## Output format для каждого агента
 
@@ -265,8 +266,9 @@ Merge owner:
 
 ## Next reading
 
-- For agent files: `../../.claude/agents/`
-- For commands: `../../.claude/commands/`
+- For canonical roles: `../../.agents/roles/`
+- For canonical commands: `../../.agents/commands/`
+- For tool adapters: `../../.claude/` and `../../.codex/`
 - For prompts: `prompt-library.md`
 - For skills: `skills.md`
 - For gates: `quality-gates.md`

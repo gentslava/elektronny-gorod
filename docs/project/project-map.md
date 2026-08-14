@@ -1,9 +1,10 @@
-Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-11 (bounded FCM recovery plus candidate-bound AIDD maintenance rules)
+Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-14 (neutral `.agents/**` source and tool adapter layout mapped)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
 - `tests/**`
 - `.github/workflows/**`
+- `.agents/**`, `.claude/**`, `.codex/**`, `.cursor/**`
 - `manifest.json`, `hacs.json`, `info.md`
 
 Related docs:
@@ -107,15 +108,16 @@ elektronny-gorod/
 │   ├── release.yaml               ← release zip + auto-commit (на event release)
 │   └── prerelease.yaml            ← PR pre-release zip (на event pull_request)
 │
-├── .claude/                       ← Claude Code конфигурация (Full AIDD)
-│   ├── agents/                    ← 5 субагентов (HA-expert, security, QA, ...)
-│   ├── commands/                  ← slash-команды
-│   ├── rules/                     ← path-specific правила
-│   ├── hooks/                     ← bash-хуки (pre-commit redaction, etc.)
-│   └── settings.json
+├── .agents/                       ← canonical cross-tool contracts
+│   ├── roles/                     ← полные role contracts
+│   ├── rules/                     ← полные engineering/process rules
+│   ├── commands/                  ← полные operational procedures
+│   └── hooks/                     ← реализации executable gates
 │
-├── .cursor/rules/                 ← правила Cursor (Full AIDD)
-├── .github/copilot-instructions.md ← инструкции для Copilot
+├── .claude/                       ← Claude discovery/settings adapters
+├── .codex/                        ← Codex agent/hook adapters
+├── .cursor/rules/                 ← Cursor scope adapters
+├── .github/copilot-instructions.md ← Copilot adapter
 │
 └── docs/                          ← AIDD-документация (см. ниже)
 ```

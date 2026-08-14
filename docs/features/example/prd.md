@@ -1,7 +1,7 @@
 # PRD: Token redaction in logs
 
 - **Date:** 2026-05-22
-- **Last reviewed:** 2026-08-11
+- **Last reviewed:** 2026-08-14
 - **Owner:** Security & Privacy Agent
 - **Status:** Approved (для example — синтетически)
 - **Linked idea:** [`idea.md`](idea.md)
@@ -38,13 +38,13 @@
 - Создать `_logging.py` с `redact()` helper и `SENSITIVE_KEYS`.
 - Заменить все прямые логи токенов на `redact(headers/data)` либо удалить.
 - Создать `diagnostics.py` с `TO_REDACT = SENSITIVE_KEYS`.
-- Canonical scanner `.codex/hooks/check-secret-logs.py` с portable shell wrapper и thin tool-specific adapters.
+- Canonical scanner `.agents/hooks/check-secret-logs.py` с portable shell wrapper и thin tool-specific adapters.
 
 См. [ADR-0004](../../decisions/0004-token-redaction.md).
 
 ## Acceptance criteria
 
-- [ ] `bash .codex/hooks/check-secret-logs.sh` → `Secret log scan passed`.
+- [ ] `bash .agents/hooks/check-secret-logs.sh` → `Secret log scan passed`.
 - [ ] Diagnostics-выгрузка через UI содержит `"***"` вместо реальных токенов.
 - [ ] Pre-commit hook блокирует регрессии.
 - [ ] Hotfix-релиз с changelog «security: redact tokens in logs» опубликован.

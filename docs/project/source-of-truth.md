@@ -1,4 +1,4 @@
-Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-11 (manifest requirements and FCM dependency contract reconciled with project/HA compatibility sources)
+Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-14 (agent contracts consolidated under neutral `.agents/**` source)
 
 Source files:
 - весь репозиторий (это карта)
@@ -57,6 +57,12 @@ Quality gates:
 | Brand assets | brands.home-assistant.io/elektronny_gorod/ | разработчик (через PR в brands repo) | HA UI, README badge |
 | Пользовательская документация | [`README.md`](../../README.md) + [`README.en_EN.md`](../../README.en_EN.md) | разработчик | пользователь |
 | Краткая HACS feature card | [`info.md`](../../info.md), производна от README | разработчик | HACS-пользователь |
+| Общий agent contract | [`AGENTS.md`](../../AGENTS.md) | Lead Architect | все agents и adapters |
+| Agent roles | [`.agents/roles/*.md`](../../.agents/roles/) | owner роли | Claude/Codex adapters |
+| Engineering/process rules | [`.agents/rules/*.md`](../../.agents/rules/) | owner правила | все agents |
+| Agent commands | [`.agents/commands/*.md`](../../.agents/commands/) | process owner | slash-command/skill adapters |
+| Cross-tool executable gates | [`.agents/hooks/*`](../../.agents/hooks/) | QA/Security/Docs owners | Claude/Codex hook adapters |
+| Tool discovery metadata | `.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md` | tool adapter owner | конкретный runtime; не source of truth поведения |
 
 ## Известные конфликты
 

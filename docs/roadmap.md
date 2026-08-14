@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-11 (A-97 independent-review candidate lifecycle mapped; current finding status remains canonical in project-audit)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (A-97 agent contracts consolidated under neutral `.agents/**`; merge status remains canonical in project-audit)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -181,10 +181,10 @@ Quality gates:
 #### AIDD Full
 
 - [ ] **A-97** Independent review candidate lifecycle: durable plan approval, tests/security prechecks/docs/history cleanup before freeze, immutable base/head/tree, non-waivable read-only post-freeze security/code/profile reviews and mandatory candidate-bound re-attestation (ADR-0015). Complete after the process changeset itself passes those reviews and merges.
-- [x] Claude/Codex agent profiles синхронизированы; final review mode требует exact tuple, independence и Critical/Important closure.
-- [x] Operational commands/skills созданы и используют один candidate lifecycle.
-- [x] Path rules созданы; security/review gates не расходятся между tools.
-- [x] Canonical hooks живут в `.codex/hooks/`; Claude hooks — wrappers без дублирования scanner/reconciliation логики.
+- [x] Роли, rules и operational commands имеют один нейтральный source of truth в `.agents/**`; Claude/Codex/Cursor/Copilot файлы — thin adapters.
+- [x] Final review mode требует exact tuple, independence и Critical/Important closure в canonical role contracts.
+- [x] Canonical hooks живут в `.agents/hooks/`; Claude/Codex hooks — wrappers без дублирования implementations.
+- [x] Contract tests проверяют parity adapters, canonical paths, thin-file limits и отсутствие parent-relative path fences.
 - [x] `docs/decisions/` содержит актуальные ADR; итоговый review/publication процесс консолидирован в ADR-0015.
 - [x] `docs/features/<feature-id>/` templates созданы.
 - [x] `docs/aidd/mcp-tools.md` описывает инструменты и permissions.

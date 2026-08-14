@@ -1,0 +1,45 @@
+---
+description: Запустить git-historian для аудита и чистки git истории текущей feature-ветки перед merge.
+kind: canonical-agent-command
+---
+
+Цель: схлопнуть «иттерационные» коммиты (hotfix-цепочки, DIAG-логи, typo- правки) в логичные substantive единицы. После — клонированная история выглядит так, как будто человек писал её сразу набело.
+
+## Шаги
+
+1. Прочитай `.agents/roles/git-historian.md` — канонический контракт агента.
+2. Прочитай `.agents/rules/git-history.md` — критерии gate `HISTORY_CLEAN`.
+3. Запусти роль `git-historian` доступным в текущем tool механизмом с задачей:
+   - сначала зафиксировать явный `<target-ref>` (PR base; для stacked PR — parent feature branch, не `master`);
+   - проанализировать текущую ветку `git log --oneline <target-ref>..HEAD`,
+   - предложить план rebase (squash / fixup / reword / drop),
+   - **спросить подтверждение** у user'а перед выполнением (не делать rebase автоматически без явного approval),
+   - после rebase — verify diff vs `<target-ref>`, объявить прежние approvals stale и остановиться до нового freeze/review; не push-ить переписанный candidate напрямую.
+
+## Что обязательно сделать перед rebase
+
+- ✅ Создать backup-ветку: `git branch backup/<branch>-$(date +%Y-%m-%d)`.
+- ✅ Убедиться что в ветку не пушены чужие коммиты после твоего последнего pull.
+- ✅ Все локальные изменения закоммичены или stashed.
+
+## Что НЕЛЬЗЯ
+
+- 🔴 Force-push в `master` / `main` / `dev`.
+- 🔴 Менять author/email коммитов.
+- 🔴 Изменять коммиты в master.
+- 🔴 `--no-verify` / `--no-gpg-sign`.
+
+## Output
+
+После выполнения — отчёт по шаблону из git-historian:
+- Before: N коммитов
+- Plan table
+- Verification (backup branch, diff idempotent)
+- Push status
+- Новый base/head/tree и hand-off на обязательные re-attestations
+
+## Связь
+
+- `.agents/roles/git-historian.md`
+- `.agents/rules/git-history.md`
+- `docs/aidd/quality-gates.md` — `HISTORY_CLEAN`.

@@ -85,7 +85,8 @@ custom_components/elektronny_gorod/
 tests/                     # pytest suite (PHC-based)
 .github/workflows/         # python-tests / hassfest / hacs / release / prerelease
 docs/                      # AIDD-документация (project/architecture/audit/testing/aidd/)
-.claude/                   # agents / commands / rules / hooks / settings
+.agents/                   # canonical roles / rules / commands / hooks
+.claude/ .codex/ .cursor/  # tool-specific discovery adapters only
 ```
 
 ## Code style
@@ -155,6 +156,20 @@ docs/                      # AIDD-документация (project/architecture
 
 Если изменение задевает несколько источников правды — зафиксировать рассогласование в [`project-audit.md`](docs/audit/project-audit.md).
 
+## Agent instruction source of truth
+
+- `AGENTS.md` — единственный общий repository contract.
+- `.agents/roles/*.md` — канонические контракты ролей.
+- `.agents/rules/*.md` — канонические инженерные и process rules.
+- `.agents/commands/*.md` — канонические операционные процедуры.
+- `.agents/hooks/*` — канонические реализации cross-tool gates.
+- `.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md`
+  и `.agents/skills/source-command-*` — только discovery/runtime adapters.
+
+Адаптер может содержать обязательные для инструмента metadata, glob/path scope
+или wiring, но не копию правила. Внутренние пути в agent contracts задаются от
+корня репозитория в backticks; цепочки `../../..` в adapters запрещены.
+
 ## Где искать что
 
 | Хочу | Файл |
@@ -176,5 +191,6 @@ docs/                      # AIDD-документация (project/architecture
 
 ## Tool-specific
 
-- **Claude Code** — см. [`CLAUDE.md`](CLAUDE.md).
-- **OpenAI Codex / Copilot / Cursor / Aider** — этот файл является source of truth.
+- **Claude Code** — `CLAUDE.md` импортирует этот контракт; `.claude/**` содержит adapters.
+- **OpenAI Codex** — `.codex/**` содержит adapters к `.agents/**`.
+- **Copilot / Cursor / Aider** — читают этот файл и matching rules из `.agents/rules/**` через свои adapters.

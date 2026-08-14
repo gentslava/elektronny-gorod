@@ -1,51 +1,9 @@
 ---
 name: "source-command-git-cleanup"
-description: "Запустить git-historian для аудита и чистки git истории текущей feature-ветки перед merge."
+description: "Провести аудит и безопасную чистку истории feature-ветки."
 ---
 
-# source-command-git-cleanup
+# Command adapter
 
-Use this skill when the user asks to run the migrated source command `git-cleanup`.
-
-## Command Template
-
-Цель: схлопнуть «иттерационные» коммиты (hotfix-цепочки, DIAG-логи, typo- правки) в логичные substantive единицы. После — клонированная история выглядит так, как будто человек писал её сразу набело.
-
-## Шаги
-
-1. Прочитай [`.claude/agents/git-historian.md`](../../../.claude/agents/git-historian.md) — контракт агента.
-2. Прочитай [`.claude/rules/git-history.md`](../../../.claude/rules/git-history.md) — критерии gate `HISTORY_CLEAN`.
-3. Запусти независимого subagent с контрактом Git Historian (dedicated `git-historian`, если такой тип доступен; иначе general-purpose agent с тем же read-only заданием) с задачей:
-   - сначала зафиксировать явный `<target-ref>` (PR base; для stacked PR — parent feature branch, не `master`);
-   - проанализировать текущую ветку `git log --oneline <target-ref>..HEAD`,
-   - предложить план rebase (squash / fixup / reword / drop),
-   - **спросить подтверждение** у user'а перед выполнением (не делать rebase автоматически без явного approval),
-   - после rebase — verify diff vs `<target-ref>`, объявить прежние approvals stale и остановиться до нового freeze/review; не push-ить переписанный candidate напрямую.
-
-## Что обязательно сделать перед rebase
-
-- ✅ Создать backup-ветку: `git branch backup/<branch>-$(date +%Y-%m-%d)`.
-- ✅ Убедиться что в ветку не пушены чужие коммиты после твоего последнего pull.
-- ✅ Все локальные изменения закоммичены или stashed.
-
-## Что НЕЛЬЗЯ
-
-- 🔴 Force-push в `master` / `main` / `dev`.
-- 🔴 Менять author/email коммитов.
-- 🔴 Изменять коммиты в master.
-- 🔴 `--no-verify` / `--no-gpg-sign`.
-
-## Output
-
-После выполнения — отчёт по шаблону из git-historian:
-- Before: N коммитов
-- Plan table
-- Verification (backup branch, diff idempotent)
-- Push status
-- Новый base/head/tree и hand-off на обязательные re-attestations
-
-## Связь
-
-- [`.claude/agents/git-historian.md`](../../../.claude/agents/git-historian.md)
-- [`.claude/rules/git-history.md`](../../../.claude/rules/git-history.md)
-- [`docs/aidd/quality-gates.md`](../../../docs/aidd/quality-gates.md) — `HISTORY_CLEAN`.
+Полностью прочитай и выполни каноническую процедуру
+`.agents/commands/git-cleanup.md`. Не копируй процедуру в этот skill.

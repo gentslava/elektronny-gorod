@@ -1,4 +1,4 @@
-Status: Active Owner: DevOps / Release Agent Last reviewed: 2026-08-11 (ADR-0015 candidate-bound evidence and CI release gates)
+Status: Active Owner: DevOps / Release Agent Last reviewed: 2026-08-14 (release command linked to canonical `.agents/commands` procedure)
 
 Source files:
 - `.github/workflows/release.yaml`
@@ -7,7 +7,7 @@ Source files:
 
 Related docs:
 - `../quality-gates.md`
-- `../../../.claude/commands/release-check.md`
+- `../../../.agents/commands/release-check.md`
 
 Used by agents:
 - Release Agent, Validator, maintainer

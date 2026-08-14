@@ -1,7 +1,7 @@
 # Tasklist: Token redaction in logs
 
 - **Date:** 2026-05-22
-- **Last reviewed:** 2026-08-11
+- **Last reviewed:** 2026-08-14
 - **Owner:** Security & Privacy Agent
 - **Linked plan:** [`plan.md`](plan.md)
 
@@ -30,7 +30,7 @@
 
 ### Slice 5 — Pre-commit hook
 
-- [x] **T-010** Создать canonical `.codex/hooks/check-secret-logs.py/.sh` и thin tool-specific adapters (см. [ADR-0004](../../decisions/0004-token-redaction.md)).
+- [x] **T-010** Создать canonical `.agents/hooks/check-secret-logs.py/.sh` и thin tool-specific adapters (см. [ADR-0016](../../decisions/0016-canonical-agent-contracts.md)).
 - [ ] **T-011** Зарегистрировать hook в `.claude/settings.json` для events `PreToolUse: Bash(git commit:*)` или эквивалентного.
 - [ ] **T-012** Ручной dry-run: создать локальный коммит с заведомой утечкой → hook блокирует.
 

@@ -1,10 +1,11 @@
-Status: Pending approval Owner: Root orchestrator Last reviewed: 2026-08-11 (revision 3 after second independent critic pass)
+Status: Approved Owner: Root orchestrator Last reviewed: 2026-08-14 (revision 4 adds neutral canonical agent contracts after owner feedback)
 
 Source files:
 - `docs/decisions/0015-independent-review-candidate.md`
+- `docs/decisions/0016-canonical-agent-contracts.md`
 - `workflow.md`
 - `docs/aidd/quality-gates.md`
-- active Claude/Codex agents, commands, skills and hooks
+- canonical `.agents/**` contracts and tool-specific adapters
 
 Related docs:
 - `../audit/project-audit.md` (A-97)
@@ -24,11 +25,11 @@ Quality gates:
 
 ## Approval record
 
-- **Revision:** 3.
+- **Revision:** 4.
 - **Approver:** @gentslava.
-- **Date:** 2026-08-12.
-- **Evidence:** direct session instruction to publish this branch as its own pull request ("chore/aidd-review-gates нужно запушить и создать PR"), which accepts revision 3 and releases the remaining remediation tasks.
-- **Execution mode:** subagent-driven implementation/review where isolated ownership is useful; root orchestrator owns integration and publication.
+- **Date:** 2026-08-14.
+- **Evidence:** direct owner instruction that Claude/Codex/other agent rules must reference one source of truth instead of duplicating instructions, with path-fence drift shown in PR #79.
+- **Execution mode:** inline implementation in the root session under the active collaboration policy; independent candidate reviews remain mandatory after freeze.
 
 ## Goal
 
@@ -39,6 +40,7 @@ Make it impossible for a nontrivial change to reach ordinary push/merge using se
 - One accepted ADR for plan approval, candidate freeze, independent review, publication evidence, CI and live test-baseline ownership.
 - Synchronized root contracts, workflow, quality gates, agent profiles, commands, migrated skills, templates and runbooks.
 - One canonical secret-log scanner and one canonical audit-reconciliation hook; tool-specific wrappers contain no duplicate logic.
+- One neutral `.agents/**` source for roles, rules, commands and hook implementations; tool directories retain discovery metadata only.
 - Regression tests for scanner, reconciliation and cross-tool invariants.
 - A product-only PR #78 plus a separate stacked process/tooling PR.
 
@@ -69,6 +71,8 @@ All final reviewers receive one exact base/head/tree, work read-only, declare no
 - [x] Synchronize active Claude/Codex profiles and operational adapters.
 - [x] Bind release checks to PR head SHA and support stacked `<target-ref>`.
 - [x] Reconcile hook/tool/roadmap docs and remove tool-specific plan mandates.
+- [x] Consolidate role, rule, command and hook bodies under `.agents/**`; replace Claude/Codex/Cursor/Copilot copies with thin adapters.
+- [x] Add ADR-0016, source-of-truth mapping and adapter drift regressions.
 - [ ] Recheck PR `headRefOid` after `gh pr checks --watch` to close the stale-head race.
 - [ ] Remove stale `READY_FOR_RELEASE`/Silver claims from roadmap summaries.
 - [ ] Extend portability regression coverage to feature-local plans and finish metadata/`Next reading` for the new plan.
@@ -81,7 +85,8 @@ All final reviewers receive one exact base/head/tree, work read-only, declare no
 - Focused hook/contract tests and full backend suite pass.
 - Secret and reconciliation hooks pass; pending findings are reported as open.
 - No active adapter checks CI from `master` or diffs a stacked PR from hardcoded `master`.
-- Claude/Codex final reviewer profiles share tuple, independence, Critical/Important and re-attestation invariants.
+- Canonical final reviewer roles contain tuple, independence, Critical/Important and re-attestation invariants; Claude/Codex profiles only delegate to them.
+- Adapter sets match canonical roles/commands, remain thin and contain no parent-relative Markdown path fences.
 - Plans are tool-independent; hook docs name only canonical live files.
 - History is self-contained, with no commit requiring an executable introduced only by a later commit.
 - Independent reviewers report no Critical/Important finding on the final tuple.

@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (A-80/A-86 field incident #77 and bounded per-entry FCM recovery merged through PR #78; A-97 independent candidate review/publication gates split from product; live test baseline delegated to testing strategy)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (A-97 process contracts consolidated under neutral `.agents/**`; finding remains in review until candidate gates and merge)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -45,7 +45,7 @@ Quality gates:
 - **🔴 OPEN / STILL OPEN** — не сделано.
 - **🟡 WON'T FIX** — осознанно не чиним (с обоснованием).
 
-🔴 Статус-плейсхолдеры без reconciliation запрещены: указывай либо merged-SHA, либо `pending merge <ref>`. Каноническую сверку гоняет `.codex/hooks/check-audit-reconciliation.sh`; Claude adapter делегирует ему.
+🔴 Статус-плейсхолдеры без reconciliation запрещены: указывай либо merged-SHA, либо `pending merge <ref>`. Каноническую сверку гоняет `.agents/hooks/check-audit-reconciliation.sh`; Claude/Codex adapters делегируют ей.
 
 ## P0 — критичные
 
@@ -856,7 +856,7 @@ Quality gates:
 - **Area:** `go2rtc.py:Go2RtcClient.async_patch_stream` (+ `upsert_audio_stream` для call stream), go2rtc config-persist.
 - **Evidence (прод, 2026-06-23, найдено пользователем):** в `go2rtc_homekit.yml` **сотни** повторяющихся блоков `streams:`, каждый — одна камера со свежим operator-RTSP вида `ffmpeg:https://forpost-NN.novotelecom.ru:18081/rtsp/<accId>/<TOKEN>/d=1#video=copy#audio=aac#audio=opus` (TOKEN ротируется per-fetch). Симптом в логах: `go2rtc cleanup failed: 400 yaml: path not exist` (DELETE не находит стрим в дублирующемся YAML).
 - **Hypothesis (нужен DIAG):** на каждое `stream_source()` (открытие камеры) интеграция получает у оператора **новый** ротируемый RTSP-URL → upsert'ит в go2rtc; go2rtc 1.9.14 на API-write **дописывает новый `streams:`-блок** в конфиг-файл (не merge в один map) → за время жизни интеграции — сотни блоков. YAML дубль-ключи: функционально побеждает последний, но файл растёт безгранично.
-- **Impact:** (1) безграничный рост конфига; (2) протухшие **operator-токены на диске** в plaintext (security-smell, ср. [`no-secret-logs.md`](../../.claude/rules/no-secret-logs.md)); (3) `cleanup failed: path not exist` на teardown стримов вызова.
+- **Impact:** (1) безграничный рост конфига; (2) протухшие **operator-токены на диске** в plaintext (security-smell, ср. [canonical no-secret-logs rule](../../.agents/rules/no-secret-logs.md)); (3) `cleanup failed: path not exist` на teardown стримов вызова.
 - **Risk / объём:** трогает `stream_source` hot path (proven, история A-71) → **через DIAG + go2rtc-консолидацию** (план Task 2 / R1-R7). M-L.
 - **Recommended first step:** controlled-DIAG на throwaway-стриме — какой write (PATCH vs PUT) дописывает блок (повторить upsert с разным src, посмотреть рост конфига) → выбрать фикс: пропускать re-upsert если src не изменился, или периодическая компакция конфига, или go2rtc-side опция → **сложить в go2rtc-консолидацию (R7)**. Пользователь чистит текущий конфиг сам.
 - **2026-07-16 mitigation in branch:** ordinary `eg_<camera_id>` writes теперь идут только через PATCH-only client; PUT fallback удалён. Manager также удаляет ineligible zero-consumer streams. Это убирает известную destructive-write ветку, но не доказывает, что конкретная сборка go2rtc не персистит repeated PATCH как duplicate YAML.
@@ -986,11 +986,11 @@ Quality gates:
 
 - **Status:** 🟡 **REMEDIATION-IN-REVIEW** — process changes вынесены из product PR #78 в stacked-ветку `chore/aidd-review-gates`; finding остаётся открытым до candidate-bound approvals, publication evidence и CI этой ветки.
 - **Severity:** P1 process/reliability.
-- **Area:** `AGENTS.md`, `CLAUDE.md`, `workflow.md`, agent adapters, hooks, `docs/aidd/**`, ADR-0015 и maintenance rules.
+- **Area:** `AGENTS.md`, `.agents/**`, Claude/Codex/Cursor/Copilot adapters, hooks, `workflow.md`, `docs/aidd/**`, ADR-0015/0016 и maintenance rules.
 - **Evidence (2026-08-10):** после рекомендации subagent-driven режима короткое «го» было ошибочно интерпретировано как inline execution. FCM fix прошёл self-review, но PR #78 был опубликован до независимых code/HA/security reviews.
-- **Root cause:** источники процесса не определяли единые semantics approval, immutable candidate tuple, reviewer independence и post-push CI/evidence.
-- **Fix draft:** консолидированный ADR-0015 задаёт plan approval, local gates, clean base/head/tree freeze, обязательные read-only reviews и re-attestation всех reviewers после изменения candidate. `TESTS_PASS` отделён от post-push `CI_GREEN`; durable evidence хранится в PR comment; review/evidence/CI gates non-waivable. Точный live test baseline принадлежит только `testing/strategy.md`. Claude/Codex adapters синхронизированы, дублирующие hooks заменены wrappers к одной canonical реализации.
-- **Acceptance:** AIDD changes опубликованы отдельным логическим PR; все обязательные reviewers одобряют один tuple; reconciliation/secret scanners, links и полный suite зелёные.
+- **Root cause:** источники процесса не определяли единые semantics approval, immutable candidate tuple, reviewer independence и post-push CI/evidence; роли/rules/commands дополнительно копировались между tool-specific каталогами и расходились вместе с relative paths.
+- **Fix draft:** ADR-0015 задаёт candidate lifecycle. ADR-0016 закрепляет `AGENTS.md` + `.agents/{roles,rules,commands,hooks}` как нейтральный source of truth; `.claude/**`, `.codex/**`, `.cursor/**`, Copilot instructions и command skills сведены к discovery/runtime adapters. Contract tests проверяют parity, thin adapters, canonical paths и отсутствие parent-relative Markdown fences. `TESTS_PASS` отделён от post-push `CI_GREEN`; live test baseline принадлежит только `testing/strategy.md`.
+- **Acceptance:** AIDD changes опубликованы отдельным логическим PR; все обязательные reviewers одобряют один tuple; adapter contract tests, reconciliation/secret scanners, links и полный suite зелёные.
 
 ### A-73. config_flow + `async_migrate_entry` без тестов (Bronze IQS gate)
 

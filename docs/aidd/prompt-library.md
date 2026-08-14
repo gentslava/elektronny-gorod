@@ -1,4 +1,4 @@
-Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-11 (candidate-bound security/release plus ADR-0015 evidence/CI prompts)
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-14 (role and command references point to canonical `.agents/**` contracts)
 
 Source files:
 - этот документ
@@ -8,7 +8,7 @@ Related docs:
 - `multi-agent-workflow.md`
 - `quality-gates.md`
 - `../testing/strategy.md`
-- `../../.claude/commands/`
+- `../../.agents/commands/`
 
 Used by agents:
 - Любой агент при выборе готового prompt-шаблона
@@ -302,6 +302,6 @@ Output:
 ## Next reading
 
 - For skills: `skills.md`
-- For agents: `../../.claude/agents/`
-- For commands: `../../.claude/commands/`
+- For agents: `../../.agents/roles/`
+- For commands: `../../.agents/commands/`
 - For MCP tools: `mcp-tools.md`

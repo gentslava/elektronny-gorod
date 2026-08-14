@@ -12,8 +12,9 @@ import custom_components.elektronny_gorod  # noqa: F401  # load patch targets
 
 REPO_ROOT = Path(__file__).parents[1]
 HOOKS = (
-    REPO_ROOT / ".codex/hooks/check-audit-reconciliation.sh",
+    REPO_ROOT / ".agents/hooks/check-audit-reconciliation.sh",
     REPO_ROOT / ".claude/hooks/check-audit-reconciliation.sh",
+    REPO_ROOT / ".codex/hooks/check-audit-reconciliation.sh",
 )
 
 

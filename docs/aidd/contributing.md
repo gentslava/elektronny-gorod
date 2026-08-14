@@ -1,4 +1,4 @@
-Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-11 (default subagent execution, independent review and ADR-0015 publication/CI contract synchronized after A-97)
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-14 (contributor routing linked to canonical roles and command procedures)
 
 Source files:
 - весь репозиторий (это процессный документ)
@@ -197,7 +197,7 @@ ADR-шаблон (создаётся в Итерации 3): `docs/decisions/NNN
 | `agent-skills:spec-driven-development` | новые features (например, reconfigure flow) |
 | `agent-skills:debugging-and-error-recovery` | при странном поведении в runtime / падающих тестах |
 
-## Какие агенты Claude Code использовать
+## Какие canonical roles использовать
 
 Полный routing ролей — [`multi-agent-workflow.md`](multi-agent-workflow.md). Кратко:
 
@@ -212,7 +212,7 @@ ADR-шаблон (создаётся в Итерации 3): `docs/decisions/NNN
 
 ## Slash-команды
 
-В `.claude/commands/`:
+Процедуры живут в `.agents/commands/`; Claude открывает их через одноимённые adapters в `.claude/commands/`:
 
 - `/audit` — полный аудит (Lead Architect + параллельные subagents)
 - `/security-check` — поиск утечек секретов

@@ -150,7 +150,7 @@ HA headless — у сервера нет «трубки». Звук термин
 ## 8. Влияние
 
 - **Existing entries:** не трогаем `entry.data` schema / config-entry VERSION в Slice 0–1. Возможен новый `CONF_*` для SIP-настроек (решим в плане) → миграция при необходимости.
-- **Security:** SIP-`password` / `realm` — секреты. Не логировать ([`no-secret-logs.md`](../../../.claude/rules/no-secret-logs.md)), добавить в `SENSITIVE_KEYS` / `TO_REDACT`.
+- **Security:** SIP-`password` / `realm` — секреты. Не логировать (см. [canonical rule](../../../.agents/rules/no-secret-logs.md)), добавить в `SENSITIVE_KEYS` / `TO_REDACT`.
 - **Distribution:** чистый Python (без aiortc) → работает в HA Container. go2rtc уже есть у пользователей с аудио-камерами.
 - **HA QS:** новый крупный компонент → ADR-0012 принят ([register-on-ring](../../decisions/0012-register-on-ring.md)).
 
