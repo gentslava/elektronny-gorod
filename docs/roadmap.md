@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (4.0.1 candidate reviews/CI complete; A-97 awaits PR #80 merge reconciliation)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (4.0.1 release PR merged; A-97 reconciled; publication verification pending)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -180,7 +180,7 @@ Quality gates:
 
 #### AIDD Full
 
-- [ ] **A-97** 🟢 resolved-in-branch: current release candidate получил candidate-bound code/security/HA/QA/docs approvals, durable evidence и зелёный CI в PR #80. После merge перевести finding в `RESOLVED` (ADR-0015).
+- [x] **A-97** ✅ RESOLVED в PR #80 (`0c220a2`): один immutable candidate получил code/security/HA/QA/docs approvals, durable evidence и зелёный CI; merged-state reconciliation завершён (ADR-0015).
 - [x] Роли, rules и operational commands имеют один нейтральный source of truth в `.agents/**`; Claude/Codex/Cursor/Copilot файлы — thin adapters.
 - [x] Final review mode требует exact tuple, independence и Critical/Important closure в canonical role contracts.
 - [x] Canonical hooks живут в `.agents/hooks/`; Claude/Codex hooks — wrappers без дублирования implementations.
@@ -214,7 +214,8 @@ Quality gates:
 - [x] Полный backend suite и production-вызов подтверждают восстановленную доставку; актуальный baseline принадлежит [`testing/strategy.md`](testing/strategy.md).
 - [x] Подготовлены CHANGELOG, RU/EN README, HACS info, сайт и [`releases/4.0.1.md`](releases/4.0.1.md).
 - [x] Release candidate прошёл обязательные review/CI gates; candidate-bound evidence опубликован в PR #80.
-- [ ] После merge и публикации проверить release asset, manifest и доставку через HACS.
+- [x] Release PR #80 слит в `master`; A-97 переведён в `RESOLVED` с merge evidence.
+- [ ] После публикации проверить release asset, manifest и доставку через HACS.
 
 ### Итоги FCM-research
 

@@ -39,9 +39,9 @@ Your **intercoms, cameras and locks** from Elektronny Gorod (Novotelecom) and Do
 
 The integration mirrors the APIs of the official My Home and Umnyy Dom.ru apps: watch cameras with sound, answer and end calls, browse answered and missed call history and build any Home Assistant automation on top.
 
-> 🛠️ **4.0.1 is out** — an important fix for 4.0.0 users: doorbell calls reach
+> 🛠️ **4.0.1 is the recommended update for 4.0.0 users:** doorbell calls reach
 > Home Assistant through FCM again, and a broken connection can no longer hang
-> Home Assistant or grow the log without bounds. Update through HACS and
+> Home Assistant or grow the log without bounds. Install 4.0.1 through HACS when offered, then
 > restart Home Assistant; no reauthentication is required. See the full
 > [release notes](docs/releases/4.0.1.md).
 

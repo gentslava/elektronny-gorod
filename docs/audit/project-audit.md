@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (A-97 review/publication acceptance completed in release PR #80; pending merge reconciliation)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (A-97 merged-state reconciliation completed after release PR #80)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -984,7 +984,7 @@ Quality gates:
 
 ### A-97. Независимый review можно было заменить self-review и пропустить до PR
 
-- **Status:** 🟢 **resolved-in-branch** (pending merge PR #80) — process changes находятся в `master`, а release candidate `93a4912` / tree `d3fc9ac` получил независимые code/security/HA/QA/docs approvals, durable PR evidence и зелёный remote CI. После merge требуется merged-state reconciliation и перевод в `RESOLVED`.
+- **Status:** ✅ **RESOLVED** — merged в PR #80 (`0c220a2`). Финальный candidate `ef96564` получил независимые code/security/HA/QA/docs approvals, durable PR evidence и зелёный remote CI; self-review больше не может закрыть обязательные review gates.
 - **Severity:** P1 process/reliability.
 - **Area:** `AGENTS.md`, `.agents/**`, Claude/Codex/Cursor/Copilot adapters, hooks, `workflow.md`, `docs/aidd/**`, ADR-0015/0016 и maintenance rules.
 - **Evidence (2026-08-10):** после рекомендации subagent-driven режима короткое «го» было ошибочно интерпретировано как inline execution. FCM fix прошёл self-review, но PR #78 был опубликован до независимых code/HA/security reviews.
