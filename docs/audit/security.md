@@ -1,4 +1,4 @@
-Status: Active Owner: Security & Privacy Agent Last reviewed: 2026-08-14 (secret-log gate moved to neutral `.agents/hooks`; security behavior unchanged)
+Status: Active Owner: Security & Privacy Agent Last reviewed: 2026-08-14 (4.0.1 Repairs PII wording reconciled with accepted S-23 boundary)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -213,8 +213,10 @@ Quality gates:
   причём второй endpoint уже возвращает `entry.title`. Event обновления Repairs
   содержит только action/domain/issue ID; новые логи title не выводят.
   Diagnostics обязательно redacts every `title` key, поэтому user-shared export
-  не переносит resident name/account ID за пределы HA. Без этой redaction S-23
-  больше не считается принятым.
+  не переносит resident name/account ID за пределы HA. Release documentation
+  должна отдельно говорить, что Repairs намеренно показывает локальный config-
+  entry title; без этой оговорки или diagnostics redaction S-23 больше не
+  считается принятым.
 - **Accepted trade-off:** небольшое дублирование PII принято ради понятного UX
   при нескольких аккаунтах — пользователь сразу видит, у какого entry отключён
   realtime FCM, вместо последовательной перезагрузки всех аккаунтов.

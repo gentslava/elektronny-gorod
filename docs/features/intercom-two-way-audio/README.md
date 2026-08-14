@@ -69,6 +69,6 @@
 - [x] SECURITY_OK (SIP realm/login/password в SENSITIVE_KEYS; no-secret-logs соблюдён)
 - [x] DOCS_UPDATED (project-map, overview, audit A-81, roadmap, ADR-0012)
 - [x] MERGED (PR #69)
-- [ ] READY_FOR_RELEASE (нужна обычная release-проверка и релизный артефакт)
+- [x] READY_FOR_RELEASE (возможности опубликованы в 4.0.0; последующий FCM reliability hotfix — 4.0.1)
 
 **Оставшийся polish:** DTMF и дальнейшие UX/reliability улучшения ведутся отдельно; они не блокируют уже реализованный two-way audio.

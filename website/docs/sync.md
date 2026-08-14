@@ -7,6 +7,7 @@
 | Что | Где на сайте | Источник правды |
 |---|---|---|
 | Версия интеграции | `src/data/project.ts: version`, `index.html` (JSON-LD `softwareVersion`) | `custom_components/elektronny_gorod/manifest.json` |
+| Release notes | `src/data/project.ts: releaseNotesLatest`, release-ссылка в FAQ | последний файл `docs/releases/X.Y.Z.md` |
 | Мин. версия HA | `src/data/project.ts: minHomeAssistant`, тексты compat/бейджей (`2024.10+`) | `hacs.json: homeassistant` |
 | Бандл карточки | пересборка сайта (`npm run build`) — бандл импортируется по пути | `custom_components/elektronny_gorod/www/eg-intercom-call-card.js` |
 

@@ -1,4 +1,4 @@
-Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-08-11 (persistent PII-free FCM Repairs issue, serialized lifecycle and stable-symbol evidence)
+Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-08-14 (persistent FCM Repairs PII boundary, serialized lifecycle and release claims reconciled)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
