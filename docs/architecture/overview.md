@@ -1,7 +1,7 @@
 Status: Active
 Owner: Architecture Agent
-Last reviewed: 2026-07-16 (go2rtc preload lifecycle, active-producer reconcile,
-in-place publication policy, cleanup and truthful external RTSP diagnostics)
+Last reviewed: 2026-08-10 (bounded per-entry FCM recovery, Repairs visibility
+and multi-account isolation)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -20,6 +20,7 @@ Source files:
 - `custom_components/elektronny_gorod/sensor.py`
 - `custom_components/elektronny_gorod/switch.py`
 - `custom_components/elektronny_gorod/event.py`
+- `custom_components/elektronny_gorod/fcm.py`
 - `custom_components/elektronny_gorod/go2rtc.py`
 - `custom_components/elektronny_gorod/uplink_ws.py`
 - `custom_components/elektronny_gorod/sip/`
@@ -149,6 +150,10 @@ async_setup_entry:
   14. _sync_visibility — `hidden` из `/settings/screens` → entity.hidden_by=INTEGRATION
   15. stream_manager.async_start() — registry eligibility уже актуальна;
       default-off main option оставляет background lifecycle inert
+  16. после последнего fallible await создать/claim per-entry FCM owner:
+      - прежний owner остановлен → зарегистрировать и запустить новый listener;
+      - прежний owner не остановлен → оставить его, показать Repairs и завершить
+        setup успешно без realtime FCM (остальные платформы работают)
 ```
 
 ### Migration
@@ -186,12 +191,20 @@ async_update_options:
 
 ```text
 async_unload_entry:
+  await DoorbellFcmListener.async_stop()
+  ├── success → continue unload
+  └── dependency stop failure → return False; HA cannot create a replacement
   await CameraStreamManager.async_stop()  # close scheduling, cancel refresh,
                                           # await reconcile, remove preloads
   await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
   if unload_ok: remove coordinator + manager from hass.data
   ── coordinator.async_unsubscribe вызывается HA-core автоматически через
      `entry.async_on_unload`, независимо от исхода unload платформ (A-16).
+  FCM claim выполняется после последнего fallible setup-await; ранняя ошибка setup
+  не может оставить новый receiver. Callback удаляет owner только после stop.
+  remove после failed unload: async_remove_entry делает ещё одну stop-попытку;
+  повторный failure сохраняет owner, а HA сообщает `require_restart`;
+  поздние callbacks после stop игнорируются
 ```
 
 ## Слои
@@ -211,7 +224,7 @@ async_unload_entry:
 | **SIP subsystem** | `sip/` (14 модулей) | SIP-UAS: REGISTER-on-ring → held-INVITE → 200 OK → RTP-latching; AudioBridge (downlink → go2rtc); `uplink.py` `UplinkSink` (микрофон-PCM → G.711) + дрейф-компенсированный RTP-uplink (`rtp.py`); ADR-0012, ADR-0013 |
 | **Uplink transport** | `uplink_ws.py`, `www/eg-intercom-mic-card.js` | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): Int16-PCM микрофона из Lovelace-карты `getUserMedia` → `DoorbellCallController.feed_uplink` → `UplinkSink`; static-регистрация JS-карты (ADR-0013) |
 | **Call camera** | `call_camera.py` | camera-сущность активного вызова: `stream_source()` собирает свежий `eg_intercom_call` (видео + аудио-мост) → RTSP; вне вызова → `None` |
-| **FCM listener** | `fcm.py` | `DoorbellFcmListener` — FCM-триггер вызова → `SIGNAL_DOORBELL` → `DoorbellCallController.handle_signal` |
+| **FCM listener** | `fcm.py` | `DoorbellFcmListener` — FCM-триггер вызова → `SIGNAL_DOORBELL` → `DoorbellCallController.handle_signal`; per-entry circuit breaker ограничивает reconnect-loop паузами 15 мин / 1 ч / 6 ч / 24 ч и показывает persistent Repairs issue с названием затронутого аккаунта. Startup, watchdog и unload сериализованы; клиент использует shared HA session, а после ошибки `stop()` его ссылка сохраняется и config-entry unload блокирует replacement |
 | **Auth crypto** | `helpers.py`, `time.py`, `user_agent.py` | reverse-engineered hashing, эмуляция мобильного клиента |
 | **Entities (HA platforms)** | `camera.py`, `lock.py`, `sensor.py`, `switch.py`, `event.py`, `binary_sensor.py` | UI представление; `event.py` — realtime doorbell (ADR-0011) и routed durable access/camera history |
 | **Constants & UI strings** | `const.py`, `strings.json`, `translations/*` | конфиг + локализация |
@@ -228,6 +241,7 @@ async_unload_entry:
 | go2rtc camera registration/preload/producer state | `CameraStreamManager._states` (credential-free, in-memory) | сессия; source URL не хранится |
 | Visibility migration flag | `entry.data["visibility_migration_v2"]` | one-time per entry |
 | History watermarks | HA `Store` `elektronny_gorod.history.{entry_id}`, schema v1 | максимум 200 opaque event IDs на source stream; без message/PII |
+| FCM recovery phase / backoff / next probe | `DoorbellFcmListener` (in-memory, per config entry) | сессия listener; reset на reload/restart, persistent только Repairs issue |
 
 Интервал refresh — 5 минут (`UPDATE_INTERVAL` в `coordinator.py`); см. [ADR-0003](../decisions/0003-iot-class-strategy.md).
 
@@ -478,6 +492,16 @@ const + go2rtc ← config_flow
    `ClientTimeout` уже есть; POST/login/open_lock намеренно не ретраятся автоматически.
 6. **FCM опирается на приватные API Google** (A-80) — realtime-вызов работает
    под graceful degradation, но долгосрочная совместимость не гарантирована.
+   Фатальные ошибки зависимости теперь ограничены per-entry circuit breaker:
+   они временно отключают только realtime-уведомления затронутого аккаунта и не
+   создают бесконечный двухминутный restart-loop. Startup, watchdog и unload
+   проходят под одним transition lock; если dependency-клиент не подтвердил
+   остановку, интеграция не теряет ссылку на него, возвращает failed unload и не
+   позволяет HA запустить замену. Claim и start происходят только после последнего
+   fallible setup-await. Если прежний owner не остановился, entry остаётся loaded,
+   но realtime FCM для него отключён с Repairs warning — без setup-retry loop.
+   Removal после failed unload повторяет stop; при повторном failure HA требует
+   restart, а ownership сохраняется до него.
 7. **External idle RTSP требует повторного live acceptance** (A-96/ADR-0014) —
    PATCH-only registration провалился на пяти lazy streams; revised automated
    suite доказывает preload policy/lifecycle, но не реальное

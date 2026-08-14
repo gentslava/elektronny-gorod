@@ -1,7 +1,7 @@
 Status: Active
 Owner: QA / Testing Agent
-Last reviewed: 2026-07-16 (go2rtc preload/producer lifecycle regressions,
-549-test backend suite and revised live acceptance synchronized)
+Last reviewed: 2026-08-11 (FCM circuit-breaker/Repairs regressions and
+597-test backend suite synchronized)
 
 Source files:
 - `tests/**` (54 test-модуля + `conftest.py`)
@@ -33,11 +33,11 @@ camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **549 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-07-16; 131 focused preload/manager tests + 151 related regressions) |
+| Локальный suite | **597 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-13) |
 | Test modules | 54 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
-| Security / crypto | redaction, diagnostics, HTTP no-leak, golden vectors helpers |
+| Security / crypto | redaction including production-format config-entry title, diagnostics, HTTP no-leak, golden vectors helpers |
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
 | Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
@@ -109,11 +109,17 @@ config-entry `VERSION`.
 
 ### 3. Init / migrations (`test_init.py`)
 
-- `test_setup_and_unload` — setup → unload.
-- `test_migration_v1_to_v2` — старый entry без `user_agent` → миграция → есть `user_agent` в data.
-- `test_migration_v2_to_v3` — старый entry без `use_go2rtc` → миграция → дефолты go2rtc.
-- `test_migration_chained_v1_to_v3` — v1 → v3 одним проходом.
-- `test_unload_releases_coordinator` — после unload `coordinator.async_unsubscribe` должен быть вызван (после фикса).
+- v1 → v3, v2 → v3 и актуальный v3 no-op без потери entry data.
+- Failed FCM stop блокирует обычный unload/reload и сохраняет owner.
+- Setup-unwind через HA core удаляет owner только после successful stop; failed
+  stop сохраняет его и блокирует replacement на следующей регистрации.
+- Surviving owner не заменяется: entry загружается с остальными платформами,
+  FCM остаётся degraded с Repairs и не создаёт HA setup-retry loop.
+- FCM claim/start отложены до последнего fallible setup-await.
+- Removal после failed unload повторяет stop старого owner; повторный failure
+  сохраняет ownership и возвращает HA `require_restart`.
+- Поздний FCM callback после terminal stop не публикует событие звонка.
+- Удаление entry очищает только его persistent FCM Repair до best-effort remote cleanup.
 
 ### 4. Coordinator (`test_coordinator_no_double_http.py` + entity regressions)
 
@@ -227,7 +233,26 @@ PATCH and go2rtc restart recovery within 60 seconds.
 
 ### 9. Realtime intercom (`test_fcm.py`, `test_sip_*.py`, `test_call_camera.py`)
 
-- FCM parse/reconnect/watchdog и dispatcher lifecycle.
+- FCM parsing и dispatcher lifecycle; bounded watchdog state machine
+  `HEALTHY → SUSPECT → VERIFYING → OPEN → VERIFYING → HEALTHY`.
+- Разбор Web Push заголовков `crypto-key`/`encryption`: реальная
+  http_ece-криптография без мока, на форме, снятой с прода
+  (`dh=<87>; p256ecdsa=<87>`). Проверяются обе исторические ошибки —
+  `binascii.Error` без padding и `Invalid EC key.` с ним — и то, что
+  нормализация их снимает. Плюс выбор сегмента по метке независимо от порядка,
+  восстановление метки у значения без неё, правка `app_data` на настоящем
+  protobuf и изоляция патча: соседний клиент того же класса остаётся нетронутым.
+  Тесты с реальной зависимостью берут её в обход `conftest`-мока и скипаются,
+  если её нет.
+- Конечный `abort_on_sequential_error_count`: сам факт передачи значения в
+  `FcmPushClientConfig` и полный проход terminated-клиента до OPEN. Отключённый
+  предохранитель делает этот путь недостижимым и подвешивает event loop (#77).
+- Capped 15m/1h/6h/24h backoff, quiet OPEN до deadline, persistent Repairs
+  create/retain/delete, multi-entry isolation, removal cleanup и no-secret output.
+- Startup/check-in/operator-bind/watchdog/unload races serialized per entry;
+  pre-start clients are discarded without dependency `stop()`, while a failed
+  started-client stop retains ownership and blocks replacement on both ordinary
+  reload and setup-unwind.
 - REGISTER profile: FCM `Call-Id`, `Accept: application/sdp`, Contact push-params
   без лишнего `transport` parameter.
 - INVITE pre-answer: немедленный `100 Trying`; `200 OK` только в `accept()`.
@@ -256,7 +281,11 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 - **Matrix-стратегия через `include:`** (не product) — потому что Python и PHC-версии жёстко связаны: PHC 0.13.175 → HA 2024.10.4 → py3.12 (min), PHC 0.13.333 → HA 2026.5.4 → py3.14 (current). Простой `ha-version: [min, stable]` не выражает эту связку.
 - **PHC ставится отдельным `pip install` после `requirements_test.txt`** — версия PHC из matrix, не из файла. `requirements_test.txt` держит только `aioresponses` (PHC сам тянет pytest, pytest-cov, coverage).
-- **josepy<2 conditional** для min-job — HA 2024.10 транзитивно использует acme<3, ожидающий `josepy.ComparableX509` (удалён в josepy 2.0). Для current (HA 2026.5+) шаг пропускается.
+- **Legacy constraints conditional** для min-job: HA 2024.10 транзитивно
+  использует acme<3, ожидающий `josepy.ComparableX509` (удалён в josepy 2.0),
+  а PHC 0.13.175 ещё не разрешает служебный pycares safe-shutdown thread,
+  появившийся в pycares 4.9. Поэтому min-job ставит `josepy<2` и
+  `pycares<4.9`; для current (HA 2026.5+) шаг пропускается.
 - **turbojpeg mock** в `tests/conftest.py` — `pytest-homeassistant-custom-component` не тянет optional HA-extras, нужно для `homeassistant.components.camera.img_util`.
 - **Path-filter на push и pull_request** — docs-only коммиты CI не запускают.
 - **Coverage artifact** с уникальным именем `coverage-py<v>-phc<v>` (artifact@v4 требует уникальности в matrix).
@@ -281,7 +310,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 549 passed (2026-07-16).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 597 passed (2026-08-13).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

@@ -1,7 +1,7 @@
 Status: Active
 Owner: Lead Architect Agent
-Last reviewed: 2026-07-16 (A-96 preload revision accepted live after go2rtc
-restart; 549-test evidence and 4.0.0 release status reconciled)
+Last reviewed: 2026-08-11 (A-80/A-86: field incident #77 and bounded per-entry
+FCM recovery; 597-test product baseline reconciled)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -1103,19 +1103,47 @@ Quality gates:
   опирается на **недокументированные приватные API** (checkin / register /
   MTalk). Google уже ломал их (20.06.2024 — «умерли» старые версии всех
   библиотек). Долгосрочных гарантий нет: «работает, пока работает».
-- **Risk 2 — новая зависимость `firebase-messaging>=0.4`** (тянет protobuf /
+- **Risk 2 — новая зависимость `firebase-messaging>=0.4.5`** (тянет protobuf /
   http_ece / cryptography). Раньше `requirements` был пуст (всё из HA core) —
   теперь интеграция имеет внешний pip-deps.
+- **Field evidence 2026-08-10:** в [issue #77](https://github.com/gentslava/elektronny-gorod/issues/77)
+  `firebase-messaging` завершает `FcmPushClient` на отдельном encrypted
+  push с `binascii.Error: Incorrect padding`. Upstream разбирает Base64URL-поля
+  без устойчивой нормализации padding и не изолирует ошибку одного сообщения;
+  исправление обсуждается в
+  [upstream PR #37](https://github.com/sdb9696/firebase-messaging/pull/37).
+  Первопричина остаётся во внешней зависимости и этим изменением не закрывается.
+- **Field evidence 2026-08-13 (DIAG-проба на проде):** истинная форма дефекта —
+  не padding, а неразобранный список параметров. Оператор перешёл на VAPID, и
+  `crypto-key` приходит как `dh=<87>; p256ecdsa=<87>`, тогда как библиотека
+  срезает префикс по позиции (`[3:]` / `[5:]`, `fcmpushclient.py:425-426`).
+  Остаток декодируется в 137 байт вместо 65 → `ValueError: Invalid EC key.`
+  Апстрим этой формы не покрывает: в PR #37 разбор `;`-параметров **снят
+  автором как спекулятивный** («never saw `;`-parameters»), а
+  [issue #42](https://github.com/sdb9696/firebase-messaging/issues/42)
+  предлагает `removeprefix("dh=")` — на нашем заголовке это оставляет хвост
+  `; p256ecdsa=…` и не помогает. Per-message изоляция из PR #37 сняла бы
+  падение, но ACK отправляется только при штатном возврате
+  `_handle_data_message` (`fcmpushclient.py:605-608`), поэтому пуш о вызове
+  был бы подтверждён и **молча потерян**. Наша нормализация заголовков в
+  `fcm.py` выбирает сегмент по метке независимо от позиции; проверено на
+  проде 2026-08-13.
 - **Risk 3 — ToS.** Эмуляция клиента приложения формально не «официально
   поддержана» (как и весь mirror-app-подход, ADR-0006).
-- **Mitigation (уже встроено):** весь FCM-флоу под `try/except` — при любом
-  сбое (Google сломал API / нет сети / протух токен) логируется warning,
-  остальная интеграция (polling-данные) работает, событие просто не стреляет,
-  `async_setup_entry` не падает. Логика изолирована в `fcm.py` за интерфейсом
-  `SIGNAL_DOORBELL` — замена механизма (другая библиотека / sidecar-bridge) не
-  задевает `event`-сущность.
-- **Watch:** при breakage приватного API — bump `firebase-messaging` (линия
-  поддержки Lemoine → sdb9696 переживает изменения через обновление зависимости).
+- **Mitigation:** весь FCM-флоу под graceful degradation — остальная интеграция
+  (polling-данные) работает, `async_setup_entry` не падает. В product PR #78
+  повторные фатальные остановки дополнительно
+  ограничены per-entry circuit breaker: одна контрольная попытка, затем
+  автоматические пробы через 15 минут / 1 час / 6 часов / 24 часа и persistent
+  Repairs warning. Логика изолирована в `fcm.py` за интерфейсом
+  `SIGNAL_DOORBELL`; один проблемный аккаунт не влияет на остальные.
+- **Watch:** lower bound `0.4.5` гарантирует проверенный shared-session API, а
+  более новые upstream releases могут быть выбраны при чистой установке или
+  повторном разрешении зависимости. Уже установленная `0.4.5` проактивно не
+  обновляется: для гарантированной доставки root fix из PR #37 потребуется
+  поднять minimum до версии с исправлением. Диапазон сохраняет риск
+  несовместимого future release; после обновления нужен regression/live check
+  FCM lifecycle.
 
 ### A-81. Приём вызова домофона по SIP + показ экрана вызова (фундамент two-way audio)
 
@@ -1165,11 +1193,11 @@ Quality gates:
   содержит acId, парный к SIP-паролю) добавлен в `SENSITIVE_KEYS`; SIP
   login/password не логируются (no-secret-logs rule).
 
-### A-86. FCM push-receiver молча умирает → вызовы домофона пропадают (watchdog)
+### A-86. FCM push-receiver умирает или зацикливает watchdog-восстановление
 
-- **Status:** ✅ **RESOLVED** — merged в master через **PR #66**
-  (`fix/fcm-reconnect-watchdog`, commit `575d885`). Bug-fix; root cause подтверждён
-  runtime-evidence (прод-лог 2026-06-24).
+- **Status:** 🟢 **RESOLVED-IN-BRANCH** — исходная молчаливая смерть исправлена
+  в master через **PR #66**; усиление ошибки watchdog-ом из issue #77 ограничено
+  в product candidate PR #78, pending merge.
 - **Severity:** P1 (вызовы домофона молча перестают приходить — пропущенные
   звонки, статус интеграции при этом `loaded`, юзер не узнаёт).
 - **Area:** `fcm.py` (`DoorbellFcmListener`: `_async_connect` / `_async_watchdog`
@@ -1178,20 +1206,103 @@ Quality gates:
   `firebase_messaging.fcmpushclient: Shutting down push receiver due to 3
   sequential errors of type ErrorType.CONNECTION`; далее FCM-сокет мёртв,
   `CALL_INCOMING`-пуши не приходят, переподнятия нет.
-- **Root cause (confirmed):** `FcmPushClientConfig.abort_on_sequential_error_count`
+- **Новый симптом 2026-08-10:** при `Incorrect padding` библиотека завершает
+  клиент, двухминутный watchdog создаёт новый, а тот снова попадает в фатальную
+  ошибку. Цикл повторяется для каждого затронутого config entry и может раздувать
+  журнал Home Assistant до гигабайт.
+- **Новый симптом 2026-08-12 (issue #77, вторая форма):** Home Assistant
+  подвисает, а в журнал уходит один и тот же traceback
+  `_listen → _receive_msg → readexactly → raise self._exception` с растущим
+  числом повторяющихся фреймов. Это **не** тот путь, который закрывал circuit
+  breaker: клиент не остановлен, `run_state` циклически возвращается в `STARTED`,
+  поэтому двухминутный watchdog видит здоровый receiver и никогда не размыкает
+  circuit.
+- **Исходный root cause (confirmed):** `FcmPushClientConfig.abort_on_sequential_error_count`
   по умолчанию `3` → библиотека выключает receiver навсегда после 3 ошибок
   подряд. `async_start` был fire-and-forget — контроля живости нет → молчаливая
   смерть.
-- **Fix:** (1) `FcmPushClientConfig(abort_on_sequential_error_count=None)` —
-  бесконечный reconnect внутри библиотеки; (2) watchdog
-  (`async_track_time_interval`, 2 мин) опрашивает `client.is_started()`, при
-  мёртвом receiver / провале первичного checkin (`client=None`) логирует warning
-  и переподнимает (`_async_connect`); guard `_reconnecting`; таймер отменяется на
-  unload. Видимость — лог-warning (по согласованию: отдельный sensor не нужен).
-- **Evidence:** прод-лог (20:47:22) + восстановление через `reload_config_entry`
-  (`FCM doorbell listener запущен`). 9 тестов `test_fcm.py` (abort=None, watchdog
-  reconnect / skip-healthy, idempotency, cleanup). Independent code-review —
-  approve (P0/P1 нет), контракт `firebase-messaging 0.4.5` верифицирован.
+- **Root cause второй формы (confirmed source inspection,
+  firebase-messaging 0.4.5):** causal chain —
+  `abort_on_sequential_error_count=None` → условие в
+  `_try_increment_error_count` (`fcmpushclient.py:568`) всегда ложно →
+  `_terminate()` недостижим → цикл `while self.do_listen` в `_listen`
+  перечитывает мёртвый `StreamReader`, чей `_exception` перевыбрасывается тем же
+  объектом и накапливает фреймы → `_logger.exception` печатает растущий traceback
+  на каждой итерации в общем event loop → HA голодает, стоимость форматирования
+  растёт квадратично. Наш watchdog слеп к этому состоянию, потому что
+  `is_started()` — это `run_state == STARTED` (`fcmpushclient.py:790`), а
+  `run_state` возвращается в `STARTED` после каждого успешного login
+  (`fcmpushclient.py:600`). Иначе говоря, снятый предохранитель библиотеки был
+  необходимым условием обеих форм инцидента.
+- **Controlled reproduce (2026-08-13, прод):** `mtalk.google.com` намеренно
+  заблокирован пользовательским правилом на роутере (AdGuard), чтобы проверить
+  механизм на живой системе. Полученная последовательность точно соответствует
+  проекту:
+
+  ```
+  08:43:40  FCM doorbell listener запущен
+  08:43:45 … 08:45:35  5 × "Could not connected to MCS endpoint … [Errno -3]"
+                       (паузы 3→12→27→48→75 с — start_seconds_before_retry_connect × n²)
+  08:46:50  "Unable to connect to MCS endpoint after 5 tries, aborting"  ← _terminate()
+  08:47:40  "FCM: push-receiver неактивен — выполняю одну попытку восстановления"  ← тик 2, SUSPECT
+  08:47:41  FCM doorbell listener запущен                                ← VERIFYING
+  08:47:46 … 08:49:36  ещё 5 × той же ошибки
+  08:49:40  "частые попытки восстановления приостановлены"               ← тик 3, OPEN + Repairs
+  --- блокировка снята ---
+  09:05:40  "FCM: выполняю пробную попытку восстановления"                ← первый тик после дедлайна 09:04:40
+  09:05:41  FCM doorbell listener запущен                                 ← VERIFYING
+  09:07:40  "FCM: push-receiver восстановлен"                             ← HEALTHY, Repairs снят, backoff сброшен
+  ```
+
+  Три watchdog-тика по 2 минуты, ровно две попытки восстановления, затем пауза;
+  Repairs issue отрисован с именем затронутого аккаунта. Ключевая строка —
+  `aborting` в 08:46:50: это и есть `_terminate()`, недостижимый при
+  `abort_on_sequential_error_count=None`. После снятия блокировки проба ушла на первом тике
+  после дедлайна, а circuit закрылся только на следующем тике — «запущен» сам
+  по себе подтверждением не считается. Эксперимент покрывает обе стороны
+  state machine и подтверждает causal chain выше не только source
+  inspection'ом, но и воспроизведением; за 6 минут
+  degraded-состояния библиотека выдала 11 ERROR-строк вместо неограниченного
+  потока.
+- **Fix второй формы:** `abort_on_sequential_error_count` возвращён к конечному
+  значению (`FCM_ABORT_AFTER_ERRORS = 3`). Причина, по которой его сняли в
+  2026-06-24 («receiver умирает молча»), устранена самим этим PR: мёртвого
+  клиента теперь поднимает watchdog, частоту ограничивает circuit breaker, а
+  пользователя извещает Repairs. Ложных срабатываний на живом сокете нет:
+  `_reset_error_count(CONNECTION)` вызывается в `_handle_message`
+  (`fcmpushclient.py:619`) после раннего `return` для `LoginResponse`, поэтому
+  счётчик обнуляют только реальные data/heartbeat-сообщения — а они идут каждые
+  10–20 с (`server_heartbeat_interval` / `client_heartbeat_interval`).
+- **Fix:** один двухминутный watchdog сохранён, восстановление конечное per entry:
+  `HEALTHY → SUSPECT → VERIFYING → OPEN`; scheduled probe также возвращает
+  listener в общий `VERIFYING`. Первая inactive-проверка
+  наблюдает, вторая делает ровно один disconnect/connect, следующая неудача
+  останавливает клиент. OPEN не создаёт отдельный timer/task и использует тот же
+  watchdog для проб 15m → 1h → 6h → 24h (далее 24h). Persistent Repairs issue
+  удаляется только после подтверждённого healthy-тика либо удаления entry;
+  reload даёт немедленную новую попытку. Состояние и issue ID изолированы по
+  `entry_id`, в Store/config entry ничего не пишется. Startup/watchdog/unload
+  сериализованы per-entry lock; stop во время check-in или operator bind не
+  запускает client и не вызывает несовместимый dependency `stop()` до start.
+  Ошибка `stop()` started-client сохраняет ссылку, а config-entry unload
+  возвращает failure, поэтому reload не создаёт replacement. Owner claim и
+  сетевой start происходят после последнего fallible setup-await. Если прежний
+  owner не остановился, entry всё равно загружается: только realtime FCM остаётся
+  degraded с Repairs, без HA setup-retry loop и повторных warning каждые ~80с.
+  Removal после failed unload повторяет stop retained owner; повторный failure
+  сохраняет ownership, HA требует restart, поздние callbacks игнорируются.
+  FCM использует shared HA aiohttp session; Repairs называет затронутый entry.
+  Дублирование title (resident name + account ID) в persistent Repairs принято
+  как P3 UX/privacy trade-off без расширения authenticated HA audience;
+  обязательный control — redaction `title` в user-shared diagnostics. См.
+  [`security.md#S-23`](security.md#s-23-config-entry-title-в-persistent-fcm-repairs).
+- **Evidence:** focused FCM/removal suite — **43 passed**: state transitions,
+  capped backoff, quiet OPEN, named Repairs lifecycle, multi-account isolation,
+  shared session, no-secret output, pre-start cleanup, failed-unload/setup-unwind
+  ownership/degraded-setup/removal guards, late-callback suppression и
+  детерминированные startup/unload races.
+  Точный full-suite baseline этой product-ветки фиксируется свежим прогоном в
+  `docs/testing/strategy.md` перед публикацией candidate.
 - **Связь:** [ADR-0011](../decisions/0011-doorbell-fcm-channel.md) (FCM-канал вызова).
 
 ### A-87. Фаза вызова залипает в `ringing`/`ended` без FCM `ended` (ring-таймаут)

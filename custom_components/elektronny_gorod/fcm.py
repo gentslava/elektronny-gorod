@@ -5,25 +5,36 @@ ntk-myhome), привязывает токен у оператора (api.regist
 MTalk-сокет. На CALL_INCOMING / CALL_END_ANSWERED_MOBILE рассылает SIGNAL_DOORBELL
 → event-сущность (event.py).
 
-⚠️ Флоу опирается на приватные API Google (ADR-0011) — весь он под graceful
-degradation: при любом сбое логируем warning, интеграция продолжает работать
-(polling-данные), событие вызова просто не стреляет. Setup entry не падает.
+⚠️ Флоу опирается на приватные API Google (ADR-0011) и работает под graceful
+degradation: сбой подключения логируется warning'ом, setup entry не падает,
+polling-данные (камеры, замки, баланс, история) продолжают работать — не
+стреляет только событие вызова. Единственное исключение из «сбой не мешает
+ничему» — неподтверждённая остановка receiver'а при выгрузке: `async_stop()`
+вернёт False, `async_unload_entry` в `__init__.py` тоже вернёт False, и HA
+сообщит, что нужен рестарт. Так мы не оставляем два живых receiver'а на один
+аккаунт — см. `docs/specs/2026-08-10-fcm-circuit-breaker-design.md`.
 
 Источник канала и payload — research/intercom-call-probe/FINDINGS.md.
 """
 from __future__ import annotations
 
-from datetime import timedelta
+import asyncio
+from datetime import datetime, timedelta
+from enum import StrEnum
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.util import dt as dt_util
 
 from .api import ElektronnyGorodAPI
 from .const import (
     CONF_FCM_CREDENTIALS,
+    DOMAIN,
     FCM_API_KEY,
     FCM_APP_ID,
     FCM_BUNDLE_ID,
@@ -40,12 +51,158 @@ _PUSH_TYPE_EVENT = {
     "CALL_END_ANSWERED_MOBILE": "ended",
 }
 
-# Watchdog: интервал контроля живости FCM-сокета. С
-# abort_on_sequential_error_count=None библиотека не умирает от сетевых сбоев,
-# но watchdog ловит фатальную смерть клиента (или провал первичного checkin) и
-# поднимает заново — иначе пуши о вызове молча отвалятся (инцидент 2026-06-24:
-# сетевой блип → 3 ошибки подряд → receiver выключился, юзер не узнал).
+# Предохранитель самой firebase-messaging: после N подряд ошибок соединения
+# библиотека сама останавливает receiver (`_terminate()` → run_state STOPPING).
+#
+# Его нельзя отключать (`None`). При `None` проверка в `_try_increment_error_count`
+# становится всегда-ложной, `_terminate()` недостижим, и `_listen` бесконечно
+# перечитывает мёртвый StreamReader: `readexactly` мгновенно перевыбрасывает
+# сохранённый `_exception`, дописывая фрейм в его traceback, а библиотека на
+# каждой итерации печатает его целиком через `_logger.exception`. Петля живёт в
+# общем event loop, поэтому HA подвисает, а стоимость форматирования растёт
+# квадратично (инцидент 2026-08-12, issue #77).
+#
+# Счётчик CONNECTION обнуляется только реальным сообщением от сервера
+# (`_handle_message`, после раннего `return` для LoginResponse), поэтому на
+# здоровом сокете heartbeat'ы каждые 10-20 с держат его на нуле, а петля
+# «connect → login → разрыв» упирается в лимит и честно гасит receiver.
+# Дальше подхватывает watchdog ниже: мёртвый клиент = `is_started() == False`.
+FCM_ABORT_AFTER_ERRORS = 3
+
+# Watchdog: интервал контроля живости FCM-сокета. Ловит остановленный
+# библиотекой receiver и провал первичного checkin (`client is None`) —
+# иначе пуши о вызове молча отвалятся (инцидент 2026-06-24). Восстановление
+# ограничено: см. `_async_watchdog` и backoff ниже.
 FCM_WATCHDOG_INTERVAL = timedelta(minutes=2)
+
+# Пауза между пробами после того, как circuit разомкнут, и её подпись для
+# лога. Последняя пара повторяется бесконечно.
+#
+# Подпись лежит рядом со значением, а не считается форматтером: `str(timedelta)`
+# даёт нечитаемое `0:15:00`, а склонять произвольную длительность незачем —
+# значений ровно четыре, и забыть подпись при добавлении новой паузы нельзя.
+# Винительный падеж, чтобы строка вставала после «через».
+FCM_RETRY_BACKOFFS = (
+    (timedelta(minutes=15), "15 минут"),
+    (timedelta(hours=1), "1 час"),
+    (timedelta(hours=6), "6 часов"),
+    (timedelta(hours=24), "24 часа"),
+)
+
+_FCM_REPAIR_ISSUE_PREFIX = "fcm_receiver_unavailable"
+
+
+def _b64_pad(value: str) -> str:
+    """Дополнить base64url-строку `=` до длины, кратной 4."""
+    return value + "=" * (-len(value) % 4)
+
+
+def _normalize_push_header(header: str, label: str) -> str:
+    """Свести Web Push заголовок к одному сегменту с корректным padding.
+
+    `Crypto-Key` и `Encryption` — списки параметров через `;` (RFC 8188 §2.1,
+    RFC 8291 §4), а не одиночные значения, поэтому нужный сегмент выбираем по
+    метке независимо от его позиции.
+    """
+    for segment in header.split(";"):
+        name, sep, payload = segment.strip().partition("=")
+        if sep and name == label:
+            return f"{label}={_b64_pad(payload.strip())}"
+    # Метки нет. Библиотека всё равно срежет 3/5 символов, то есть съест
+    # реальные байты ключа, поэтому метку восстанавливаем — но только если
+    # строка вообще может быть голым значением: `=` в base64url встречается
+    # лишь как хвостовой padding. Незнакомую форму отдаём нетронутой.
+    bare = header.strip()
+    if not bare or "=" in bare.rstrip("="):
+        return header
+    return f"{label}={_b64_pad(bare)}"
+
+
+def _patch_push_headers(client: Any) -> None:
+    """Нормализовать crypto-key/encryption до формы, которую ждёт библиотека.
+
+    firebase-messaging 0.4.5 читает оба заголовка как одиночное значение и
+    срезает префикс вслепую — `[3:]` для `dh=`, `[5:]` для `salt=`
+    (`fcmpushclient.py:425-426`), после чего декодирует остаток без padding
+    (`:378-379`). На реальном пуше оператора это ломается дважды:
+
+    * `crypto-key` пришёл в VAPID-форме `dh=<87>; p256ecdsa=<87>` — после
+      среза остаётся `<dh>; p256ecdsa=<...>`, и base64-декодер молча
+      выбрасывает `;`, пробел и буквы метки, собирая 137 байт вместо 65;
+    * `dh` передан без `=`-padding (87 символов), тогда как `salt` — с ним
+      (24 символа), так что одного лишь padding'а недостаточно.
+
+    Итог до фикса — `Invalid EC key.` (а без padding'а `Incorrect padding`)
+    на каждом зашифрованном пуше, то есть на каждом звонке в домофон.
+    Падение происходит до `self.callback(...)`: событие не доезжает до
+    интеграции, ACK не отправляется, и Google переигрывает то же сообщение
+    при каждом переподключении, роняя клиент по кругу (issue #77).
+
+    Правим заголовки в `app_data` до того, как их прочитает библиотека —
+    достаём нужный сегмент по метке независимо от его позиции и дополняем
+    padding. Криптографию и порядок вызовов не трогаем; когда апстрим
+    научится разбирать список параметров, патч станет no-op. Обновиться
+    некуда: 0.4.5 — последняя версия на PyPI.
+
+    Патчим **экземпляр**, а не класс: `firebase-messaging` тянет за собой не
+    только нас (её же использует `ring_doorbell[listen]`, то есть core-
+    интеграция `ring` в том же процессе). Классовый патч чинил бы и чужие
+    клиенты, и переживал бы выгрузку нашего entry — радиус шире, чем нужно.
+
+    Форма заголовков снята с прода 2026-08-13 (DIAG-проба, issue #77);
+    в июне 2026 сегмента `p256ecdsa` ещё не было — см. `research/
+    intercom-call-probe/logs/fcm.log` с 16 расшифрованными `CALL_INCOMING`.
+    """
+    original = client._handle_data_message
+
+    def _handle_with_normalized_headers(msg: Any) -> Any:
+        for item in msg.app_data:
+            if item.key == "crypto-key":
+                item.value = _normalize_push_header(item.value, "dh")
+            elif item.key == "encryption":
+                item.value = _normalize_push_header(item.value, "salt")
+        return original(msg)
+
+    client._handle_data_message = _handle_with_normalized_headers
+
+
+def fcm_repair_issue_id(entry_id: str) -> str:
+    """Вернуть стабильный Repairs issue ID для config entry."""
+    return f"{_FCM_REPAIR_ISSUE_PREFIX}_{entry_id}"
+
+
+@callback
+def async_create_fcm_repair_issue(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Show one persistent degraded-FCM issue for a config entry."""
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        fcm_repair_issue_id(entry.entry_id),
+        is_fixable=False,
+        is_persistent=True,
+        severity=ir.IssueSeverity.ERROR,
+        translation_key="fcm_receiver_unavailable",
+        translation_placeholders={"entry_title": entry.title},
+    )
+
+
+@callback
+def async_delete_fcm_repair_issue(
+    hass: HomeAssistant, entry_id: str
+) -> None:
+    """Удалить persistent FCM issue одного config entry."""
+    ir.async_delete_issue(hass, DOMAIN, fcm_repair_issue_id(entry_id))
+
+
+class _FcmRecoveryPhase(StrEnum):
+    """Per-entry FCM recovery phase."""
+
+    HEALTHY = "healthy"
+    SUSPECT = "suspect"
+    VERIFYING = "verifying"
+    OPEN = "open"
 
 
 class DoorbellFcmListener:
@@ -61,15 +218,26 @@ class DoorbellFcmListener:
         # Watchdog: unsub периодического контроля живости + guard от
         # перекрытия повторных переподнятий.
         self._watchdog_unsub: Any = None
-        self._reconnecting = False
+        self._transition_lock = asyncio.Lock()
+        self._stopping = False
+        self._recovery_phase = _FcmRecoveryPhase.HEALTHY
+        self._next_probe_at: datetime | None = None
+        self._backoff_index = 0
         # FCM push-токен (после checkin_or_register). Нужен SIP-ответу для
         # push-params REGISTER (pn-tok=...) — см. sip/call_controller.py.
         self.fcm_token: str | None = None
 
     async def async_start(self) -> None:
         """Первичный коннект + запуск watchdog'а (контроль живости сокета)."""
-        await self._async_connect()
-        if self._watchdog_unsub is None:
+        async with self._transition_lock:
+            if self._stopping or self._watchdog_unsub is not None:
+                return
+            await self._async_connect()
+            if self._stopping:
+                # Выгрузка успела начаться уже после успешного start() —
+                # здесь клиент реальный и его надо закрыть.
+                await self._async_disconnect()
+                return
             self._watchdog_unsub = async_track_time_interval(
                 self._hass, self._async_watchdog, FCM_WATCHDOG_INTERVAL
             )
@@ -77,8 +245,9 @@ class DoorbellFcmListener:
     async def _async_connect(self) -> None:
         """checkin/register → привязка токена у оператора → start MTalk-сокет.
 
-        `abort_on_sequential_error_count=None` — библиотека НЕ выключает receiver
-        после N подряд ошибок соединения (дефолт 3), а продолжает переподключаться.
+        Полностью contained: любая ошибка здесь — warning, `self._client`
+        остаётся `None`, и watchdog разбирается дальше по своей state machine.
+        Клиент публикуется в `self._client` только после успешного `start()`.
         """
         try:
             from firebase_messaging import (
@@ -88,7 +257,8 @@ class DoorbellFcmListener:
             )
         except Exception as err:  # noqa: BLE001
             LOGGER.warning(
-                "FCM: firebase-messaging недоступна (%s) — событие вызова отключено", err
+                "FCM: firebase-messaging недоступна (%s) — событие вызова отключено",
+                type(err).__name__,
             )
             return
 
@@ -101,70 +271,173 @@ class DoorbellFcmListener:
                 bundle_id=FCM_BUNDLE_ID,
             )
             credentials = self._entry.data.get(CONF_FCM_CREDENTIALS)
-            self._client = FcmPushClient(
+            # Keep the candidate local until start(): firebase-messaging 0.4.5
+            # creates stopping_lock in start(), so stop() is unsafe beforehand.
+            client = FcmPushClient(
                 self._on_notification,
                 register_config,
                 credentials,
                 self._on_credentials_updated,
-                config=FcmPushClientConfig(abort_on_sequential_error_count=None),
+                config=FcmPushClientConfig(
+                    abort_on_sequential_error_count=FCM_ABORT_AFTER_ERRORS
+                ),
+                http_client_session=async_get_clientsession(self._hass),
             )
-            fcm_token = await self._client.checkin_or_register()
+            # Внутри `try`: патч читает приватный метод зависимости, а верхней
+            # границы версии в manifest нет. Если апстрим его переименует,
+            # ошибка должна уйти в graceful degradation, а не оборвать
+            # `_async_connect` до постановки watchdog'а.
+            _patch_push_headers(client)
+            fcm_token = await client.checkin_or_register()
             self.fcm_token = fcm_token
+            # Начатую выгрузку видно только здесь: `async_stop()` выставляет
+            # флаг до захвата lock'а и ждёт нас. Нестартовавший клиент просто
+            # отбрасываем — `stop()` до `start()` упадёт на `stopping_lock`.
+            if self._stopping:
+                return
             if not await self._api.register_push_device(fcm_token):
                 LOGGER.warning(
                     "FCM: привязка push-токена у оператора не удалась — пуши могут не прийти"
                 )
-            await self._client.start()
+            if self._stopping:
+                return
+            await client.start()
+            self._client = client
             LOGGER.info("FCM doorbell listener запущен")
         except Exception as err:  # noqa: BLE001
+            # Текст исключения зависимости может нести credentials/payload —
+            # логируем только класс (ADR-0004).
             LOGGER.warning(
-                "FCM: не удалось запустить listener (%s) — событие вызова отключено", err
+                "FCM: не удалось запустить listener (%s) — событие вызова отключено",
+                type(err).__name__,
             )
-            self._client = None
 
-    async def _async_watchdog(self, _now: Any = None) -> None:
-        """Периодически: если push-receiver неактивен — переподнять listener.
+    @callback
+    def _async_mark_healthy(self) -> None:
+        """Сбросить recovery-state после подтверждённого healthy-тика."""
+        recovered = self._recovery_phase in {
+            _FcmRecoveryPhase.VERIFYING,
+            _FcmRecoveryPhase.OPEN,
+        }
+        self._recovery_phase = _FcmRecoveryPhase.HEALTHY
+        self._next_probe_at = None
+        self._backoff_index = 0
+        async_delete_fcm_repair_issue(self._hass, self._entry.entry_id)
+        if recovered:
+            LOGGER.info("FCM: push-receiver восстановлен")
 
-        Ловит фатальную смерть клиента и провал первичного checkin (client=None).
-        Guard `_reconnecting` — против перекрытия с предыдущим переподнятием.
+    @callback
+    def _async_open_circuit(self, now: datetime) -> None:
+        """Назначить следующую пробу и показать persistent Repairs issue."""
+        if self._stopping:
+            return
+        delay, delay_text = FCM_RETRY_BACKOFFS[self._backoff_index]
+        self._backoff_index = min(
+            self._backoff_index + 1, len(FCM_RETRY_BACKOFFS) - 1
+        )
+        self._next_probe_at = now + delay
+        self._recovery_phase = _FcmRecoveryPhase.OPEN
+        async_create_fcm_repair_issue(self._hass, self._entry)
+        LOGGER.warning(
+            "FCM: частые попытки восстановления приостановлены; "
+            "следующая проверка через %s",
+            delay_text,
+        )
+
+    async def _async_reconnect(self) -> bool:
+        """Выполнить один защищённый disconnect/connect цикл."""
+        if not await self._async_disconnect():
+            return False
+        if self._stopping:
+            return False
+        await self._async_connect()
+        if not self._stopping:
+            self._recovery_phase = _FcmRecoveryPhase.VERIFYING
+        return True
+
+    async def _async_watchdog(self, _now: datetime | None = None) -> None:
+        """Наблюдать receiver и выполнять bounded automatic recovery.
+
+        Один тик = один переход. Живой клиент всегда возвращает в HEALTHY;
+        мёртвый идёт HEALTHY → SUSPECT → VERIFYING → OPEN, где OPEN пробует
+        восстановиться по backoff-расписанию.
         """
-        if self._reconnecting:
+        if self._stopping or self._transition_lock.locked():
             return
-        client = self._client
-        if client is not None and client.is_started():
-            return
-        # is_started()==False = receiver мёртв ЛИБО ещё в фазе MCS-login.
-        # Интервал watchdog (2 мин) ≫ времени login (секунды) → к тику живой
-        # клиент уже STARTED; не-STARTED на тике = реально залип/умер →
-        # переподнимаем (grace-период не нужен и лишь задержал бы восстановление
-        # действительно зависшего login).
-        self._reconnecting = True
-        try:
-            LOGGER.warning("FCM: push-receiver неактивен — переподнимаю listener")
-            await self._async_disconnect()
-            await self._async_connect()
-        finally:
-            self._reconnecting = False
+        async with self._transition_lock:
+            if self._stopping:
+                return
+            client = self._client
+            if client is not None and client.is_started():
+                self._async_mark_healthy()
+                return
 
-    async def _async_disconnect(self) -> None:
+            now = _now or dt_util.utcnow()
+
+            match self._recovery_phase:
+                case _FcmRecoveryPhase.HEALTHY:
+                    # Первая неактивность — только наблюдаем: даём библиотеке
+                    # тик на самостоятельное переподключение.
+                    self._recovery_phase = _FcmRecoveryPhase.SUSPECT
+
+                case _FcmRecoveryPhase.SUSPECT:
+                    LOGGER.warning(
+                        "FCM: push-receiver неактивен — выполняю одну попытку восстановления"
+                    )
+                    if not await self._async_reconnect():
+                        self._async_open_circuit(now)
+
+                case _FcmRecoveryPhase.VERIFYING:
+                    # Замена не ожила к следующему тику — размыкаем circuit.
+                    await self._async_disconnect()
+                    self._async_open_circuit(now)
+
+                case _FcmRecoveryPhase.OPEN:
+                    if self._next_probe_at is not None and now < self._next_probe_at:
+                        return
+                    LOGGER.info("FCM: выполняю пробную попытку восстановления")
+                    if not await self._async_reconnect():
+                        self._async_open_circuit(now)
+
+    async def _async_disconnect(self) -> bool:
         """Остановить текущий MTalk-сокет (watchdog НЕ трогаем)."""
-        client, self._client = self._client, None
-        if client is not None:
-            try:
-                await client.stop()
-            except Exception:  # noqa: BLE001
-                pass
+        client = self._client
+        if client is None:
+            return True
+        try:
+            await client.stop()
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning(
+                "FCM: не удалось остановить listener (%s)",
+                type(err).__name__,
+            )
+            return False
+        if self._client is client:
+            self._client = None
+        return True
 
-    async def async_stop(self) -> None:
+    async def async_stop(self) -> bool:
         """Полная остановка на unload entry: отменить watchdog + закрыть сокет."""
+        self._stopping = True
         if self._watchdog_unsub is not None:
             self._watchdog_unsub()
             self._watchdog_unsub = None
-        await self._async_disconnect()
+        async with self._transition_lock:
+            stopped = await self._async_disconnect()
+        if stopped and self._entry.disabled_by is not None:
+            async_delete_fcm_repair_issue(self._hass, self._entry.entry_id)
+        return stopped
 
     @callback
     def _on_credentials_updated(self, credentials: dict, *_: Any) -> None:
-        """Персист FCM-creds в entry.data — стабильный токен между рестартами."""
+        """Персист FCM-creds в entry.data — стабильный токен между рестартами.
+
+        Тот же guard, что и в `_on_notification`: при неподтверждённой
+        остановке клиент остаётся живым и после удаления entry, а запись в
+        чужой/удалённый entry бросит `UnknownEntry` внутри чужой таски.
+        """
+        if self._stopping:
+            return
         self._hass.config_entries.async_update_entry(
             self._entry,
             data={**self._entry.data, CONF_FCM_CREDENTIALS: credentials},
@@ -173,6 +446,8 @@ class DoorbellFcmListener:
     @callback
     def _on_notification(self, notification: dict, persistent_id: str, *_: Any) -> None:
         """Callback firebase-messaging: парсит push → SIGNAL_DOORBELL."""
+        if self._stopping:
+            return
         data = (notification or {}).get("data") or {}
         push_type = data.get("PushType") or data.get("google.c.a.m_l")
         event_type = _PUSH_TYPE_EVENT.get(push_type)

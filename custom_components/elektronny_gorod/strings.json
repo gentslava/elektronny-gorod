@@ -8,6 +8,12 @@
     "go2rtc_streams_api_failed": "go2rtc is reachable, but /api/streams is not writable (check configuration/permissions)",
     "go2rtc_rtsp_port_closed": "go2rtc HTTP API is reachable, but the RTSP port (8554) is closed. Check firewall, bind address, or that go2rtc was built with RTSP support."
   },
+  "issues": {
+    "fcm_receiver_unavailable": {
+      "title": "Doorbell notifications are unavailable for {entry_title}",
+      "description": "Doorbell calls are not reaching Home Assistant — account {entry_title}. Cameras, locks, balance and history work as usual.\n\nThe integration is already trying to reconnect. If this warning stays:\n\n1. Reload the account — that usually does it.\n2. Still there? Reconnect it.\n3. Still there? Update the integration and report the problem."
+    }
+  },
   "config": {
     "abort": {
       "missing_phone": "Phone number is missing. Go back and enter your phone number.",

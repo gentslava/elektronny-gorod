@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 import json
-from typing import Any
+from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers import device_registry as dr, entity_registry as er
@@ -34,7 +34,11 @@ from .const import (
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
-from .fcm import DoorbellFcmListener
+from .fcm import (
+    DoorbellFcmListener,
+    async_create_fcm_repair_issue,
+    async_delete_fcm_repair_issue,
+)
 from .go2rtc import Go2RtcClient, go2rtc_auth_headers
 from .history import HistoryManager
 from .history_ws import async_register_history_ws_command
@@ -42,6 +46,9 @@ from .sip.call_controller import DoorbellCallController, Go2RtcConfig
 from .stream_manager import CameraStreamManager
 from .uplink_ws import async_register_uplink_card, async_register_uplink_ws_command
 from .user_agent import UserAgent
+
+# Per-entry FCM ownership is private to this lifecycle module.
+_FCM_DATA: Final = f"{DOMAIN}_fcm_listeners"
 
 # Реестр SIP-контроллеров per-entry (`SIP_DATA` из const.py) — отдельный top-level
 # key, чтобы не ломать `hass.data[DOMAIN][entry_id] = coordinator` (event/camera/lock).
@@ -56,6 +63,39 @@ PLATFORMS: list[Platform] = [
     Platform.SENSOR,
     Platform.SWITCH,
 ]
+
+
+async def _async_register_fcm_listener(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    listener: DoorbellFcmListener,
+) -> bool:
+    """Claim per-entry FCM ownership without replacing a surviving receiver."""
+    registry = hass.data.setdefault(_FCM_DATA, {})
+    previous = registry.get(entry.entry_id)
+    if previous is not None and previous is not listener:
+        try:
+            stopped = await previous.async_stop()
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning(
+                "FCM: прежний listener не завершён (%s)",
+                type(err).__name__,
+            )
+            stopped = False
+        if not stopped:
+            async_create_fcm_repair_issue(hass, entry)
+            return False
+        if registry.get(entry.entry_id) is previous:
+            registry.pop(entry.entry_id)
+
+    registry[entry.entry_id] = listener
+
+    async def stop_and_release() -> None:
+        if await listener.async_stop() and registry.get(entry.entry_id) is listener:
+            registry.pop(entry.entry_id)
+
+    entry.async_on_unload(stop_and_release)
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -129,20 +169,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name=f"{DOMAIN}_history_manager",
     )
 
-    # Realtime событие вызова домофона — FCM-listener в фоне. Хрупкий флоу
-    # (приватные API Google) под graceful degradation в fcm.py; background-task —
-    # чтобы медленный checkin/register не блокировал setup. См. ADR-0011.
+    # Build the optional realtime listener now so SIP can read its token later,
+    # but do not claim/start FCM until all fallible setup awaits have completed.
     fcm_listener = DoorbellFcmListener(hass, entry, coordinator.api)
-    entry.async_create_background_task(
-        hass, fcm_listener.async_start(), name=f"{DOMAIN}_fcm_listener"
-    )
-    entry.async_on_unload(fcm_listener.async_stop)
 
     # Two-way audio: контроллер приёма вызова (REGISTER-on-ring). Трекает
     # активный FCM-вызов (SIGNAL_DOORBELL) и драйвит SipManager по сервису
     # `answer`/`hangup`. FCM-токен берёт у listener (push-params REGISTER).
     sip_controller = DoorbellCallController(
-        hass, coordinator.api, lambda: fcm_listener.fcm_token,
+        hass,
+        coordinator.api,
+        # `fcm_token` присваивается только внутри `_async_connect`, а тот
+        # достижим лишь после успешной регистрации ниже — до неё токен и так
+        # `None`, отдельный флаг ничего не добавлял.
+        lambda: fcm_listener.fcm_token,
         go2rtc=_build_go2rtc_config(entry),
         camera_resolver=lambda ac: _resolve_call_camera_id(coordinator, ac),
     )
@@ -170,6 +210,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if stream_manager is not None:
         await stream_manager.async_start()
+
+    # A surviving dependency client degrades only realtime FCM. Do not raise
+    # ConfigEntryNotReady: HA would retry setup forever and recreate log churn.
+    # Claim/start only after every fallible setup await, so a later setup unwind
+    # cannot strand a newly registered dependency-owned receiver.
+    if await _async_register_fcm_listener(hass, entry, fcm_listener):
+        entry.async_create_background_task(
+            hass, fcm_listener.async_start(), name=f"{DOMAIN}_fcm_listener"
+        )
 
     # Reload только если migration реально сбросила disabled_by markers — entity
     # требуют re-init платформ для применения. Sync visibility update в registry
@@ -519,6 +568,22 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     HA-core вызовет их автоматически независимо от исхода platform unload
     (см. audit A-16).
     """
+    fcm_listener = hass.data.get(_FCM_DATA, {}).get(entry.entry_id)
+    if fcm_listener is not None:
+        # Как и в двух других точках остановки: текст исключения зависимости
+        # наружу не выпускаем — HA положил бы `str(exc)` в `reason` записи и
+        # показал его пользователю (ADR-0004).
+        try:
+            stopped = await fcm_listener.async_stop()
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning(
+                "FCM: listener не завершён при выгрузке (%s)",
+                type(err).__name__,
+            )
+            stopped = False
+        if not stopped:
+            return False
+
     stream_manager = hass.data.get(STREAM_MANAGER_DATA, {}).get(entry.entry_id)
     if stream_manager is not None:
         await stream_manager.async_stop()
@@ -535,6 +600,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data.get(_FCM_DATA, {}).pop(entry.entry_id, None)
         hass.data.get(STREAM_MANAGER_DATA, {}).pop(entry.entry_id, None)
 
     return unload_ok
@@ -544,9 +610,30 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """На удалении интеграции — отвязать FCM push-токен у оператора (best-effort).
 
     Вызывается HA только при удалении entry (НЕ при reload/unload), поэтому
-    отвязка не происходит на каждый reload. Coordinator уже выгружен — строим
-    временный API из entry.data. Ошибки глушим (cleanup не должен мешать удалению).
+    отвязка не происходит на каждый reload. После failed unload повторяем stop
+    retained FCM owner; если dependency снова не остановилась, сохраняем owner,
+    а HA уже вернёт пользователю `require_restart`.
+    Для remote cleanup строим временный API из entry.data; ошибки глушим, чтобы
+    cleanup не мешал удалению.
     """
+    registry = hass.data.get(_FCM_DATA, {})
+    listener = registry.get(entry.entry_id)
+    if listener is not None:
+        try:
+            stopped = await listener.async_stop()
+        except Exception as err:  # noqa: BLE001
+            LOGGER.warning(
+                "FCM: не удалось завершить listener при удалении entry (%s)",
+                type(err).__name__,
+            )
+        else:
+            # A failed ordinary unload makes HA report that restart is required.
+            # Keep ownership on another failed stop instead of orphaning a
+            # dependency receiver whose shutdown was not confirmed.
+            if stopped and registry.get(entry.entry_id) is listener:
+                registry.pop(entry.entry_id)
+
+    async_delete_fcm_repair_issue(hass, entry.entry_id)
     try:
         user_agent = UserAgent()
         user_agent.from_json(json.loads(entry.data[CONF_USER_AGENT]))

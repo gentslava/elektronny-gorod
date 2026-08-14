@@ -1,7 +1,7 @@
 Status: Active
 Owner: Security & Privacy Agent
-Last reviewed: 2026-07-15 (9.9.0 parity credential classification;
-stale diagnostics/timeout/MCP gate text reconciled)
+Last reviewed: 2026-08-11 (FCM Repairs title privacy boundary accepted;
+9.9.0 parity credential classification retained)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -9,6 +9,7 @@ Source files:
 - `custom_components/elektronny_gorod/api.py`
 - `custom_components/elektronny_gorod/helpers.py`
 - `custom_components/elektronny_gorod/user_agent.py`
+- `custom_components/elektronny_gorod/fcm.py`
 
 Related docs:
 - `project-audit.md`
@@ -33,9 +34,9 @@ Quality gates:
 > чужой access_token в логах. **По состоянию на 2026-05-30 утечки нет** —
 > верифицировано по коду независимым security-аудитом (см. статусы S-01..S-06).
 
-## Сводка по состоянию на 2026-07-15
+## Сводка по состоянию на 2026-08-11
 
-Проверка по текущему `master`: grep всех `LOGGER.*` в чувствительных файлах,
+Проверка по текущему product candidate: grep всех `LOGGER.*` в чувствительных файлах,
 построчный разбор `_logging.py`/`http.py`/`config_flow.py`/`api.py`/
 `camera.py`/`go2rtc.py`/`diagnostics.py`, а также поиск credential-like
 значений в документации перед релизом.
@@ -54,6 +55,7 @@ Quality gates:
 | S-19 | 🟢 ACCEPTED-by-design | uplink AuthZ (любой auth HA-юзер) + AudioBridge `0.0.0.0:40020` LAN-exposure (ADR-0013/A-85) |
 | S-20 | ✅ RESOLVED | production credential-like literal удалён из audit evidence; текущие production credentials не совпадают |
 | S-21 | 🟡 DESIGN GATE | guest link, access-key code and signed archive URL for planned parity features |
+| S-23 | 🟢 ACCEPTED P3 | persistent FCM Repairs дублирует config-entry title для идентификации проблемного аккаунта |
 
 ## P0 — критичные утечки (все RESOLVED)
 
@@ -125,7 +127,7 @@ Quality gates:
 - **Status:** ✅ **RESOLVED** — добавлен `diagnostics.py` (3.3.0).
   `async_get_config_entry_diagnostics` → `async_redact_data(entry.as_dict(), TO_REDACT)`.
   `TO_REDACT = SENSITIVE_KEYS ∪ {phone, contract, operator_id, account_id,
-  subscriber_id, name, address}` (синхронизирован с `_logging.py`; есть тест
+  subscriber_id, title, name, address}` (синхронизирован с `_logging.py`; есть тест
   `test_to_redact_covers_sensitive_keys`). Coordinator-снимок — только счётчики.
   6 тестов `tests/test_diagnostics.py`. Разблокирует `SECURITY_OK`.
 - **Файл:** [`diagnostics.py`](../../custom_components/elektronny_gorod/diagnostics.py)
@@ -133,7 +135,7 @@ Quality gates:
 - **Fix:** создать `diagnostics.py`:
   ```python
   TO_REDACT = {
-      "access_token", "refresh_token", "user_agent", "name",
+      "access_token", "refresh_token", "user_agent", "title", "name",
       "account_id", "subscriber_id",
       "go2rtc_username", "go2rtc_password",  # S-16
   }
@@ -264,6 +266,30 @@ Quality gates:
 
 ## P3 — низкий
 
+### S-23. Config-entry title в persistent FCM Repairs
+
+- **Status:** 🟢 **ACCEPTED** (owner confirmation 2026-08-11).
+- **Data:** автоматически созданный title интеграции содержит resident name и
+  operator `accountId`; FCM Repairs не читает токены/credentials из
+  `entry.data`, но пользовательский переименованный title копируется verbatim.
+- **Persistence:** `is_persistent=True` дублирует title из
+  `.storage/core.config_entries` в `.storage/repairs.issue_registry`.
+- **Audience / required control:** новой категории доступа внутри HA не
+  появляется: и
+  `repairs/list_issues`, и `config_entries/get` доступны authenticated HA users,
+  причём второй endpoint уже возвращает `entry.title`. Event обновления Repairs
+  содержит только action/domain/issue ID; новые логи title не выводят.
+  Diagnostics обязательно redacts every `title` key, поэтому user-shared export
+  не переносит resident name/account ID за пределы HA. Без этой redaction S-23
+  больше не считается принятым.
+- **Accepted trade-off:** небольшое дублирование PII принято ради понятного UX
+  при нескольких аккаунтах — пользователь сразу видит, у какого entry отключён
+  realtime FCM, вместо последовательной перезагрузки всех аккаунтов.
+- **Revisit:** если HA сузит доступ к config-entry titles или entry title начнёт
+  содержать дополнительные чувствительные данные, placeholder нужно удалить
+  либо заменить privacy-safe идентификатором. Пользователям не следует помещать
+  credentials в произвольно переименованный title.
+
 ### S-15. Случайный Pixel device fingerprint
 
 - **Файл:** [`user_agent.py:11-13`](../../custom_components/elektronny_gorod/user_agent.py#L11-L13)
@@ -343,8 +369,9 @@ scan и review перед коммитом.
 
 ## Dependency vulnerabilities
 
-`manifest.json:requirements` больше не пуст: `firebase-messaging>=0.4` (FCM-вызов,
-ADR-0011 — тянет protobuf / http_ece / cryptography; «серая зона» приватных API
+`manifest.json:requirements` больше не пуст: `firebase-messaging>=0.4.5` (FCM-вызов,
+ADR-0011 — `0.4.5` является проверенным минимумом, а обновления выше него
+разрешены; тянет protobuf / http_ece / cryptography; «серая зона» приватных API
 Google задокументирована в [A-80](project-audit.md)) + `audioop-lts>=0.2.1`
 (G.711-транскод SIP, A-81; только Python 3.13+). Остальное — `aiohttp`/`voluptuous`/
 `yarl` из HA core. CVE-risk core-зависимостей управляется HA core; внешние pip-deps
