@@ -1,6 +1,4 @@
-Status: Active
-Owner: Documentation / AIDD Agent
-Last reviewed: 2026-08-10 (tool-independent `specs/` and `plans/` structure)
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-11 (tool-independent `specs/` and `plans/` structure)
 
 Source files:
 - AIDD-документы в `docs/` (этот каталог и подкаталоги)
@@ -90,9 +88,7 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 
 ## Где не AIDD-документация
 
-- Пользовательская документация: [`../../README.md`](../README.md),
-  [`../../README.en_EN.md`](../README.en_EN.md), включая обзор 4.0.0, экран
-  вызова, карточку истории и opt-in внешний RTSP через go2rtc.
+- Пользовательская документация: [`../../README.md`](../README.md), [`../../README.en_EN.md`](../README.en_EN.md), включая обзор 4.0.0, экран вызова, карточку истории и opt-in внешний RTSP через go2rtc.
 - HACS: [`../../hacs.json`](../hacs.json), [`../../info.md`](../info.md).
 - CI: [`../../.github/workflows/`](../.github/workflows/).
 
@@ -120,7 +116,7 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | `aidd/mcp-tools.md` | Active |
 | `specs/*` | Согласованные tool-independent технические дизайны |
 | `plans/*` | Исполняемые tool-independent implementation plans |
-| `decisions/0001..0007` | accepted (0001, 0006, 0007) / proposed (0002..0005) |
+| `decisions/*` | ADR registry; актуальные status и полный список — в `decisions/README.md` |
 | `aidd/templates/*` | шаблоны |
 | `aidd/runbooks/*` | руководства (вкл. `har-collection.md`) |
 | `features/example/*` | образец |

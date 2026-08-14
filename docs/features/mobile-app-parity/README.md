@@ -5,9 +5,7 @@
 - **Owner:** @gentslava
 - **Apps:** Мой Дом 9.9.0 and Умный Дом.ру 9.9.0
 
-This folder is the implementation hand-off for features found while exercising
-the 9.9.0 Android applications. It deliberately separates observed behaviour
-from static-only APK contracts.
+This folder is the implementation hand-off for features found while exercising the 9.9.0 Android applications. It deliberately separates observed behaviour from static-only APK contracts.
 
 ## Feature matrix
 
@@ -31,18 +29,12 @@ from static-only APK contracts.
 
 ## Sources of truth
 
-- Exact endpoint/DTO contracts and evidence labels:
-  [`api-reference.md`](../../architecture/api-reference.md).
-- APK/HAR/PCAP and AVD conclusions:
-  [`9.9.0-analysis.md`](../../../research/apk/9.9.0-analysis.md).
-- Commit-safe response fixtures:
-  [`tests/fixtures/mobile_app_9_9_0`](../../../tests/fixtures/mobile_app_9_9_0/README.md).
-- Priority/status:
-  [`project-audit.md`](../../audit/project-audit.md) and
-  [`roadmap.md`](../../roadmap.md).
+- Exact endpoint/DTO contracts and evidence labels: [`api-reference.md`](../../architecture/api-reference.md).
+- APK/HAR/PCAP and AVD conclusions: [`9.9.0-analysis.md`](../../../research/apk/9.9.0-analysis.md).
+- Commit-safe response fixtures: [`tests/fixtures/mobile_app_9_9_0`](../../../tests/fixtures/mobile_app_9_9_0/README.md).
+- Priority/status: [`project-audit.md`](../../audit/project-audit.md) and [`roadmap.md`](../../roadmap.md).
 
-Do not copy live guest links, access-key codes or signed archive URLs into this
-folder. They are access credentials even when short-lived.
+Do not copy live guest links, access-key codes or signed archive URLs into this folder. They are access credentials even when short-lived.
 
 ## Quality gates
 

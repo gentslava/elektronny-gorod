@@ -1,10 +1,9 @@
-Status: Active
-Owner: Documentation / AIDD Agent
-Last reviewed: 2026-05-22
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-14 (local command procedures consolidated under `.agents/commands`)
 
 Source files:
-- глобальные skills плагина `agent-skills:*`
-- `.claude/commands/**`
+- доступные global/plugin skills текущего tool
+- `.agents/commands/**`
+- `.agents/skills/source-command-*/SKILL.md`
 
 Related docs:
 - `multi-agent-workflow.md`
@@ -24,36 +23,38 @@ Quality gates:
 В Claude Code / Codex / Cursor «skill» — это переиспользуемая процедура (набор инструкций + ожидаемый output), которая применяется к конкретной задаче. Skills бывают:
 
 - **Глобальные** (из плагинов) — установлены на уровне пользователя.
-- **Локальные** (свои) — описаны в `.claude/commands/*.md` или вызываются по контексту.
+- **Локальные** (свои) — описаны в `.agents/commands/*.md` и открываются через tool-specific adapters.
 
 ## Глобальные skills, релевантные этому проекту
 
 | Skill | Когда применять | Почему |
 |---|---|---|
-| `agent-skills:security-and-hardening` | работа с `http.py`, `config_flow.py:logging`, `helpers.py`, новый `diagnostics.py` | P0 утечки — критический риск проекта |
-| `agent-skills:test-driven-development` | переписывание тестов config-flow / coordinator / api | сейчас 0% coverage |
-| `agent-skills:code-review-and-quality` | перед коммитом в entity / coordinator | пять осей review |
-| `agent-skills:debugging-and-error-recovery` | падающий тест, странное runtime-поведение | systematic debugging |
-| `agent-skills:incremental-implementation` | переход на `CoordinatorEntity` (3 платформы) | тонкие vertical slices |
-| `agent-skills:spec-driven-development` | новые features (reconfigure flow, repairs) | spec до кода |
-| `agent-skills:source-driven-development` | при работе с HA API, в котором есть сомнения | сверка с official docs |
-| `agent-skills:context-engineering` | при потере фокуса агентом | curated context |
-| `agent-skills:planning-and-task-breakdown` | большие задачи (Bronze→Silver) | разбивка на verifiable шаги |
-| `agent-skills:git-workflow-and-versioning` | при подготовке PR | atomic commits |
-| `agent-skills:documentation-and-adrs` | принятие архитектурного решения | ADR-шаблон |
-| `agent-skills:shipping-and-launch` | подготовка к релизу | pre-launch checklist |
+| `security-and-hardening` | работа с `http.py`, `config_flow.py:logging`, `helpers.py`, `diagnostics.py`, `fcm.py`, credentials/tokens | P0 утечки и log-amplification — критический риск проекта |
+| `test-driven-development` | любое изменение поведения или bug-fix в config-flow / coordinator / api / FCM | regression сначала воспроизводится тестом; live baseline — в testing strategy |
+| `code-review-and-quality` | независимым reviewer-ом clean committed candidate после tests/security prechecks/docs/history cleanup | пять осей review; self-review не закрывает gate; fixes создают новый candidate |
+| `debugging-and-error-recovery` | падающий тест, странное runtime-поведение | systematic debugging |
+| `incremental-implementation` | переход на `CoordinatorEntity` (3 платформы) | тонкие vertical slices |
+| `spec-driven-development` | новые features (reconfigure flow, repairs) | spec до кода |
+| `source-driven-development` | при работе с HA API, в котором есть сомнения | сверка с official docs |
+| `context-engineering` | при потере фокуса агентом | curated context |
+| `planning-and-task-breakdown` | большие задачи (Bronze→Silver) | разбивка на verifiable шаги |
+| `git-workflow-and-versioning` | при подготовке PR | atomic commits |
+| `documentation-and-adrs` | принятие архитектурного решения | ADR-шаблон |
+| `shipping-and-launch` | подготовка к релизу | pre-launch checklist |
 
 ## Локальные skills (этого проекта)
 
-Реализованы как `.claude/commands/*.md`. Запускаются slash-командой в Claude Code.
+Реализованы один раз в `.agents/commands/*.md`. Claude открывает их slash-командами из `.claude/commands/`, Codex — matching skills из `.agents/skills/source-command-*`.
 
 | Команда | Цель | Файл |
 |---|---|---|
-| `/audit` | полный аудит по методологии этого репозитория | `.claude/commands/audit.md` |
-| `/test-config-flow` | сгенерировать или дополнить тесты config_flow | `.claude/commands/test-config-flow.md` |
-| `/security-check` | проверка кода на утечки токенов и headers | `.claude/commands/security-check.md` |
-| `/docs-update` | обновить AIDD-документы после правок в коде | `.claude/commands/docs-update.md` |
-| `/release-check` | пройти pre-release checklist | `.claude/commands/release-check.md` |
+| `/audit` | полный аудит по методологии этого репозитория | `.agents/commands/audit.md` |
+| `/capture-har` | собрать HAR целевого сценария | `.agents/commands/capture-har.md` |
+| `/test-config-flow` | сгенерировать или дополнить тесты config_flow | `.agents/commands/test-config-flow.md` |
+| `/security-check` | проверка кода на утечки токенов и headers | `.agents/commands/security-check.md` |
+| `/docs-update` | обновить AIDD-документы после правок в коде | `.agents/commands/docs-update.md` |
+| `/git-cleanup` | проверить и безопасно очистить историю | `.agents/commands/git-cleanup.md` |
+| `/release-check` | пройти pre-release checklist | `.agents/commands/release-check.md` |
 
 ## Когда какой skill использовать
 
@@ -61,16 +62,16 @@ Quality gates:
 
 | Тип задачи | Skill |
 |---|---|
-| Bug fix с очевидным root cause | `agent-skills:debugging-and-error-recovery` |
-| Bug fix без понятного root cause | `agent-skills:systematic-debugging` |
-| Новый feature | `agent-skills:spec-driven-development` → `incremental-implementation` |
-| Рефакторинг | `agent-skills:code-simplification` |
-| Изменение API entity | `agent-skills:api-and-interface-design` |
-| Security-чувствительный код | `agent-skills:security-and-hardening` |
-| Тесты | `agent-skills:test-driven-development` |
-| Performance | `agent-skills:performance-optimization` |
-| Code review | `agent-skills:code-review-and-quality` |
-| Подготовка релиза | `agent-skills:shipping-and-launch` |
+| Bug fix с очевидным root cause | `debugging-and-error-recovery` |
+| Bug fix без понятного root cause | `systematic-debugging` |
+| Новый feature | `spec-driven-development` → `incremental-implementation` |
+| Рефакторинг | `code-simplification` |
+| Изменение API entity | `api-and-interface-design` |
+| Security-чувствительный код | `security-and-hardening` |
+| Тесты | `test-driven-development` |
+| Performance | `performance-optimization` |
+| Code review | `code-review-and-quality` |
+| Подготовка релиза | `shipping-and-launch` |
 
 ## Правила использования skills
 
@@ -81,7 +82,7 @@ Quality gates:
 
 ## Создание новых локальных skills
 
-Когда добавлять `.claude/commands/<name>.md`:
+Когда добавлять `.agents/commands/<name>.md` и короткие tool adapters:
 
 - Повторяющаяся процедура (≥ 3 раза).
 - Чёткие inputs / outputs.
@@ -91,7 +92,7 @@ Quality gates:
 
 ## Next reading
 
-- For commands: `../../.claude/commands/`
-- For agents: `../../.claude/agents/`
+- For commands: `../../.agents/commands/`
+- For agents: `../../.agents/roles/`
 - For prompts: `prompt-library.md`
 - For MCP: `mcp-tools.md`

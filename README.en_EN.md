@@ -35,14 +35,9 @@
   </tr>
 </table>
 
-Your **intercoms, cameras and locks** from Elektronny Gorod (Novotelecom) and
-Dom.ru — right inside Home Assistant. When a guest rings the doorbell you
-instantly see the video, hear the audio, talk back and open the door with a
-single tap, even when you're away from home.
+Your **intercoms, cameras and locks** from Elektronny Gorod (Novotelecom) and Dom.ru — right inside Home Assistant. When a guest rings the doorbell you instantly see the video, hear the audio, talk back and open the door with a single tap, even when you're away from home.
 
-The integration mirrors the APIs of the official My Home and Umnyy Dom.ru
-apps: watch cameras with sound, answer and end calls, browse answered and
-missed call history and build any Home Assistant automation on top.
+The integration mirrors the APIs of the official My Home and Umnyy Dom.ru apps: watch cameras with sound, answer and end calls, browse answered and missed call history and build any Home Assistant automation on top.
 
 > 🎉 **4.0.0 is out** — the project's biggest release yet: a complete call
 > screen, SIP answering with two-way audio, realtime doorbell events (FCM),
@@ -66,28 +61,16 @@ missed call history and build any Home Assistant automation on top.
 
 ## What's new in 4.0.0
 
-- **Calls without polling:** incoming calls arrive through FCM and are
-  immediately available to Home Assistant automations.
-- **Answer and talk:** SIP answer/hangup, guest video and audio, browser
-  microphone uplink, and `elektronny_gorod.answer` / `hangup` services.
-- **Ready-to-use call screen:** `custom:eg-intercom-call-card` combines video,
-  answer controls, microphone, sound and protected door opening across phones,
-  desktops and wall panels.
-- **Event history:** `custom:eg-event-history-card` displays answered and missed
-  calls, groups them by date/device and merges multiple places or accounts.
-- **Automation events:** new answered/missed calls are exposed as HA `event`
-  entities. Camera-motion history is a separate disabled-by-default entity;
-  enabling it starts polling for that camera.
-- **Stable external RTSP:** enabled cameras can be published through go2rtc for
-  an NVR, media player or another local system. Publishing is off by default;
-  hidden cameras require a separate option.
-- **No reconfiguration:** existing Home Assistant entries do not need to be
-  recreated.
-- **Reliability:** FCM reconnect/watchdog, caller replacement, concurrent
-  call-video access and SIP/go2rtc lifecycle handling were hardened.
+- **Calls without polling:** incoming calls arrive through FCM and are immediately available to Home Assistant automations.
+- **Answer and talk:** SIP answer/hangup, guest video and audio, browser microphone uplink, and `elektronny_gorod.answer` / `hangup` services.
+- **Ready-to-use call screen:** `custom:eg-intercom-call-card` combines video, answer controls, microphone, sound and protected door opening across phones, desktops and wall panels.
+- **Event history:** `custom:eg-event-history-card` displays answered and missed calls, groups them by date/device and merges multiple places or accounts.
+- **Automation events:** new answered/missed calls are exposed as HA `event` entities. Camera-motion history is a separate disabled-by-default entity; enabling it starts polling for that camera.
+- **Stable external RTSP:** enabled cameras can be published through go2rtc for an NVR, media player or another local system. Publishing is off by default; hidden cameras require a separate option.
+- **No reconfiguration:** existing Home Assistant entries do not need to be recreated.
+- **Reliability:** FCM reconnect/watchdog, caller replacement, concurrent call-video access and SIP/go2rtc lifecycle handling were hardened.
 
-There are no breaking changes. Upgrade steps, limitations and the complete list
-are available in [`docs/releases/4.0.0.md`](docs/releases/4.0.0.md).
+There are no breaking changes. Upgrade steps, limitations and the complete list are available in [`docs/releases/4.0.0.md`](docs/releases/4.0.0.md).
 
 ## Installation
 
@@ -126,16 +109,12 @@ or manually:
 - Get previews and streams from intercoms and cameras.
 - Manage the opening of locks in real time.
 - **Real-time doorbell call events** (FCM push) — an `event` entity for notifications and automations (show the camera, open the door).
-- **Two-way intercom audio** — answer/hang up, guest video and sound in one
-  card, and talk through the browser microphone.
-- **Answered and missed call history** — one entity per place plus a combined
-  Lovelace card with filters and pagination.
+- **Two-way intercom audio** — answer/hang up, guest video and sound in one card, and talk through the browser microphone.
+- **Answered and missed call history** — one entity per place plus a combined Lovelace card with filters and pagination.
 - Account health: balance, days until blocking and blocked status.
 - Do-not-disturb controls for intercom and management-company calls.
 
-Entity types created: `camera` (regular and active-call video), `lock` (open the
-door), `event` (calls and history), `sensor` (balance,
-days-to-block and call state), `binary_sensor`, and `switch`.
+Entity types created: `camera` (regular and active-call video), `lock` (open the door), `event` (calls and history), `sensor` (balance, days-to-block and call state), `binary_sensor`, and `switch`.
 
 > **go2rtc:** The integration can use an existing
 > [go2rtc](https://github.com/AlexxIT/go2rtc) instance. If you do not have one,
@@ -145,47 +124,34 @@ days-to-block and call state), `binary_sensor`, and `switch`.
 
 ## Camera connection via go2rtc
 
-The integration supports [go2rtc](https://github.com/AlexxIT/go2rtc) for both
-Elektronny Gorod and Dom.ru cameras. It provides:
+The integration supports [go2rtc](https://github.com/AlexxIT/go2rtc) for both Elektronny Gorod and Dom.ru cameras. It provides:
 
 - Audio from camera streams.
 - Faster and more stable video (low latency and fewer disconnects).
-- Optionally publish ready-to-use streams at stable RTSP addresses for NVRs,
-  media players and other local clients.
+- Optionally publish ready-to-use streams at stable RTSP addresses for NVRs, media players and other local clients.
 
 ### How to connect
 
-The integration needs access to a go2rtc instance with an HTTP API and RTSP
-port. You do not need to add the cameras to `go2rtc.yaml` manually: streams are
-created and refreshed automatically.
+The integration needs access to a go2rtc instance with an HTTP API and RTSP port. You do not need to add the cameras to `go2rtc.yaml` manually: streams are created and refreshed automatically.
 
 #### If go2rtc is already installed
 
-You can use an existing go2rtc instance, such as an add-on, container or server
-on your local network:
+You can use an existing go2rtc instance, such as an add-on, container or server on your local network:
 
-1. Make sure Home Assistant can reach the go2rtc HTTP API (usually
-   `http://HOST:1984`) and RTSP port `8554`.
-2. Select **Configure go2rtc** while adding the integration and enter the API
-   URL.
+1. Make sure Home Assistant can reach the go2rtc HTTP API (usually `http://HOST:1984`) and RTSP port `8554`.
+2. Select **Configure go2rtc** while adding the integration and enter the API URL.
 3. If go2rtc uses Basic Auth, enter its username and password in the same form.
 
-For a separate container or server, use a hostname or local IP address that is
-reachable from Home Assistant. Use `127.0.0.1` only when go2rtc runs in the same
-environment as Home Assistant Core.
+For a separate container or server, use a hostname or local IP address that is reachable from Home Assistant. Use `127.0.0.1` only when go2rtc runs in the same environment as Home Assistant Core.
 
 #### If you do not have go2rtc: install WebRTC Camera through HACS
 
-[WebRTC Camera](https://github.com/AlexxIT/WebRTC) downloads and runs its own
-go2rtc automatically, so you do not need a separate add-on or a manually
-installed binary:
+[WebRTC Camera](https://github.com/AlexxIT/WebRTC) downloads and runs its own go2rtc automatically, so you do not need a separate add-on or a manually installed binary:
 
-1. Open **HACS → Integrations**, search for **WebRTC**, and install the
-   component.
+1. Open **HACS → Integrations**, search for **WebRTC**, and install the component.
 2. Restart Home Assistant.
 3. Open **Settings → Devices & services → Add integration → WebRTC**.
-4. Enable go2rtc in the integration settings for your operator account and keep
-   the default address `http://127.0.0.1:1984`.
+4. Enable go2rtc in the integration settings for your operator account and keep the default address `http://127.0.0.1:1984`.
 
 The component also provides a low-latency Lovelace card with audio:
 
@@ -194,40 +160,24 @@ type: custom:webrtc-camera
 entity: camera.YOUR_INTERCOM
 ```
 
-Replace `camera.YOUR_INTERCOM` with the entity ID of the camera you want to
-display. If you manage Lovelace resources in YAML mode, follow the
-[additional installation step in the WebRTC Camera documentation](https://github.com/AlexxIT/WebRTC#installation).
+Replace `camera.YOUR_INTERCOM` with the entity ID of the camera you want to display. If you manage Lovelace resources in YAML mode, follow the [additional installation step in the WebRTC Camera documentation](https://github.com/AlexxIT/WebRTC#installation).
 
 #### If the integration is already configured
 
-Open its options and enable go2rtc. You do not need to add the account or its
-devices again.
+Open its options and enable go2rtc. You do not need to add the account or its devices again.
 
-**Note:** Use current versions of go2rtc, WebRTC Camera and Home Assistant for
-audio and low-latency streaming.
+**Note:** Use current versions of go2rtc, WebRTC Camera and Home Assistant for audio and low-latency streaming.
 
 ### External RTSP in 4.0.0
 
 The go2rtc integration settings now contain two separate options:
 
-- **“Publish enabled cameras for external RTSP”** creates stable streams only
-  for camera entities that are enabled in Home Assistant.
-- **“Also publish hidden cameras”** additionally includes hidden entities and
-  works only with the main publishing option. Disabled camera entities are
-  never published.
+- **“Publish enabled cameras for external RTSP”** creates stable streams only for camera entities that are enabled in Home Assistant.
+- **“Also publish hidden cameras”** additionally includes hidden entities and works only with the main publishing option. Disabled camera entities are never published.
 
-Both options are off by default. For every published camera, the integration
-immediately starts a background go2rtc consumer so the operator's one-time
-source cannot expire before the first viewer connects. The source is refreshed
-every 28 minutes 30 seconds without disconnecting an active viewer. The
-diagnostic **“Published RTSP streams”** entity exposes ready stream addresses
-and their actual state without putting go2rtc credentials in its attributes.
+Both options are off by default. For every published camera, the integration immediately starts a background go2rtc consumer so the operator's one-time source cannot expire before the first viewer connects. The source is refreshed every 28 minutes 30 seconds without disconnecting an active viewer. The diagnostic **“Published RTSP streams”** entity exposes ready stream addresses and their actual state without putting go2rtc credentials in its attributes.
 
-Publishing settings control background keep-warm only. Explicitly opening an
-enabled hidden camera in Home Assistant still works without a persistent
-preload. The integration does not expose the RTSP port to the Internet;
-network access, firewall/VPN policy and go2rtc security remain the user's
-responsibility.
+Publishing settings control background keep-warm only. Explicitly opening an enabled hidden camera in Home Assistant still works without a persistent preload. The integration does not expose the RTSP port to the Internet; network access, firewall/VPN policy and go2rtc security remain the user's responsibility.
 
 ## 🔔 Doorbell call event (FCM push)
 
@@ -336,20 +286,17 @@ Ready-to-use Lovelace card `custom:eg-intercom-call-card` — the whole call on 
   </tr>
 </table>
 
-Installation and HTTPS/go2rtc requirements:
-[`call-card-install.md`](docs/features/intercom-two-way-audio/call-card-install.md).
+Installation and HTTPS/go2rtc requirements: [`call-card-install.md`](docs/features/intercom-two-way-audio/call-card-install.md).
 
 ## 🕘 Event history
 
-Browse answered and missed calls in a dedicated Home Assistant card and use new
-calls in automations.
+Browse answered and missed calls in a dedicated Home Assistant card and use new calls in automations.
 
 <p align="center">
   <img src="docs/features/mobile-app-parity/screenshots/en/history.png" alt="Answered and missed intercom call history card" width="860"/>
 </p>
 
-The history card is included in the same JavaScript bundle as the call screen.
-Add the resource once:
+The history card is included in the same JavaScript bundle as the call screen. Add the resource once:
 
 ```text
 /elektronny_gorod_static/eg-intercom-call-card.js
@@ -363,12 +310,9 @@ entity: event.account_123456_place_7890_event_history
 title: Events
 ```
 
-Use `entities:` to merge multiple places or configured accounts into one
-timeline. Device filters remain account-aware, and operator text or personal
-data is not shown in the card.
+Use `entities:` to merge multiple places or configured accounts into one timeline. Device filters remain account-aware, and operator text or personal data is not shown in the card.
 
-Configuration and limitations:
-[`history-card.md`](docs/features/mobile-app-parity/history-card.md).
+Configuration and limitations: [`history-card.md`](docs/features/mobile-app-parity/history-card.md).
 
 ## Automation example: balance
 Here is an example of automation for low balance notification:

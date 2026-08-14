@@ -1,13 +1,10 @@
 # Установка карты микрофона (uplink) + ручной тест
 
-Phase C, механизм #1 ([ADR-0013](../../decisions/0013-uplink-mic-transport.md)).
-Серверная часть (WS-команда `elektronny_gorod/intercom_uplink` + wiring `UplinkSink` +
-дрейф-фикс `rtp.py`) — в коде. Карта раздаётся интеграцией статикой.
+Phase C, механизм #1 ([ADR-0013](../../decisions/0013-uplink-mic-transport.md)). Серверная часть (WS-команда `elektronny_gorod/intercom_uplink` + wiring `UplinkSink` + дрейф-фикс `rtp.py`) — в коде. Карта раздаётся интеграцией статикой.
 
 ## Установка
 
-1. Интеграция раздаёт карту по `/elektronny_gorod_static/eg-intercom-mic-card.js`
-   (регистрируется автоматически в `async_setup_entry`).
+1. Интеграция раздаёт карту по `/elektronny_gorod_static/eg-intercom-mic-card.js` (регистрируется автоматически в `async_setup_entry`).
 2. Добавить ресурс: **Settings → Dashboards → ⋮ → Resources → Add resource**
    - URL: `/elektronny_gorod_static/eg-intercom-mic-card.js`
    - Type: **JavaScript Module**
@@ -16,8 +13,7 @@ Phase C, механизм #1 ([ADR-0013](../../decisions/0013-uplink-mic-transpo
    type: custom:eg-intercom-mic-card
    title: Домофон — микрофон
    ```
-   Рядом с `webrtc-camera` (downlink видео+звук гостя, Slice 1) — получается «трубка»:
-   сверху видео+звук гостя, снизу кнопка «🎤 Говорить».
+   Рядом с `webrtc-camera` (downlink видео+звук гостя, Slice 1) — получается «трубка»: сверху видео+звук гостя, снизу кнопка «🎤 Говорить».
 
 ## Как работает (поток)
 
@@ -30,8 +26,7 @@ Phase C, механизм #1 ([ADR-0013](../../decisions/0013-uplink-mic-transpo
   → SipManager.uplink_provider → RtpSession.run_uplink (дрейф-компенсированный) → RTP в домофон
 ```
 
-Без go2rtc/TURN — едет по тому же WSS, что весь HA-UI (удалённо/4G ок). HTTPS-origin
-обязателен (браузер даёт микрофон только на secure origin).
+Без go2rtc/TURN — едет по тому же WSS, что весь HA-UI (удалённо/4G ок). HTTPS-origin обязателен (браузер даёт микрофон только на secure origin).
 
 ## Ручной тест (на проде, во время реального вызова)
 
@@ -43,17 +38,12 @@ Phase C, механизм #1 ([ADR-0013](../../decisions/0013-uplink-mic-transpo
 **Что проверять:**
 - Кнопка появляется/работает; статус-строка без ошибок.
 - Звук доходит до панели, разговорная латентность (дрейф-фикс убрал заикания из PoC).
-- Если «Нет активного вызова» — карта/WS отработали, но вызова нет (WS-команда вернула
-  `no_active_call`): нажимать во время активного отвеченного вызова.
+- Если «Нет активного вызова» — карта/WS отработали, но вызова нет (WS-команда вернула `no_active_call`): нажимать во время активного отвеченного вызова.
 
-**Тестовая среда (без домофона):** `research/intercom-call-probe/test_harness/` —
-door-эмулятор со строгим латчингом валидирует SIP/RTP-тракт оффлайн
-(`./test_harness/run_loopback.sh`). Серверный uplink-тракт покрыт юнит-тестами
-(`test_uplink_ws.py`, `test_sip_uplink.py`, `test_sip_rtp.py`, `test_sip_call_controller.py`).
+**Тестовая среда (без домофона):** `research/intercom-call-probe/test_harness/` — door-эмулятор со строгим латчингом валидирует SIP/RTP-тракт оффлайн (`./test_harness/run_loopback.sh`). Серверный uplink-тракт покрыт юнит-тестами (`test_uplink_ws.py`, `test_sip_uplink.py`, `test_sip_rtp.py`, `test_sip_call_controller.py`).
 
 ## Ограничения слайса
 
 - Один одновременный разговор (фикс-порты SIP/RTP, first-answer-wins).
-- Авто-старт микрофона по открытию экрана политикой автоплея браузера не гарантируется
-  (нужен жест — нажатие кнопки). Это by-design.
+- Авто-старт микрофона по открытию экрана политикой автоплея браузера не гарантируется (нужен жест — нажатие кнопки). Это by-design.
 - Hands-free (всегда открытый микрофон) — polish следующего слайса; сейчас кнопка-тумблер.

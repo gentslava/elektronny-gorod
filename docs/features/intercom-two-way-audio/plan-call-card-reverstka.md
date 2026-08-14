@@ -1,6 +1,7 @@
 # Перевёрстка `<eg-intercom-call-card>` по production-макетам — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution mode:** use the active tool's native subagent workflow when
+> available; otherwise execute the checkboxes inline.
 
 **Goal:** Пиксельно пересобрать визуальный слой карточки вызова домофона по новым макетам `pencil/design.pen` (6 секций), сохранив проверенную механику two-way audio и машину состояний.
 
@@ -12,12 +13,11 @@
 
 - **Источник правды состояния** — `sensor.<intercom>_call_state` (`idle|ringing|connecting|active|ended|error`). Слои (`audio_blocked / mic_permission_required / camera_unavailable / connection_lost / door-стадии`) — локальный UI-стейт карточки, НЕ новые значения сенсора.
 - **Никаких хардкод-hex в UI**, кроме `scrim` (`rgba(0,0,0,.72)`) и красного `LIVE`-бейджа. Все цвета — через токен-слой `--eg-*` → HA theme-переменные с fallback.
-- **Токены макета (design.pen) → HA-переменные** (точные значения):
-  `primary #03A9F4/#0288D1`→`--primary-color`; `success #4CAF50/#2E7D32`→`--success-color`; `error #EF5350/#D32F2F`→`--error-color`; `warning #FFB300/#B26A00`→`--warning-color`; `text #E8E8E8/#212121`→`--primary-text-color`; `text-2 #A6A6A6/#6B6B6B`→`--secondary-text-color`; `text-3 #787878/#9B9B9B`→`--disabled-text-color`; `elevated #2A2A2A/#F0F0F0`→`--secondary-background-color`; `card #1C1C1C/#FFFFFF`→`--ha-card-background`/`--card-background-color`; `bg #111/#FAFAFA`→`--primary-background-color`; `divider`→`--divider-color`; `on-fill #FFFFFF`→`--text-primary-color`; радиусы `r-card 16 / r-md 12 / r-full 999`; шрифты `Roboto` (body) / `Roboto Mono` (таймер).
+- **Токены макета (design.pen) → HA-переменные** (точные значения): `primary #03A9F4/#0288D1`→`--primary-color`; `success #4CAF50/#2E7D32`→`--success-color`; `error #EF5350/#D32F2F`→`--error-color`; `warning #FFB300/#B26A00`→`--warning-color`; `text #E8E8E8/#212121`→`--primary-text-color`; `text-2 #A6A6A6/#6B6B6B`→`--secondary-text-color`; `text-3 #787878/#9B9B9B`→`--disabled-text-color`; `elevated #2A2A2A/#F0F0F0`→`--secondary-background-color`; `card #1C1C1C/#FFFFFF`→`--ha-card-background`/`--card-background-color`; `bg #111/#FAFAFA`→`--primary-background-color`; `divider`→`--divider-color`; `on-fill #FFFFFF`→`--text-primary-color`; радиусы `r-card 16 / r-md 12 / r-full 999`; шрифты `Roboto` (body) / `Roboto Mono` (таймер).
 - **`*-bg` тинты** (badge/banner фон): `color-mix(in srgb, var(--eg-<role>) 18%, transparent)` (эквивалент alpha `2E`/`1A` из макета).
 - **Точные размеры (из `design.pen`, обязательны):** карточка контент `padding [6,16,28,16]`, `gap 20`, radius `16`; шапка: name `fs22 fw700`, addr `fs13 text-2`, close `44×44` elevated; статус-бейдж `pad[5,12] r-full`, dot `8×8`, текст `fs13 fw600`; окно ответа `h4 r-full`; видео `16:9 r-md`; слайдер трек `h80 r-full elevated`, thumb `68×68 primary` (ключ), торец `44×68 lock-open text-3`, «Открыть» `fs17 fw600`, hint `fs12 text-3`; круглая кнопка `68×68 r-full elevated`, иконка `28`, подпись `fs12 fw500 text-2`; ряд действий `gap 28 center`; компакт мини-видео `96×72`.
 - **Иконки — единый набор lucide** через компонент `eg-icon` (инлайн-SVG, `currentColor`, размер `--eg-icon-size`). НЕ mdi/`ha-icon` (по требованию однородности — макеты нарисованы в lucide). Геометрия извлечена из `lucide-static@1.23.0` (dev-only) и вшита в бандл. Набор: `key-round, lock, lock-open, phone, phone-off, mic, mic-off, volume-2, volume-x, x, timer, refresh-cw, door-open, video-off, wifi-off, circle-check, chevron-right, bell-ring`. Новые иконки добавлять тем же способом (извлечь из lucide-static, вписать в `ICONS` в `eg-icon.ts`).
-- **Проект-правила:** `.claude/rules/no-secret-logs.md` (не логировать токены/headers), `ha-best-practices.md` (theme-токены, `unique_id` без локали, a11y), `test-coverage.md` (bug→тест; не упрощать тесты ради зелёного CI), `git-history.md` (conventional commits, substantive). `mic-controller.ts` НЕ править (ADR-0013, two-way audio работает).
+- **Проект-правила:** `.agents/rules/no-secret-logs.md` (не логировать токены/headers), `ha-best-practices.md` (theme-токены, `unique_id` без локали, a11y), `test-coverage.md` (bug→тест; не упрощать тесты ради зелёного CI), `git-history.md` (conventional commits, substantive). `mic-controller.ts` НЕ править (ADR-0013, two-way audio работает).
 - **Проверка сборки:** `cd frontend && node build.mjs` собирает в `custom_components/elektronny_gorod/www/eg-intercom-call-card.js`. Тесты: `cd frontend && npm test`.
 - **A11y:** каждая кнопка — `aria-label`; слайдер — `role="slider"` + `aria-valuenow`; `@media (prefers-reduced-motion: reduce)` отключает анимации.
 - **Референс визуала** — узлы `design.pen` (id для скриншот-сверки указаны в задачах) + `call-card-ux-production.md`. Сверка КАЖДОГО слайса — скриншот узла макета vs рендер в браузере.
@@ -85,8 +85,7 @@ describe("tokens", () => {
 
 - [ ] **Step 2: Запустить — убедиться, что падает**
 
-Run: `cd frontend && npm test -- tokens`
-Expected: FAIL «Cannot find module '../src/theme/tokens.js'».
+Run: `cd frontend && npm test -- tokens` Expected: FAIL «Cannot find module '../src/theme/tokens.js'».
 
 - [ ] **Step 3: Реализовать минимально**
 
@@ -139,8 +138,7 @@ export function statusColor(phase: CallPhase): string {
 
 - [ ] **Step 4: Запустить тест — зелёный**
 
-Run: `cd frontend && npm test -- tokens`
-Expected: PASS (2 теста).
+Run: `cd frontend && npm test -- tokens` Expected: PASS (2 теста).
 
 - [ ] **Step 5: Commit**
 
@@ -201,9 +199,7 @@ static override styles = [egTokens, css`
 
 - [ ] **Step 4: Собрать и проверить в браузере**
 
-Run: `cd frontend && node build.mjs`
-Expected: сборка без ошибок; `www/eg-intercom-call-card.js` обновлён.
-Визуальная проверка (browser-testing-with-devtools): смонтировать карточку с мок-`hass` (`call_state=ringing`), сверить шапку+статус со скриншотом узла `Z1sbL`. Совпадение: имя fs22, адрес fs13, close-круг, badge warning, окно ответа.
+Run: `cd frontend && node build.mjs` Expected: сборка без ошибок; `www/eg-intercom-call-card.js` обновлён. Визуальная проверка (browser-testing-with-devtools): смонтировать карточку с мок-`hass` (`call_state=ringing`), сверить шапку+статус со скриншотом узла `Z1sbL`. Совпадение: имя fs22, адрес fs13, close-круг, badge warning, окно ответа.
 
 - [ ] **Step 5: Commit**
 
@@ -239,8 +235,7 @@ it("slideProgress учитывает knob 68 и полную ширину тре
 
 - [ ] **Step 2: Запустить — падает**
 
-Run: `cd frontend && npm test -- open-control`
-Expected: FAIL (текущий knob=60 в `_onSlideMove`).
+Run: `cd frontend && npm test -- open-control` Expected: FAIL (текущий knob=60 в `_onSlideMove`).
 
 - [ ] **Step 3: Заменить knob-константу на 68 в `_onSlideMove` и CSS `--knob`**
 
@@ -251,8 +246,7 @@ this._progress = slideProgress(e.clientX, this._trackRect.left, this._trackRect.
 
 - [ ] **Step 4: Тест зелёный**
 
-Run: `cd frontend && npm test -- open-control`
-Expected: PASS.
+Run: `cd frontend && npm test -- open-control` Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
@@ -284,8 +278,7 @@ git commit -m "feat(open-control): knob 68pt по макету (slice 1)"
 
 - [ ] **Step 4: Собрать + визуальная сверка**
 
-Run: `cd frontend && node build.mjs`
-Визуально сверить 3 стадии слайдера с узлом `UZrKy` и успех — с `ecmXJ` (зелёный трек, ключ справа, подпись «Дверь открыта · 11:25»). Hold — с `A8dfFd`.
+Run: `cd frontend && node build.mjs` Визуально сверить 3 стадии слайдера с узлом `UZrKy` и успех — с `ecmXJ` (зелёный трек, ключ справа, подпись «Дверь открыта · 11:25»). Hold — с `A8dfFd`.
 
 - [ ] **Step 5: Commit**
 
@@ -577,7 +570,7 @@ git commit -m "feat(call-card): паритет светлой темы + reduced
 **Files:**
 - Modify/Create: `frontend/test/*`
 
-- [ ] **Step 1:** Полный прогон — Run: `cd frontend && npm test`. Expected: все зелёные. Дописать недостающие (view-model, gesture, call-stage выбор). Не упрощать тесты ради зелёного (`.claude/rules/test-coverage.md`).
+- [ ] **Step 1:** Полный прогон — Run: `cd frontend && npm test`. Expected: все зелёные. Дописать недостающие (view-model, gesture, call-stage выбор). Не упрощать тесты ради зелёного (`.agents/rules/test-coverage.md`).
 - [ ] **Step 2: Финальная сборка** — Run: `cd frontend && node build.mjs` → без ошибок.
 - [ ] **Step 3: Commit** — `test(call-card): покрытие перевёрстки`.
 
@@ -590,15 +583,12 @@ git commit -m "feat(call-card): паритет светлой темы + reduced
 
 ### Task 7.3: Code-review + git-историан
 
-- [ ] **Step 1:** Запустить `code-reviewer` subagent по диффу (`.claude/rules/pre-pr-checklist.md`); применить P0/P1.
+- [ ] **Step 1:** Запустить `code-reviewer` subagent по диффу (`.agents/rules/pre-pr-checklist.md`); применить P0/P1.
 - [ ] **Step 2:** `git-historian` — `HISTORY_CLEAN` (схлопнуть slice-фиксапы если есть).
-- [ ] **Step 3:** Финальный прогон тестов+сборки; отчёт пользователю (без push/PR без явной команды — `.claude/rules/pre-pr-checklist.md`, boundary «Ask first»).
+- [ ] **Step 3:** Финальный прогон тестов+сборки; отчёт пользователю (без push/PR без явной команды — `.agents/rules/pre-pr-checklist.md`, boundary «Ask first»).
 
 ---
 
 ## Self-Review (проверка плана против спеки)
 
-**Покрытие макетов (6 секций):** 01 мобайл→Slice 0–3; 02 состояния (audio_blocked/mic/camera/connection_lost/ended)→Slice 3–4; 03 светлая→Slice 6.2; 04 настенная→Slice 6.1; 05 десктоп+компакт+idle→Slice 5,6.1; 06 слайдер/hold стадии+мульти→Slice 1 (мульти-домофон-список — покрыт существующим `_active`-выбором; отдельный список-UI `LZnZu` — опционально, при необходимости добавить в Slice 5). ✅
-**Плейсхолдеры:** нет TBD/«обработать ошибки» — значения и узлы указаны. ✅
-**Консистентность типов:** `ActionKind`, `stageState`, `statusColor`, `egTokens` — определены в задачах 2.1/3.2/0.1 и используются согласованно. ✅
-**Открытый пункт для исполнителя:** список-UI нескольких домофонов (`LZnZu`) — если у пользователя >1 активного домофона; текущая модель «активен один» (UX-док §4 п.16) уже покрывает MVP.
+**Покрытие макетов (6 секций):** 01 мобайл→Slice 0–3; 02 состояния (audio_blocked/mic/camera/connection_lost/ended)→Slice 3–4; 03 светлая→Slice 6.2; 04 настенная→Slice 6.1; 05 десктоп+компакт+idle→Slice 5,6.1; 06 слайдер/hold стадии+мульти→Slice 1 (мульти-домофон-список — покрыт существующим `_active`-выбором; отдельный список-UI `LZnZu` — опционально, при необходимости добавить в Slice 5). ✅ **Плейсхолдеры:** нет TBD/«обработать ошибки» — значения и узлы указаны. ✅ **Консистентность типов:** `ActionKind`, `stageState`, `statusColor`, `egTokens` — определены в задачах 2.1/3.2/0.1 и используются согласованно. ✅ **Открытый пункт для исполнителя:** список-UI нескольких домофонов (`LZnZu`) — если у пользователя >1 активного домофона; текущая модель «активен один» (UX-док §4 п.16) уже покрывает MVP.

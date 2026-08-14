@@ -1,7 +1,6 @@
 # Feature: Two-way talk по домофону (SIP-аудио)
 
-- **Status:** IMPLEMENTED IN MASTER — SIP-фундамент, downlink, uplink-микрофон,
-  экран вызова, multi-call switching и video anti-churn реализованы.
+- **Status:** IMPLEMENTED IN MASTER — SIP-фундамент, downlink, uplink-микрофон, экран вызова, multi-call switching и video anti-churn реализованы.
 - **Feature-id:** `intercom-two-way-audio`
 - **Branch:** `master` (актуальная реализация после PR #69)
 - **Owner:** Vyacheslav Scherbinin
@@ -21,36 +20,26 @@
 
 ## Краткая суть
 
-После события вызова (FCM, ADR-0011) — ответить на вызов из HA и **говорить с гостем
-у двери** (двусторонний звук), как приложение. SIP/RTP-медиа **доказаны рабочими**
-(`probe_sip_media.py`, live 2026-06-22).
+После события вызова (FCM, ADR-0011) — ответить на вызов из HA и **говорить с гостем у двери** (двусторонний звук), как приложение. SIP/RTP-медиа **доказаны рабочими** (`probe_sip_media.py`, live 2026-06-22).
 
 **Текущее состояние (`master`):**
-- Приём вызова по SIP — **работает live** (register-on-ring, ADR-0012: FCM `ring`
-  → mint → REGISTER → held-INVITE → `100 Trying`; по «Ответить» `200 OK` → RTP-latching).
+- Приём вызова по SIP — **работает live** (register-on-ring, ADR-0012: FCM `ring` → mint → REGISTER → held-INVITE → `100 Trying`; по «Ответить» `200 OK` → RTP-latching).
 - Сброс с панели → SIP `CANCEL` → мгновенный dismiss экрана вызова в HA.
 - Звук гостя (downlink) — **выводится** через `AudioBridge` → go2rtc → HA-native WebRTC.
 - Экран вызова (`camera.intercom_call`) — видео домофона + звук гостя инлайн на дашборде, работает на 4G без экспозиции go2rtc.
-- Микрофон (uplink, говорить гостю) — **реализован и live-подтверждён** через
-  HA WebSocket binary-audio → `UplinkSink` → RTP (ADR-0013).
-- Несколько клиентов делят один video producer вызова; новый неотвеченный ring
-  переключает карточку на нового звонящего (A-88/A-89, PR #69).
+- Микрофон (uplink, говорить гостю) — **реализован и live-подтверждён** через HA WebSocket binary-audio → `UplinkSink` → RTP (ADR-0013).
+- Несколько клиентов делят один video producer вызова; новый неотвеченный ring переключает карточку на нового звонящего (A-88/A-89, PR #69).
 
 ## Использование: экран вызова `/doorbell-call/call`
 
-Интеграция даёт сервисы `elektronny_gorod.answer` / `elektronny_gorod.hangup`,
-`event`-сущность вызова и сущность активного вызова `camera.<...>_intercom_call`.
-Поверх них собирается **экран вызова**: пуш будит телефон и одним тапом открывает
-в HA экран с видео, звуком гостя и кнопками. Канон — прод-модель «лёгкий пуш →
-экран» (idiomatic HA: интеграция = entity+сервисы, UI строит пользователь).
+Интеграция даёт сервисы `elektronny_gorod.answer` / `elektronny_gorod.hangup`, `event`-сущность вызова и сущность активного вызова `camera.<...>_intercom_call`. Поверх них собирается **экран вызова**: пуш будит телефон и одним тапом открывает в HA экран с видео, звуком гостя и кнопками. Канон — прод-модель «лёгкий пуш → экран» (idiomatic HA: интеграция = entity+сервисы, UI строит пользователь).
 
 | Blueprint | Роль | Сколько |
 |---|---|---|
 | [`doorbell_call_notify.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_call_notify.yaml) | пуш со снимком + активная дверь + «Открыть» из пуша | по 1× на дверь |
 | [`doorbell_screen_controller.yaml`](../../../blueprints/automation/elektronny_gorod/doorbell_screen_controller.yaml) | SIP-состояние + «Открыть» + сброс при старте | 1× на систему |
 
-Полная пошаговая сборка (хелперы → blueprint-ы → дашборд → микрофон → pro-tip
-авто-звука), поток состояний и ограничения — в [`call-screen-setup.md`](call-screen-setup.md).
+Полная пошаговая сборка (хелперы → blueprint-ы → дашборд → микрофон → pro-tip авто-звука), поток состояний и ограничения — в [`call-screen-setup.md`](call-screen-setup.md).
 
 > Требуется Companion App (actionable-уведомления). Ответить нужно в окне `~30с`
 > (`CallInvalidated`) — иначе домофон сбросит вызов сам. Альтернатива без телефона:
@@ -58,19 +47,10 @@
 
 ## Ключевые решения (brainstorming 2026-06-22)
 
-1. **SIP-стек — в интеграции** (go2rtc не умеет SIP: нет пакета `sip`,
-   [issue #1750](https://github.com/AlexxIT/go2rtc/issues/1750) open). База —
-   **ручной `asyncio`-модуль на основе `probe`** (спайк [research-spike.md](research-spike.md)
-   D1 показал: `voip-utils` не подходит под Kazoo — схлопывает multi-`Via`/`Record-Route`,
-   хардкодит Opus, нет REGISTER/Digest). Из `voip-utils` берём лишь `SipEndpoint`.
-   Без тяжёлых нативных deps → работает в HA Container. Готового end-to-end решения
-   нет (3 research-прохода) — наш `probe` уже закрыл SIP-gap на Python.
-2. **Целевая трубка — браузер HA через go2rtc** (вариант A: `exec`-backchannel +
-   готовая карта `custom:webrtc-camera` AlexxIT/WebRTC). go2rtc как транспорт.
-   ⚠️ uplink через `exec`-backchannel — известный риск go2rtc, PoC до Slice 2.
+1. **SIP-стек — в интеграции** (go2rtc не умеет SIP: нет пакета `sip`, [issue #1750](https://github.com/AlexxIT/go2rtc/issues/1750) open). База — **ручной `asyncio`-модуль на основе `probe`** (спайк [research-spike.md](research-spike.md) D1 показал: `voip-utils` не подходит под Kazoo — схлопывает multi-`Via`/`Record-Route`, хардкодит Opus, нет REGISTER/Digest). Из `voip-utils` берём лишь `SipEndpoint`. Без тяжёлых нативных deps → работает в HA Container. Готового end-to-end решения нет (3 research-прохода) — наш `probe` уже закрыл SIP-gap на Python.
+2. **Целевая трубка — браузер HA через go2rtc** (вариант A: `exec`-backchannel + готовая карта `custom:webrtc-camera` AlexxIT/WebRTC). go2rtc как транспорт. ⚠️ uplink через `exec`-backchannel — известный риск go2rtc, PoC до Slice 2.
 3. **Инкрементально:** фундамент (SIP-приём + downlink/прослушка) → полный two-way.
-4. **go2rtc SIP-source на Go** — отдельная upstream-инициатива позже, наш `sip.py`
-   как референс (мотивация: переиспользовать и для 2-way домашней камеры — вне scope).
+4. **go2rtc SIP-source на Go** — отдельная upstream-инициатива позже, наш `sip.py` как референс (мотивация: переиспользовать и для 2-way домашней камеры — вне scope).
 
 ## Связь
 
@@ -91,5 +71,4 @@
 - [x] MERGED (PR #69)
 - [ ] READY_FOR_RELEASE (нужна обычная release-проверка и релизный артефакт)
 
-**Оставшийся polish:** DTMF и дальнейшие UX/reliability улучшения ведутся отдельно;
-они не блокируют уже реализованный two-way audio.
+**Оставшийся polish:** DTMF и дальнейшие UX/reliability улучшения ведутся отдельно; они не блокируют уже реализованный two-way audio.

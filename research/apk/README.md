@@ -1,10 +1,8 @@
 # research/apk/
 
-Локальная папка для оригинальных и пропатченных APK мобильных приложений
-оператора. Используется для capture HAR через mitmproxy/Charles.
+Локальная папка для оригинальных и пропатченных APK мобильных приложений оператора. Используется для capture HAR через mitmproxy/Charles.
 
-🔴 **Эта папка НЕ коммитится** (см. [`.gitignore`](../../.gitignore)). APK —
-интеллектуальная собственность оператора, не наша.
+🔴 **Эта папка НЕ коммитится** (см. [`.gitignore`](../../.gitignore)). APK — интеллектуальная собственность оператора, не наша.
 
 ## Приложения, с которыми работаем
 
@@ -63,8 +61,7 @@ apk-mitm research/apk/<file>-original.apk
 # Выход: research/apk/<file>-original-patched.apk
 ```
 
-⚠️ **Не запускать параллельно несколько `apk-mitm`** — они race-condition'ятся
-на скачивании `uber-apk-signer.jar` в кэш. Запускай последовательно.
+⚠️ **Не запускать параллельно несколько `apk-mitm`** — они race-condition'ятся на скачивании `uber-apk-signer.jar` в кэш. Запускай последовательно.
 
 После патча `logs/` создаётся в корне проекта (gitignored).
 
@@ -81,8 +78,7 @@ adb install -r research/apk/<file>-original-patched.apk
 adb shell pm list packages | grep -E "intercom|electronnij|smarthome"
 ```
 
-После установки настрой Charles/mitmproxy CA на устройстве (как обычный
-user cert — `apk-mitm` уже снял pinning, значит user-cert будет доверенным).
+После установки настрой Charles/mitmproxy CA на устройстве (как обычный user cert — `apk-mitm` уже снял pinning, значит user-cert будет доверенным).
 
 ## Capture сценарии (важные)
 
@@ -99,8 +95,7 @@ user cert — `apk-mitm` уже снял pinning, значит user-cert буд�
 ## Anti-checklist
 
 - 🔴 НЕ коммитить `.apk` / `.xapk` файлы (gitignored — `*.apk`, `*.xapk`, `*.apks`).
-- 🔴 НЕ распространять пропатченные APK третьим лицам — это модифицированное
-  приложение оператора.
+- 🔴 НЕ распространять пропатченные APK третьим лицам — это модифицированное приложение оператора.
 - 🔴 НЕ использовать пропатченный APK как обычный клиент — только для capture.
 - 🔴 НЕ скачивать APK с непроверенных источников (риск trojan-сборок).
 

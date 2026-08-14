@@ -57,7 +57,7 @@
 
 ### Slice 5: Pre-commit hook
 
-- **Файлы:** `.claude/hooks/pre-commit-redaction-check.sh`, `.claude/settings.json`.
+- **Файлы:** `.agents/hooks/check-secret-logs.py`, `.agents/hooks/check-secret-logs.sh`, tool-specific wrappers/settings.
 - **Что:** bash-скрипт, блокирующий commit при прямом логировании sensitive ключей.
 - **Acceptance:** ручной dry-run на staged diff с заведомой утечкой → блокирует.
 - **Risk:** низкий.

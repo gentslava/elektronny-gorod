@@ -35,9 +35,7 @@
 
 ### 1. Правка go2rtc.yaml ОБЯЗАТЕЛЬНА (через REST невозможно)
 
-Frigate-go2rtc (bundled) блокирует `exec:` через REST-источник с сообщением
-`insecure producer` (хардкод в go2rtc `streams.go:Validate`). Единственный путь —
-напрямую отредактировать `go2rtc.yaml`.
+Frigate-go2rtc (bundled) блокирует `exec:` через REST-источник с сообщением `insecure producer` (хардкод в go2rtc `streams.go:Validate`). Единственный путь — напрямую отредактировать `go2rtc.yaml`.
 
 **Путь к файлу (прод-HA):**
 ```
@@ -52,8 +50,7 @@ docker inspect home-assistant-core-skdjyi-homeassistant-1 | grep -i go2rtc
 
 ### 2. TURN-сервер для 4G
 
-advanced-camera-card WebRTC идёт через go2rtc. Если клиент на 4G —
-нужен TURN-сервер (настраивается в карте или go2rtc.yaml iceServers).
+advanced-camera-card WebRTC идёт через go2rtc. Если клиент на 4G — нужен TURN-сервер (настраивается в карте или go2rtc.yaml iceServers).
 
 ### 3. Upstream-баги go2rtc (known issues)
 

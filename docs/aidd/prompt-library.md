@@ -1,6 +1,4 @@
-Status: Active
-Owner: Documentation / AIDD Agent
-Last reviewed: 2026-05-22
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-14 (role and command references point to canonical `.agents/**` contracts)
 
 Source files:
 - этот документ
@@ -8,7 +6,9 @@ Source files:
 Related docs:
 - `skills.md`
 - `multi-agent-workflow.md`
-- `../../.claude/commands/`
+- `quality-gates.md`
+- `../testing/strategy.md`
+- `../../.agents/commands/`
 
 Used by agents:
 - Любой агент при выборе готового prompt-шаблона
@@ -50,38 +50,50 @@ Output:
 - если HEAD сдвинулся с последнего аудита — обязательно зафиксировать в начале отчёта
 ```
 
-## P-02. Security check на утечки токенов
+## P-02. Независимый security review замороженного кандидата
 
 ```text
-Ты — Security & Privacy Agent. Skill: agent-skills:security-and-hardening.
+Ты — независимый Security & Privacy Reviewer. Skill: agent-skills:security-and-hardening.
 
-Цель: убедиться, что в diff (или в коде на HEAD) нет логирования секретов.
+Цель: проверить exact frozen candidate и закрыть SECURITY_OK только при
+отсутствии незакрытых Critical/Important security findings.
 
 Inputs:
-- diff PR ИЛИ снепшот файлов custom_components/elektronny_gorod/*.py
+- evidence CANDIDATE_FROZEN: clean status, base SHA, head SHA, tree SHA
+- exact diff base..head и файлы из этого candidate
 - ../audit/security.md
+- quality-gates.md
 
 Действия:
-1. grep -rE "LOGGER\.(debug|info|warning|error|exception)\(.*(token|password|sms|headers|entry\.data|api_key)" custom_components/
-2. Для каждой находки оценить: это новая утечка или известная (S-NN).
-3. Для каждой новой — recommended fix + ссылка на S-NN или предложение нового ID.
+1. Подтвердить, что reviewer не участвовал в implementation и проверяет именно
+   указанные base/head/tree; self-review не закрывает SECURITY_OK.
+2. Проверить diff и затронутые пути на логирование/сохранение секретов,
+   redaction, auth/token lifecycle и сообщения сторонних зависимостей.
+3. Запустить релевантные secret/redaction checks и security regressions.
+4. Для каждой находки указать severity и evidence. Critical/Important блокируют
+   SECURITY_OK; после fix нужен новый freeze и повторный независимый review.
 
 Output:
+- reviewer identity и подтверждение независимости
+- base SHA, head SHA, tree SHA
 - список совпадений с file:line
 - severity per finding
-- список redaction-helper-ов, которые нужно добавить
+- команды/evidence выполненных проверок
+- verdict: SECURITY_OK или changes requested
 
 Ограничения:
-- не «исправлять» молча, только отчёт
+- review read-only: не «исправлять» молча, только отчёт
 - не подавлять предупреждения
+- не выдавать SECURITY_OK без CANDIDATE_FROZEN или для другого candidate
 ```
 
-## P-03. Сгенерировать тесты config_flow
+## P-03. Запустить и дополнить тесты config_flow
 
 ```text
 Ты — QA Agent. Skill: agent-skills:test-driven-development.
 
-Цель: создать pytest-тесты для config_flow по плану docs/testing/strategy.md.
+Цель: запустить и дополнить существующие pytest-тесты config_flow по canonical
+плану docs/testing/strategy.md.
 
 Inputs:
 - custom_components/elektronny_gorod/config_flow.py
@@ -91,17 +103,22 @@ Inputs:
 
 Действия:
 1. Перечитай config_flow.py, идентифицируй все steps и error/abort пути.
-2. Для каждого test case из strategy.md — напиши тест.
-3. Используй `aioresponses` для мокирования HTTP.
-4. Используй `MockConfigEntry` для duplicate-entry проверок.
+2. Запусти существующий
+   `PYTHONPATH=. .venv/bin/pytest tests/test_config_flow.py -v` и сопоставь
+   реальные тесты с изменённым поведением, acceptance criteria и gaps из
+   strategy.
+3. Для отсутствующего сценария сначала получи ожидаемый RED, затем минимальный
+   GREEN; используй сложившиеся PHC fixtures и mock-подход модуля.
+4. Повторно запусти весь `tests/test_config_flow.py`.
 
 Output:
-- новый файл `tests/test_config_flow.py` (полностью переписанный)
+- точечный diff к существующим tests и перечень защищённых сценариев
+- команда и свежий результат прогона
 - если test fails — НЕ упрощать тест; зафиксировать как баг и предложить исправление в коде.
 
 Ограничения:
-- не использовать `unittest.mock.patch` где можно `aioresponses`
 - не «зелёные» тесты ценой потери проверки
+- не удалять и не переписывать рабочий test module без доказанной причины
 - не импортировать несуществующие сущности
 ```
 
@@ -110,26 +127,42 @@ Output:
 ```text
 Ты — DevOps / Release Agent. Skill: agent-skills:shipping-and-launch.
 
-Цель: подготовить hotfix-релиз с security-фиксами (S-01..S-05).
+Цель: подготовить hotfix-релиз с security-фиксами для exact frozen candidate.
 
 Inputs:
-- diff с фиксами
+- evidence CANDIDATE_FROZEN: clean status, base SHA, head SHA, tree SHA
+- candidate-bound independent REVIEW_OK и SECURITY_OK с теми же идентификаторами
+- durable PR evidence comment и `CI_GREEN` текущего head
+- diff с фиксами и результаты обязательных проверок
 - docs/audit/security.md
+- docs/aidd/quality-gates.md
 - .github/workflows/release.yaml
 
 Действия:
-1. Проверить, что все P0 из audit/security.md закрыты.
-2. Сформировать CHANGELOG entry: что было, что стало, как пользователь должен реагировать (рекомендовать перевыпуск токена).
-3. Подготовить release notes.
-4. Проверить: `grep -rE "LOGGER\..*(token|headers|entry\.data)" custom_components/` → пусто.
+1. Сверить base/head/tree у CANDIDATE_FROZEN, REVIEW_OK, SECURITY_OK и PR
+   evidence comment;
+   self-review или review другого candidate не принимается.
+2. Проверить, что все Critical/Important findings обязательных code/profile
+   reviews закрыты и повторно проверены; открытый release-blocking security
+   finding из audit также блокирует релиз.
+3. Проверить остальные обязательные quality gates и свежие test/hassfest/HACS
+   результаты для этого candidate.
+4. Сформировать CHANGELOG entry и release notes: что было, что стало и нужны ли
+   действия пользователя. Перевыпуск токена рекомендовать только когда риск
+   утечки действительно подтверждён.
+5. Повторить релевантные secret/redaction checks; каждое совпадение оценивать по
+   контексту, а не считать пустой grep единственным доказательством.
 
 Output:
 - черновик release notes
 - список действий пользователя в notes (если нужно)
-- ответ: готов ли релиз (все P0 closed + tests pass + hassfest pass).
+- base/head/tree проверенного candidate и evidence gates
+- verdict: готов ли релиз; иначе точный список блокеров
 
 Ограничения:
-- не релизить, пока есть открытые P0
+- не релизить без CANDIDATE_FROZEN, независимых candidate-bound
+  REVIEW_OK/SECURITY_OK, REVIEW_EVIDENCE_PUBLISHED и CI_GREEN
+- не релизить при открытом Critical/Important finding обязательного review
 - НЕ делать `git push --tags` без явного approval owner
 ```
 
@@ -170,7 +203,8 @@ Output:
 Цель: review diff по 5 осям.
 
 Inputs:
-- diff PR
+- exact clean committed base/head/tree candidate (local, review branch or PR)
+- spec / plan / acceptance criteria
 - docs/audit/project-audit.md (для контекста — какие проблемы уже известны)
 - docs/architecture/ha-compatibility.md (для HA-проверок)
 - conventions.md
@@ -188,6 +222,9 @@ Output:
 - approve / changes requested
 
 Ограничения:
+- reviewer не участвовал в implementation и работает read-only
+- self-review не закрывает REVIEW_OK
+- все Critical/Important findings требуют fix, новый freeze и re-review до merge
 - не повторять автоматически проверяемое (linter)
 - сосредоточиться на том, что машина не поймает
 ```
@@ -265,6 +302,6 @@ Output:
 ## Next reading
 
 - For skills: `skills.md`
-- For agents: `../../.claude/agents/`
-- For commands: `../../.claude/commands/`
+- For agents: `../../.agents/roles/`
+- For commands: `../../.agents/commands/`
 - For MCP tools: `mcp-tools.md`

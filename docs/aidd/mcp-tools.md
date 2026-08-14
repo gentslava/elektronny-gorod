@@ -1,10 +1,10 @@
-Status: Active
-Owner: Documentation / AIDD Agent
-Last reviewed: 2026-05-22
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-14 (canonical hooks moved to neutral `.agents/hooks`; Claude/Codex wiring remains adapter-only)
 
 Source files:
 - этот документ
+- `../../.agents/hooks/**`
 - `../../.claude/settings.json`
+- `../../.codex/hooks.json`
 
 Related docs:
 - `skills.md`
@@ -112,18 +112,22 @@ Quality gates:
 
 ## Конфигурация
 
-`.claude/settings.json` хранит allow-list разрешённых команд / MCP-серверов на уровне проекта.
-Не коммитить `.claude/settings.local.json` (пользовательские настройки).
+`.claude/settings.json` хранит allow-list разрешённых команд / MCP-серверов на уровне проекта. Не коммитить `.claude/settings.local.json` (пользовательские настройки).
 
 ## Hooks
 
 В Claude Code hooks — это shell-команды, привязанные к events.
 
-Запланированные для этого проекта:
-- `PreToolUse` для `Bash` — блокировать `rm -rf custom_components/`.
-- `PostToolUse` для `Edit` / `Write` — `pre-commit-redaction-check.sh` для измененных `.py` файлов.
+Активные hooks проекта:
 
-См. [`../../.claude/hooks/`](../../.claude/hooks/).
+- `.agents/hooks/check-secret-logs.py` + `.agents/hooks/check-secret-logs.sh` — канонический AST scanner для всего candidate.
+- `.agents/hooks/post-edit-redaction-check.sh` — канонический быстрый gate после правки.
+- `.agents/hooks/check-audit-reconciliation.sh` — каноническая сверка audit↔git.
+- `.claude/hooks/**` и `.codex/hooks/**` — launch adapters к тем же implementations.
+
+Новые hooks добавляются в `.agents/hooks/`; tool-specific каталог содержит только adapter, если формат события инструмента этого требует.
+
+См. [`../../.agents/hooks/`](../../.agents/hooks/).
 
 ## Skills (повтор)
 
@@ -147,6 +151,6 @@ Quality gates:
 ## Next reading
 
 - For skills: `skills.md`
-- For agents: `../../.claude/agents/`
+- For canonical agents: `../../.agents/roles/`
 - For settings: `../../.claude/settings.json`
-- For hooks: `../../.claude/hooks/`
+- For hooks: `../../.agents/hooks/`

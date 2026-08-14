@@ -1,6 +1,4 @@
-Status: Active
-Owner: Home Assistant Expert Agent
-Last reviewed: 2026-08-10 (persistent FCM Repairs issue and ru/en translations)
+Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-08-11 (persistent PII-free FCM Repairs issue, serialized lifecycle and stable-symbol evidence)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
@@ -146,15 +144,7 @@ async_step_user
 | Корректное обновление через coordinator | ✅ | ✅ (+ локальный synthetic unlock timer) | ✅ |
 | Хардкод русского имени | нет | нет | нет — translation key ru/en |
 
-History `EventEntity` additive и не требует config-entry migration: stable
-unique IDs строятся из place/access-control или camera ID, device identity
-совпадает с существующим intercom/camera device. `_trigger_event` получает
-только allowlisted attributes; backend message не копируется. Durable
-accepted/missed streams не объявляют `device_class=doorbell`, потому что этот
-HA-класс требует поддержку `ring`; doorbell-класс остаётся только у realtime
-сущности вызова. Dispatcher signal включает config-entry ID, baseline хранится
-по source, а camera-motion history по умолчанию отключена и не создаёт API
-нагрузку до явного включения entity.
+History `EventEntity` additive и не требует config-entry migration: stable unique IDs строятся из place/access-control или camera ID, device identity совпадает с существующим intercom/camera device. `_trigger_event` получает только allowlisted attributes; backend message не копируется. Durable accepted/missed streams не объявляют `device_class=doorbell`, потому что этот HA-класс требует поддержку `ring`; doorbell-класс остаётся только у realtime сущности вызова. Dispatcher signal включает config-entry ID, baseline хранится по source, а camera-motion history по умолчанию отключена и не создаёт API нагрузку до явного включения entity.
 
 ## Diagnostics / Repairs / Services
 
@@ -180,12 +170,9 @@ HA-класс требует поддержку `ring`; doorbell-класс ос
 
 ## Платформы и manifest dependencies
 
-PLATFORMS: `[BINARY_SENSOR, CAMERA, EVENT, LOCK, SENSOR, SWITCH]`
-([`__init__.py:46-53`](../../custom_components/elektronny_gorod/__init__.py)).
+PLATFORMS: `[BINARY_SENSOR, CAMERA, EVENT, LOCK, SENSOR, SWITCH]` (`__init__.py:PLATFORMS`).
 
-Зависимости HA-core (`dependencies` в manifest) пусты. Импортированный helper
-`persistent_notification` и стандартные entity-платформы не требуют отдельного
-порядка setup через `dependencies`/`after_dependencies`.
+Зависимости HA-core (`dependencies` в manifest) пусты. Импортированный helper `persistent_notification` и стандартные entity-платформы не требуют отдельного порядка setup через `dependencies`/`after_dependencies`.
 
 ## CI / Validation
 

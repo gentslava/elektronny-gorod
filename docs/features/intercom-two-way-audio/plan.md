@@ -1,6 +1,7 @@
 # Two-way talk по домофону — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution mode:** use the active tool's native subagent workflow when
+> available; otherwise execute the checkboxes inline.
 
 **Goal:** Принять входящий вызов домофона из Home Assistant и говорить с гостем у двери (двусторонний SIP-аудио), переиспользуя go2rtc для доставки звука в браузер.
 
@@ -12,22 +13,16 @@
 
 ## Scope этого плана
 
-Фича research-heavy: три развилки нужно снять **экспериментом до** production-кода
-SIP-lifecycle:
+Фича research-heavy: три развилки нужно снять **экспериментом до** production-кода SIP-lifecycle:
 1. Даёт ли публичный API `voip-utils` переопределить кодек/SDP на G.711 — или fallback на ручной `asyncio`-модуль из `probe`.
 2. Тайминг transient-регистрации (успеть к форк-INVITE, не залипнуть в «Занято»).
 3. `audioop` удалён из stdlib в Python 3.13 — стратегия транскода.
 
 Поэтому план покрывает **Slice 0 (фундамент)**:
 - **Task 1 — Spike** снимает три развилки (research, не TDD).
-- **Task 2–3 — TDD** для чистых модулей, которые нужны **независимо** от исхода
-  спайка (G.711-транскод, STUN): `voip-utils` хардкодит Opus и не имеет STUN —
-  значит эти два слоя наши при любом раскладе.
+- **Task 2–3 — TDD** для чистых модулей, которые нужны **независимо** от исхода спайка (G.711-транскод, STUN): `voip-utils` хардкодит Opus и не имеет STUN — значит эти два слоя наши при любом раскладе.
 
-**SIP-UAS lifecycle, downlink-вывод (Slice 1), uplink через go2rtc (Slice 2),
-polish (Slice 3)** — в [roadmap](#roadmap-следующие-слайсы). Их bite-sized задачи
-финализируются **после Task 1**, т.к. форма кода зависит от исхода спайка. Не
-выдумываем код для неразрешённых развилок.
+**SIP-UAS lifecycle, downlink-вывод (Slice 1), uplink через go2rtc (Slice 2), polish (Slice 3)** — в [roadmap](#roadmap-следующие-слайсы). Их bite-sized задачи финализируются **после Task 1**, т.к. форма кода зависит от исхода спайка. Не выдумываем код для неразрешённых развилок.
 
 ---
 
@@ -83,15 +78,9 @@ polish (Slice 3)** — в [roadmap](#roadmap-следующие-слайсы). �
 
 - [ ] **Step 3: Измерить тайминг вызова + протестировать transient-REGISTER**
 
-Прогнать harness `research/intercom-call-probe/` на реальном вызове (нужен живой
-звонок в домофон). Инструментировать probe: залогировать монотонные timestamps
-`FCM CALL_INCOMING` (probe_fcm) и первого `INVITE` (probe_sip_media). Замерить дельту.
-Затем проверить сценарий: стартовать REGISTER **по** приходу FCM (не держать заранее)
-и проверить, приходит ли INVITE на свежую регистрацию.
+Прогнать harness `research/intercom-call-probe/` на реальном вызове (нужен живой звонок в домофон). Инструментировать probe: залогировать монотонные timestamps `FCM CALL_INCOMING` (probe_fcm) и первого `INVITE` (probe_sip_media). Замерить дельту. Затем проверить сценарий: стартовать REGISTER **по** приходу FCM (не держать заранее) и проверить, приходит ли INVITE на свежую регистрацию.
 
-Зафиксировать в `research-spike.md`: дельта FCM→INVITE (мс); успевает ли
-transient-register; вывод — стратегия регистрации (`transient-by-FCM` vs
-`held-short-window`).
+Зафиксировать в `research-spike.md`: дельта FCM→INVITE (мс); успевает ли transient-register; вывод — стратегия регистрации (`transient-by-FCM` vs `held-short-window`).
 
 - [ ] **Step 4: Записать решения и обновить спеку**
 
@@ -100,8 +89,7 @@ transient-register; вывод — стратегия регистрации (`t
 - **D2 (регистрация):** стратегия из Step 3.
 - **D3 (audioop):** `audioop-lts` ✅ / vendored.
 
-Обновить `design.md` §6: п.1 (тайминг) — заменить «**Риск: тайминг.**» на измеренный
-результат + выбранную стратегию; §3.1 — отметить подтверждённый исход развилки voip-utils.
+Обновить `design.md` §6: п.1 (тайминг) — заменить «**Риск: тайминг.**» на измеренный результат + выбранную стратегию; §3.1 — отметить подтверждённый исход развилки voip-utils.
 
 - [ ] **Step 5: Commit**
 
@@ -119,9 +107,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ## Task 2: G.711 ↔ PCM транскод (`sip/audio.py`)
 
-**Зачем:** `voip-utils` хардкодит Opus; домофон шлёт только G.711 (PCMU pt=0 / PCMA
-pt=8). Транскод — наш слой при любом исходе спайка. `audioop` удалён из py3.13 →
-зависимость `audioop-lts`.
+**Зачем:** `voip-utils` хардкодит Opus; домофон шлёт только G.711 (PCMU pt=0 / PCMA pt=8). Транскод — наш слой при любом исходе спайка. `audioop` удалён из py3.13 → зависимость `audioop-lts`.
 
 **Files:**
 - Create: `custom_components/elektronny_gorod/sip/__init__.py`
@@ -131,9 +117,7 @@ pt=8). Транскод — наш слой при любом исходе сп�
 
 - [ ] **Step 1: Добавить `audioop-lts` в manifest и установить**
 
-`audioop` удалён из stdlib в Python 3.13 (PEP 594) → backport нужен для `sip/audio.py`.
-`voip-utils` НЕ добавляем сейчас (в Task 2–3 не используется; версию подтвердит
-спайк Task 1) — добавим в Slice 0-lifecycle.
+`audioop` удалён из stdlib в Python 3.13 (PEP 594) → backport нужен для `sip/audio.py`. `voip-utils` НЕ добавляем сейчас (в Task 2–3 не используется; версию подтвердит спайк Task 1) — добавим в Slice 0-lifecycle.
 
 Изменить `manifest.json` requirements:
 
@@ -200,8 +184,7 @@ def test_unsupported_payload_type_raises() -> None:
 
 - [ ] **Step 4: Запустить тест — убедиться, что падает**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_audio.py -v`
-Expected: FAIL — `ModuleNotFoundError: ...sip.audio`
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_audio.py -v` Expected: FAIL — `ModuleNotFoundError: ...sip.audio`
 
 - [ ] **Step 5: Реализовать `sip/audio.py`**
 
@@ -243,8 +226,7 @@ def pcm_to_g711(pcm: bytes, payload_type: int) -> bytes:
 
 - [ ] **Step 6: Запустить тест — убедиться, что проходит**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_audio.py -v`
-Expected: PASS (5 тестов: 2+2 параметризованных + 1)
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_audio.py -v` Expected: PASS (5 тестов: 2+2 параметризованных + 1)
 
 - [ ] **Step 7: Commit**
 
@@ -262,10 +244,7 @@ Co-Authored-By: Claude Opus 4.8 (1M context) <noreply@anthropic.com>"
 
 ## Task 3: STUN Binding parse (`sip/stun.py`)
 
-**Зачем:** за symmetric NAT нужен публичный RTP-адрес для SDP `c=` (downlink доходит
-через latching). `voip-utils` STUN не имеет — наш слой. Parse-функция чистая и
-юнит-тестируемая; сетевой `discover` (socket I/O) — тонкая обёртка, тестируется
-позже в интеграции.
+**Зачем:** за symmetric NAT нужен публичный RTP-адрес для SDP `c=` (downlink доходит через latching). `voip-utils` STUN не имеет — наш слой. Parse-функция чистая и юнит-тестируемая; сетевой `discover` (socket I/O) — тонкая обёртка, тестируется позже в интеграции.
 
 **Files:**
 - Create: `custom_components/elektronny_gorod/sip/stun.py`
@@ -314,8 +293,7 @@ def test_parse_returns_none_without_address_attribute() -> None:
 
 - [ ] **Step 2: Запустить тест — убедиться, что падает**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_stun.py -v`
-Expected: FAIL — `ImportError: cannot import name 'parse_stun_binding_response'`
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_stun.py -v` Expected: FAIL — `ImportError: cannot import name 'parse_stun_binding_response'`
 
 - [ ] **Step 3: Реализовать `sip/stun.py`**
 
@@ -358,13 +336,11 @@ def parse_stun_binding_response(data: bytes) -> tuple[str, int] | None:
 
 - [ ] **Step 4: Запустить тест — убедиться, что проходит**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_stun.py -v`
-Expected: PASS (3 теста)
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_stun.py -v` Expected: PASS (3 теста)
 
 - [ ] **Step 5: Прогнать весь suite — нет регрессий**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/ -q`
-Expected: все прежние тесты + новые зелёные
+Run: `PYTHONPATH=. .venv/bin/pytest tests/ -q` Expected: все прежние тесты + новые зелёные
 
 - [ ] **Step 6: Commit**
 
@@ -390,35 +366,19 @@ Bite-sized задачи финализируются **после Task 1** (фо
 > части (REGISTER-transport, RTP-loop, STUN-discover, transient-register по D2) —
 > следующий слайс (часть ждёт живого звонка).
 
-- **L1 — `sip/digest.py`:** `md5()`, `digest_response()` (RFC 2617 Digest MD5,
-  qop/non-qop), `build_authorization()` (заголовок). Из `probe_sip.py:52-64,162-172`.
-  Тест: golden-vector ha1/ha2/response для известных user/realm/pass/nonce.
-- **L2 — `sip/sdp.py`:** `parse_sdp()` (conn_ip, media-линии, rtpmap — из
-  `probe_sip_media.py:120-132`), `build_g711_answer(media_ip, port, pt, codec)`
-  (SDP 200 OK для G.711 — из `probe_sip_media.py:287-298`). Тест: parse реального
-  offer-а домофона (G.711+telephone-event), build даёт корректный `m=audio`/rtpmap.
-- **L3 — `sip/message.py`:** `parse_sip_headers()` — раскладывает raw SIP на
-  request-line + headers, 🔴 **сохраняя множественные `Via`/`Record-Route` списком**
-  (урок спайка: dict теряет). Тест: 2× `Via` + 2× `Record-Route` → оба сохранены.
-- **L4 — `sip/dialog.py`:** `DialogState` (callid, local/remote с тегами, target,
-  route[], addr — из INVITE), `build_200_ok(invite, sdp_body)` (эхо **всех**
-  Via/Record-Route + To-tag — из `probe_sip_media.py:255-310`), `build_bye(dialog)`
-  (из `probe_sip_media.py:377-399`). Тест: 200 OK эхо-ит оба Via и оба Record-Route
-  дословно + добавляет To-tag; BYE адресован remote Contact с Route из Record-Route.
+- **L1 — `sip/digest.py`:** `md5()`, `digest_response()` (RFC 2617 Digest MD5, qop/non-qop), `build_authorization()` (заголовок). Из `probe_sip.py:52-64,162-172`. Тест: golden-vector ha1/ha2/response для известных user/realm/pass/nonce.
+- **L2 — `sip/sdp.py`:** `parse_sdp()` (conn_ip, media-линии, rtpmap — из `probe_sip_media.py:120-132`), `build_g711_answer(media_ip, port, pt, codec)` (SDP 200 OK для G.711 — из `probe_sip_media.py:287-298`). Тест: parse реального offer-а домофона (G.711+telephone-event), build даёт корректный `m=audio`/rtpmap.
+- **L3 — `sip/message.py`:** `parse_sip_headers()` — раскладывает raw SIP на request-line + headers, 🔴 **сохраняя множественные `Via`/`Record-Route` списком** (урок спайка: dict теряет). Тест: 2× `Via` + 2× `Record-Route` → оба сохранены.
+- **L4 — `sip/dialog.py`:** `DialogState` (callid, local/remote с тегами, target, route[], addr — из INVITE), `build_200_ok(invite, sdp_body)` (эхо **всех** Via/Record-Route + To-tag — из `probe_sip_media.py:255-310`), `build_bye(dialog)` (из `probe_sip_media.py:377-399`). Тест: 200 OK эхо-ит оба Via и оба Record-Route дословно + добавляет To-tag; BYE адресован remote Contact с Route из Record-Route.
 
 ### Slice 0-network — реализованная модель register-on-ring
 > Этот раздел был перепроверен полным Android PCAP 2026-07-13. Ранний вывод
 > register-on-answer отменён; актуальный source of truth —
 > [call-answer-model.md](call-answer-model.md).
-- `sip/protocol.py` (`asyncio.DatagramProtocol`): на FCM ring выполняется короткий
-  `REGISTER` (Expires=30, stock Contact push-params, `Call-Id` из FCM,
-  `Accept: application/sdp`) → `INVITE` → немедленный `100 Trying` и hold.
-- По сервису `answer` в окне `CallInvalidated` отправляется `200 OK` с локальным
-  G.711 SDP → RTP uplink/keepalive активирует latching → приходит downlink.
-- Fallback register-on-answer сохраняется только при провале раннего hold и
-  использует тот же stock REGISTER profile.
-- **Не нужны:** 180/183 early media, session timers, SRTP/ICE; завершение до ответа
-  обрабатывается через `CANCEL` → `487`.
+- `sip/protocol.py` (`asyncio.DatagramProtocol`): на FCM ring выполняется короткий `REGISTER` (Expires=30, stock Contact push-params, `Call-Id` из FCM, `Accept: application/sdp`) → `INVITE` → немедленный `100 Trying` и hold.
+- По сервису `answer` в окне `CallInvalidated` отправляется `200 OK` с локальным G.711 SDP → RTP uplink/keepalive активирует latching → приходит downlink.
+- Fallback register-on-answer сохраняется только при провале раннего hold и использует тот же stock REGISTER profile.
+- **Не нужны:** 180/183 early media, session timers, SRTP/ICE; завершение до ответа обрабатывается через `CANCEL` → `487`.
 - Видео при ответе — go2rtc (отдельно), как «подгрузка видео» в приложении.
 
 ### Slice 1 — downlink (прослушка), Фаза B
@@ -450,10 +410,6 @@ Bite-sized задачи финализируются **после Task 1** (фо
 - §8 security (redact SIP-пароль), ADR-0012 → roadmap Slice 3. ✅
 - Gap (намеренный): детальный код Slice 0-lifecycle / Slice 1–3 не bite-sized — зависит от Task 1. Зафиксировано в [Scope](#scope-этого-плана). ✅
 
-**2. Placeholder scan:** Task 1–3 содержат полный код/команды/ожидаемый вывод.
-Roadmap-секции явно помечены как «после Task 1» — это не плейсхолдеры, а корректная
-инкрементальность research-heavy фичи. ✅
+**2. Placeholder scan:** Task 1–3 содержат полный код/команды/ожидаемый вывод. Roadmap-секции явно помечены как «после Task 1» — это не плейсхолдеры, а корректная инкрементальность research-heavy фичи. ✅
 
-**3. Type consistency:** `PCMU_PAYLOAD_TYPE`/`PCMA_PAYLOAD_TYPE`, `g711_to_pcm`/
-`pcm_to_g711`, `parse_stun_binding_response` — имена согласованы между тестами и
-реализацией во всех задачах. ✅
+**3. Type consistency:** `PCMU_PAYLOAD_TYPE`/`PCMA_PAYLOAD_TYPE`, `g711_to_pcm`/ `pcm_to_g711`, `parse_stun_binding_response` — имена согласованы между тестами и реализацией во всех задачах. ✅

@@ -1,7 +1,4 @@
-Status: Active
-Owner: Project Cartographer Agent
-Last reviewed: 2026-08-11 (manifest requirements and FCM dependency contract
-reconciled with project/HA compatibility sources)
+Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-14 (agent contracts consolidated under neutral `.agents/**` source)
 
 Source files:
 - весь репозиторий (это карта)
@@ -60,6 +57,12 @@ Quality gates:
 | Brand assets | brands.home-assistant.io/elektronny_gorod/ | разработчик (через PR в brands repo) | HA UI, README badge |
 | Пользовательская документация | [`README.md`](../../README.md) + [`README.en_EN.md`](../../README.en_EN.md) | разработчик | пользователь |
 | Краткая HACS feature card | [`info.md`](../../info.md), производна от README | разработчик | HACS-пользователь |
+| Общий agent contract | [`AGENTS.md`](../../AGENTS.md) | Lead Architect | все agents и adapters |
+| Agent roles | [`.agents/roles/*.md`](../../.agents/roles/) | owner роли | Claude/Codex adapters |
+| Engineering/process rules | [`.agents/rules/*.md`](../../.agents/rules/) | owner правила | все agents |
+| Agent commands | [`.agents/commands/*.md`](../../.agents/commands/) | process owner | slash-command/skill adapters |
+| Cross-tool executable gates | [`.agents/hooks/*`](../../.agents/hooks/) | QA/Security/Docs owners | Claude/Codex hook adapters |
+| Tool discovery metadata | `.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md` | tool adapter owner | конкретный runtime; не source of truth поведения |
 
 ## Известные конфликты
 
@@ -83,8 +86,7 @@ Quality gates:
 | `manifest.json:10` | `cloud_polling` |
 | `coordinator.py` | `update_interval=5 min`, реальный polling |
 
-**Резолюция:** ✅ закрыт. Polling реализован, `cloud_polling` соответствует
-поведению; решение закреплено в [ADR-0003](../decisions/0003-iot-class-strategy.md).
+**Резолюция:** ✅ закрыт. Polling реализован, `cloud_polling` соответствует поведению; решение закреплено в [ADR-0003](../decisions/0003-iot-class-strategy.md).
 
 ### Конфликт 3: README.md ↔ файловая система
 
@@ -95,8 +97,7 @@ Quality gates:
 | Реальный домен | `elektronny_gorod` — совпадает |
 | `info.md` | краткое подмножество актуальных возможностей RU/EN README |
 
-**Резолюция:** ✅ закрыт. Языковые ссылки и путь ручной установки совпадают с
-файловой системой.
+**Резолюция:** ✅ закрыт. Языковые ссылки и путь ручной установки совпадают с файловой системой.
 
 ### Конфликт 4: тесты ↔ реальный config_flow
 
@@ -105,8 +106,7 @@ Quality gates:
 | `tests/test_config_flow.py` | реальные PHC-тесты password/SMS/token, reauth и abort |
 | `tests/test_init.py` | миграции config entry v1→v2→v3 |
 
-**Резолюция:** ✅ закрыт. Scaffold-stub заменён реальными тестами; актуальный
-baseline — в [`testing/strategy.md`](../testing/strategy.md).
+**Резолюция:** ✅ закрыт. Scaffold-stub заменён реальными тестами; актуальный baseline — в [`testing/strategy.md`](../testing/strategy.md).
 
 ## Принципы при разрешении
 

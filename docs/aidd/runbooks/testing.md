@@ -4,9 +4,7 @@
 
 ## Текущий статус
 
-Suite зелёный; config flow и миграции покрыты реальными PHC-тестами. Точный
-baseline, состав модулей и известные gaps ведутся в
-[`testing/strategy.md`](../../testing/strategy.md), а не дублируются здесь.
+Suite зелёный; config flow и миграции покрыты реальными PHC-тестами. Точный baseline, состав модулей и известные gaps ведутся в [`testing/strategy.md`](../../testing/strategy.md), а не дублируются здесь.
 
 ## Установка
 
@@ -46,9 +44,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Config flow examples
 
-Исполняемые примеры находятся в `tests/test_config_flow.py`; миграции — в
-`tests/test_init.py`. Не копируйте fixtures в runbook: тесты являются source of
-truth и проверяются CI.
+Исполняемые примеры находятся в `tests/test_config_flow.py`; миграции — в `tests/test_init.py`. Не копируйте fixtures в runbook: тесты являются source of truth и проверяются CI.
 
 ## Что НЕ делать
 
@@ -58,8 +54,7 @@ truth и проверяются CI.
 
 ## CI
 
-`.github/workflows/python-tests.yaml` запускает pytest matrix на минимальной и
-текущей поддерживаемой Home Assistant.
+`.github/workflows/python-tests.yaml` запускает pytest matrix на минимальной и текущей поддерживаемой Home Assistant.
 
 ## Quality gate
 

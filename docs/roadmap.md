@@ -1,7 +1,4 @@
-Status: Active
-Owner: Lead Architect Agent
-Last reviewed: 2026-07-16 (external RTSP stream-manager implementation accepted
-live after go2rtc restart; A-82/A-84/A-96 status reconciled)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (A-97 agent contracts consolidated under neutral `.agents/**`; merge status remains canonical in project-audit)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -53,8 +50,7 @@ Quality gates:
 
 **Цель:** довести интеграцию до Bronze. См. [`architecture/quality-scale.md#bronze`](architecture/quality-scale.md).
 
-**Статус:** Bronze IQS shipped. Все обязательные критерии Bronze закрыты;
-pytest CI matrix также работает на минимальной и текущей HA-версиях.
+**Статус:** Bronze IQS shipped. Все обязательные критерии Bronze закрыты; pytest CI matrix также работает на минимальной и текущей HA-версиях.
 
 **Acceptance — met:**
 - `manifest.json` содержит `quality_scale: "bronze"` и `integration_type: "hub"` ✓ (A-34);
@@ -80,8 +76,7 @@ pytest CI matrix также работает на минимальной и те
 
 ### Tasks (deferred → Итерация 3)
 
-- [x] **A-10** ✅ Реальный polling включён (`update_interval=5 min`),
-  `iot_class: cloud_polling` соответствует поведению; ADR-0003.
+- [x] **A-10** ✅ Реальный polling включён (`update_interval=5 min`), `iot_class: cloud_polling` соответствует поведению; ADR-0003.
 - [x] **A-11** ✅ Поднят `hacs.json:homeassistant` до `2024.10.4` — первая stable HA с `LockState` enum, который импортирует `lock.py`. Та же версия пинится как min в CI matrix (см. python-tests.yaml).
 - [x] **A-12** ✅ slice 3c — stable `unique_id` Camera/Lock + миграция legacy через `entity_registry.async_migrate_entries`.
 - [x] **A-13** ✅ slice 3c — `_attr_has_entity_name = True` + `_attr_translation_key="balance"` (sensor); Camera/Lock — имя в `device_info.name`. Раздел `entity` добавлен в `strings.json` + переводы.
@@ -91,13 +86,10 @@ pytest CI matrix также работает на минимальной и те
 - [x] **A-18** ✅ Неиспользуемый `query_sections` удалён из coordinator.
 - [ ] **A-19** Сузить `except Exception` в `api.py` до `ClientResponseError`/`ClientError`/`asyncio.TimeoutError`; не использовать `e.args[0]`.
 - [ ] **A-20** Заменить `raise ClientError(response)` на корректное `ClientResponseError`.
-- [ ] **A-21** 🟡 Timeout закрыт (REST 30с / binary 60с / connect 10с);
-  остаётся retry/backoff только для идемпотентных GET.
-- [x] **A-23 + A-45** ✅ `diagnostics.py` redacts secrets/PII;
-  `TO_REDACT` покрывает `SENSITIVE_KEYS`, включая go2rtc credentials.
+- [ ] **A-21** 🟡 Timeout закрыт (REST 30с / binary 60с / connect 10с); остаётся retry/backoff только для идемпотентных GET.
+- [x] **A-23 + A-45** ✅ `diagnostics.py` redacts secrets/PII; `TO_REDACT` покрывает `SENSITIVE_KEYS`, включая go2rtc credentials.
 - [x] **A-44** ✅ Legacy `async_update` камеры удалён при переходе на CoordinatorEntity.
-- [x] **Tests-1..N** ✅ Реальные config-flow/init/migration/coordinator/API/SIP/
-  frontend тесты добавлены; release-candidate suite — 392 backend + 48 frontend.
+- [x] **Tests-1..N** ✅ Реальные config-flow/init/migration/coordinator/API/SIP/ frontend тесты добавлены; release-candidate suite — 392 backend + 48 frontend.
 - [x] **CI-1** ✅ Создан `.github/workflows/python-tests.yaml` с matrix по двум HA-версиям (min 2024.10.4 + current 2026.5.4), pip-cache и coverage artifact.
 - [x] **A-34** ✅ slice 3c — `quality_scale: "bronze"`, `integration_type: "hub"` в `manifest.json`.
 - [x] **A-35** ✅ `CHANGELOG.md` ведётся и подготовлен к 4.0.0.
@@ -141,112 +133,41 @@ pytest CI matrix также работает на минимальной и те
 
 #### Mobile app parity 9.9.0
 
-Единый PRD/research/plan/tasklist:
-[`features/mobile-app-parity/`](features/mobile-app-parity/README.md).
-Static-only write paths не переходят в код без decrypted HAR (ADR-0006).
+Единый PRD/research/plan/tasklist: [`features/mobile-app-parity/`](features/mobile-app-parity/README.md). Static-only write paths не переходят в код без decrypted HAR (ADR-0006).
 
-- [x] **A-50 + A-58 remainder** ✅ Access-call и verified camera-motion events
-  реализованы в `feat/durable-event-history` с baseline/dedup и PII-safe DTO;
-  camera-motion polling начинается только после включения entity.
-- [ ] **A-59 / Slice 2** Archive Media Source, retention mapping и on-demand
-  signed URL resolution.
-- [ ] **A-93** Guest invitation: NTK `app=2`, response-only admin action; live
-  link never persists. Sanitized success/401 fixtures captured; implementation
-  waits only for Slice 3 approval and admin/security review.
-- [ ] **A-94** Access keys: read-only inventory first, notification switch only
-  after enabled-account HAR; key code is never HA state/ID.
-- [ ] **A-95** Private-camera settings: feature-gated sensitivity/volume first;
-  record/mirror/PTZ after hardware HAR confirms enums/actions.
+- [x] **A-50 + A-58 remainder** ✅ Access-call и verified camera-motion events реализованы в `feat/durable-event-history` с baseline/dedup и PII-safe DTO; camera-motion polling начинается только после включения entity.
+- [ ] **A-59 / Slice 2** Archive Media Source, retention mapping и on-demand signed URL resolution.
+- [ ] **A-93** Guest invitation: NTK `app=2`, response-only admin action; live link never persists. Sanitized success/401 fixtures captured; implementation waits only for Slice 3 approval and admin/security review.
+- [ ] **A-94** Access keys: read-only inventory first, notification switch only after enabled-account HAR; key code is never HA state/ID.
+- [ ] **A-95** Private-camera settings: feature-gated sensitivity/volume first; record/mirror/PTZ after hardware HAR confirms enums/actions.
 
 #### Production-log polish (A-63..A-66 — отдельные PR)
 
 > Findings собраны из production-лога (см. audit §A-63..A-66).
 
-- [x] ~~**A-63**~~ → **Won't fix** (PR #46 final). Оригинальная идея skip
-  `stream_source()` для hidden cameras фундаментально несовместима с HA
-  Stream lifecycle. Эксперимент в 3 PR (#44 X / #45 Y / #46 Z) подтвердил.
-  Skip оставлен только в `async_camera_image` (snapshot). Лишние HTTP к
-  operator приемлемы (поведение 3.1.0, без rate-limit). См. audit A-63.
-- [x] **A-64** ✅ Reload cascade + user override (PR #43). Migration flag
-  в `entry.data`, sync через `entity.options[DOMAIN]` track per-entity
-  user_shown override.
-- [x] **A-66** ✅ Historical HA Stream stale-source recovery (PR #46),
-  позже расширено A-71. В stream-manager ветке camera больше не
-  владеет write boundary; recovery делегирует PATCH-only manager'у.
-- [x] **A-65** ✅ Log throttling от broken cameras (PR #49). Per-entity
-  `_consecutive_empty_count` counter в `ElektronnyGorodCamera`. 1й fail
-  → WARNING, 2й+ подряд → DEBUG. Counter сбрасывается на первый success.
+- [x] ~~**A-63**~~ → **Won't fix** (PR #46 final). Оригинальная идея skip `stream_source()` для hidden cameras фундаментально несовместима с HA Stream lifecycle. Эксперимент в 3 PR (#44 X / #45 Y / #46 Z) подтвердил. Skip оставлен только в `async_camera_image` (snapshot). Лишние HTTP к operator приемлемы (поведение 3.1.0, без rate-limit). См. audit A-63.
+- [x] **A-64** ✅ Reload cascade + user override (PR #43). Migration flag в `entry.data`, sync через `entity.options[DOMAIN]` track per-entity user_shown override.
+- [x] **A-66** ✅ Historical HA Stream stale-source recovery (PR #46), позже расширено A-71. В stream-manager ветке camera больше не владеет write boundary; recovery делегирует PATCH-only manager'у.
+- [x] **A-65** ✅ Log throttling от broken cameras (PR #49). Per-entity `_consecutive_empty_count` counter в `ElektronnyGorodCamera`. 1й fail → WARNING, 2й+ подряд → DEBUG. Counter сбрасывается на первый success.
 
 #### Production-log polish (2026-05-27 — новые findings)
 
 > Логи 2026-05-27 показали 2 новых проблемы после deployment A-64/A-66.
 
-- [x] **A-68** ✅ **P2 defensive** Concurrent `stream_source()` dedup
-  (PR #51). In-flight future-pattern в `Camera.stream_source` — concurrent
-  callers wait first future вместо параллельного fetch. N concurrent
-  callers → 1 HTTP + 1 PUT + 1 `Stream.update_source()` restart. **Scope
-  clarification**: defensive cleanup для concurrent-thrash (Frigate /
-  WebRTC probe / Lovelace card в параллель). **Не фикс** «мигание видео
-  после cold start» — у него отдельный root cause (production-тест
-  2026-05-27 подтвердил: с A-68 мигание остаётся). Investigation
-  flicker'а перенесена в отдельный track (требует browser-side runtime
-  diagnostic: Network m3u8/m4s + Console MediaSource events).
-- [ ] **A-67** P2 Cold-start go2rtc warmup — **attempted, didn't help**.
-  Эксперимент в 3 итерациях (A-67 PUT-only pre-warm / A-71 active probe
-  via `/api/frame.jpeg` / A-72 `/api/preload` через go2rtc-research): все
-  проверены runtime'ом на production-сервере, ни один не убрал видимое
-  мигание видео. Hypothesis «ffmpeg cold-start race» оказалась неверной
-  (нужна другая diagnostic-сессия). Закрыт без PR'а.
+- [x] **A-68** ✅ **P2 defensive** Concurrent `stream_source()` dedup (PR #51). In-flight future-pattern в `Camera.stream_source` — concurrent callers wait first future вместо параллельного fetch. N concurrent callers → 1 HTTP + 1 PUT + 1 `Stream.update_source()` restart. **Scope clarification**: defensive cleanup для concurrent-thrash (Frigate / WebRTC probe / Lovelace card в параллель). **Не фикс** «мигание видео после cold start» — у него отдельный root cause (production-тест 2026-05-27 подтвердил: с A-68 мигание остаётся). Investigation flicker'а перенесена в отдельный track (требует browser-side runtime diagnostic: Network m3u8/m4s + Console MediaSource events).
+- [ ] **A-67** P2 Cold-start go2rtc warmup — **attempted, didn't help**. Эксперимент в 3 итерациях (A-67 PUT-only pre-warm / A-71 active probe via `/api/frame.jpeg` / A-72 `/api/preload` через go2rtc-research): все проверены runtime'ом на production-сервере, ни один не убрал видимое мигание видео. Hypothesis «ffmpeg cold-start race» оказалась неверной (нужна другая diagnostic-сессия). Закрыт без PR'а.
 
 #### External RTSP after idle (A-82/A-84/A-96, ADR-0014)
 
-- [x] **Revised automated implementation** — live run опроверг PATCH-only
-  registration: пять lazy streams возвращали 404/EOF. Per-entry manager теперь
-  выполняет initial mint→PATCH→preload, сохраняет non-disruptive 28:30 PATCH,
-  проверяет stream/preload/active producer раз в минуту, снимает preload перед
-  consumer-aware cleanup; option-off startup удаляет preload и idle stream,
-  сохраняя active viewer. Diagnostic sensor требует
-  preloaded+active+fresh; source writes остаются PATCH-only.
-- [x] **Hidden publication pre-mint gate** — live options reload показал
-  transient hidden names и более долгую initialization: setup-time
-  `stream_source()` успевал сделать operator mint/PATCH до visibility sync.
-  Background-excluded hidden cameras теперь делают zero mint/PATCH/preload;
-  API-hidden startup hint не перекрывает persistent user-shown override.
-  Explicit HA-open enabled hidden camera во время или после startup лениво
-  делает mint/PATCH без preload и работает на время активного viewer.
-- [x] **Policy update without producer churn** — publication checkboxes больше
-  не вызывают full config-entry reload. Existing eligible preloads и HA
-  consumers сохраняются; excluded cleanup и newly eligible scheduling делает
-  текущий manager. Live follow-up убрал ошибочный cold-start jitter из ручного
-  включения: первая missing camera запускается сразу, следующие через 0.5s;
-  transport/auth changes сохраняют normal reload fallback.
-- [x] **Independent review lifecycle triage** — stop ждёт running reconcile и
-  снимает pending preload после cancellation ambiguity; entity proactive timer
-  не превращает preload consumers в синхронный 28:30 burst. Теоретические
-  per-camera locks/attach lease/main-off polling/removed-snapshot cleanup не
-  приняты без production evidence и дополнительной фоновой сети.
-- [x] **Startup-grid production follow-up** — live на `3a3ad02`: explicit
-  hidden HA-open во время setup выполняет mint/PATCH вместо возврата
-  незарегистрированного RTSP name; background gate сохранён. Proxied EOF recovery больше не вызывает
-  `Stream.update_source()` с тем же URL и не оставляет worker через
-  fast-restart/idle-stop race.
-- [x] **A-82** ✅ resolved в PR #71 (`bf5ba9b`): `camera.py` больше не владеет
-  go2rtc HTTP transport/writes.
-- [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles
-  проверить, что repeated PATCH не раздувает persistent go2rtc YAML.
-- [x] **A-96 repeat production acceptance (4.0.0 release gate)** — затронутые
-  streams получают active preload и переживают idle без HA-open; active
-  consumer переживает refresh; restart restore ≤60s; disabled/hidden cleanup;
-  concurrent reasons dedup; option-off удаляет idle registrations, unload
-  снимает background consumers; main/hidden toggle не reload-ит integration,
-  не обнуляет existing eligible producers и никогда даже кратковременно не
-  добавляет excluded hidden names фоновым path; explicit hidden HA-open во
-  время и после setup работает без persistent preload и cleanup-ится после
-  viewer; закрытие HA UI не оставляет orphan consumer после EOF recovery.
-- [x] Live evidence записан в существующем feature design: владелец подтвердил
-  восстановление после manual go2rtc restart, а обезличенный snapshot показал
-  `3/3` active producer и preload consumer с растущим `bytes_recv`. Публикация
-  4.0.0 разблокирована. PR #71 merged, PR #61 закрыт как superseded.
+- [x] **Revised automated implementation** — live run опроверг PATCH-only registration: пять lazy streams возвращали 404/EOF. Per-entry manager теперь выполняет initial mint→PATCH→preload, сохраняет non-disruptive 28:30 PATCH, проверяет stream/preload/active producer раз в минуту, снимает preload перед consumer-aware cleanup; option-off startup удаляет preload и idle stream, сохраняя active viewer. Diagnostic sensor требует preloaded+active+fresh; source writes остаются PATCH-only.
+- [x] **Hidden publication pre-mint gate** — live options reload показал transient hidden names и более долгую initialization: setup-time `stream_source()` успевал сделать operator mint/PATCH до visibility sync. Background-excluded hidden cameras теперь делают zero mint/PATCH/preload; API-hidden startup hint не перекрывает persistent user-shown override. Explicit HA-open enabled hidden camera во время или после startup лениво делает mint/PATCH без preload и работает на время активного viewer.
+- [x] **Policy update without producer churn** — publication checkboxes больше не вызывают full config-entry reload. Existing eligible preloads и HA consumers сохраняются; excluded cleanup и newly eligible scheduling делает текущий manager. Live follow-up убрал ошибочный cold-start jitter из ручного включения: первая missing camera запускается сразу, следующие через 0.5s; transport/auth changes сохраняют normal reload fallback.
+- [x] **Independent review lifecycle triage** — stop ждёт running reconcile и снимает pending preload после cancellation ambiguity; entity proactive timer не превращает preload consumers в синхронный 28:30 burst. Теоретические per-camera locks/attach lease/main-off polling/removed-snapshot cleanup не приняты без production evidence и дополнительной фоновой сети.
+- [x] **Startup-grid production follow-up** — live на `3a3ad02`: explicit hidden HA-open во время setup выполняет mint/PATCH вместо возврата незарегистрированного RTSP name; background gate сохранён. Proxied EOF recovery больше не вызывает `Stream.update_source()` с тем же URL и не оставляет worker через fast-restart/idle-stop race.
+- [x] **A-82** ✅ resolved в PR #71 (`bf5ba9b`): `camera.py` больше не владеет go2rtc HTTP transport/writes.
+- [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles проверить, что repeated PATCH не раздувает persistent go2rtc YAML.
+- [x] **A-96 repeat production acceptance (4.0.0 release gate)** — затронутые streams получают active preload и переживают idle без HA-open; active consumer переживает refresh; restart restore ≤60s; disabled/hidden cleanup; concurrent reasons dedup; option-off удаляет idle registrations, unload снимает background consumers; main/hidden toggle не reload-ит integration, не обнуляет existing eligible producers и никогда даже кратковременно не добавляет excluded hidden names фоновым path; explicit hidden HA-open во время и после setup работает без persistent preload и cleanup-ится после viewer; закрытие HA UI не оставляет orphan consumer после EOF recovery.
+- [x] Live evidence записан в существующем feature design: владелец подтвердил восстановление после manual go2rtc restart, а обезличенный snapshot показал `3/3` active producer и preload consumer с растущим `bytes_recv`. Публикация 4.0.0 разблокирована. PR #71 merged, PR #61 закрыт как superseded.
 
 #### Code quality
 
@@ -259,14 +180,15 @@ Static-only write paths не переходят в код без decrypted HAR (
 
 #### AIDD Full
 
-- [ ] Создать `.claude/agents/` (3 роли: HA-expert, security, QA).
-- [ ] Создать `.claude/commands/` (audit, test-config-flow, release-check).
-- [ ] Создать `.claude/rules/` (no-secret-logs, coordinator-pattern, test-coverage).
-- [ ] Создать `.claude/hooks/pre-commit-redaction-check.sh`.
-- [ ] Создать `docs/decisions/` (ADR-0001..0004).
-- [ ] Создать `docs/features/<feature-id>/` templates.
-- [ ] Создать `docs/aidd/mcp-tools.md` — карта инструментов и permissions.
-- [ ] Создать `docs/aidd/prompts.md` — prompt library.
+- [ ] **A-97** Independent review candidate lifecycle: durable plan approval, tests/security prechecks/docs/history cleanup before freeze, immutable base/head/tree, non-waivable read-only post-freeze security/code/profile reviews and mandatory candidate-bound re-attestation (ADR-0015). Complete after the process changeset itself passes those reviews and merges.
+- [x] Роли, rules и operational commands имеют один нейтральный source of truth в `.agents/**`; Claude/Codex/Cursor/Copilot файлы — thin adapters.
+- [x] Final review mode требует exact tuple, independence и Critical/Important closure в canonical role contracts.
+- [x] Canonical hooks живут в `.agents/hooks/`; Claude/Codex hooks — wrappers без дублирования implementations.
+- [x] Contract tests проверяют parity adapters, canonical paths, thin-file limits и отсутствие parent-relative path fences.
+- [x] `docs/decisions/` содержит актуальные ADR; итоговый review/publication процесс консолидирован в ADR-0015.
+- [x] `docs/features/<feature-id>/` templates созданы.
+- [x] `docs/aidd/mcp-tools.md` описывает инструменты и permissions.
+- [x] `docs/aidd/prompt-library.md` содержит portable prompt library.
 
 #### Гэпы с приложением (на основе первого HAR-разбора)
 
@@ -278,133 +200,64 @@ Static-only write paths не переходят в код без decrypted HAR (
 
 ## Итерация 4 — Real-time events ✅ doorbell-вызов реализован (FCM)
 
-**Результат research-фазы:** канал доставки события «вызов с домофона»
-определён **экспериментально** (`research/intercom-call-probe/FINDINGS.md` —
-live-проверка 3 каналов на прод-аккаунте) — это **FCM data-push**. Решение
-зафиксировано в **[ADR-0011](decisions/0011-doorbell-fcm-channel.md)** (заменил
-гипотетический ADR-0009-event-delivery для этого use-case). Реализовано:
-`event`-сущность `EventDeviceClass.DOORBELL` + `fcm.py` (`DoorbellFcmListener`)
-+ push-регистрация в `api.py` (см. [audit A-54 / A-58](audit/project-audit.md),
-реализация находится в master). Известный риск «серой зоны»
-приватных API Google — [A-80](audit/project-audit.md), под graceful degradation.
+**Результат research-фазы:** канал доставки события «вызов с домофона» определён **экспериментально** (`research/intercom-call-probe/FINDINGS.md` — live-проверка 3 каналов на прод-аккаунте) — это **FCM data-push**. Решение зафиксировано в **[ADR-0011](decisions/0011-doorbell-fcm-channel.md)** (заменил гипотетический ADR-0009-event-delivery для этого use-case). Реализовано: `event`-сущность `EventDeviceClass.DOORBELL` + `fcm.py` (`DoorbellFcmListener`)
++ push-регистрация в `api.py` (см. [audit A-54 / A-58](audit/project-audit.md), реализация находится в master). Известный риск «серой зоны» приватных API Google — [A-80](audit/project-audit.md), под graceful degradation.
 
-**Принцип:** строго следуем [ADR-0006](decisions/0006-mirror-app-behavior.md)
-— никаких выводов без HAR/APK evidence. Канал вызова доказан экспериментом.
+**Принцип:** строго следуем [ADR-0006](decisions/0006-mirror-app-behavior.md) — никаких выводов без HAR/APK evidence. Канал вызова доказан экспериментом.
 
-**Двусторонний звук (разговор по домофону)** — ✅ реализован: приём + downlink
-(A-81, ADR-0012) + uplink-микрофон (A-85, ADR-0013, HA WS-binary #1, live-прод
-2026-06-24). Реализация находится в master после PR #69. PRD —
-`research/intercom-call-probe/PRD-two-way-audio.md`.
+**Двусторонний звук (разговор по домофону)** — ✅ реализован: приём + downlink (A-81, ADR-0012) + uplink-микрофон (A-85, ADR-0013, HA WS-binary #1, live-прод 2026-06-24). Реализация находится в master после PR #69. PRD — `research/intercom-call-probe/PRD-two-way-audio.md`.
 
 ### Что НЕ решено (открытые research-вопросы)
 
 **Real push** через FCM не отброшен — требует исследования:
 
-- **`google-services.json`** внутри APK содержит Firebase config
-  (`project_id`, `app_id`, `api_key`, `sender_id`). Декомпиляция APK
-  (apktool/jadx) — стандартная процедура, не требует обфускации-bypass.
-- **Mimicry**: технически возможно зарегистрировать HA-instance как
-  «FCM client» приложения «Мой Дом», получая push **напрямую**.
-  Реализация: Python библиотеки типа `firebase_messaging` / `aiohttp`
-  + STOMP-emulation Google CCS protocol. Существуют open-source
-  imp'ы для подобных задач (например, Eufy, Olarm, и другие
-  HACS-интеграции делают именно так).
-- **HA Companion bridge**: HA Companion уже регистрирует FCM-token,
-  но в **другом** Firebase project (HA-вшем). Backend оператора шлёт
-  push в **свой** project → routing невозможен без mimicry.
-- **Sub-second latency** — если research подтвердит технически
-  возможным — это **существенно** лучше polling (15-30s).
+- **`google-services.json`** внутри APK содержит Firebase config (`project_id`, `app_id`, `api_key`, `sender_id`). Декомпиляция APK (apktool/jadx) — стандартная процедура, не требует обфускации-bypass.
+- **Mimicry**: технически возможно зарегистрировать HA-instance как «FCM client» приложения «Мой Дом», получая push **напрямую**. Реализация: Python библиотеки типа `firebase_messaging` / `aiohttp`
+  + STOMP-emulation Google CCS protocol. Существуют open-source imp'ы для подобных задач (например, Eufy, Olarm, и другие HACS-интеграции делают именно так).
+- **HA Companion bridge**: HA Companion уже регистрирует FCM-token, но в **другом** Firebase project (HA-вшем). Backend оператора шлёт push в **свой** project → routing невозможен без mimicry.
+- **Sub-second latency** — если research подтвердит технически возможным — это **существенно** лучше polling (15-30s).
 
 ### Research tasks — ✅ выполнены экспериментом `intercom-call-probe`
 
-- [x] **R-1 APK Firebase config extraction**: публичный Firebase-конфиг
-  приложения извлечён (project / app_id / sender / api_key / package —
-  значения в [`const.py`](../custom_components/elektronny_gorod/const.py) `FCM_*`).
-  Это **не секреты** (одинаковы у всех пользователей, защита — package + SHA-1
-  restriction) → лежат в `const.py`, как `BASE_API_URL` (см. ADR-0011 §Decision).
-- [x] **R-2 FCM mimicry feasibility**: подтверждено рабочим — `firebase-messaging`
-  (checkin → register → MTalk-сокет) принимает push **без Android-устройства**.
-- [x] **R-3 Test push delivery**: на прод-аккаунте — 3 реальных звонка приняты
-  без сбоев, payload `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` (sub-second).
-- [x] **R-4 Legal review**: «серая зона» (приватные API Google + ToS) —
-  принято как known risk с graceful degradation (A-80, ADR-0011 §Consequences).
-- [x] **R-5 Backup plan (polling)**: `/rest/v1/events/search` остаётся
-  возможным fallback/backfill, но для realtime-вызова **не нужен** — FCM
-  sub-second лучше polling 15-30s.
+- [x] **R-1 APK Firebase config extraction**: публичный Firebase-конфиг приложения извлечён (project / app_id / sender / api_key / package — значения в [`const.py`](../custom_components/elektronny_gorod/const.py) `FCM_*`). Это **не секреты** (одинаковы у всех пользователей, защита — package + SHA-1 restriction) → лежат в `const.py`, как `BASE_API_URL` (см. ADR-0011 §Decision).
+- [x] **R-2 FCM mimicry feasibility**: подтверждено рабочим — `firebase-messaging` (checkin → register → MTalk-сокет) принимает push **без Android-устройства**.
+- [x] **R-3 Test push delivery**: на прод-аккаунте — 3 реальных звонка приняты без сбоев, payload `CALL_INCOMING` / `CALL_END_ANSWERED_MOBILE` (sub-second).
+- [x] **R-4 Legal review**: «серая зона» (приватные API Google + ToS) — принято как known risk с graceful degradation (A-80, ADR-0011 §Consequences).
+- [x] **R-5 Backup plan (polling)**: `/rest/v1/events/search` остаётся возможным fallback/backfill, но для realtime-вызова **не нужен** — FCM sub-second лучше polling 15-30s.
 
 ### Реализовано
 
 - [x] **ADR-0011** — Realtime-канал события вызова: приём FCM in-HA (accepted).
 - [x] **A-58 / A-54** — `event`-сущность + `fcm.py` + push-регистрация в master.
-- [x] **A-50** ✅ Camera motion event-stream реализован в
-  `feat/durable-event-history` как disabled-by-default entity; archive playback
-  остаётся Slice 2.
+- [x] **A-50** ✅ Camera motion event-stream реализован в `feat/durable-event-history` как disabled-by-default entity; archive playback остаётся Slice 2.
 
 ### Реализовано в master (A-81, ADR-0012)
 
-- [x] **A-81 приём вызова по SIP** — `sip/` пакет (14 модулей), сервисы `answer`/`hangup`,
-  модель **register-on-ring** (ADR-0012): mint → REGISTER → held-INVITE → 100 Trying →
-  по «Ответить» `200 OK` → RTP-latching. Сброс с панели → SIP `CANCEL` → мгновенный dismiss.
-- [x] **Downlink-аудио (слышать гостя)** — `sip/bridge.py` `AudioBridge`:
-  G.711-кадры → ffmpeg → mpegts/aac → HTTP-сервер → go2rtc → HA-native WebRTC.
-- [x] **Показ экрана вызова** — `call_camera.py` `ElektronnyGorodCallCamera`:
-  camera-сущность `camera.intercom_call` с видео домофона + звуком гостя инлайн через
-  HA-native WebRTC (4G ok, go2rtc в LAN). `stream_source()` собирает свежий `eg_intercom_call`.
+- [x] **A-81 приём вызова по SIP** — `sip/` пакет (14 модулей), сервисы `answer`/`hangup`, модель **register-on-ring** (ADR-0012): mint → REGISTER → held-INVITE → 100 Trying → по «Ответить» `200 OK` → RTP-latching. Сброс с панели → SIP `CANCEL` → мгновенный dismiss.
+- [x] **Downlink-аудио (слышать гостя)** — `sip/bridge.py` `AudioBridge`: G.711-кадры → ffmpeg → mpegts/aac → HTTP-сервер → go2rtc → HA-native WebRTC.
+- [x] **Показ экрана вызова** — `call_camera.py` `ElektronnyGorodCallCamera`: camera-сущность `camera.intercom_call` с видео домофона + звуком гостя инлайн через HA-native WebRTC (4G ok, go2rtc в LAN). `stream_source()` собирает свежий `eg_intercom_call`.
 
 ### Реализовано в master (A-85 — uplink-микрофон, ADR-0013)
 
-- [x] **A-85 Uplink (микрофон → домофон)** — механизм **#1 (HA WebSocket binary-audio,
-  ADR-0013)**: своя Lovelace-карта `getUserMedia` → Int16 PCM по авторизованному
-  HA-WebSocket (`elektronny_gorod/intercom_uplink`) → `DoorbellCallController.feed_uplink`
-  → `UplinkSink` (resample 8к → G.711) → `SipManager.uplink_provider` →
-  дрейф-компенсированный RTP-uplink в домофон. **Без go2rtc/TURN/новых зависимостей**
-  (`audioop-lts` уже есть). Дрейф-фикс `sip/rtp.py:run_uplink` (наивный
-  `asyncio.sleep(0.02)` копил ~12% дрейфа → drop-кадры). **Live-прод 2026-06-24**
-  (микрофон браузера дошёл до домофона). Файлы: `uplink_ws.py`, `sip/uplink.py`,
-  `www/eg-intercom-mic-card.js`.
-- [x] **Варианты #2/#3/#4 эмпирически отвергнуты** (не догадки): #2 go2rtc WHIP-pull
-  (нужен стрим-таргет/yaml + TURN на 4G), #3 go2rtc exec-backchannel
-  (`exec:#backchannel=1` заблокирован через REST на Frigate-go2rtc + upstream-баги +
-  TURN), #4 aiortc (конфликт `av<17` vs HA `av==17.0.1`, нет колёс armv7l).
-  Подробности — [ADR-0013](decisions/0013-uplink-mic-transport.md) + research
-  FINDINGS §D-audio-variants.
+- [x] **A-85 Uplink (микрофон → домофон)** — механизм **#1 (HA WebSocket binary-audio, ADR-0013)**: своя Lovelace-карта `getUserMedia` → Int16 PCM по авторизованному HA-WebSocket (`elektronny_gorod/intercom_uplink`) → `DoorbellCallController.feed_uplink` → `UplinkSink` (resample 8к → G.711) → `SipManager.uplink_provider` → дрейф-компенсированный RTP-uplink в домофон. **Без go2rtc/TURN/новых зависимостей** (`audioop-lts` уже есть). Дрейф-фикс `sip/rtp.py:run_uplink` (наивный `asyncio.sleep(0.02)` копил ~12% дрейфа → drop-кадры). **Live-прод 2026-06-24** (микрофон браузера дошёл до домофона). Файлы: `uplink_ws.py`, `sip/uplink.py`, `www/eg-intercom-mic-card.js`.
+- [x] **Варианты #2/#3/#4 эмпирически отвергнуты** (не догадки): #2 go2rtc WHIP-pull (нужен стрим-таргет/yaml + TURN на 4G), #3 go2rtc exec-backchannel (`exec:#backchannel=1` заблокирован через REST на Frigate-go2rtc + upstream-баги + TURN), #4 aiortc (конфликт `av<17` vs HA `av==17.0.1`, нет колёс armv7l). Подробности — [ADR-0013](decisions/0013-uplink-mic-transport.md) + research FINDINGS §D-audio-variants.
 
 ### Экран вызова: UI + видео-надёжность + мульти-вызов (PR #68 + PR #69 merged)
 
-- [x] **feat/intercom-call-ui (merged PR #68):** карточка `eg-intercom-call-card`
-  (UI + i18n ru/en по `hass.locale.language`), mic-фикс (auto-start every call +
-  разный текст баннера), call-camera fixes — снапшот + `available`-only-during-call
-  (2a), не отдавать мёртвый URL (2b), state-write на смену фазы (регресс 2a),
-  cross-call guard (чужой `ended` не рвёт активный вызов), anti-delay warm-up стрима
-  на answer, ring/idle watchdog (A-87). Три исходных UI-замечания закрыты (слайдер /
-  микрофон / видео рендерится).
+- [x] **feat/intercom-call-ui (merged PR #68):** карточка `eg-intercom-call-card` (UI + i18n ru/en по `hass.locale.language`), mic-фикс (auto-start every call + разный текст баннера), call-camera fixes — снапшот + `available`-only-during-call (2a), не отдавать мёртвый URL (2b), state-write на смену фазы (регресс 2a), cross-call guard (чужой `ended` не рвёт активный вызов), anti-delay warm-up стрима на answer, ring/idle watchdog (A-87). Три исходных UI-замечания закрыты (слайдер / микрофон / видео рендерится).
 
-- [x] **Фаза A — видео anti-churn ([A-88](audit/project-audit.md), merged PR #69).**
-  Видео вызова = copy с общей forpost-камеры
-  (SIP несёт только аудио); при нескольких клиентах (ноут+телефон, ringing+вызов)
-  пересборка одноразового operator-URL рвёт общий продюсер → у части клиентов
-  видео пусто + задержка + вечные 404 после звонка. Фикс: сборка стрима **один
-  раз на звонок**, все клиенты делят один продюсер, только PATCH (не PUT),
-  teardown стрима+worker на завершении. Осталась эксплуатационная проверка двумя клиентами.
-- [x] **Фаза B — мульти-вызов ([A-89](audit/project-audit.md), merged PR #69).**
-  Смена **звонящего домофона**: новый `ring` во время held (не
-  answered) снимает старый held и переключается на новый (не одновременные
-  разговоры). Различать holding vs in_call в ring-guard.
+- [x] **Фаза A — видео anti-churn ([A-88](audit/project-audit.md), merged PR #69).** Видео вызова = copy с общей forpost-камеры (SIP несёт только аудио); при нескольких клиентах (ноут+телефон, ringing+вызов) пересборка одноразового operator-URL рвёт общий продюсер → у части клиентов видео пусто + задержка + вечные 404 после звонка. Фикс: сборка стрима **один раз на звонок**, все клиенты делят один продюсер, только PATCH (не PUT), teardown стрима+worker на завершении. Осталась эксплуатационная проверка двумя клиентами.
+- [x] **Фаза B — мульти-вызов ([A-89](audit/project-audit.md), merged PR #69).** Смена **звонящего домофона**: новый `ring` во время held (не answered) снимает старый held и переключается на новый (не одновременные разговоры). Различать holding vs in_call в ring-guard.
 
 ### Будущие фичи (вне scope v1)
 
-- [ ] **Slice 2b (uplink polish)** — явная `stop`-команда (slot-leak handler при
-  многократном toggle, S-UP-02), hands-free (непрерывный поток, джиттер-буфер,
-  UX mic-toggle).
+- [ ] **Slice 2b (uplink polish)** — явная `stop`-команда (slot-leak handler при многократном toggle, S-UP-02), hands-free (непрерывный поток, джиттер-буфер, UX mic-toggle).
 - [ ] **Дом.ру-вариант** события вызова — Huawei Push / HMS (другой канал).
 
 ### Не блокирующие основной scope
 
-- **A-47** STOMP — остаётся **P3 / skip**. Backend feature-flag null для
-  ЭГ абонентов. Реализация только если backend когда-нибудь включит
-  STOMP для нашей аудитории — пересмотр.
-- **A-49** SIP — остаётся **P3 future**. Только для full intercom-call
-  feature (RTP audio в HA) — отдельная итерация.
+- **A-47** STOMP — остаётся **P3 / skip**. Backend feature-flag null для ЭГ абонентов. Реализация только если backend когда-нибудь включит STOMP для нашей аудитории — пересмотр.
+- **A-49** SIP — остаётся **P3 future**. Только для full intercom-call feature (RTP audio в HA) — отдельная итерация.
 
 ### Ожидаемые исходы research
 
@@ -414,8 +267,7 @@ live-проверка 3 каналов на прод-аккаунте) — эт�
 | FCM mimicry не работает | — | — | fallback → polling |
 | Polling-only | 15-30s | низко | aiohttp (уже есть) |
 
-**Quality gates passed (итерация):** `READY_FOR_RELEASE` + Silver IQS +
-working real-time event entity (path TBD после ADR).
+**Quality gates passed (итерация):** `READY_FOR_RELEASE` + Silver IQS + working real-time event entity (path TBD после ADR).
 
 ## Принципы
 

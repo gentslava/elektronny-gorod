@@ -6,14 +6,11 @@
 
 ## What is proposed
 
-Add durable event/archive access, guest invitation generation, access-key
-visibility and safe private-camera controls to the Home Assistant integration.
+Add durable event/archive access, guest invitation generation, access-key visibility and safe private-camera controls to the Home Assistant integration.
 
 ## Why
 
-The integration already covers live cameras, doors, finance, DND and realtime
-intercom calls. The largest remaining user-facing differences are historical
-video, household access administration and settings for owned cameras.
+The integration already covers live cameras, doors, finance, DND and realtime intercom calls. The largest remaining user-facing differences are historical video, household access administration and settings for owned cameras.
 
 ## Who benefits
 
@@ -24,12 +21,9 @@ video, household access administration and settings for owned cameras.
 
 ## Alternatives considered
 
-- Keep linking to the stock app: safe, but prevents automations and a unified HA
-  surface.
-- Reproduce every mobile screen: rejected; advertising, CAPTCHA payment pages,
-  Wi-Fi provisioning and firmware update do not fit HA.
-- Create entities for guest names and key codes: rejected because recorder and
-  diagnostics would persist PII/credentials.
+- Keep linking to the stock app: safe, but prevents automations and a unified HA surface.
+- Reproduce every mobile screen: rejected; advertising, CAPTCHA payment pages, Wi-Fi provisioning and firmware update do not fit HA.
+- Create entities for guest names and key codes: rejected because recorder and diagnostics would persist PII/credentials.
 
 ## Out of scope
 

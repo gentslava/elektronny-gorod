@@ -1,11 +1,10 @@
-Status: Active
-Owner: Project Cartographer Agent
-Last reviewed: 2026-08-10 (bounded FCM recovery and per-entry Repairs lifecycle)
+Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-14 (neutral `.agents/**` source and tool adapter layout mapped)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
 - `tests/**`
 - `.github/workflows/**`
+- `.agents/**`, `.claude/**`, `.codex/**`, `.cursor/**`
 - `manifest.json`, `hacs.json`, `info.md`
 
 Related docs:
@@ -109,15 +108,16 @@ elektronny-gorod/
 │   ├── release.yaml               ← release zip + auto-commit (на event release)
 │   └── prerelease.yaml            ← PR pre-release zip (на event pull_request)
 │
-├── .claude/                       ← Claude Code конфигурация (Full AIDD)
-│   ├── agents/                    ← 5 субагентов (HA-expert, security, QA, ...)
-│   ├── commands/                  ← slash-команды
-│   ├── rules/                     ← path-specific правила
-│   ├── hooks/                     ← bash-хуки (pre-commit redaction, etc.)
-│   └── settings.json
+├── .agents/                       ← canonical cross-tool contracts
+│   ├── roles/                     ← полные role contracts
+│   ├── rules/                     ← полные engineering/process rules
+│   ├── commands/                  ← полные operational procedures
+│   └── hooks/                     ← реализации executable gates
 │
-├── .cursor/rules/                 ← правила Cursor (Full AIDD)
-├── .github/copilot-instructions.md ← инструкции для Copilot
+├── .claude/                       ← Claude discovery/settings adapters
+├── .codex/                        ← Codex agent/hook adapters
+├── .cursor/rules/                 ← Cursor scope adapters
+├── .github/copilot-instructions.md ← Copilot adapter
 │
 └── docs/                          ← AIDD-документация (см. ниже)
 ```
@@ -181,11 +181,7 @@ elektronny-gorod/
 
 Пакет `sip/` — двусторонняя связь (A-81 приём + downlink, A-85 uplink-микрофон, [call-answer-model](../features/intercom-two-way-audio/call-answer-model.md)). Модель **register-on-ring (held-short-window, ADR-0012)**: на FCM `CALL_INCOMING` — сразу `mint → REGISTER → 100 Trying` (hold), по «Ответить» — `200 OK` на held-INVITE + RTP-latching. Сброс с панели приходит как SIP `CANCEL` → мгновенный dismiss экрана. `DoorbellCallController` в `hass.data`, сервисы `answer` / `hangup`. Микрофон (говорить гостю) — `uplink_ws.py` WS-команда `intercom_uplink` → `UplinkSink` → uplink-RTP (ADR-0013). Экран вызова `/doorbell-call/call` собирается из blueprints `doorbell_call_notify` (на дверь) + `doorbell_screen_controller` (на систему) + хелперов + dashboard-примера — гайд [call-screen-setup](../features/intercom-two-way-audio/call-screen-setup.md).
 
-Показ экрана вызова — `call_camera.py`: camera-сущность `camera.intercom_call`
-показывает активный вызов **видео + звук гостя** через HA-native WebRTC
-(go2rtc в LAN, 4G без экспозиции). `eg_intercom_call` собирается один раз на
-вызов, конкурентные первые открытия дедуплицируются, видео переиспользует живой
-общий producer `eg_<camera_id>`, а на terminal-state стрим удаляется. Вне вызова → `None`.
+Показ экрана вызова — `call_camera.py`: camera-сущность `camera.intercom_call` показывает активный вызов **видео + звук гостя** через HA-native WebRTC (go2rtc в LAN, 4G без экспозиции). `eg_intercom_call` собирается один раз на вызов, конкурентные первые открытия дедуплицируются, видео переиспользует живой общий producer `eg_<camera_id>`, а на terminal-state стрим удаляется. Вне вызова → `None`.
 
 | Файл | Назначение |
 |---|---|
@@ -289,8 +285,7 @@ elektronny-gorod/
 | [`prerelease.yaml`](../../.github/workflows/prerelease.yaml) | PR opened / sync | pre-release ZIP с тегом `pr-N` для тестирования |
 | [`release.yaml`](../../.github/workflows/release.yaml) | release published | zip + GH release + автокоммит версии |
 
-Pytest CI настроен; актуальный локальный baseline и состав suite ведутся в
-[`testing/strategy.md`](../testing/strategy.md), без дублирования здесь.
+Pytest CI настроен; актуальный локальный baseline и состав suite ведутся в [`testing/strategy.md`](../testing/strategy.md), без дублирования здесь.
 
 ## Внешние API и зависимости
 
@@ -307,9 +302,7 @@ Pytest CI настроен; актуальный локальный baseline и 
 
 ## Maintenance rules
 
-Две оси (ADR-0010). **Ось A** — «изменён код-файл → обнови docs». **Ось B** —
-«изменилось состояние (finding/CI/quality_scale) → обнови docs». Раньше была
-только ось A — поэтому `summary.md`/`AGENTS.md`/state-таблицы гнили (D-04).
+Две оси (ADR-0010). **Ось A** — «изменён код-файл → обнови docs». **Ось B** — «изменилось состояние (finding/CI/quality_scale) → обнови docs». Раньше была только ось A — поэтому `summary.md`/`AGENTS.md`/state-таблицы гнили (D-04).
 
 ### Ось A — код-файл → docs
 
@@ -323,8 +316,8 @@ Pytest CI настроен; актуальный локальный baseline и 
 | `api.py` / `http.py` | `architecture/overview.md`, `security.md`, `project-audit.md` |
 | `helpers.py` (crypto) | `security.md` |
 | `strings.json` / `translations/*` | `ha-compatibility.md` |
-| `tests/**` | `testing/strategy.md`, `quality-gates.md` |
-| `.github/workflows/**` | `contributing.md`, `quality-gates.md`, `roadmap.md` |
+| `tests/**` | `testing/strategy.md`; `quality-gates.md` только при изменении определения gate |
+| `.github/workflows/**` | `contributing.md`, `quality-gates.md`; `roadmap.md` только при изменении плана |
 | новый/удалённый файл в `custom_components/` | `project-map.md`, `AGENTS.md` (`Project structure`) |
 | `README.md` | `summary.md`, `index.md` |
 | `AGENTS.md` / `CLAUDE.md` (self-описание: стек, hooks, setup) | взаимная сверка обоих + `contributing.md` |
@@ -335,13 +328,14 @@ Pytest CI настроен; актуальный локальный baseline и 
 |---|---|
 | finding → `✅ RESOLVED` (merged в master) | `summary.md` (риски), `CHANGELOG.md`, снять `🔴` в `AGENTS.md` `Project structure` если упоминался |
 | finding → `🟢 resolved-in-branch` | `project-audit.md` (статус + `pending merge <ref>`), **не** трогать `summary.md` риски до merge |
+| finding → `🟡 REMEDIATION-IN-REVIEW` | `project-audit.md`; candidate/review/CI ещё не дают merged-state |
 | новый finding (A-NN / S-NN) | `project-audit.md` (+ `security.md` если security), `summary.md` риски если P0/P1 |
 | разрешён known-антипаттерн в коде | `AGENTS.md` `Project structure` (снять метку), `summary.md` |
-| изменилось CI / тест-состояние | `summary.md` «Состояние»; `quality-gates.md` — только ссылкой, не копией |
+| изменился aggregate test baseline | `testing/strategy.md`; audit может хранить только historical candidate evidence |
+| изменился CI-контракт | `contributing.md`, `quality-gates.md`; `summary.md` только при изменении capability/risk |
 | изменён `manifest:quality_scale` | сверить с гейтом (D-05); при несоответствии — finding в `project-audit.md` |
 
-🔴 **Запрет (ADR-0010):** дублировать «текущее состояние» в нескольких доках.
-Единый источник — `project-audit.md` + `summary.md`. Остальное ссылается.
+🔴 **Запрет (ADR-0010/0015):** дублировать live-состояние. Findings/status принадлежат `project-audit.md`, aggregate test baseline — `testing/strategy.md`, а `summary.md` хранит только качественную сводку.
 
 ## Next reading
 

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'/Users/gentslava/Developer/elektronny-gorod/.codex/hooks/post-edit-redaction-check.sh'"
+            "command": ".codex/hooks/post-edit-redaction-check.sh"
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'/Users/gentslava/Developer/elektronny-gorod/.codex/hooks/check-audit-reconciliation.sh'"
+            "command": ".codex/hooks/check-audit-reconciliation.sh"
           }
         ]
       }

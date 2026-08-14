@@ -74,10 +74,7 @@ Cм. [ADR-0007](../../decisions/0007-stateful-emulator-baseline.md).
 
 ### Часть 2: Per-capture (любой сценарий)
 
-Постоянные auth-данные для автоматического ввода можно хранить отдельно в
-gitignored `research/scripts/auth.env` (`AUTH_LOGIN`, `AUTH_PASSWORD`,
-`AUTH_PHONE`). `.env` остаётся только конфигурацией AVD/APK/proxy и может быть
-перегенерирован `00a-detect.sh`. Одноразовый SMS-код в файлы не записывается.
+Постоянные auth-данные для автоматического ввода можно хранить отдельно в gitignored `research/scripts/auth.env` (`AUTH_LOGIN`, `AUTH_PASSWORD`, `AUTH_PHONE`). `.env` остаётся только конфигурацией AVD/APK/proxy и может быть перегенерирован `00a-detect.sh`. Одноразовый SMS-код в файлы не записывается.
 
 #### Через slash-команду (рекомендуется)
 
@@ -180,8 +177,8 @@ jq -r '.log.entries[] | select(.response.status >= 400) | "\(.response.status) \
 - [`research/apk/README.md`](../../../research/apk/README.md) — где брать APK.
 - [`research/api/README.md`](../../../research/api/README.md) — naming + storage.
 - [`api-reference.md`](../../architecture/api-reference.md) — куда вливаются результаты анализа.
-- [`.claude/agents/reverse-engineer.md`](../../../.claude/agents/reverse-engineer.md) — кто запускает.
-- [`.claude/commands/capture-har.md`](../../../.claude/commands/capture-har.md) — slash-команда.
+- [`.agents/roles/reverse-engineer.md`](../../../.agents/roles/reverse-engineer.md) — canonical role.
+- [`.agents/commands/capture-har.md`](../../../.agents/commands/capture-har.md) — canonical procedure.
 
 ## Next reading
 

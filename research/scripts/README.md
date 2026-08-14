@@ -91,8 +91,7 @@ Pipeline для сбора HAR-трафика мобильного прилож�
 
 Никаких секретов. Только локальные пути и выбор приложения.
 
-Auth-данные хранятся отдельно в `research/scripts/auth.env` (gitignored,
-`chmod 600`), чтобы `00a-detect.sh` никогда их не показывал и не перезаписывал:
+Auth-данные хранятся отдельно в `research/scripts/auth.env` (gitignored, `chmod 600`), чтобы `00a-detect.sh` никогда их не показывал и не перезаписывал:
 
 ```bash
 AUTH_LOGIN=

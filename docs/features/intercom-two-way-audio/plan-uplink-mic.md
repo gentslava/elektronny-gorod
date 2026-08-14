@@ -1,6 +1,7 @@
 # Slice 2 Uplink (микрофон) — Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution mode:** use the active tool's native subagent workflow when
+> available; otherwise execute the checkboxes inline.
 
 **Goal:** Довести живой микрофон браузера до домофона — построить механизм-независимый каркас `UplinkSink` (resample→G.711→джиттер-буфер) и PoC-пробой (D-audio-2) выбрать транспорт микрофона.
 
@@ -152,8 +153,7 @@ def test_clear_resets_buffer_and_state():
 
 - [ ] **Step 2: Запустить — убедиться, что падают**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_uplink.py -q`
-Expected: FAIL — `ModuleNotFoundError: No module named '...sip.uplink'`.
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_uplink.py -q` Expected: FAIL — `ModuleNotFoundError: No module named '...sip.uplink'`.
 
 - [ ] **Step 3: Реализовать `UplinkSink`**
 
@@ -217,13 +217,11 @@ class UplinkSink:
 
 - [ ] **Step 4: Запустить — убедиться, что проходят**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_uplink.py -q`
-Expected: PASS (9 passed).
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_uplink.py -q` Expected: PASS (9 passed).
 
 - [ ] **Step 5: Полный набор не сломан**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/ -q`
-Expected: PASS (предыдущие 273 + новые).
+Run: `PYTHONPATH=. .venv/bin/pytest tests/ -q` Expected: PASS (предыдущие 273 + новые).
 
 - [ ] **Step 6: Commit**
 
@@ -271,8 +269,7 @@ ffmpeg в `bridge.py`, прямой вызов появится при опти�
 
 - [ ] **Step 2: Тесты `audio.py` зелёные (без изменений поведения)**
 
-Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_audio.py tests/test_sip_uplink.py -q`
-Expected: PASS.
+Run: `PYTHONPATH=. .venv/bin/pytest tests/test_sip_audio.py tests/test_sip_uplink.py -q` Expected: PASS.
 
 - [ ] **Step 3: Commit**
 

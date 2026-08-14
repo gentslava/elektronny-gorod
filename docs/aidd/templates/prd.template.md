@@ -1,9 +1,13 @@
+Status: Template Owner: Product / Architecture Agent Last reviewed: 2026-08-11 (ADR-0015 plan approval contract)
+
+---
+
 # PRD: <название фичи>
 
 - **Date:** <YYYY-MM-DD>
 - **Owner:** @<user>
 - **Status:** Draft / Review / Approved / Implemented / Cancelled
-- **Linked idea:** [`idea.md`](idea.md)
+- **Linked idea:** `docs/features/<feature>/idea.md`
 
 ## Problem
 

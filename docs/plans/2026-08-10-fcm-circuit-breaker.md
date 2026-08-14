@@ -1,6 +1,8 @@
 # FCM Circuit Breaker Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Execution mode:** subagent-driven is recommended when the active tool can
+> isolate implementation ownership; otherwise execute inline task-by-task.
+> Use the tool's native planning/delegation mechanism and track the checkboxes.
 
 **Goal:** Ограничить повторные падения FCM для одного проблемного аккаунта, не затрагивая остальные функции и аккаунты, и показать пользователю одно понятное предупреждение в Home Assistant Repairs.
 
@@ -212,9 +214,7 @@ async def _async_watchdog(self, _now: datetime | None = None) -> None:
         await self._async_reconnect()
 ```
 
-Task 2 completes the shared `VERIFYING` and `OPEN` branches. The same
-verification phase follows both the immediate reconnect and scheduled probes;
-do not inspect dependency-private exceptions or log text.
+Task 2 completes the shared `VERIFYING` and `OPEN` branches. The same verification phase follows both the immediate reconnect and scheduled probes; do not inspect dependency-private exceptions or log text.
 
 - [x] **Step 6: Run all FCM tests and verify GREEN**
 
@@ -389,8 +389,7 @@ Run:
 rtk env PYTHONPATH=. .venv/bin/pytest tests/test_fcm.py -q
 ```
 
-Expected: failures for missing backoff constants, Repairs helpers and
-OPEN/VERIFYING behavior.
+Expected: failures for missing backoff constants, Repairs helpers and OPEN/VERIFYING behavior.
 
 - [x] **Step 5: Add backoff constants and Repairs helpers**
 
@@ -424,9 +423,7 @@ def async_delete_fcm_repair_issue(
     ir.async_delete_issue(hass, DOMAIN, fcm_repair_issue_id(entry_id))
 ```
 
-Add the open helper. The HA issue registry is the source of truth and already
-deduplicates unchanged `async_create_issue` calls, so no parallel boolean flag
-is maintained:
+Add the open helper. The HA issue registry is the source of truth and already deduplicates unchanged `async_create_issue` calls, so no parallel boolean flag is maintained:
 
 ```python
 @callback
@@ -456,8 +453,7 @@ def _async_open_circuit(self, now: datetime) -> None:
     )
 ```
 
-Extend `_async_mark_healthy` so it idempotently deletes the issue only on the
-confirmed healthy tick:
+Extend `_async_mark_healthy` so it idempotently deletes the issue only on the confirmed healthy tick:
 
 ```python
 async_delete_fcm_repair_issue(self._hass, self._entry.entry_id)
@@ -846,10 +842,7 @@ Expected: diff and JSON checks succeed; the `rg` command prints no matches.
 
 - [x] **Step 4: Update the test evidence**
 
-Update `docs/testing/strategy.md` with the exact backend suite count and a short
-note that bounded FCM recovery regressions were added. Synchronize the compact
-test baselines in `docs/summary.md`, `docs/aidd/quality-gates.md`, and the audit
-header as required by the project maintenance contract.
+Update `docs/testing/strategy.md` with the exact backend suite count and a short note that bounded FCM recovery regressions were added. Synchronize the compact test baselines in `docs/summary.md`, `docs/aidd/quality-gates.md`, and the audit header as required by the project maintenance contract.
 
 - [x] **Step 5: Perform final self-review against the approved design**
 
