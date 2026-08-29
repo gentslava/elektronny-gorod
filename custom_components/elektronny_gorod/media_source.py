@@ -8,6 +8,7 @@ Opaque IDs only — signed URLs are never logged or persisted
 
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components.media_player import (
@@ -22,6 +23,7 @@ from homeassistant.components.media_source.models import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .history import place_display_name
@@ -29,6 +31,14 @@ from .history import place_display_name
 _SOURCE_TITLE = "Электронный город"
 
 _CAMERA_SOURCES = ("intercom", "public")
+
+_INTERCOM_RETENTION_DAYS = 14
+_OTHER_RETENTION_DAYS = 7
+
+
+def _recent_days(count: int) -> list[date]:
+    today = dt_util.now().date()
+    return [today - timedelta(days=offset) for offset in range(count)]
 
 
 def _uri(identifier: str = "") -> str:
@@ -62,7 +72,9 @@ class ElektronnyGorodMediaSource(MediaSource):
         parts = identifier.split("/")
         if len(parts) == 2:
             return self._browse_place(*parts)
-        if len(parts) in (3, 4, 5):
+        if len(parts) == 3:
+            return self._browse_camera(*parts)
+        if len(parts) in (4, 5):
             raise BrowseError("Unknown media item")
         raise BrowseError("Unknown media item")
 
@@ -128,6 +140,48 @@ class ElektronnyGorodMediaSource(MediaSource):
             _uri(f"{entry_id}/{place_id}"),
             place_display_name(coordinator.data, place_id),
             children,
+        )
+
+    def _camera(
+        self, entry_id: str, place_id: str, camera_id: str
+    ) -> dict[str, Any] | None:
+        coordinator = self._coordinator(entry_id)
+        if coordinator is None:
+            return None
+        for camera in (coordinator.data or {}).get("cameras") or []:
+            if camera.get("source") not in _CAMERA_SOURCES:
+                continue
+            if str(camera.get("id") or "") != camera_id:
+                continue
+            if str(camera.get("place_id") or "") != place_id:
+                continue
+            if not self._camera_visible(camera_id):
+                return None
+            return camera
+        return None
+
+    def _browse_camera(
+        self, entry_id: str, place_id: str, camera_id: str
+    ) -> BrowseMedia:
+        camera = self._camera(entry_id, place_id, camera_id)
+        if camera is None:
+            raise BrowseError("Unknown media item")
+        retention = (
+            _INTERCOM_RETENTION_DAYS
+            if camera.get("source") == "intercom"
+            else _OTHER_RETENTION_DAYS
+        )
+        base = f"{entry_id}/{place_id}/{camera_id}"
+        children = [
+            self._folder(
+                _uri(f"{base}/{day.strftime('%Y%m%d')}"),
+                day.isoformat(),
+                children_media_class=MediaClass.VIDEO,
+            )
+            for day in _recent_days(retention)
+        ]
+        return self._directory(
+            _uri(base), str(camera.get("name") or camera_id), children
         )
 
     @staticmethod

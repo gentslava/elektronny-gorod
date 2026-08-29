@@ -185,3 +185,33 @@ async def test_unknown_place_raises_browse_error(hass) -> None:
         await _source(hass).async_browse_media(
             _item(hass, f"{entry.entry_id}/9999")
         )
+
+
+async def test_camera_lists_retention_day_folders(hass) -> None:
+    from homeassistant.util import dt as dt_util
+
+    entry = _entry(hass, _coordinator())
+
+    intercom = await _source(hass).async_browse_media(
+        _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}")
+    )
+    public = await _source(hass).async_browse_media(
+        _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_PUBLIC_ID}")
+    )
+
+    assert len(intercom.children) == 14
+    assert len(public.children) == 7
+    today = dt_util.now().date().isoformat()
+    assert intercom.children[0].title == today
+    assert intercom.children[0].media_content_id.endswith(
+        dt_util.now().strftime("%Y%m%d")
+    )
+
+
+async def test_unknown_camera_raises_browse_error(hass) -> None:
+    entry = _entry(hass, _coordinator())
+
+    with pytest.raises(BrowseError):
+        await _source(hass).async_browse_media(
+            _item(hass, f"{entry.entry_id}/{_PLACE_ID}/999")
+        )
