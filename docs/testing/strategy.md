@@ -41,6 +41,7 @@ Quality gates:
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
 | Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
+| Media Source archive | browse hierarchy place → camera → day → event, opaque-ID navigation, signed-URL resolve без persistence, retention/playability errors, hidden-camera exclusion, multi-entry root |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Website CI | `website.yml`: typecheck + Vitest + production build перед GitHub Pages deploy |
 | Coverage | Процент намеренно не фиксируется без свежего coverage-run; каноническая команда приведена ниже |
@@ -56,7 +57,7 @@ tests/
 ├── test_http.py / test_api_push.py / test_api_camera.py / test_api_history.py / test_api_sip.py / test_diagnostics.py
 ├── test_camera_*.py / test_call_camera.py / test_go2rtc_*.py
 ├── test_stream_manager*.py / test_sensor_rtsp_urls.py / test_config_flow_keep_warm.py
-├── test_event.py / test_history.py / test_history_ws.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
+├── test_event.py / test_history.py / test_history_ws.py / test_media_source.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
 ├── test_sip_*.py / test_uplink_ws.py
 ├── test_secret_log_gate.py / test_audit_reconciliation_gate.py
 ├── test_aidd_contracts.py

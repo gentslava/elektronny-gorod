@@ -920,7 +920,7 @@ Response:
 - Хост `myhome-savevideo.ertelecom.ru` — отдельный сервер видеохранилища («ertelecom» = ЭР-Телеком, материнская компания Дом.ру). URL содержит hex-токены — вероятно одноразовый signed-link.
 - Query `container=mp4` — формат контейнера; возможны и другие форматы (не подтверждено).
 
-🔵 Для нашей integration — потенциал для `media_source` / event-driven recording в HA, но требует UX-фичи «история событий». См. [audit A-50](../audit/project-audit.md).
+🔵 Реализован в [`api.py:query_event_download`](../../custom_components/elektronny_gorod/api.py); browsing — `media_source.py` (spec: `docs/specs/2026-08-29-media-source-design.md`).
 
 ### `GET /api/mh-camera/mobile/v1/places/{place_id}/cameras/features/info`
 

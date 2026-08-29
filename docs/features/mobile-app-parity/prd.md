@@ -38,10 +38,10 @@ The 9.9.0 stock apps expose durable event history, archive clips, guest invitati
 - [x] Later polls deduplicate by server event ID and emit only explicitly mapped event types; unknown types are ignored without copying message/PII.
 - [x] Existing FCM remains the realtime source for doorbell `ring`/`ended`.
 - [x] Previous accepted/missed call rows are browseable on demand in Lovelace; browsing is entity-scoped, paginated and never replays rows into automations.
-- [ ] Camera archive is browseable through HA Media Source by place → camera → date/event; browsing uses opaque IDs, not signed URLs.
-- [ ] Playback/download URLs are resolved on demand, expire naturally and never appear in entity state, attributes, logs, diagnostics or persistent storage.
-- [ ] `11005` is surfaced as “outside retention”, not a generic camera failure.
-- [ ] `IsGotoEnabled=0`/`isAvailable=false` produces a non-playable item, not a broken link.
+- [x] Camera archive is browseable through HA Media Source by place → camera → date/event; browsing uses opaque IDs, not signed URLs.
+- [x] Playback/download URLs are resolved on demand, expire naturally and never appear in entity state, attributes, logs, diagnostics or persistent storage.
+- [x] `11005` is surfaced as “outside retention”, not a generic camera failure.
+- [x] `IsGotoEnabled=0`/`isAvailable=false` produces a non-playable item, not a broken link.
 
 ### 2. Guest invitation
 
