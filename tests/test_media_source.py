@@ -394,3 +394,129 @@ async def test_resolve_never_logs_signed_url(hass, caplog) -> None:
     )
 
     assert "savevideo.example" not in caplog.text
+
+
+def _full_config_entry() -> MockConfigEntry:
+    import json
+
+    from custom_components.elektronny_gorod.const import (
+        CONF_ACCESS_TOKEN,
+        CONF_OPERATOR_ID,
+        CONF_REFRESH_TOKEN,
+        CONF_USER_AGENT,
+    )
+    from custom_components.elektronny_gorod.user_agent import UserAgent
+
+    ua = UserAgent()
+    ua.operator_id = "1"
+    return MockConfigEntry(
+        domain=DOMAIN,
+        version=3,
+        unique_id="test_unique_subscriber_S1",
+        title="Test",
+        data={
+            CONF_ACCESS_TOKEN: "T1",
+            CONF_REFRESH_TOKEN: "R1",
+            CONF_OPERATOR_ID: "1",
+            CONF_USER_AGENT: json.dumps(ua.json()),
+            "account_id": "A1",
+            "subscriber_id": "S1",
+            "use_go2rtc": False,
+        },
+    )
+
+
+@pytest.fixture
+def mock_full_api():
+    from unittest.mock import patch
+
+    from custom_components.elektronny_gorod.api import HistoryPage
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as mock_cls:
+        instance = mock_cls.return_value
+        instance.http = AsyncMock()
+        instance.http.user_agent = MagicMock()
+        instance.query_places = AsyncMock(
+            return_value=[
+                {
+                    "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+                    "place": {"id": _PLACE_ID, "address": "ул. Тестовая 1"},
+                }
+            ]
+        )
+        instance.query_balance = AsyncMock(return_value={})
+        instance.query_access_controls = AsyncMock(
+            return_value=[
+                {
+                    "id": 2001,
+                    "name": "Домофон",
+                    "entrances": [
+                        {
+                            "id": 3001,
+                            "name": "Подъезд",
+                            "externalCameraId": int(_INTERCOM_ID),
+                            "allowOpen": True,
+                        }
+                    ],
+                }
+            ]
+        )
+        instance.query_cameras = AsyncMock(return_value=[])
+        instance.query_public_cameras = AsyncMock(
+            return_value=[{"id": int(_PUBLIC_ID), "name": "Двор"}]
+        )
+        instance.query_screens_settings = AsyncMock(
+            return_value={"screens": []}
+        )
+        instance.query_dnd_settings = AsyncMock(return_value=[])
+        instance.query_events = AsyncMock(
+            return_value=HistoryPage(events=(), number=0, last=True)
+        )
+        yield mock_cls
+
+
+async def test_media_source_registered_on_integration_setup(
+    hass, mock_full_api
+) -> None:
+    from homeassistant.components.media_source import async_browse_media
+    from homeassistant.setup import async_setup_component
+
+    assert await async_setup_component(hass, "media_source", {})
+    entry = _full_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert DOMAIN in hass.data["media_source"]
+    browse = await async_browse_media(hass, f"media-source://{DOMAIN}")
+    assert browse.children[0].title == "Test"
+
+
+async def test_public_camera_grouped_under_place_end_to_end(
+    hass, mock_full_api
+) -> None:
+    """The coordinator place_id fix routes public cameras into the place."""
+    from homeassistant.components.media_source import async_browse_media
+    from homeassistant.setup import async_setup_component
+
+    assert await async_setup_component(hass, "media_source", {})
+    entry = _full_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    place = await async_browse_media(
+        hass, f"media-source://{DOMAIN}/{entry.entry_id}/{_PLACE_ID}"
+    )
+    assert [child.title for child in place.children] == ["Подъезд", "Двор"]
+
+
+async def test_root_aggregates_multiple_entries(hass) -> None:
+    _entry(hass, _coordinator(), title="Account B")
+    _entry(hass, _coordinator(), title="Account A")
+
+    result = await _source(hass).async_browse_media(_item(hass, ""))
+
+    assert [child.title for child in result.children] == ["Account A", "Account B"]
