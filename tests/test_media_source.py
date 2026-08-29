@@ -647,3 +647,39 @@ async def test_root_aggregates_multiple_entries(hass) -> None:
     result = await _source(hass).async_browse_media(_item(hass, ""))
 
     assert [child.title for child in result.children] == ["Account A", "Account B"]
+
+
+async def test_entry_lists_place_folders(hass) -> None:
+    """Expanding the account folder must list its places (regression: A)."""
+    entry = _entry(hass, _coordinator())
+
+    result = await _source(hass).async_browse_media(_item(hass, entry.entry_id))
+
+    assert result.title == "Test Account"
+    assert [child.title for child in result.children] == ["ул. Тестовая 1"]
+    assert result.children[0].media_content_id == (
+        f"media-source://{DOMAIN}/{entry.entry_id}/{_PLACE_ID}"
+    )
+    assert result.children[0].can_expand is True
+
+
+async def test_entry_lists_only_places_with_cameras(hass) -> None:
+    places = [
+        {"place": {"id": _PLACE_ID, "address": "ул. Тестовая 1"}},
+        {"place": {"id": "1002", "address": "ул. Вторая 2"}},
+    ]
+    entry = _entry(hass, _coordinator(places=places))
+
+    result = await _source(hass).async_browse_media(_item(hass, entry.entry_id))
+
+    assert [child.title for child in result.children] == ["ул. Тестовая 1"]
+
+
+async def test_entry_without_cameras_or_unknown_entry_raises(hass) -> None:
+    empty = _entry(hass, _coordinator(cameras=[]))
+    _entry(hass, _coordinator())
+
+    with pytest.raises(BrowseError):
+        await _source(hass).async_browse_media(_item(hass, empty.entry_id))
+    with pytest.raises(BrowseError):
+        await _source(hass).async_browse_media(_item(hass, "no-such-entry"))

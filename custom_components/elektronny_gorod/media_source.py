@@ -89,6 +89,8 @@ class ElektronnyGorodMediaSource(MediaSource):
         if not identifier:
             return self._browse_root()
         parts = identifier.split("/")
+        if len(parts) == 1:
+            return self._browse_entry(parts[0])
         if len(parts) == 2:
             return self._browse_place(*parts)
         if len(parts) == 3:
@@ -203,6 +205,22 @@ class ElektronnyGorodMediaSource(MediaSource):
             if place_id and self._place_cameras(coordinator, place_id):
                 place_ids.append(place_id)
         return place_ids
+
+    def _browse_entry(self, entry_id: str) -> BrowseMedia:
+        coordinator = self._coordinator(entry_id)
+        entry = self._hass.config_entries.async_get_entry(entry_id)
+        if coordinator is None or entry is None:
+            raise BrowseError("Unknown media item")
+        children = [
+            self._folder(
+                _uri(f"{entry_id}/{place_id}"),
+                place_display_name(coordinator.data, place_id),
+            )
+            for place_id in self._place_ids(coordinator)
+        ]
+        if not children:
+            raise BrowseError("Unknown media item")
+        return self._directory(_uri(entry_id), entry.title, children)
 
     def _browse_place(self, entry_id: str, place_id: str) -> BrowseMedia:
         coordinator = self._coordinator(entry_id)
