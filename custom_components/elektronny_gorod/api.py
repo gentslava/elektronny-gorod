@@ -57,11 +57,23 @@ class CameraHistoryEvent:
     goto_enabled: bool
 
 
+def _is_safe_error_code(code: str | None) -> bool:
+    """True если код состоит только из цифр/букв/дефиса/точки (ASCII).
+
+    Код приходит из backend-ответа и попадает в message исключения
+    (chain/log surface) — всё прочее подменяется на "unknown".
+    """
+    return bool(code) and all(
+        char.isascii() and (char.isalnum() or char in "-.") for char in code
+    )
+
+
 class ForpostDownloadError(Exception):
     """Forpost event-download failure with a parsed backend error code."""
 
     def __init__(self, error_code: str | None) -> None:
-        super().__init__(f"forpost_download_failed_{error_code or 'unknown'}")
+        safe_code = error_code if _is_safe_error_code(error_code) else None
+        super().__init__(f"forpost_download_failed_{safe_code or 'unknown'}")
         self.error_code = error_code
 
 
@@ -322,15 +334,20 @@ class ElektronnyGorodAPI:
         try:
             response = await self.http.get(api_url)
         except ClientError as ex:
-            error_code: str | None = None
+            # Typed ForpostDownloadError — только для распознанного бизнес-кода
+            # из JSON-тела. Транспортные сбои (timeout, 5xx-HTML) — это
+            # транзиентные ошибки: пробрасываем исходный ClientError, чтобы
+            # media source честно показал "temporarily unavailable".
             if ex.args and isinstance(ex.args[0], ClientResponse):
                 try:
                     error_body = await ex.args[0].json()
                 except Exception:  # noqa: BLE001 - non-JSON bodies degrade
                     error_body = None
                 if isinstance(error_body, dict) and error_body.get("errorCode"):
-                    error_code = str(error_body["errorCode"])
-            raise ForpostDownloadError(error_code) from ex
+                    raise ForpostDownloadError(
+                        str(error_body["errorCode"])
+                    ) from ex
+            raise
         if not isinstance(response, ClientResponse):
             raise TypeError(f"Unexpected response type: {type(response)!r}")
         payload = await response.json()

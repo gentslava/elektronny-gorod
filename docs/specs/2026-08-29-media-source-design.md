@@ -94,7 +94,7 @@ HA's `media_source` websocket handlers relay the exception message as plain text
 Effective model, identical to every other HA media source:
 
 - Any authenticated HA user can browse and resolve the source.
-- Cameras hidden in the HA entity registry (`hidden_by is not None`, checked via `unique_id = f"{DOMAIN}_camera_{camera_id}"`) are excluded for everyone — in browse and in resolve.
+- Cameras hidden in the HA entity registry (`hidden_by is not None`, checked via `unique_id = f"{DOMAIN}_camera_{camera_id}"`) are excluded for everyone — in browse and in resolve. Cameras whose entity is disabled (but not hidden) still appear in the archive: the visibility gate is `hidden_by` only (the «Показывать на панели» toggle).
 - Places without any eligible camera are omitted from entries; entries without places are omitted from the root. Resolve validates the full path (entry/place/camera must exist) before hitting the API.
 
 ### Security & privacy

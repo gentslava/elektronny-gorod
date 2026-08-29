@@ -28,7 +28,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .api import ForpostDownloadError
-from .const import DOMAIN
+from .const import DOMAIN, LOGGER
 from .history import place_display_name
 
 _SOURCE_TITLE = "Электронный город"
@@ -46,6 +46,18 @@ _MOTION_EVENT_SUBJECT_ID = 126
 def _recent_days(count: int) -> list[date]:
     today = dt_util.now().date()
     return [today - timedelta(days=offset) for offset in range(count)]
+
+
+def _day_bounds(day: date) -> tuple[str, str]:
+    """Local-midnight ISO-Z bounds of a day (lower inclusive, upper not)."""
+    day_start = dt_util.start_of_local_day(day)
+    lower = dt_util.as_utc(day_start).isoformat().replace("+00:00", "Z")
+    upper = (
+        dt_util.as_utc(day_start + timedelta(days=1))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    return lower, upper
 
 
 def _uri(identifier: str = "") -> str:
@@ -89,12 +101,48 @@ class ElektronnyGorodMediaSource(MediaSource):
         parts = (item.identifier or "").split("/")
         if len(parts) != 5:
             raise Unresolvable("Unknown media item")
-        entry_id, place_id, camera_id, _day_str, event_id = parts
+        entry_id, place_id, camera_id, day_str, event_id = parts
+        # event_id входит в URL запроса к оператору, day_str — в окно поиска:
+        # принимаем только цифры/валидную дату (закрывает path/query-инъекции).
+        if not event_id.isdigit():
+            raise Unresolvable("Unknown media item")
+        if len(day_str) != 8 or not day_str.isdigit():
+            raise Unresolvable("Unknown media item")
+        try:
+            day = datetime.strptime(day_str, "%Y%m%d").date()
+        except ValueError as err:
+            raise Unresolvable("Unknown media item") from err
         coordinator = self._coordinator(entry_id)
         if coordinator is None or self._camera(
             entry_id, place_id, camera_id
         ) is None:
             raise Unresolvable("Unknown media item")
+        # Привязка события к гейтируемой камере: client-supplied event_id сам
+        # по себе не авторизует доступ — событие должно найтись среди событий
+        # этой камеры за этот день и быть играемым (spec: "in browse and in
+        # resolve"). Каждый play ре-резолвит события, как и ссылку.
+        lower, upper = _day_bounds(day)
+        try:
+            events = await coordinator.api.query_camera_events(
+                camera_id, lower_date=lower, upper_date=upper
+            )
+        except Exception as ex:  # noqa: BLE001 - operator boundary
+            LOGGER.debug(
+                "Media source resolve failed for camera_id=%s event_id=%s (%s)",
+                camera_id,
+                event_id,
+                type(ex).__name__,
+            )
+            raise Unresolvable("Archive is temporarily unavailable") from None
+        event = next(
+            (found for found in events if found.id == event_id), None
+        )
+        if (
+            event is None
+            or event.event_subject_id != _MOTION_EVENT_SUBJECT_ID
+            or not (event.available and event.goto_enabled)
+        ):
+            raise Unresolvable("Recording is not available")
         try:
             url = await coordinator.api.query_event_download(event_id)
         except ForpostDownloadError as err:
@@ -103,7 +151,13 @@ class ElektronnyGorodMediaSource(MediaSource):
                     "Archive is outside the retention window"
                 ) from err
             raise Unresolvable("Recording is not available") from err
-        except Exception:  # noqa: BLE001 - operator boundary
+        except Exception as ex:  # noqa: BLE001 - operator boundary
+            LOGGER.debug(
+                "Media source resolve failed for camera_id=%s event_id=%s (%s)",
+                camera_id,
+                event_id,
+                type(ex).__name__,
+            )
             raise Unresolvable("Archive is temporarily unavailable") from None
         return PlayMedia(url=url, mime_type=_MIME_MP4)
 
@@ -224,18 +278,17 @@ class ElektronnyGorodMediaSource(MediaSource):
         except ValueError as err:
             raise BrowseError("Unknown media item") from err
         coordinator = self._coordinator(entry_id)
-        day_start = dt_util.start_of_local_day(day)
-        lower = dt_util.as_utc(day_start).isoformat().replace("+00:00", "Z")
-        upper = (
-            dt_util.as_utc(day_start + timedelta(days=1))
-            .isoformat()
-            .replace("+00:00", "Z")
-        )
+        lower, upper = _day_bounds(day)
         try:
             events = await coordinator.api.query_camera_events(
                 camera_id, lower_date=lower, upper_date=upper
             )
-        except Exception:  # noqa: BLE001 - operator boundary
+        except Exception as ex:  # noqa: BLE001 - operator boundary
+            LOGGER.debug(
+                "Media source day browse failed for camera_id=%s (%s)",
+                camera_id,
+                type(ex).__name__,
+            )
             raise BrowseError("Archive is temporarily unavailable") from None
         base = f"{entry_id}/{place_id}/{camera_id}/{day_str}"
         children = [

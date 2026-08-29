@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 
+import pytest
 from aiohttp import ClientError, ClientResponse
+from aioresponses import aioresponses
 
 from custom_components.elektronny_gorod.api import (
     ForpostDownloadError,
     ElektronnyGorodAPI,
 )
+from custom_components.elektronny_gorod.const import BASE_API_URL
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
 
@@ -65,16 +69,62 @@ async def test_query_event_download_parses_forpost_error_code(hass) -> None:
         raise AssertionError("ForpostDownloadError not raised")
 
 
-async def test_query_event_download_non_json_error_body(hass) -> None:
-    """A non-JSON error body still yields a typed error with no code."""
+async def test_query_event_download_non_json_error_body_propagates(hass) -> None:
+    """A 502-style non-JSON body is transient, not a business 'no recording'."""
     api = _api(hass)
     failed = MagicMock(spec=ClientResponse)
-    failed.json = AsyncMock(side_effect=ValueError("not json"))
+    failed.json = AsyncMock(side_effect=ValueError("<html>Bad Gateway</html>"))
     api.http.get = AsyncMock(side_effect=ClientError(failed))
 
-    try:
+    with pytest.raises(ClientError) as excinfo:
         await api.query_event_download("3001")
-    except ForpostDownloadError as ex:
-        assert ex.error_code is None
-    else:
-        raise AssertionError("ForpostDownloadError not raised")
+
+    assert excinfo.value.args[0] is failed
+
+
+async def test_query_event_download_timeout_propagates_as_client_error(
+    hass,
+) -> None:
+    """A transport timeout (no ClientResponse in args) is not 'no recording'."""
+    from aiohttp import ServerTimeoutError
+
+    api = _api(hass)
+    api.http.get = AsyncMock(side_effect=ClientError(ServerTimeoutError("t")))
+
+    with pytest.raises(ClientError) as excinfo:
+        await api.query_event_download("3001")
+
+    assert not isinstance(excinfo.value, ForpostDownloadError)
+
+
+def test_forpost_download_error_sanitizes_message() -> None:
+    """The backend-controlled code enters the message only if charset-safe."""
+    clean = ForpostDownloadError("11005")
+    assert str(clean) == "forpost_download_failed_11005"
+    assert clean.error_code == "11005"
+
+    dirty = ForpostDownloadError("code with spaces\nand newline")
+    assert str(dirty) == "forpost_download_failed_unknown"
+    assert dirty.error_code == "code with spaces\nand newline"
+
+    assert str(ForpostDownloadError(None)) == "forpost_download_failed_unknown"
+    assert str(ForpostDownloadError("a1-b.c")) == "forpost_download_failed_a1-b.c"
+
+
+async def test_query_event_download_real_http_never_logs_signed_url(
+    hass, caplog
+) -> None:
+    """End-to-end through the real HTTP layer: the signed URL never hits logs."""
+    api = _api(hass)
+    caplog.set_level(logging.DEBUG)
+
+    with aioresponses() as m:
+        m.get(
+            f"https://{BASE_API_URL}"
+            "/rest/v1/forpost/events/3001/downloads?container=mp4",
+            payload={"data": "https://savevideo.example/signed-clip.mp4"},
+        )
+        url = await api.query_event_download("3001")
+
+    assert url == "https://savevideo.example/signed-clip.mp4"
+    assert "savevideo.example" not in caplog.text

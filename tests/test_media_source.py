@@ -21,6 +21,17 @@ _PLACE_ID = "1001"
 _INTERCOM_ID = "111"
 _PUBLIC_ID = "222"
 
+_EVENT_TS = 1770000000
+
+
+def _day_str(timestamp: int = _EVENT_TS) -> str:
+    """Local calendar day (yyyymmdd) of an event timestamp."""
+    from homeassistant.util import dt as dt_util
+
+    return dt_util.as_local(dt_util.utc_from_timestamp(timestamp)).strftime(
+        "%Y%m%d"
+    )
+
 
 def _coordinator(
     *,
@@ -192,6 +203,7 @@ async def test_camera_lists_retention_day_folders(hass) -> None:
     from homeassistant.util import dt as dt_util
 
     entry = _entry(hass, _coordinator())
+    now = dt_util.now()
 
     intercom = await _source(hass).async_browse_media(
         _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}")
@@ -202,10 +214,10 @@ async def test_camera_lists_retention_day_folders(hass) -> None:
 
     assert len(intercom.children) == 14
     assert len(public.children) == 7
-    today = dt_util.now().date().isoformat()
+    today = now.date().isoformat()
     assert intercom.children[0].title == today
     assert intercom.children[0].media_content_id.endswith(
-        dt_util.now().strftime("%Y%m%d")
+        now.strftime("%Y%m%d")
     )
 
 
@@ -296,47 +308,109 @@ async def test_day_invalid_or_unknown_path_raises(hass) -> None:
 
 
 async def test_resolve_returns_play_media_for_valid_event(hass) -> None:
-    from homeassistant.util import dt as dt_util
-
-    coordinator = _coordinator()
+    coordinator = _coordinator(events=(_event(event_id="3001"),))
     entry = _entry(hass, coordinator)
-    day_str = dt_util.now().strftime("%Y%m%d")
-    identifier = (
-        f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}/3001"
-    )
+    identifier = f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001"
 
     play = await _source(hass).async_resolve_media(_item(hass, identifier))
 
+    coordinator.api.query_camera_events.assert_awaited_once()
     coordinator.api.query_event_download.assert_awaited_once_with("3001")
     assert play.url == "https://savevideo.example/signed-clip.mp4"
     assert play.mime_type == "video/mp4"
 
 
+async def test_resolve_cross_camera_event_id_is_not_available(hass) -> None:
+    """An event_id of another camera must not resolve via a visible path."""
+    coordinator = _coordinator(events=(_event(event_id="3002"),))
+    entry = _entry(hass, coordinator)
+
+    with pytest.raises(Unresolvable, match="not available"):
+        await _source(hass).async_resolve_media(
+            _item(
+                hass,
+                f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
+            )
+        )
+
+    coordinator.api.query_camera_events.assert_awaited_once()
+    coordinator.api.query_event_download.assert_not_awaited()
+
+
+async def test_resolve_event_without_goto_is_not_available(hass) -> None:
+    coordinator = _coordinator(events=(_event(event_id="3001", goto=False),))
+    entry = _entry(hass, coordinator)
+
+    with pytest.raises(Unresolvable, match="not available"):
+        await _source(hass).async_resolve_media(
+            _item(
+                hass,
+                f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
+            )
+        )
+
+    coordinator.api.query_event_download.assert_not_awaited()
+
+
+async def test_resolve_rejects_malformed_event_id_and_day(hass) -> None:
+    coordinator = _coordinator(events=(_event(event_id="3001"),))
+    entry = _entry(hass, coordinator)
+    day = _day_str()
+
+    for bad_identifier in (
+        f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day}/3001?x=1",
+        f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day}/../x",
+        f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/20261399/3001",
+    ):
+        with pytest.raises(Unresolvable, match="Unknown media item"):
+            await _source(hass).async_resolve_media(_item(hass, bad_identifier))
+
+    coordinator.api.query_camera_events.assert_not_awaited()
+    coordinator.api.query_event_download.assert_not_awaited()
+
+
+async def test_resolve_events_lookup_failure_is_temporarily_unavailable(
+    hass,
+) -> None:
+    coordinator = _coordinator()
+    coordinator.api.query_camera_events.side_effect = RuntimeError("operator down")
+    entry = _entry(hass, coordinator)
+
+    with pytest.raises(Unresolvable, match="temporarily unavailable"):
+        await _source(hass).async_resolve_media(
+            _item(
+                hass,
+                f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
+            )
+        )
+
+    coordinator.api.query_event_download.assert_not_awaited()
+
+
 async def test_resolve_outside_retention(hass) -> None:
-    from homeassistant.util import dt as dt_util
     from custom_components.elektronny_gorod.api import ForpostDownloadError
 
-    coordinator = _coordinator()
+    coordinator = _coordinator(events=(_event(event_id="3001"),))
     coordinator.api.query_event_download = AsyncMock(
         side_effect=ForpostDownloadError("11005")
     )
     entry = _entry(hass, coordinator)
-    day_str = dt_util.now().strftime("%Y%m%d")
 
     with pytest.raises(Unresolvable, match="outside the retention window"):
         await _source(hass).async_resolve_media(
-            _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}/3001")
+            _item(
+                hass,
+                f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
+            )
         )
 
 
 async def test_resolve_no_recording_and_transport_error(hass) -> None:
-    from homeassistant.util import dt as dt_util
     from custom_components.elektronny_gorod.api import ForpostDownloadError
 
-    day_str = dt_util.now().strftime("%Y%m%d")
-    base = f"/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}/3001"
+    base = f"/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001"
 
-    no_recording = _coordinator()
+    no_recording = _coordinator(events=(_event(event_id="3001"),))
     no_recording.api.query_event_download = AsyncMock(
         side_effect=ForpostDownloadError(None)
     )
@@ -346,7 +420,7 @@ async def test_resolve_no_recording_and_transport_error(hass) -> None:
             _item(hass, f"{entry_a.entry_id}{base}")
         )
 
-    transport = _coordinator()
+    transport = _coordinator(events=(_event(event_id="3001"),))
     transport.api.query_event_download = AsyncMock(
         side_effect=RuntimeError("operator down")
     )
@@ -358,12 +432,10 @@ async def test_resolve_no_recording_and_transport_error(hass) -> None:
 
 
 async def test_resolve_rejects_unknown_and_hidden_paths(hass) -> None:
-    from homeassistant.util import dt as dt_util
-
     coordinator = _coordinator()
     entry = _entry(hass, coordinator)
     _hide_camera(hass, entry, _PUBLIC_ID)
-    day_str = dt_util.now().strftime("%Y%m%d")
+    day_str = _day_str()
 
     with pytest.raises(Unresolvable, match="Unknown media item"):
         await _source(hass).async_resolve_media(
@@ -379,21 +451,76 @@ async def test_resolve_rejects_unknown_and_hidden_paths(hass) -> None:
 
 async def test_resolve_never_logs_signed_url(hass, caplog) -> None:
     import logging
-    from homeassistant.util import dt as dt_util
 
-    coordinator = _coordinator()
+    coordinator = _coordinator(events=(_event(event_id="3001"),))
     entry = _entry(hass, coordinator)
-    day_str = dt_util.now().strftime("%Y%m%d")
     caplog.set_level(logging.DEBUG)
 
     await _source(hass).async_resolve_media(
         _item(
             hass,
-            f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}/3001",
+            f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
         )
     )
 
     assert "savevideo.example" not in caplog.text
+
+
+async def test_day_browse_failure_logs_opaque_context_only(hass, caplog) -> None:
+    import logging
+
+    coordinator = _coordinator()
+    coordinator.api.query_camera_events.side_effect = RuntimeError("boom-secret")
+    entry = _entry(hass, coordinator)
+    caplog.set_level(logging.DEBUG)
+
+    with pytest.raises(BrowseError, match="temporarily unavailable"):
+        await _source(hass).async_browse_media(
+            _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}")
+        )
+
+    assert (
+        "Media source day browse failed for camera_id=111 (RuntimeError)"
+        in caplog.text
+    )
+    assert "boom-secret" not in caplog.text
+
+
+async def test_resolve_failures_log_opaque_context_only(hass, caplog) -> None:
+    import logging
+
+    lookup = _coordinator()
+    lookup.api.query_camera_events.side_effect = RuntimeError("boom-secret")
+    entry_a = _entry(hass, lookup)
+
+    download = _coordinator(events=(_event(event_id="3001"),))
+    download.api.query_event_download.side_effect = RuntimeError("boom-secret")
+    entry_b = _entry(hass, download)
+    caplog.set_level(logging.DEBUG)
+
+    with pytest.raises(Unresolvable, match="temporarily unavailable"):
+        await _source(hass).async_resolve_media(
+            _item(
+                hass,
+                f"{entry_a.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
+            )
+        )
+    with pytest.raises(Unresolvable, match="temporarily unavailable"):
+        await _source(hass).async_resolve_media(
+            _item(
+                hass,
+                f"{entry_b.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
+            )
+        )
+
+    assert (
+        caplog.text.count(
+            "Media source resolve failed for camera_id=111 event_id=3001"
+            " (RuntimeError)"
+        )
+        == 2
+    )
+    assert "boom-secret" not in caplog.text
 
 
 def _full_config_entry() -> MockConfigEntry:
