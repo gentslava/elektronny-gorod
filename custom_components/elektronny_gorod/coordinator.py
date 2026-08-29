@@ -350,6 +350,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             cameras.append({
                 "id": cid,
                 "name": cam.get("name"),
+                "place_id": place_id,
                 "source": "place",
                 "hidden": False,  # личные камеры всегда видимы по дефолту
             })
@@ -363,6 +364,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             cameras.append({
                 "id": cid,
                 "name": cam.get("name"),
+                "place_id": place_id,
                 "source": "public",
                 "hidden": str(cid) in hidden_cam_ids,
             })

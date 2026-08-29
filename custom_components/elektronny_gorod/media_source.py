@@ -1,0 +1,167 @@
+"""Native Media Source: forpost camera motion-event clips.
+
+Browse: account entry → place → camera → day → events.
+Resolve: one signed mp4 per event, fetched on demand and discarded.
+Opaque IDs only — signed URLs are never logged or persisted
+(spec: docs/specs/2026-08-29-media-source-design.md).
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from homeassistant.components.media_player import (
+    BrowseError,
+    BrowseMedia,
+    MediaClass,
+    MediaType,
+)
+from homeassistant.components.media_source.models import (
+    MediaSource,
+    MediaSourceItem,
+)
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
+
+from .const import DOMAIN
+from .history import place_display_name
+
+_SOURCE_TITLE = "Электронный город"
+
+_CAMERA_SOURCES = ("intercom", "public")
+
+
+def _uri(identifier: str = "") -> str:
+    """Build the media-source URI for one opaque identifier path."""
+    if not identifier:
+        return f"media-source://{DOMAIN}"
+    return f"media-source://{DOMAIN}/{identifier}"
+
+
+async def async_get_media_source(hass: HomeAssistant) -> ElektronnyGorodMediaSource:
+    """Register the Elektronny Gorod archive as a HA media source."""
+    return ElektronnyGorodMediaSource(hass)
+
+
+class ElektronnyGorodMediaSource(MediaSource):
+    """Forpost camera archive: motion-event clips per day."""
+
+    name = _SOURCE_TITLE
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        super().__init__(DOMAIN)
+        self._hass = hass
+
+    def _coordinator(self, entry_id: str) -> Any | None:
+        return (self._hass.data.get(DOMAIN) or {}).get(entry_id)
+
+    async def async_browse_media(self, item: MediaSourceItem) -> BrowseMedia:
+        identifier = item.identifier or ""
+        if not identifier:
+            return self._browse_root()
+        parts = identifier.split("/")
+        if len(parts) == 2:
+            return self._browse_place(*parts)
+        if len(parts) in (3, 4, 5):
+            raise BrowseError("Unknown media item")
+        raise BrowseError("Unknown media item")
+
+    def _browse_root(self) -> BrowseMedia:
+        children: list[BrowseMedia] = []
+        for entry_id, coordinator in (self._hass.data.get(DOMAIN) or {}).items():
+            entry = self._hass.config_entries.async_get_entry(entry_id)
+            if entry is None or not self._place_ids(coordinator):
+                continue
+            children.append(
+                self._folder(_uri(entry_id), entry.title)
+            )
+        children.sort(key=lambda child: child.title)
+        return self._directory(_uri(), _SOURCE_TITLE, children)
+
+    def _camera_visible(self, camera_id: str) -> bool:
+        registry = er.async_get(self._hass)
+        entity_id = registry.async_get_entity_id(
+            "camera", DOMAIN, f"{DOMAIN}_camera_{camera_id}"
+        )
+        if entity_id is None:
+            return True
+        entry = registry.async_get(entity_id)
+        return entry is None or entry.hidden_by is None
+
+    def _place_cameras(self, coordinator: Any, place_id: str) -> list[dict]:
+        cameras: list[dict] = []
+        for camera in (coordinator.data or {}).get("cameras") or []:
+            if camera.get("source") not in _CAMERA_SOURCES:
+                continue
+            if str(camera.get("place_id") or "") != place_id:
+                continue
+            camera_id = str(camera.get("id") or "")
+            if not camera_id or not self._camera_visible(camera_id):
+                continue
+            cameras.append(camera)
+        return cameras
+
+    def _place_ids(self, coordinator: Any) -> list[str]:
+        place_ids: list[str] = []
+        for subscriber_place in (coordinator.data or {}).get("places") or []:
+            place_id = str((subscriber_place.get("place") or {}).get("id") or "")
+            if place_id and self._place_cameras(coordinator, place_id):
+                place_ids.append(place_id)
+        return place_ids
+
+    def _browse_place(self, entry_id: str, place_id: str) -> BrowseMedia:
+        coordinator = self._coordinator(entry_id)
+        if coordinator is None:
+            raise BrowseError("Unknown media item")
+        cameras = self._place_cameras(coordinator, place_id)
+        if not cameras:
+            raise BrowseError("Unknown media item")
+        children = [
+            self._folder(
+                _uri(f"{entry_id}/{place_id}/{camera_id}"),
+                str(camera.get("name") or camera_id),
+            )
+            for camera in cameras
+            if (camera_id := str(camera.get("id") or ""))
+        ]
+        return self._directory(
+            _uri(f"{entry_id}/{place_id}"),
+            place_display_name(coordinator.data, place_id),
+            children,
+        )
+
+    @staticmethod
+    def _folder(
+        identifier: str,
+        title: str,
+        *,
+        children_media_class: MediaClass = MediaClass.DIRECTORY,
+    ) -> BrowseMedia:
+        return BrowseMedia(
+            title=title,
+            media_class=MediaClass.DIRECTORY,
+            media_content_type=MediaType.VIDEO,
+            media_content_id=identifier,
+            can_play=False,
+            can_expand=True,
+            children_media_class=children_media_class,
+        )
+
+    @staticmethod
+    def _directory(
+        identifier: str,
+        title: str,
+        children: list[BrowseMedia],
+    ) -> BrowseMedia:
+        return BrowseMedia(
+            title=title,
+            media_class=MediaClass.DIRECTORY,
+            media_content_type=MediaType.VIDEO,
+            media_content_id=identifier,
+            can_play=False,
+            can_expand=True,
+            children=children,
+            children_media_class=(
+                children[0].media_class if children else MediaClass.DIRECTORY
+            ),
+        )
