@@ -30,6 +30,10 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
 from .api import ForpostDownloadError
+from .clip_proxy import (
+    async_register_clip_view,
+    clip_proxy_url,
+)
 from .const import DOMAIN, LOGGER
 from .history import place_display_name
 
@@ -44,10 +48,11 @@ _OTHER_RETENTION_DAYS = 7
 
 _MOTION_EVENT_SUBJECT_ID = 126
 
-# ErrorCode 102: оператор готовит mp4 к загрузке (HTTP 423) — bounded poll.
-_ERROR_PREPARING = "102"
-_DOWNLOAD_PREPARE_INTERVAL = 2.0
-_DOWNLOAD_PREPARE_BUDGET = 30.0
+from .clip_proxy import (
+    _DOWNLOAD_PREPARE_BUDGET,
+    _DOWNLOAD_PREPARE_INTERVAL,
+    _ERROR_PREPARING,
+)
 
 
 def _recent_days(count: int) -> list[date]:
@@ -76,6 +81,7 @@ def _uri(identifier: str = "") -> str:
 
 async def async_get_media_source(hass: HomeAssistant) -> ElektronnyGorodMediaSource:
     """Register the Elektronny Gorod archive as a HA media source."""
+    async_register_clip_view(hass)
     return ElektronnyGorodMediaSource(hass)
 
 
@@ -153,7 +159,11 @@ class ElektronnyGorodMediaSource(MediaSource):
         ):
             raise Unresolvable("Recording is not available")
         try:
-            url = await self._poll_download(coordinator, camera_id, event_id)
+            # Проверка готовности + прогрев серверной подготовки; сама
+            # операторская ссылка не покидает HA — браузер получает
+            # same-origin proxy URL (ORB блокирует octet-stream+attachment
+            # cross-origin, runtime 2026-08-30).
+            await self._poll_download(coordinator, camera_id, event_id)
         except ForpostDownloadError as err:
             if err.error_code == _ERROR_PREPARING:
                 raise Unresolvable(
@@ -172,7 +182,10 @@ class ElektronnyGorodMediaSource(MediaSource):
                 type(ex).__name__,
             )
             raise Unresolvable("Archive is temporarily unavailable") from None
-        return PlayMedia(url=url, mime_type=_MIME_MP4)
+        return PlayMedia(
+            url=clip_proxy_url(self._hass, entry_id, event_id),
+            mime_type=_MIME_MP4,
+        )
 
     async def _poll_download(
         self, coordinator: Any, camera_id: str, event_id: str

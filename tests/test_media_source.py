@@ -320,8 +320,11 @@ async def test_resolve_returns_play_media_for_valid_event(hass) -> None:
 
     coordinator.api.query_camera_events.assert_awaited_once()
     coordinator.api.query_event_download.assert_awaited_once_with("3001")
-    assert play.url == "https://savevideo.example/signed-clip.mp4"
     assert play.mime_type == "video/mp4"
+    assert play.url.startswith(
+        f"/api/elektronny_gorod/clips/{entry.entry_id}/3001?t="
+    )
+    assert "savevideo.example" not in play.url
 
 
 async def test_resolve_cross_camera_event_id_is_not_available(hass) -> None:
@@ -725,7 +728,8 @@ async def test_resolve_polls_while_file_prepares(hass) -> None:
     ) as sleep_mock, _patched_prepare_clock([0, 1, 3]):
         play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
 
-    assert play.url == "https://savevideo.example/signed-clip.mp4"
+    assert play.url.startswith(f"/api/elektronny_gorod/clips/{entry.entry_id}/")
+    assert "savevideo.example" not in play.url
     assert coordinator.api.query_event_download.await_count == 3
     assert sleep_mock.await_count == 2
 

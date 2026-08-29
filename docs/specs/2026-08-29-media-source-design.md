@@ -74,7 +74,7 @@ media-source://elektronny_gorod/                                          → pl
 query_event_download(event_id: str) -> str
 ```
 
-`GET /rest/v1/forpost/events/{event_id}/downloads?container=mp4` → `{"data": "<signed mp4 url>"}` (note: `data` is a string, not an object). The wrapper raises typed errors for the forpost `{errorCode, errorMessage}` shape and non-200 responses. Resolve returns `PlayMedia(url, "video/mp4")`. The signed URL is used transiently for the single response and discarded; every play re-resolves a fresh link, so expiry is naturally tolerated.
+`GET /rest/v1/forpost/events/{event_id}/downloads?container=mp4` → `{"data": "<signed mp4 url>"}` (note: `data` is a string, not an object). The wrapper raises typed errors for the forpost `{errorCode, errorMessage}` shape and non-200 responses. Resolve returns `PlayMedia(url, "video/mp4")` where the URL is a **same-origin proxy link** (`/api/elektronny_gorod/clips/<entry_id>/<event_id>?t=<token>`), not the operator link. The operator's signed URL is used transiently server-side and never reaches the browser: the storage host serves clips as `application/octet-stream` + `Content-Disposition: attachment`, which Chromium's ORB blocks inside `<video>` elements (runtime-verified 2026-08-30). The proxy view (HMAC-SHA256 token, per-boot secret, 10-minute TTL, constant-time verification, `requires_auth=False` following HA's camera/tts signed-URL pattern because `<video>` cannot attach session auth) re-mints a fresh operator link per stream, forces `Content-Type: video/mp4`, and forwards `Range` requests for seeking.
 
 ### Error mapping
 

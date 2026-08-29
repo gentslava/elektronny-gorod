@@ -917,14 +917,16 @@ Response:
 
 🎯 **Особенности:**
 - `data` — **строка-URL**, не объект (в отличие от других endpoint'ов).
-- Хост `myhome-savevideo.ertelecom.ru` — отдельный сервер видеохранилища («ertelecom» = ЭР-Телеком, материнская компания Дом.ру). URL содержит hex-токены — вероятно одноразовый signed-link.
+- Хост `myhome-savevideo.ertelecom.ru` — отдельный сервер видеохранилища («ertelecom» = ЭР-Телеком, материнская компания Дом.ру). URL содержит hex-токены — **одноразовый signed-link, подтверждено runtime 2026-09-01**: первый успешный GET погашает token, повторный GET той же ссылки → 404.
 - Query `container=mp4` — формат контейнера; возможны и другие форматы (не подтверждено).
 
 ⚠️ **Runtime-verified (2026-08-30): подготовка файла по требованию.** Первый запрос для события возвращает **HTTP 423** с телом PascalCase-формы (отличается от camelCase `errorCode` у 11005):
 ```json
 { "Error": "Файл не готов для загрузки", "ErrorCode": 102, "status": 423 }
 ```
-Сервер готовит mp4 асинхронно (секунды); мобильное приложение повторяет запрос со spinner'ом. Наш `media_source` делает bounded poll: интервал 2с, бюджет 30с (`_ERROR_PREPARING` / `_DOWNLOAD_PREPARE_*`), после бюджета — «Recording is being prepared, try again shortly».
+Сервер готовит mp4 асинхронно (секунды); мобильное приложение повторяет запрос со spinner'ом.
+
+⚠️ **Runtime (2026-09-01): prepare-гейт ДВА слоя.** 423/102 возвращают и mint-endpoint (выше), и **сам storage-хост** на GET подписанной ссылки — линк минтится раньше, чем файл отрендерен. Наблюдения (production 2026-09-01): **re-mint каждый цикл держал storage-гейт вечно непроходимым**, а **повторный GET после успешного — 404** (одноразовый token). Контракт `clip_proxy`: минт ОДИН раз; poll той же ссылки (client Range в poll-запросах) интервал 2с, бюджет 30с (`_ERROR_PREPARING` / `_HTTP_LOCKED` / `_DOWNLOAD_PREPARE_*`); первый 200/206 стримится напрямую, БЕЗ второго fetch; после бюджета — 503 «Recording is being prepared, try again shortly». Seek = новый request = новый mint (ссылка уже погашена) — работает, т.к. файл уже отрендерен и новый mint+GET отдаёт 200/206 сразу.
 
 🔵 Реализован в [`api.py:query_event_download`](../../custom_components/elektronny_gorod/api.py); browsing — `media_source.py` (spec: `docs/specs/2026-08-29-media-source-design.md`).
 
