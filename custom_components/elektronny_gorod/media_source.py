@@ -8,6 +8,8 @@ Opaque IDs only — signed URLs are never logged or persisted
 
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -41,6 +43,11 @@ _INTERCOM_RETENTION_DAYS = 14
 _OTHER_RETENTION_DAYS = 7
 
 _MOTION_EVENT_SUBJECT_ID = 126
+
+# ErrorCode 102: оператор готовит mp4 к загрузке (HTTP 423) — bounded poll.
+_ERROR_PREPARING = "102"
+_DOWNLOAD_PREPARE_INTERVAL = 2.0
+_DOWNLOAD_PREPARE_BUDGET = 30.0
 
 
 def _recent_days(count: int) -> list[date]:
@@ -146,8 +153,12 @@ class ElektronnyGorodMediaSource(MediaSource):
         ):
             raise Unresolvable("Recording is not available")
         try:
-            url = await coordinator.api.query_event_download(event_id)
+            url = await self._poll_download(coordinator, camera_id, event_id)
         except ForpostDownloadError as err:
+            if err.error_code == _ERROR_PREPARING:
+                raise Unresolvable(
+                    "Recording is being prepared, try again shortly"
+                ) from err
             if err.error_code == "11005":
                 raise Unresolvable(
                     "Archive is outside the retention window"
@@ -162,6 +173,34 @@ class ElektronnyGorodMediaSource(MediaSource):
             )
             raise Unresolvable("Archive is temporarily unavailable") from None
         return PlayMedia(url=url, mime_type=_MIME_MP4)
+
+    async def _poll_download(
+        self, coordinator: Any, camera_id: str, event_id: str
+    ) -> str:
+        """Fetch the download URL, polling while the operator renders it.
+
+        ErrorCode 102 (`Файл не готов для загрузки`, HTTP 423) — сервер
+        готовит mp4 на demand; мобильное приложение показывает spinner и
+        повторяет запрос. Полняем его контрактом: bounded poll, бюджет
+        `_DOWNLOAD_PREPARE_BUDGET` — потом caller честно скажет "being
+        prepared". Остальные коды не транслируются в ожидание.
+        """
+        deadline = time.monotonic() + _DOWNLOAD_PREPARE_BUDGET
+        while True:
+            try:
+                return await coordinator.api.query_event_download(event_id)
+            except ForpostDownloadError as err:
+                if err.error_code != _ERROR_PREPARING:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise
+                LOGGER.debug(
+                    "Media source download pending for camera_id=%s "
+                    "event_id=%s — waiting for operator preparation",
+                    camera_id,
+                    event_id,
+                )
+                await asyncio.sleep(_DOWNLOAD_PREPARE_INTERVAL)
 
     def _browse_root(self) -> BrowseMedia:
         children: list[BrowseMedia] = []

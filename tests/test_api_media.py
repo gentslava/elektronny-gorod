@@ -128,3 +128,19 @@ async def test_query_event_download_real_http_never_logs_signed_url(
 
     assert url == "https://savevideo.example/signed-clip.mp4"
     assert "savevideo.example" not in caplog.text
+
+
+async def test_query_event_download_parses_prepare_pending_shape(hass) -> None:
+    """423 preparation carries PascalCase ErrorCode as an int (runtime 2026-08-30)."""
+    api = _api(hass)
+    failed = _response(
+        {"Error": "Файл не готов для загрузки", "ErrorCode": 102, "status": 423}
+    )
+    api.http.get = AsyncMock(side_effect=ClientError(failed))
+
+    try:
+        await api.query_event_download("3001")
+    except ForpostDownloadError as ex:
+        assert ex.error_code == "102"
+    else:
+        raise AssertionError("ForpostDownloadError not raised")

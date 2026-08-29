@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -13,8 +13,12 @@ from homeassistant.components.media_player import BrowseError
 from homeassistant.components.media_source.error import Unresolvable
 from homeassistant.components.media_source.models import MediaSourceItem
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util import dt as dt_util
 
-from custom_components.elektronny_gorod.api import CameraHistoryEvent
+from custom_components.elektronny_gorod.api import (
+    CameraHistoryEvent,
+    ForpostDownloadError,
+)
 from custom_components.elektronny_gorod.const import DOMAIN
 
 _PLACE_ID = "1001"
@@ -683,3 +687,62 @@ async def test_entry_without_cameras_or_unknown_entry_raises(hass) -> None:
         await _source(hass).async_browse_media(_item(hass, empty.entry_id))
     with pytest.raises(BrowseError):
         await _source(hass).async_browse_media(_item(hass, "no-such-entry"))
+
+
+def _resolve_item(hass, entry, camera_id=_INTERCOM_ID, event_id="3001") -> MediaSourceItem:
+    day_str = dt_util.as_local(dt_util.utc_from_timestamp(_EVENT_TS)).strftime(
+        "%Y%m%d"
+    )
+    return _item(
+        hass,
+        f"{entry.entry_id}/{_PLACE_ID}/{camera_id}/{day_str}/{event_id}",
+    )
+
+
+def _patched_prepare_clock(ticks):
+    fake_time = MagicMock()
+    fake_time.monotonic.side_effect = ticks
+    return patch(
+        "custom_components.elektronny_gorod.media_source.time", fake_time
+    )
+
+
+async def test_resolve_polls_while_file_prepares(hass) -> None:
+    """ErrorCode 102 = server-side rendering: bounded poll until the link."""
+    coordinator = _coordinator(events=(_event(),))
+    coordinator.api.query_event_download = AsyncMock(
+        side_effect=[
+            ForpostDownloadError("102"),
+            ForpostDownloadError("102"),
+            "https://savevideo.example/signed-clip.mp4",
+        ]
+    )
+    entry = _entry(hass, coordinator)
+
+    with patch(
+        "custom_components.elektronny_gorod.media_source.asyncio.sleep",
+        new_callable=AsyncMock,
+    ) as sleep_mock, _patched_prepare_clock([0, 1, 3]):
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    assert play.url == "https://savevideo.example/signed-clip.mp4"
+    assert coordinator.api.query_event_download.await_count == 3
+    assert sleep_mock.await_count == 2
+
+
+async def test_resolve_prepare_timeout_is_being_prepared(hass) -> None:
+    coordinator = _coordinator(events=(_event(),))
+    coordinator.api.query_event_download = AsyncMock(
+        side_effect=ForpostDownloadError("102")
+    )
+    entry = _entry(hass, coordinator)
+
+    with patch(
+        "custom_components.elektronny_gorod.media_source.asyncio.sleep",
+        new_callable=AsyncMock,
+    ) as sleep_mock, _patched_prepare_clock([0, 1, 3, 5, 7, 100]):
+        with pytest.raises(Unresolvable, match="being prepared"):
+            await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    assert coordinator.api.query_event_download.await_count == 5
+    assert sleep_mock.await_count == 4

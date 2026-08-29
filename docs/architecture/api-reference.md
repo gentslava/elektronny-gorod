@@ -920,6 +920,12 @@ Response:
 - Хост `myhome-savevideo.ertelecom.ru` — отдельный сервер видеохранилища («ertelecom» = ЭР-Телеком, материнская компания Дом.ру). URL содержит hex-токены — вероятно одноразовый signed-link.
 - Query `container=mp4` — формат контейнера; возможны и другие форматы (не подтверждено).
 
+⚠️ **Runtime-verified (2026-08-30): подготовка файла по требованию.** Первый запрос для события возвращает **HTTP 423** с телом PascalCase-формы (отличается от camelCase `errorCode` у 11005):
+```json
+{ "Error": "Файл не готов для загрузки", "ErrorCode": 102, "status": 423 }
+```
+Сервер готовит mp4 асинхронно (секунды); мобильное приложение повторяет запрос со spinner'ом. Наш `media_source` делает bounded poll: интервал 2с, бюджет 30с (`_ERROR_PREPARING` / `_DOWNLOAD_PREPARE_*`), после бюджета — «Recording is being prepared, try again shortly».
+
 🔵 Реализован в [`api.py:query_event_download`](../../custom_components/elektronny_gorod/api.py); browsing — `media_source.py` (spec: `docs/specs/2026-08-29-media-source-design.md`).
 
 ### `GET /api/mh-camera/mobile/v1/places/{place_id}/cameras/features/info`

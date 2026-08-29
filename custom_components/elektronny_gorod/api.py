@@ -343,10 +343,15 @@ class ElektronnyGorodAPI:
                     error_body = await ex.args[0].json()
                 except Exception:  # noqa: BLE001 - non-JSON bodies degrade
                     error_body = None
-                if isinstance(error_body, dict) and error_body.get("errorCode"):
-                    raise ForpostDownloadError(
-                        str(error_body["errorCode"])
-                    ) from ex
+                if isinstance(error_body, dict):
+                    # Две runtime-формы: camelCase errorCode ("11005",
+                    # retention) и PascalCase int ErrorCode (102, файл
+                    # готовится к загрузке; production 2026-08-30).
+                    raw_code = error_body.get("errorCode")
+                    if raw_code is None:
+                        raw_code = error_body.get("ErrorCode")
+                    if raw_code is not None and str(raw_code):
+                        raise ForpostDownloadError(str(raw_code)) from ex
             raise
         if not isinstance(response, ClientResponse):
             raise TypeError(f"Unexpected response type: {type(response)!r}")
