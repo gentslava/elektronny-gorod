@@ -35,6 +35,8 @@ _CAMERA_SOURCES = ("intercom", "public")
 _INTERCOM_RETENTION_DAYS = 14
 _OTHER_RETENTION_DAYS = 7
 
+_MOTION_EVENT_SUBJECT_ID = 126
+
 
 def _recent_days(count: int) -> list[date]:
     today = dt_util.now().date()
@@ -74,8 +76,8 @@ class ElektronnyGorodMediaSource(MediaSource):
             return self._browse_place(*parts)
         if len(parts) == 3:
             return self._browse_camera(*parts)
-        if len(parts) in (4, 5):
-            raise BrowseError("Unknown media item")
+        if len(parts) == 4:
+            return await self._browse_day(*parts)
         raise BrowseError("Unknown media item")
 
     def _browse_root(self) -> BrowseMedia:
@@ -183,6 +185,50 @@ class ElektronnyGorodMediaSource(MediaSource):
         return self._directory(
             _uri(base), str(camera.get("name") or camera_id), children
         )
+
+    async def _browse_day(
+        self, entry_id: str, place_id: str, camera_id: str, day_str: str
+    ) -> BrowseMedia:
+        camera = self._camera(entry_id, place_id, camera_id)
+        if camera is None or len(day_str) != 8 or not day_str.isdigit():
+            raise BrowseError("Unknown media item")
+        try:
+            day = datetime.strptime(day_str, "%Y%m%d").date()
+        except ValueError as err:
+            raise BrowseError("Unknown media item") from err
+        coordinator = self._coordinator(entry_id)
+        day_start = dt_util.start_of_local_day(day)
+        lower = dt_util.as_utc(day_start).isoformat().replace("+00:00", "Z")
+        upper = (
+            dt_util.as_utc(day_start + timedelta(days=1))
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        try:
+            events = await coordinator.api.query_camera_events(
+                camera_id, lower_date=lower, upper_date=upper
+            )
+        except Exception:  # noqa: BLE001 - operator boundary
+            raise BrowseError("Archive is temporarily unavailable") from None
+        base = f"{entry_id}/{place_id}/{camera_id}/{day_str}"
+        children = [
+            BrowseMedia(
+                title=self._event_title(event),
+                media_class=MediaClass.VIDEO,
+                media_content_type=MediaType.VIDEO,
+                media_content_id=_uri(f"{base}/{event.id}"),
+                can_play=bool(event.available and event.goto_enabled),
+                can_expand=False,
+            )
+            for event in events
+            if event.event_subject_id == _MOTION_EVENT_SUBJECT_ID
+        ]
+        return self._directory(_uri(base), day.isoformat(), children)
+
+    @staticmethod
+    def _event_title(event: Any) -> str:
+        local = dt_util.as_local(dt_util.utc_from_timestamp(event.timestamp))
+        return f"{local.strftime('%H:%M:%S')} · {event.duration}s"
 
     @staticmethod
     def _folder(

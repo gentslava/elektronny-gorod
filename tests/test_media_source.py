@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
@@ -214,4 +215,81 @@ async def test_unknown_camera_raises_browse_error(hass) -> None:
     with pytest.raises(BrowseError):
         await _source(hass).async_browse_media(
             _item(hass, f"{entry.entry_id}/{_PLACE_ID}/999")
+        )
+
+
+def _event(
+    event_id: str = "3001",
+    timestamp: int = 1770000000,
+    duration: int = 12,
+    subject: int = 126,
+    available: bool = True,
+    goto: bool = True,
+) -> CameraHistoryEvent:
+    return CameraHistoryEvent(
+        id=event_id,
+        camera_id=_INTERCOM_ID,
+        backend_camera_id="4001",
+        timestamp=timestamp,
+        duration=duration,
+        event_subject_id=subject,
+        available=available,
+        goto_enabled=goto,
+    )
+
+
+async def test_day_lists_motion_events_with_playability(hass) -> None:
+    from homeassistant.util import dt as dt_util
+
+    events = (
+        _event(event_id="3002", timestamp=1770000060),
+        _event(event_id="3001", timestamp=1770000000, goto=False),
+        _event(event_id="9999", subject=99),
+    )
+    coordinator = _coordinator(events=events)
+    entry = _entry(hass, coordinator)
+    day = dt_util.as_local(dt_util.utc_from_timestamp(1770000000))
+    day_str = day.strftime("%Y%m%d")
+    day_start = dt_util.start_of_local_day(day)
+
+    result = await _source(hass).async_browse_media(
+        _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}")
+    )
+
+    coordinator.api.query_camera_events.assert_awaited_once_with(
+        _INTERCOM_ID,
+        lower_date=dt_util.as_utc(day_start).isoformat().replace("+00:00", "Z"),
+        upper_date=dt_util.as_utc(day_start + timedelta(days=1))
+        .isoformat()
+        .replace("+00:00", "Z"),
+    )
+    assert [child.media_content_id.rsplit("/", 1)[-1] for child in result.children] == [
+        "3002",
+        "3001",
+    ]
+    assert result.children[0].can_play is True
+    assert result.children[1].can_play is False
+    assert result.children[0].title.endswith("· 12s")
+
+
+async def test_day_api_failure_is_temporarily_unavailable(hass) -> None:
+    from homeassistant.util import dt as dt_util
+
+    coordinator = _coordinator()
+    coordinator.api.query_camera_events.side_effect = RuntimeError("operator down")
+    entry = _entry(hass, coordinator)
+    day_str = dt_util.now().strftime("%Y%m%d")
+
+    with pytest.raises(BrowseError, match="temporarily unavailable"):
+        await _source(hass).async_browse_media(
+            _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}")
+        )
+
+
+async def test_day_invalid_or_unknown_path_raises(hass) -> None:
+    entry = _entry(hass, _coordinator())
+
+    with pytest.raises(BrowseError, match="Unknown media item"):
+        await _source(hass).async_browse_media(
+            _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/20261399")
         )
