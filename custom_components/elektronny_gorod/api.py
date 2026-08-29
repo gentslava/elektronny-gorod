@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
-from aiohttp import ClientResponse
+from aiohttp import ClientError, ClientResponse
 
 from homeassistant.core import HomeAssistant
 
@@ -55,6 +55,14 @@ class CameraHistoryEvent:
     event_subject_id: int
     available: bool
     goto_enabled: bool
+
+
+class ForpostDownloadError(Exception):
+    """Forpost event-download failure with a parsed backend error code."""
+
+    def __init__(self, error_code: str | None) -> None:
+        super().__init__(f"forpost_download_failed_{error_code or 'unknown'}")
+        self.error_code = error_code
 
 
 def _device_id(installation_id: str) -> str:
@@ -307,6 +315,29 @@ class ElektronnyGorodAPI:
             )
             for item in (payload or {}).get("data") or []
         )
+
+    async def query_event_download(self, event_id: str) -> str:
+        """Query the signed mp4 download URL for one forpost event."""
+        api_url = f"/rest/v1/forpost/events/{event_id}/downloads?container=mp4"
+        try:
+            response = await self.http.get(api_url)
+        except ClientError as ex:
+            error_code: str | None = None
+            if ex.args and isinstance(ex.args[0], ClientResponse):
+                try:
+                    error_body = await ex.args[0].json()
+                except Exception:  # noqa: BLE001 - non-JSON bodies degrade
+                    error_body = None
+                if isinstance(error_body, dict) and error_body.get("errorCode"):
+                    error_code = str(error_body["errorCode"])
+            raise ForpostDownloadError(error_code) from ex
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        payload = await response.json()
+        url = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(url, str) or not url:
+            raise ForpostDownloadError(None)
+        return url
 
     async def query_access_controls(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of access controls for a place."""
