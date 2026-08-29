@@ -17,18 +17,23 @@ from homeassistant.components.media_player import (
     MediaClass,
     MediaType,
 )
+from homeassistant.components.media_source.error import Unresolvable
 from homeassistant.components.media_source.models import (
     MediaSource,
     MediaSourceItem,
+    PlayMedia,
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
 from homeassistant.util import dt as dt_util
 
+from .api import ForpostDownloadError
 from .const import DOMAIN
 from .history import place_display_name
 
 _SOURCE_TITLE = "Электронный город"
+
+_MIME_MP4 = "video/mp4"
 
 _CAMERA_SOURCES = ("intercom", "public")
 
@@ -79,6 +84,28 @@ class ElektronnyGorodMediaSource(MediaSource):
         if len(parts) == 4:
             return await self._browse_day(*parts)
         raise BrowseError("Unknown media item")
+
+    async def async_resolve_media(self, item: MediaSourceItem) -> PlayMedia:
+        parts = (item.identifier or "").split("/")
+        if len(parts) != 5:
+            raise Unresolvable("Unknown media item")
+        entry_id, place_id, camera_id, _day_str, event_id = parts
+        coordinator = self._coordinator(entry_id)
+        if coordinator is None or self._camera(
+            entry_id, place_id, camera_id
+        ) is None:
+            raise Unresolvable("Unknown media item")
+        try:
+            url = await coordinator.api.query_event_download(event_id)
+        except ForpostDownloadError as err:
+            if err.error_code == "11005":
+                raise Unresolvable(
+                    "Archive is outside the retention window"
+                ) from err
+            raise Unresolvable("Recording is not available") from err
+        except Exception:  # noqa: BLE001 - operator boundary
+            raise Unresolvable("Archive is temporarily unavailable") from None
+        return PlayMedia(url=url, mime_type=_MIME_MP4)
 
     def _browse_root(self) -> BrowseMedia:
         children: list[BrowseMedia] = []

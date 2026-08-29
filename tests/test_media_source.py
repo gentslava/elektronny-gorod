@@ -293,3 +293,104 @@ async def test_day_invalid_or_unknown_path_raises(hass) -> None:
         await _source(hass).async_browse_media(
             _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/20261399")
         )
+
+
+async def test_resolve_returns_play_media_for_valid_event(hass) -> None:
+    from homeassistant.util import dt as dt_util
+
+    coordinator = _coordinator()
+    entry = _entry(hass, coordinator)
+    day_str = dt_util.now().strftime("%Y%m%d")
+    identifier = (
+        f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}/3001"
+    )
+
+    play = await _source(hass).async_resolve_media(_item(hass, identifier))
+
+    coordinator.api.query_event_download.assert_awaited_once_with("3001")
+    assert play.url == "https://savevideo.example/signed-clip.mp4"
+    assert play.mime_type == "video/mp4"
+
+
+async def test_resolve_outside_retention(hass) -> None:
+    from homeassistant.util import dt as dt_util
+    from custom_components.elektronny_gorod.api import ForpostDownloadError
+
+    coordinator = _coordinator()
+    coordinator.api.query_event_download = AsyncMock(
+        side_effect=ForpostDownloadError("11005")
+    )
+    entry = _entry(hass, coordinator)
+    day_str = dt_util.now().strftime("%Y%m%d")
+
+    with pytest.raises(Unresolvable, match="outside the retention window"):
+        await _source(hass).async_resolve_media(
+            _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}/3001")
+        )
+
+
+async def test_resolve_no_recording_and_transport_error(hass) -> None:
+    from homeassistant.util import dt as dt_util
+    from custom_components.elektronny_gorod.api import ForpostDownloadError
+
+    day_str = dt_util.now().strftime("%Y%m%d")
+    base = f"/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}/3001"
+
+    no_recording = _coordinator()
+    no_recording.api.query_event_download = AsyncMock(
+        side_effect=ForpostDownloadError(None)
+    )
+    entry_a = _entry(hass, no_recording)
+    with pytest.raises(Unresolvable, match="not available"):
+        await _source(hass).async_resolve_media(
+            _item(hass, f"{entry_a.entry_id}{base}")
+        )
+
+    transport = _coordinator()
+    transport.api.query_event_download = AsyncMock(
+        side_effect=RuntimeError("operator down")
+    )
+    entry_b = _entry(hass, transport)
+    with pytest.raises(Unresolvable, match="temporarily unavailable"):
+        await _source(hass).async_resolve_media(
+            _item(hass, f"{entry_b.entry_id}{base}")
+        )
+
+
+async def test_resolve_rejects_unknown_and_hidden_paths(hass) -> None:
+    from homeassistant.util import dt as dt_util
+
+    coordinator = _coordinator()
+    entry = _entry(hass, coordinator)
+    _hide_camera(hass, entry, _PUBLIC_ID)
+    day_str = dt_util.now().strftime("%Y%m%d")
+
+    with pytest.raises(Unresolvable, match="Unknown media item"):
+        await _source(hass).async_resolve_media(
+            _item(hass, f"{entry.entry_id}/{_PLACE_ID}/999/{day_str}/3001")
+        )
+    with pytest.raises(Unresolvable, match="Unknown media item"):
+        await _source(hass).async_resolve_media(
+            _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_PUBLIC_ID}/{day_str}/3001")
+        )
+    with pytest.raises(Unresolvable, match="Unknown media item"):
+        await _source(hass).async_resolve_media(_item(hass, "too/few/parts"))
+
+
+async def test_resolve_never_logs_signed_url(hass, caplog) -> None:
+    import logging
+    from homeassistant.util import dt as dt_util
+
+    coordinator = _coordinator()
+    entry = _entry(hass, coordinator)
+    day_str = dt_util.now().strftime("%Y%m%d")
+    caplog.set_level(logging.DEBUG)
+
+    await _source(hass).async_resolve_media(
+        _item(
+            hass,
+            f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}/3001",
+        )
+    )
+
+    assert "savevideo.example" not in caplog.text
