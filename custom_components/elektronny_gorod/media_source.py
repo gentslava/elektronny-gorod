@@ -27,6 +27,7 @@ from homeassistant.components.media_source.models import (
 )
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import translation
 from homeassistant.util import dt as dt_util
 
 from .api import ForpostDownloadError
@@ -47,6 +48,14 @@ _INTERCOM_RETENTION_DAYS = 14
 _OTHER_RETENTION_DAYS = 7
 
 _MOTION_EVENT_SUBJECT_ID = 126
+
+# EN-fallback для duration-labels; переопределяются категорией `common`
+# translations (hass.config.language).
+_DEFAULT_DURATION_LABELS = {
+    "duration_min_sec": "{minutes} min {seconds} sec",
+    "duration_min": "{minutes} min",
+    "duration_sec": "{seconds} sec",
+}
 
 from .clip_proxy import (
     _DOWNLOAD_PREPARE_BUDGET,
@@ -361,9 +370,10 @@ class ElektronnyGorodMediaSource(MediaSource):
             )
             raise BrowseError("Archive is temporarily unavailable") from None
         base = f"{entry_id}/{place_id}/{camera_id}/{day_str}"
+        labels = await self._duration_labels()
         children = [
             BrowseMedia(
-                title=self._event_title(event),
+                title=self._event_title(event, labels),
                 media_class=MediaClass.VIDEO,
                 media_content_type=MediaType.VIDEO,
                 media_content_id=_uri(f"{base}/{event.id}"),
@@ -375,10 +385,40 @@ class ElektronnyGorodMediaSource(MediaSource):
         ]
         return self._directory(_uri(base), day.isoformat(), children)
 
+    async def _duration_labels(self) -> dict[str, str]:
+        """Duration unit labels per the HA instance language.
+
+        Media-source browse carries no user locale, so titles follow
+        `hass.config.language` via the integration's `common` translation
+        category; missing translations fall back to English.
+        """
+        labels = dict(_DEFAULT_DURATION_LABELS)
+        try:
+            fetched = await translation.async_get_translations(
+                self._hass, self._hass.config.language, "common", {DOMAIN}
+            )
+        except Exception:  # noqa: BLE001 - optional feature degradation
+            fetched = {}
+        for key in labels:
+            value = fetched.get(f"component.{DOMAIN}.common.{key}")
+            if value:
+                labels[key] = value
+        return labels
+
     @staticmethod
-    def _event_title(event: Any) -> str:
+    def _event_title(event: Any, labels: dict[str, str]) -> str:
         local = dt_util.as_local(dt_util.utc_from_timestamp(event.timestamp))
-        return f"{local.strftime('%H:%M:%S')} · {event.duration}s"
+        duration = int(event.duration)
+        if duration >= 60:
+            minutes, seconds = divmod(duration, 60)
+            duration_label = (
+                labels["duration_min_sec"].format(minutes=minutes, seconds=seconds)
+                if seconds
+                else labels["duration_min"].format(minutes=minutes)
+            )
+        else:
+            duration_label = labels["duration_sec"].format(seconds=duration)
+        return f"{local.strftime('%H:%M:%S')} · {duration_label}"
 
     @staticmethod
     def _folder(

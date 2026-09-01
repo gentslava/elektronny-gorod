@@ -1,5 +1,10 @@
 {
   "title": "Электронный город",
+  "common": {
+    "duration_min_sec": "{minutes} мин {seconds} сек",
+    "duration_min": "{minutes} мин",
+    "duration_sec": "{seconds} сек"
+  },
   "issues": {
     "fcm_receiver_unavailable": {
       "title": "Уведомления о звонках недоступны: {entry_title}",

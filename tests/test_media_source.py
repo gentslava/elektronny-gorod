@@ -268,6 +268,7 @@ async def test_day_lists_motion_events_with_playability(hass) -> None:
     day_str = day.strftime("%Y%m%d")
     day_start = dt_util.start_of_local_day(day)
 
+    hass.config.language = "ru"
     result = await _source(hass).async_browse_media(
         _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{day_str}")
     )
@@ -285,7 +286,129 @@ async def test_day_lists_motion_events_with_playability(hass) -> None:
     ]
     assert result.children[0].can_play is True
     assert result.children[1].can_play is False
-    assert result.children[0].title.endswith("· 12s")
+    assert result.children[0].title.endswith("· 12 сек")
+
+
+RU_LABELS = {
+    "duration_min_sec": "{minutes} мин {seconds} сек",
+    "duration_min": "{minutes} мин",
+    "duration_sec": "{seconds} сек",
+}
+
+
+async def test_duration_labels_follow_instance_language(hass) -> None:
+    """Labels come from the `common` category keyed by HA instance lang."""
+    source = _source(hass)
+    hass.config.language = "ru"
+    ru_payload = {
+        f"component.{DOMAIN}.common.{key}": value
+        for key, value in RU_LABELS.items()
+    }
+    with patch(
+        "custom_components.elektronny_gorod.media_source.translation"
+        ".async_get_translations",
+        AsyncMock(return_value=ru_payload),
+    ) as get_translations:
+        labels = await source._duration_labels()
+
+    assert labels == RU_LABELS
+    get_translations.assert_awaited_once_with(hass, "ru", "common", {DOMAIN})
+
+
+async def test_duration_labels_from_real_translation_files(hass) -> None:
+    """Non-mocked: the loader serves our ru strings under `common` keys."""
+    from homeassistant.helpers import translation
+
+    source = _source(hass)
+    hass.config.language = "ru"
+    fetched = await translation.async_get_translations(
+        hass, "ru", "common", {DOMAIN}
+    )
+    labels = await source._duration_labels()
+
+    assert fetched.get(f"component.{DOMAIN}.common.duration_min") == (
+        "{minutes} мин"
+    )
+    assert labels == RU_LABELS
+
+
+async def test_duration_labels_fetch_error_falls_back(hass) -> None:
+    """A crashing translation helper degrades to English labels."""
+    source = _source(hass)
+    hass.config.language = "ru"
+    with patch(
+        "custom_components.elektronny_gorod.media_source.translation"
+        ".async_get_translations",
+        AsyncMock(side_effect=RuntimeError("loader down")),
+    ):
+        labels = await source._duration_labels()
+
+    assert labels["duration_min_sec"] == "{minutes} min {seconds} sec"
+
+
+async def test_duration_labels_fallback_to_english(hass) -> None:
+    """Missing translations degrade to built-in English labels."""
+    source = _source(hass)
+    hass.config.language = "de"
+    with patch(
+        "custom_components.elektronny_gorod.media_source.translation"
+        ".async_get_translations",
+        AsyncMock(return_value={}),
+    ):
+        labels = await source._duration_labels()
+
+    assert labels["duration_min_sec"] == "{minutes} min {seconds} sec"
+    assert labels["duration_min"] == "{minutes} min"
+    assert labels["duration_sec"] == "{seconds} sec"
+
+
+def test_translation_files_carry_duration_labels_in_common() -> None:
+    """hassfest rejects non-standard categories; durations live in `common`."""
+    import json
+    from pathlib import Path
+
+    base = (
+        Path(__file__).parent.parent
+        / "custom_components"
+        / "elektronny_gorod"
+    )
+    for name in (
+        "strings.json",
+        "translations/en.json",
+        "translations/ru.json",
+    ):
+        with (base / name).open(encoding="utf-8") as file:
+            data = json.load(file)
+        assert "media" not in data, name
+        for key in ("duration_min_sec", "duration_min", "duration_sec"):
+            assert key in data["common"], f"{name}: {key} missing in common"
+
+
+def _event_title_for(duration: int, labels: dict) -> str:
+    from custom_components.elektronny_gorod.media_source import (
+        ElektronnyGorodMediaSource,
+    )
+
+    return ElektronnyGorodMediaSource._event_title(
+        SimpleNamespace(timestamp=1770000000, duration=duration), labels
+    )
+
+
+async def test_event_title_formats_duration_localized(hass) -> None:
+    """Duration renders localized: ru 'X мин Y сек', en 'X min Y sec'."""
+    assert _event_title_for(45, RU_LABELS).endswith("· 45 сек")
+    assert _event_title_for(125, RU_LABELS).endswith("· 2 мин 5 сек")
+    assert _event_title_for(120, RU_LABELS).endswith("· 2 мин")
+    assert _event_title_for(3661, RU_LABELS).endswith("· 61 мин 1 сек")
+
+    en = {
+        "duration_min_sec": "{minutes} min {seconds} sec",
+        "duration_min": "{minutes} min",
+        "duration_sec": "{seconds} sec",
+    }
+    assert _event_title_for(125, en).endswith("· 2 min 5 sec")
+    assert _event_title_for(120, en).endswith("· 2 min")
+    assert _event_title_for(45, en).endswith("· 45 sec")
 
 
 async def test_day_api_failure_is_temporarily_unavailable(hass) -> None:
