@@ -145,7 +145,7 @@ Used by agents:
 |---|---|
 | Purpose | Remote checks подтвердили уже опубликованный и одобренный candidate |
 | Owner | Validator / DevOps Agent |
-| Required evidence | Required GitHub checks текущего head SHA: Python Tests, Validate with hassfest, HACS Action; PR Pre-Release — когда workflow применим |
+| Required evidence | Required GitHub checks текущего head SHA: Python Tests, Validate with hassfest, HACS Action; PR Pre-Release — когда workflow применим. Публикация пререлиза вынесена в `prerelease-publish.yaml` на событии `workflow_run` и **в PR checks не отображается** — её исход проверяется отдельно во вкладке Actions |
 | Pass | все применимые required jobs success; корректно skipped conditional job допустим |
 | Fail | failure/cancelled/pending required job; checks относятся к старому head |
 | Stop | не merge-ить и не релизить до зелёного CI текущего candidate |

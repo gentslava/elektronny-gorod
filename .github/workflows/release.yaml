@@ -10,6 +10,9 @@ permissions:
 
 jobs:
   release-zip:
+    # Пререлизы pr-N сюда попадать не должны: иначе версия вида `pr-81`
+    # уедет в manifest.json и будет закоммичена в master.
+    if: github.event.release.prerelease == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,8 +21,9 @@ jobs:
           ref: master
 
       - name: Update manifest.json with version
+        env:
+          VERSION: ${{ github.event.release.tag_name }}
         run: |
-          VERSION=${{ github.event.release.tag_name }}
           echo "Updating manifest.json with version $VERSION"
           jq --arg version "$VERSION" '.version = $version' custom_components/elektronny_gorod/manifest.json > tmp.json && mv tmp.json custom_components/elektronny_gorod/manifest.json
 

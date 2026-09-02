@@ -109,7 +109,7 @@ Quality gates:
 - ✅ Перезапустить именно интеграцию (Reload через UI).
 - ✅ Проверить лог конкретно за `custom_components.elektronny_gorod`.
 - ✅ Reauth через config_flow с тем же номером.
-- ✅ Скачать pre-release из PR с фиксом (через HACS Custom repository), если фикс готов.
+- ✅ Скачать pre-release из PR с фиксом (через HACS Custom repository), если фикс готов. Для PR из форка сборка публикуется только после того, как мейнтейнер поставит на PR метку `prerelease`.
 
 ## Next reading
 

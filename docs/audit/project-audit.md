@@ -329,7 +329,7 @@ Quality gates:
 
 - **Status:** ИНФОРМАЦИЯ (не проблема)
 - **Evidence:** [`.github/workflows/prerelease.yaml`](../../.github/workflows/prerelease.yaml)
-- **Note:** workflow выкатывает pre-release zip для каждого PR. Добавлен в карту проекта.
+- **Note:** workflow выкатывает pre-release zip для PR. С A-98 разделён на сборку (`prerelease.yaml`) и публикацию (`prerelease-publish.yaml`). Добавлен в карту проекта.
 
 ## Findings из первого HAR-анализа (2026-05-23)
 
@@ -991,6 +991,18 @@ Quality gates:
 - **Root cause:** источники процесса не определяли единые semantics approval, immutable candidate tuple, reviewer independence и post-push CI/evidence; роли/rules/commands дополнительно копировались между tool-specific каталогами и расходились вместе с relative paths.
 - **Fix in master:** ADR-0015 задаёт candidate lifecycle. ADR-0016 закрепляет `AGENTS.md` + `.agents/{roles,rules,commands,hooks}` как нейтральный source of truth; `.claude/**`, `.codex/**`, `.cursor/**`, Copilot instructions и command skills сведены к discovery/runtime adapters. Contract tests проверяют parity, thin adapters, canonical paths и отсутствие parent-relative Markdown fences. `TESTS_PASS` отделён от post-push `CI_GREEN`; live test baseline принадлежит только `testing/strategy.md`.
 - **Acceptance:** AIDD changes опубликованы отдельным логическим PR; все обязательные reviewers одобряют один tuple; adapter contract tests, reconciliation/secret scanners, links и полный suite зелёные.
+
+### A-98. PR Pre-Release падал с 403 для PR из форка
+
+- **Status:** 🟡 REMEDIATION-IN-REVIEW — фикс в ветке `ci/prerelease-fork-safe`.
+- **Severity:** P2 CI/release.
+- **Area:** `.github/workflows/prerelease.yaml`, `prerelease-publish.yaml`, `prerelease-cleanup.yaml`.
+- **Evidence (2026-09-01):** run [33506288560](https://github.com/gentslava/elektronny-gorod/actions/runs/33506288560) на PR #81 — `Resource not accessible by integration` (HTTP 403) при создании релиза `pr-81`; первый прогон того же PR получил статус `action_required`. Настройка репозитория при этом `default_workflow_permissions: write`, а прогоны с веток самого репозитория (`release/4.0.1`, `fix/fcm-circuit-breaker`) успешны.
+- **Root cause:** для события `pull_request` из форка GitHub всегда выдаёт read-only `GITHUB_TOKEN`; это не переопределяется ни настройкой репозитория, ни блоком `permissions:` в workflow. Прежняя одностадийная схема создавала релиз прямо из прогона на коде PR и потому работала только для веток внутри репозитория.
+- **Fix:** сборка zip отделена от публикации. Публикация выполняется на событии `workflow_run` в контексте base-репозитория, где токен может иметь `contents: write`. Номер PR не берётся из артефакта (он подконтролен автору fork-PR и позволял бы перезаписать пререлиз чужого PR), а резолвится по доверенному `workflow_run.head_sha` через API. PR из форка публикуется только при наличии метки `prerelease` — явный опт-ин мейнтейнера, иначе недоверенный код автоматически становился бы установочной версией в HACS. Cleanup переведён на `pull_request_target`, поскольку при закрытии fork-PR токен точно так же read-only.
+- **Known limitations:** метка `prerelease` авторизует весь PR, а не конкретный коммит — после её простановки последующие push в ту же ветку публикуются без повторного просмотра. Снятие метки удаляет уже опубликованный пререлиз (`unlabeled` в cleanup), а состояние PR и наличие метки перепроверяются непосредственно перед созданием релиза. Релиз пересоздаётся (delete + create), поэтому при сбое создания PR временно остаётся без пререлиза.
+- **Follow-up:** `permissions` не заданы в `hacs.yaml`, `hassfest.yaml`, `python-tests.yaml` — при `default_workflow_permissions: write` они получают write-токен и запускают сторонние экшены с mutable-ref (`hacs/action@main`, `hassfest@master`). Отдельно стоит завести `.github/dependabot.yml` для экосистемы `github-actions`: остальные workflow всё ещё сидят на `actions/checkout@v4` и `actions/upload-artifact@v4` при актуальных `v7`, а `hacs/action@main` и `hassfest@master` вообще не версионированы.
+- **Acceptance:** первый fork-PR после merge проверяется вручную — `workflow_run` и `pull_request_target` читаются GitHub только из default-ветки, поэтому до merge схема непроверяема.
 
 ### A-73. config_flow + `async_migrate_entry` без тестов (Bronze IQS gate)
 

@@ -31,7 +31,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - **Опция:** прокси видео через [go2rtc](https://github.com/AlexxIT/go2rtc) и default-off публикация enabled камер по stable external RTSP (A-96/ADR-0014); go2rtc API/RTSP Basic Auth поддерживается.
 - **Версия:** см. [`manifest.json`](../custom_components/elektronny_gorod/manifest.json).
 - **Codeowner:** [@gentslava](https://github.com/gentslava).
-- **PR pre-release:** workflow [`prerelease.yaml`](../.github/workflows/prerelease.yaml) выкатывает pre-release zip для каждого открытого PR.
+- **PR pre-release:** [`prerelease.yaml`](../.github/workflows/prerelease.yaml) собирает zip в артефакт, [`prerelease-publish.yaml`](../.github/workflows/prerelease-publish.yaml) публикует его как pre-release `pr-N`. Для PR из форка публикация требует метки `prerelease` — токен такого PR read-only, а его zip недоверенный.
 
 ## Состояние (на 2026-08-14)
 

@@ -115,7 +115,9 @@ elektronny-gorod/
 │   ├── hacs.yaml                  ← HACS validation
 │   ├── python-tests.yaml           ← pytest matrix min/current HA
 │   ├── release.yaml               ← release zip + auto-commit (на event release)
-│   ├── prerelease.yaml            ← PR pre-release zip (на event pull_request)
+│   ├── prerelease.yaml            ← PR pre-release: сборка zip в артефакт (pull_request)
+│   ├── prerelease-publish.yaml    ← публикация pre-release `pr-N` (workflow_run)
+│   ├── prerelease-cleanup.yaml    ← удаление pre-release при закрытии PR
 │   └── website.yml                ← build + GitHub Pages deploy
 │
 ├── .agents/                       ← canonical cross-tool contracts
@@ -293,7 +295,9 @@ elektronny-gorod/
 | [`hassfest.yaml`](../../.github/workflows/hassfest.yaml) | push / PR | manifest validation |
 | [`hacs.yaml`](../../.github/workflows/hacs.yaml) | push / PR / dispatch | HACS validation |
 | [`python-tests.yaml`](../../.github/workflows/python-tests.yaml) | push / PR | pytest matrix: минимальная и текущая HA |
-| [`prerelease.yaml`](../../.github/workflows/prerelease.yaml) | PR opened / sync | pre-release ZIP с тегом `pr-N` для тестирования |
+| [`prerelease.yaml`](../../.github/workflows/prerelease.yaml) | PR opened / sync | сборка pre-release ZIP в артефакт; релиз не создаёт (для форка токен read-only) |
+| [`prerelease-publish.yaml`](../../.github/workflows/prerelease-publish.yaml) | завершение `PR Pre-Release` | публикует pre-release `pr-N`; PR из форка — только по метке `prerelease` |
+| [`prerelease-cleanup.yaml`](../../.github/workflows/prerelease-cleanup.yaml) | PR closed | удаляет pre-release и тег `pr-N` |
 | [`release.yaml`](../../.github/workflows/release.yaml) | release published | zip + GH release + автокоммит версии |
 | [`website.yml`](../../.github/workflows/website.yml) | push `master` с `website/**` / dispatch | typecheck + Vitest + Vite build → GitHub Pages |
 
