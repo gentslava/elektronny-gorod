@@ -450,7 +450,7 @@ Quality gates:
 
 ### A-99. Пустые `dependencies` в manifest при наличии media source и HTTP view
 
-- **Status:** 🔴 **OPEN** (заведено по итогам независимого `ha-expert` review PR #81).
+- **Status:** ✅ **RESOLVED** — merged в master (commit `05d329f`), выпуск 4.1.0. `dependencies: ["http"]`, `after_dependencies: ["media_source"]`; ключи manifest пересортированы по правилу hassfest.
 - **Severity:** **P3 (convention)** — функционального слома нет.
 - **Area:** `manifest.json`.
 - **Evidence:** интеграция предоставляет integration platform `media_source` (`media_source.py`) и регистрирует `HomeAssistantView` (`clip_proxy.py`), импортируя `homeassistant.components.http` на уровне модуля, при этом `manifest.json:dependencies` пуст. Core-интеграции в таком случае объявляют `http`, а провайдеры media source — `media_source` в `dependencies` либо `after_dependencies`.
