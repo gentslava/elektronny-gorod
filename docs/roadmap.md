@@ -136,7 +136,7 @@ Quality gates:
 Единый PRD/research/plan/tasklist: [`features/mobile-app-parity/`](features/mobile-app-parity/README.md). Static-only write paths не переходят в код без decrypted HAR (ADR-0006).
 
 - [x] **A-50 + A-58 remainder** ✅ Access-call и verified camera-motion events реализованы в `feat/durable-event-history` с baseline/dedup и PII-safe DTO; camera-motion polling начинается только после включения entity.
-- [ ] **A-59 / Slice 2** Archive Media Source, retention mapping и on-demand signed URL resolution.
+- [x] **A-59 / Slice 2** Archive Media Source, retention mapping и on-demand signed URL resolution — выпущено в 4.1.0.
 - [ ] **A-93** Guest invitation: NTK `app=2`, response-only admin action; live link never persists. Sanitized success/401 fixtures captured; implementation waits only for Slice 3 approval and admin/security review.
 - [ ] **A-94** Access keys: read-only inventory first, notification switch only after enabled-account HAR; key code is never HA state/ID.
 - [ ] **A-95** Private-camera settings: feature-gated sensitivity/volume first; record/mirror/PTZ after hardware HAR confirms enums/actions.

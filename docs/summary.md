@@ -93,7 +93,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 
 ### Mobile-app parity backlog
 
-AVD/HAR/APK analysis оформлен в отдельный [`feature package`](features/mobile-app-parity/README.md). Durable event history реализована в PR #70; в backlog остаются archive/Media Source (A-50/A-59), response action гостевого приглашения (A-93), ключи доступа (A-94) и настройки личных камер (A-95). Guest/key/camera write paths сохраняют обязательный HAR/ hardware gate. Guest links, key codes and signed media URLs не допускаются в entity state, recorder, diagnostics или логи.
+AVD/HAR/APK analysis оформлен в отдельный [`feature package`](features/mobile-app-parity/README.md). Durable event history реализована в PR #70, archive/Media Source (A-50/A-59) — в PR #81 и выпуске 4.1.0; в backlog остаются response action гостевого приглашения (A-93), ключи доступа (A-94) и настройки личных камер (A-95). Guest/key/camera write paths сохраняют обязательный HAR/ hardware gate. Guest links, key codes and signed media URLs не допускаются в entity state, recorder, diagnostics или логи.
 
 Полный список — в [`audit/project-audit.md`](audit/project-audit.md).
 

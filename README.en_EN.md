@@ -49,18 +49,31 @@ The integration mirrors the APIs of the official My Home and Umnyy Dom.ru apps: 
 
 - [Installation](#installation)
 - [Configuration](#configuration)
-- [What's new in 4.0.1](#whats-new-in-401)
+- [What's new in 4.1.0](#whats-new-in-410)
+- [What was in 4.0.1](#what-was-in-401)
 - [Highlights of the 4.0 line](#highlights-of-the-40-line)
 - [Features](#features)
 - [Camera connection via go2rtc](#camera-connection-via-go2rtc)
 - [🔔 Doorbell call event (FCM push)](#-doorbell-call-event-fcm-push)
 - [📞 Call screen and two-way audio](#-call-screen-card)
 - [🕘 Event history](#-event-history)
+- [🎞 Camera archive in the media browser](#-camera-archive-in-the-media-browser)
 - [Automation example: balance](#automation-example-balance)
 - [Issues and Contributions](#issues-and-contributions)
 - [License](#license)
 
-## What's new in 4.0.1
+## What's new in 4.1.0
+
+- **Camera archive in the media browser:** a new "Elektronny Gorod" source under Media — account → address → camera → day → motion events.
+- **Playback right in the browser:** a clip opens on click, and seeking works.
+- **Depth follows the operator's retention:** 14 days for intercoms, 7 days for other cameras. A request outside that window gives a clear message instead of a generic camera failure.
+- **Hidden cameras stay hidden:** cameras switched off via "Visible on dashboard" never appear in the archive, neither in the tree nor on playback.
+- **The operator's signed link never leaves the server:** Home Assistant fetches the file itself and serves it over its own short-lived link, so the signed URL reaches neither the browser nor the log.
+- **No reconfiguration:** install 4.1.0 through HACS and restart Home Assistant. Re-authentication is not required.
+
+This release contains no breaking changes. Details, slice limitations and the upgrade path are in [`docs/releases/4.1.0.md`](docs/releases/4.1.0.md); the previous release is described in [`docs/releases/4.0.1.md`](docs/releases/4.0.1.md).
+
+## What was in 4.0.1
 
 - **Doorbell calls arrive again:** the integration handles the new VAPID form of the FCM service headers that previously dropped a call before it reached Home Assistant.
 - **Home Assistant stays responsive:** a finite safety fuse now closes a broken FCM connection instead of allowing a hot loop with an ever-growing traceback to starve the event loop.
@@ -122,6 +135,7 @@ or manually:
 - **Real-time doorbell call events** (FCM push) — an `event` entity for notifications and automations (show the camera, open the door).
 - **Two-way intercom audio** — answer/hang up, guest video and sound in one card, and talk through the browser microphone.
 - **Answered and missed call history** — one entity per place plus a combined Lovelace card with filters and pagination.
+- **Camera recordings archive in the media browser** — browse motion events by day and play clips with seeking (see [the section below](#-camera-archive-in-the-media-browser)).
 - Account health: balance, days until blocking and blocked status.
 - Do-not-disturb controls for intercom and management-company calls.
 
@@ -324,6 +338,20 @@ title: Events
 Use `entities:` to merge multiple places or configured accounts into one timeline. Device filters remain account-aware, and operator text or personal data is not shown in the card.
 
 Configuration and limitations: [`history-card.md`](docs/features/mobile-app-parity/history-card.md).
+
+## 🎞 Camera archive in the media browser
+
+Motion-event recordings live under **Media → Elektronny Gorod**. The tree mirrors the mobile app: account → address → camera → day → events. Every event is labelled with its time and recording length; entries that cannot be played are marked and stay closed.
+
+Depth follows the operator's retention: **14 days** for intercoms and **7 days** for other cameras. A request outside that window produces a clear message rather than a generic camera error.
+
+A clip opens on click and supports seeking. The operator renders the mp4 on demand, so the first click on a fresh event takes a few seconds — the integration waits for it instead of failing.
+
+**What to know about access.** The link the browser receives points at Home Assistant itself, is valid for a limited time and **opens without signing in again**. This is the same approach Home Assistant uses for its built-in camera and TTS proxies: a `<video>` tag cannot attach a session, so access is proven by the signature in the link. The practical consequence: do not forward such a link to anyone else. The operator's own signed URL never leaves the server and is never logged.
+
+Cameras hidden via the "Visible on dashboard" toggle are excluded from the archive entirely.
+
+**Current slice limitations:** motion-event clips only (no continuous timeline scrubbing), event thumbnails are not exposed, and personal cameras are not supported.
 
 ## Automation example: balance
 Here is an example of automation for low balance notification:

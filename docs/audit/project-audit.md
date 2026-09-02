@@ -441,11 +441,21 @@ Quality gates:
 
 ### A-59. Video archive retention не учитывается при формировании URL
 
+- **Status:** ✅ **RESOLVED** для архивной части — merged в master (commit `2ad236d`, PR #81), выпуск 4.1.0 — media source ограничивает дерево окном 14/7 дней и маппит `errorCode 11005` в понятное сообщение вместо общей ошибки камеры. Live-stream URL остаётся вне scope: там ретенция по-прежнему не проверяется до запроса.
 - **Severity:** P3 (UX improvement).
 - **Area:** Correctness.
 - **Evidence:** Video retention зависит от типа камеры — 14d для intercoms (accessControl source), 7d для PUBLIC_CAMERA. Rolling-window («граница ползёт» по wall-clock). См. [`api-reference.md` §retention](../architecture/api-reference.md).
 - **Impact:** интеграция при попытке получить video URL за пределами retention окна получит 500 с `errorCode 11005` («archive out of range»). Это ложная error для пользователя — данных физически нет, но HA показывает «video стримминг недоступен / ошибка».
 - **Recommended fix:** helper `is_within_retention(camera_type, ts) -> bool` в `helpers.py` (mapping retention per source type) + проверка перед любым video URL request. Если вне retention — возвращать `None` (или раннее `UpdateFailed` с понятной причиной), не дёргать API.
+
+### A-99. Пустые `dependencies` в manifest при наличии media source и HTTP view
+
+- **Status:** 🔴 **OPEN** (заведено по итогам независимого `ha-expert` review PR #81).
+- **Severity:** **P3 (convention)** — функционального слома нет.
+- **Area:** `manifest.json`.
+- **Evidence:** интеграция предоставляет integration platform `media_source` (`media_source.py`) и регистрирует `HomeAssistantView` (`clip_proxy.py`), импортируя `homeassistant.components.http` на уровне модуля, при этом `manifest.json:dependencies` пуст. Core-интеграции в таком случае объявляют `http`, а провайдеры media source — `media_source` в `dependencies` либо `after_dependencies`.
+- **Impact:** discovery работает в обе стороны (`async_process_integration_platforms` обрабатывает и уже загруженные компоненты, и `EVENT_COMPONENT_LOADED`), поэтому порядок setup не важен, и hassfest для custom-интеграций это не проверяет. Остаточный риск узкий: в конфигурации без `default_config` и без `media_source:` компонент не поднимется, архив не появится и clip view не зарегистрируется. Деградация консистентная — proxy-URL порождается только resolve-ом, поэтому битых ссылок не возникает.
+- **Recommended fix:** `"dependencies": ["http"]`, `"after_dependencies": ["media_source"]`. Правка manifest требует явного подтверждения владельца (ask-first по AGENTS.md).
 
 ### A-60. Visibility migration v2 уже applied
 
