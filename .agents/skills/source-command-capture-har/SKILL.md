@@ -5,5 +5,4 @@ description: "Собрать HAR целевого сценария по безо
 
 # Command adapter
 
-Полностью прочитай и выполни каноническую процедуру
-`.agents/commands/capture-har.md`. Не копируй процедуру в этот skill.
+Полностью прочитай и выполни каноническую процедуру `.agents/commands/capture-har.md`. Не копируй процедуру в этот skill.

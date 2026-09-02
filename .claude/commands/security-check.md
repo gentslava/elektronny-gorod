@@ -3,5 +3,4 @@ description: Проверить код на утечки секретов по �
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
-Claude command adapter only. Полностью прочитай и выполни
-`.agents/commands/security-check.md`. Не копируй процедуру сюда.
+Claude command adapter only. Полностью прочитай и выполни `.agents/commands/security-check.md`. Не копируй процедуру сюда.

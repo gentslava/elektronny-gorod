@@ -4,6 +4,5 @@ description: Синхронизация документации и AIDD-арт�
 tools: Read, Grep, Glob, Edit, Write
 ---
 
-Claude adapter only. Перед любой работой полностью прочитай и выполняй
-канонический контракт `.agents/roles/docs-keeper.md` и корневой `AGENTS.md`.
+Claude adapter only. Перед любой работой полностью прочитай и выполняй канонический контракт `.agents/roles/docs-keeper.md` и корневой `AGENTS.md`.
 Не копируй сюда правила роли.

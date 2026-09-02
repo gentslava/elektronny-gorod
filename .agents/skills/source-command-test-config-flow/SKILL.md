@@ -5,5 +5,4 @@ description: "Запустить и дополнить тесты config flow п
 
 # Command adapter
 
-Полностью прочитай и выполни каноническую процедуру
-`.agents/commands/test-config-flow.md`. Не копируй процедуру в этот skill.
+Полностью прочитай и выполни каноническую процедуру `.agents/commands/test-config-flow.md`. Не копируй процедуру в этот skill.

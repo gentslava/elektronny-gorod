@@ -5,5 +5,4 @@ description: "Проверить готовность проекта к публ
 
 # Command adapter
 
-Полностью прочитай и выполни каноническую процедуру
-`.agents/commands/release-check.md`. Не копируй процедуру в этот skill.
+Полностью прочитай и выполни каноническую процедуру `.agents/commands/release-check.md`. Не копируй процедуру в этот skill.

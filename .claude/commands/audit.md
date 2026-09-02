@@ -3,5 +3,4 @@ description: Провести глубокий аудит проекта по к
 allowed-tools: Read, Grep, Glob, Bash, Agent, TodoWrite
 ---
 
-Claude command adapter only. Полностью прочитай и выполни
-`.agents/commands/audit.md`. Не копируй процедуру сюда.
+Claude command adapter only. Полностью прочитай и выполни `.agents/commands/audit.md`. Не копируй процедуру сюда.

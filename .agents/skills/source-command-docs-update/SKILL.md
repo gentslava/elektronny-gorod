@@ -5,5 +5,4 @@ description: "Синхронизировать AIDD-документацию с 
 
 # Command adapter
 
-Полностью прочитай и выполни каноническую процедуру
-`.agents/commands/docs-update.md`. Не копируй процедуру в этот skill.
+Полностью прочитай и выполни каноническую процедуру `.agents/commands/docs-update.md`. Не копируй процедуру в этот skill.

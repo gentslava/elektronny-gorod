@@ -3,5 +3,4 @@ description: Проверить готовность релиза по кано�
 allowed-tools: Read, Grep, Glob, Bash
 ---
 
-Claude command adapter only. Полностью прочитай и выполни
-`.agents/commands/release-check.md`. Не копируй процедуру сюда.
+Claude command adapter only. Полностью прочитай и выполни `.agents/commands/release-check.md`. Не копируй процедуру сюда.

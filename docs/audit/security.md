@@ -202,28 +202,12 @@ Quality gates:
 ### S-23. Config-entry title в persistent FCM Repairs
 
 - **Status:** 🟢 **ACCEPTED** (owner confirmation 2026-08-11).
-- **Data:** автоматически созданный title интеграции содержит resident name и
-  operator `accountId`; FCM Repairs не читает токены/credentials из
-  `entry.data`, но пользовательский переименованный title копируется verbatim.
-- **Persistence:** `is_persistent=True` дублирует title из
-  `.storage/core.config_entries` в `.storage/repairs.issue_registry`.
-- **Audience / required control:** новой категории доступа внутри HA не
-  появляется: и
-  `repairs/list_issues`, и `config_entries/get` доступны authenticated HA users,
-  причём второй endpoint уже возвращает `entry.title`. Event обновления Repairs
-  содержит только action/domain/issue ID; новые логи title не выводят.
-  Diagnostics обязательно redacts every `title` key, поэтому user-shared export
-  не переносит resident name/account ID за пределы HA. Release documentation
-  должна отдельно говорить, что Repairs намеренно показывает локальный config-
-  entry title; без этой оговорки или diagnostics redaction S-23 больше не
-  считается принятым.
-- **Accepted trade-off:** небольшое дублирование PII принято ради понятного UX
-  при нескольких аккаунтах — пользователь сразу видит, у какого entry отключён
-  realtime FCM, вместо последовательной перезагрузки всех аккаунтов.
-- **Revisit:** если HA сузит доступ к config-entry titles или entry title начнёт
-  содержать дополнительные чувствительные данные, placeholder нужно удалить
-  либо заменить privacy-safe идентификатором. Пользователям не следует помещать
-  credentials в произвольно переименованный title.
+- **Data:** автоматически созданный title интеграции содержит resident name и operator `accountId`; FCM Repairs не читает токены/credentials из `entry.data`, но пользовательский переименованный title копируется verbatim.
+- **Persistence:** `is_persistent=True` дублирует title из `.storage/core.config_entries` в `.storage/repairs.issue_registry`.
+- **Audience / required control:** новой категории доступа внутри HA не появляется: и `repairs/list_issues`, и `config_entries/get` доступны authenticated HA users, причём второй endpoint уже возвращает `entry.title`. Event обновления Repairs содержит только action/domain/issue ID; новые логи title не выводят.
+  Diagnostics обязательно redacts every `title` key, поэтому user-shared export не переносит resident name/account ID за пределы HA. Release documentation должна отдельно говорить, что Repairs намеренно показывает локальный config- entry title; без этой оговорки или diagnostics redaction S-23 больше не считается принятым.
+- **Accepted trade-off:** небольшое дублирование PII принято ради понятного UX при нескольких аккаунтах — пользователь сразу видит, у какого entry отключён realtime FCM, вместо последовательной перезагрузки всех аккаунтов.
+- **Revisit:** если HA сузит доступ к config-entry titles или entry title начнёт содержать дополнительные чувствительные данные, placeholder нужно удалить либо заменить privacy-safe идентификатором. Пользователям не следует помещать credentials в произвольно переименованный title.
 
 ### S-15. Случайный Pixel device fingerprint
 

@@ -8,16 +8,10 @@
 
 ## Context
 
-Роли, правила и процедуры одновременно существовали в `.claude/**`,
-`.codex/**`, `.cursor/**`, Copilot instructions и command skills. Одно изменение
-требовало синхронной правки нескольких почти одинаковых файлов. Копии уже
-расходились, а Markdown links зависели от глубины каталога и порождали цепочки
-`../../..` при переносе текста между tools.
+Роли, правила и процедуры одновременно существовали в `.claude/**`, `.codex/**`, `.cursor/**`, Copilot instructions и command skills. Одно изменение требовало синхронной правки нескольких почти одинаковых файлов. Копии уже расходились, а Markdown links зависели от глубины каталога и порождали цепочки `../../..` при переносе текста между tools.
 
 Инструменты при этом действительно требуют разные discovery formats. Claude
-Code использует `CLAUDE.md`, Markdown subagents/rules/commands и settings hooks;
-Codex читает `AGENTS.md` и TOML agent profiles. Эти форматы являются runtime
-metadata, но не основанием хранить несколько версий поведения.
+Code использует `CLAUDE.md`, Markdown subagents/rules/commands и settings hooks; Codex читает `AGENTS.md` и TOML agent profiles. Эти форматы являются runtime metadata, но не основанием хранить несколько версий поведения.
 
 ## Decision
 
@@ -31,29 +25,18 @@ metadata, но не основанием хранить несколько ве�
 
 ### 2. Tool-specific файлы являются adapters
 
-`.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md` и
-`.agents/skills/source-command-*` могут хранить только обязательные discovery
-metadata, path/glob scope и launch wiring. Каждый adapter указывает точный
-repository-root-relative canonical path и требует прочитать его полностью.
+`.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md` и `.agents/skills/source-command-*` могут хранить только обязательные discovery metadata, path/glob scope и launch wiring. Каждый adapter указывает точный repository-root-relative canonical path и требует прочитать его полностью.
 
-Claude root adapter использует нативный `@AGENTS.md`. Claude agent frontmatter,
-command `allowed-tools`, rule discovery и settings остаются в `.claude/**`.
-Codex agent `name`, `description` и `developer_instructions` остаются в
-`.codex/agents/*.toml`. Это допустимое metadata-дублирование, потому что оно
-нужно для обнаружения и проверяется автоматически.
+Claude root adapter использует нативный `@AGENTS.md`. Claude agent frontmatter, command `allowed-tools`, rule discovery и settings остаются в `.claude/**`.
+Codex agent `name`, `description` и `developer_instructions` остаются в `.codex/agents/*.toml`. Это допустимое metadata-дублирование, потому что оно нужно для обнаружения и проверяется автоматически.
 
 ### 3. Пути не зависят от глубины adapter-а
 
-В agent contracts используются пути от корня репозитория в backticks. Parent
-relative Markdown links вида `](../../../...)` в canonical и adapter layers
-запрещены. Это исключает path drift при переносе файла между tools.
+В agent contracts используются пути от корня репозитория в backticks. Parent relative Markdown links вида `](../../../...)` в canonical и adapter layers запрещены. Это исключает path drift при переносе файла между tools.
 
 ### 4. Drift блокируется contract tests
 
-Tests проверяют одинаковый набор canonical/Claude/Codex ролей, точную ссылку
-каждого adapter-а, ограничение его размера, command mapping, отсутствие parent
-relative links и canonical hook placement. Нормативные invariants проверяются
-в `.agents/**`, а не повторно в каждом tool adapter.
+Tests проверяют одинаковый набор canonical/Claude/Codex ролей, точную ссылку каждого adapter-а, ограничение его размера, command mapping, отсутствие parent relative links и canonical hook placement. Нормативные invariants проверяются в `.agents/**`, а не повторно в каждом tool adapter.
 
 ## Consequences
 
@@ -78,12 +61,9 @@ relative links и canonical hook placement. Нормативные invariants п
 
 ## Alternatives considered
 
-1. **Считать `.claude/**` каноническим.** Отклонено: источник истины становится
-   привязан к одному runtime и снова создаёт глубокие relative paths для Codex.
-2. **Использовать symlinks.** Отклонено: discovery и поддержка symlinks различаются
-   между tools и платформами; metadata formats всё равно несовместимы.
-3. **Генерировать adapters с copied body.** Отклонено: generated copies остаются
-   drift-prone и усложняют review diff.
+1. **Считать `.claude/**` каноническим.** Отклонено: источник истины становится привязан к одному runtime и снова создаёт глубокие relative paths для Codex.
+2. **Использовать symlinks.** Отклонено: discovery и поддержка symlinks различаются между tools и платформами; metadata formats всё равно несовместимы.
+3. **Генерировать adapters с copied body.** Отклонено: generated copies остаются drift-prone и усложняют review diff.
 
 ## Sources
 
