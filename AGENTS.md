@@ -59,6 +59,8 @@ custom_components/elektronny_gorod/
 ├── event.py               # doorbell call event (ADR-0011)
 ├── history.py             # durable REST history: baseline, dedup, Store lifecycle
 ├── history_ws.py          # entity-scoped browse старых событий для Lovelace
+├── media_source.py        # HA Media Source: archive clips place → camera → day → event
+├── clip_proxy.py          # same-origin signed clip streaming view (ORB workaround)
 ├── fcm.py                 # FCM listener для события вызова (ADR-0011)
 ├── sip/                   # SIP-стек two-way audio, register-on-ring (ADR-0012, A-81)
 │   ├── call_controller.py # HA-glue: трекинг вызова + answer/hangup + AudioBridge lifecycle
@@ -163,12 +165,9 @@ docs/                      # AIDD-документация (project/architecture
 - `.agents/rules/*.md` — канонические инженерные и process rules.
 - `.agents/commands/*.md` — канонические операционные процедуры.
 - `.agents/hooks/*` — канонические реализации cross-tool gates.
-- `.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md`
-  и `.agents/skills/source-command-*` — только discovery/runtime adapters.
+- `.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md` и `.agents/skills/source-command-*` — только discovery/runtime adapters.
 
-Адаптер может содержать обязательные для инструмента metadata, glob/path scope
-или wiring, но не копию правила. Внутренние пути в agent contracts задаются от
-корня репозитория в backticks; цепочки `../../..` в adapters запрещены.
+Адаптер может содержать обязательные для инструмента metadata, glob/path scope или wiring, но не копию правила. Внутренние пути в agent contracts задаются от корня репозитория в backticks; цепочки `../../..` в adapters запрещены.
 
 ## Где искать что
 

@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlencode
 
-from aiohttp import ClientResponse
+from aiohttp import ClientError, ClientResponse
 
 from homeassistant.core import HomeAssistant
 
@@ -55,6 +55,26 @@ class CameraHistoryEvent:
     event_subject_id: int
     available: bool
     goto_enabled: bool
+
+
+def _is_safe_error_code(code: str | None) -> bool:
+    """True если код состоит только из цифр/букв/дефиса/точки (ASCII).
+
+    Код приходит из backend-ответа и попадает в message исключения
+    (chain/log surface) — всё прочее подменяется на "unknown".
+    """
+    return bool(code) and all(
+        char.isascii() and (char.isalnum() or char in "-.") for char in code
+    )
+
+
+class ForpostDownloadError(Exception):
+    """Forpost event-download failure with a parsed backend error code."""
+
+    def __init__(self, error_code: str | None) -> None:
+        safe_code = error_code if _is_safe_error_code(error_code) else None
+        super().__init__(f"forpost_download_failed_{safe_code or 'unknown'}")
+        self.error_code = error_code
 
 
 def _device_id(installation_id: str) -> str:
@@ -307,6 +327,39 @@ class ElektronnyGorodAPI:
             )
             for item in (payload or {}).get("data") or []
         )
+
+    async def query_event_download(self, event_id: str) -> str:
+        """Query the signed mp4 download URL for one forpost event."""
+        api_url = f"/rest/v1/forpost/events/{event_id}/downloads?container=mp4"
+        try:
+            response = await self.http.get(api_url)
+        except ClientError as ex:
+            # Typed ForpostDownloadError — только для распознанного бизнес-кода
+            # из JSON-тела. Транспортные сбои (timeout, 5xx-HTML) — это
+            # транзиентные ошибки: пробрасываем исходный ClientError, чтобы
+            # media source честно показал "temporarily unavailable".
+            if ex.args and isinstance(ex.args[0], ClientResponse):
+                try:
+                    error_body = await ex.args[0].json()
+                except Exception:  # noqa: BLE001 - non-JSON bodies degrade
+                    error_body = None
+                if isinstance(error_body, dict):
+                    # Две runtime-формы: camelCase errorCode ("11005",
+                    # retention) и PascalCase int ErrorCode (102, файл
+                    # готовится к загрузке; production 2026-08-30).
+                    raw_code = error_body.get("errorCode")
+                    if raw_code is None:
+                        raw_code = error_body.get("ErrorCode")
+                    if raw_code is not None and str(raw_code):
+                        raise ForpostDownloadError(str(raw_code)) from ex
+            raise
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        payload = await response.json()
+        url = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(url, str) or not url:
+            raise ForpostDownloadError(None)
+        return url
 
     async def query_access_controls(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of access controls for a place."""

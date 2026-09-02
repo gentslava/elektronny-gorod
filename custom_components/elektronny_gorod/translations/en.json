@@ -1,5 +1,10 @@
 {
   "title": "Elektronny Gorod",
+  "common": {
+    "duration_min_sec": "{minutes} min {seconds} sec",
+    "duration_min": "{minutes} min",
+    "duration_sec": "{seconds} sec"
+  },
   "issues": {
     "fcm_receiver_unavailable": {
       "title": "Doorbell notifications are unavailable for {entry_title}",
