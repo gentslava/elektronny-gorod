@@ -1,6 +1,7 @@
 ---
 name: git-historian
-description: Валидация и чистка git истории feature-ветки до candidate freeze. Схлопывает hotfix/diag/typo-коммиты в логичные единицы и запрещает последующий rewrite без нового freeze/review.
+description: Аудит и безопасная чистка истории feature-ветки до candidate freeze.
+use_when: Валидация и чистка git истории feature-ветки до candidate freeze. Схлопывает hotfix/diag/typo-коммиты в логичные единицы и запрещает последующий rewrite без нового freeze/review.
 kind: canonical-agent-role
 ---
 

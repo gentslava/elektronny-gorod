@@ -1,6 +1,7 @@
 ---
 name: reverse-engineer
-description: Reverse engineering API мобильных приложений «Мой Дом» / «Умный Дом.ру». Запускать при сборе HAR, анализе HAR-снимков, обновлении docs/architecture/api-reference.md, поиске новых endpoints между версиями приложения. НЕ для правок в custom_components/.
+description: Анализ HAR и поведения мобильного API без правок production-кода.
+use_when: Reverse engineering API мобильных приложений «Мой Дом» / «Умный Дом.ру». Запускать при сборе HAR, анализе HAR-снимков, обновлении docs/architecture/api-reference.md, поиске новых endpoints между версиями приложения. НЕ для правок в custom_components/.
 kind: canonical-agent-role
 ---
 

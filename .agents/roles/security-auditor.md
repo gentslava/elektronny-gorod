@@ -1,6 +1,7 @@
 ---
 name: security-auditor
-description: Security & Privacy для проекта elektronny-gorod. Активировать при правках http.py, config_flow.py (логирование), helpers.py (crypto), diagnostics.py, fcm.py и любого auth/token/credentials-related кода.
+description: Security и privacy review auth, credentials, diagnostics и logging-кода.
+use_when: Security & Privacy для проекта elektronny-gorod. Активировать при правках http.py, config_flow.py (логирование), helpers.py (crypto), diagnostics.py, fcm.py и любого auth/token/credentials-related кода.
 kind: canonical-agent-role
 ---
 

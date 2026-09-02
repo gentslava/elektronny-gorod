@@ -1,6 +1,7 @@
 ---
 name: ha-expert
-description: Home Assistant integration expert. Использовать при работе с manifest.json, config_flow.py, coordinator.py, entity-платформами, Repairs/issue registry, FCM lifecycle и Integration Quality Scale. Не для security/QA — есть отдельные роли.
+description: Проверка и реализация Home Assistant-специфичных контрактов интеграции.
+use_when: Home Assistant integration expert. Использовать при работе с manifest.json, config_flow.py, coordinator.py, entity-платформами, Repairs/issue registry, FCM lifecycle и Integration Quality Scale. Не для security/QA — есть отдельные роли.
 kind: canonical-agent-role
 ---
 

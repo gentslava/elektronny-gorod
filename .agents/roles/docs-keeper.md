@@ -1,6 +1,7 @@
 ---
 name: docs-keeper
-description: Documentation / AIDD docs синхронизация для проекта elektronny-gorod. Активировать после любых правок в коде (особенно затрагивающих maintenance rules), а также при обновлении audit findings, ADR, roadmap.
+description: Синхронизация документации и AIDD-артефактов с кодом и решениями.
+use_when: Documentation / AIDD docs синхронизация для проекта elektronny-gorod. Активировать после любых правок в коде (особенно затрагивающих maintenance rules), а также при обновлении audit findings, ADR, roadmap.
 kind: canonical-agent-role
 ---
 

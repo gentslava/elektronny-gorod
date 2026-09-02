@@ -28,7 +28,9 @@ Code использует `CLAUDE.md`, Markdown subagents/rules/commands и sett
 `.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md` и `.agents/skills/source-command-*` могут хранить только обязательные discovery metadata, path/glob scope и launch wiring. Каждый adapter указывает точный repository-root-relative canonical path и требует прочитать его полностью.
 
 Claude root adapter использует нативный `@AGENTS.md`. Claude agent frontmatter, command `allowed-tools`, rule discovery и settings остаются в `.claude/**`.
-Codex agent `name`, `description` и `developer_instructions` остаются в `.codex/agents/*.toml`. Это допустимое metadata-дублирование, потому что оно нужно для обнаружения и проверяется автоматически.
+Codex agent `name`, `description` и `developer_instructions` остаются в `.codex/agents/*.toml`.
+
+`description` — единственное поле, которое приходится хранить в нескольких местах: инструменты читают его буквально (Claude выбирает по нему субагента, Codex подставляет в профиль), поэтому заменить ссылкой на канон его нельзя. Написан он один раз — в каноническом `.agents/roles/*.md`, а adapters обязаны копировать его дословно; расхождение падает в contract tests. Подробное правило «когда применять роль» вынесено в канонический `use_when` и в adapters не копируется вовсе.
 
 ### 3. Пути не зависят от глубины adapter-а
 
@@ -36,7 +38,7 @@ Codex agent `name`, `description` и `developer_instructions` остаются �
 
 ### 4. Drift блокируется contract tests
 
-Tests проверяют одинаковый набор canonical/Claude/Codex ролей, точную ссылку каждого adapter-а, ограничение его размера, command mapping, отсутствие parent relative links и canonical hook placement. Нормативные invariants проверяются в `.agents/**`, а не повторно в каждом tool adapter.
+Tests проверяют одинаковый набор canonical/Claude/Codex ролей, дословное совпадение `description` каждой роли между каноном и обоими adapters, присутствие `use_when` в каноне и его отсутствие в adapters, точную ссылку каждого adapter-а, ограничение его размера, command mapping, отсутствие parent relative links и canonical hook placement. Нормативные invariants проверяются в `.agents/**`, а не повторно в каждом tool adapter.
 
 ## Consequences
 

@@ -1,6 +1,7 @@
 ---
 name: code-reviewer
-description: Независимый 5-осевой code review для проекта elektronny-gorod. Использовать для clean committed candidate после tests/security prechecks/docs/history cleanup и обязательно перед обычным push, ready-for-review PR или merge нетривиального изменения.
+description: Независимый 5-осевой review чистого candidate перед публикацией или merge.
+use_when: Независимый 5-осевой code review для проекта elektronny-gorod. Использовать для clean committed candidate после tests/security prechecks/docs/history cleanup и обязательно перед обычным push, ready-for-review PR или merge нетривиального изменения.
 kind: canonical-agent-role
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: lead-architect
-description: Lead architect для elektronny-gorod проекта. Использовать в начале сессии, после major change, перед релизом — для сводки, обновления audit, синхронизации roadmap. Не для конкретных правок кода (для этого — узкие агенты).
+description: Архитектурная сводка, аудит и координация проектных источников истины.
+use_when: Lead architect для elektronny-gorod проекта. Использовать в начале сессии, после major change, перед релизом — для сводки, обновления audit, синхронизации roadmap. Не для конкретных правок кода (для этого — узкие агенты).
 kind: canonical-agent-role
 ---
 

@@ -1,6 +1,7 @@
 ---
 name: qa-engineer
-description: QA / Testing для elektronny-gorod. Использовать при написании тестов, дополнении test plan, прохождении quality gate TESTS_PASS. Не для security или HA-compat (отдельные роли).
+description: Тестирование, регрессии и аттестация quality gate TESTS_PASS.
+use_when: QA / Testing для elektronny-gorod. Использовать при написании тестов, дополнении test plan, прохождении quality gate TESTS_PASS. Не для security или HA-compat (отдельные роли).
 kind: canonical-agent-role
 ---
 

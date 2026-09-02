@@ -28,6 +28,20 @@ def _role_names(directory: Path, suffix: str) -> set[str]:
     }
 
 
+def _frontmatter_value(text: str, key: str) -> str | None:
+    """Вернуть значение поля из YAML frontmatter markdown-файла."""
+    lines = text.split("\n")
+    if not lines or lines[0].strip() != "---":
+        return None
+    for line in lines[1:]:
+        if line.strip() in ("---", "..."):
+            break
+        name, separator, value = line.partition(":")
+        if separator and name.strip() == key:
+            return value.strip()
+    return None
+
+
 def test_tool_role_adapters_match_canonical_roles() -> None:
     canonical = _role_names(CANONICAL_ROLES, ".md")
     claude = _role_names(REPO_ROOT / ".claude/agents", ".md")
@@ -207,3 +221,42 @@ def test_live_hook_docs_use_canonical_implementation() -> None:
 
     assert "pre-commit-redaction-check.sh" not in text
     assert ".agents/hooks/check-secret-logs.sh" in text
+
+
+@pytest.mark.parametrize("role", sorted(_role_names(CANONICAL_ROLES, ".md")))
+def test_role_description_is_written_once_in_the_canonical_role(role: str) -> None:
+    """`description` пишется только в каноне, адаптеры копируют его дословно.
+
+    Инструменты читают это поле буквально — Claude по нему выбирает субагента,
+    Codex подставляет в профиль, — поэтому ссылкой на канон его заменить
+    нельзя. Единственная защита от расхождения — сверка (ADR-0016 §4).
+    Подробное правило маршрутизации живёт в каноническом `use_when` и в
+    адаптеры не копируется.
+    """
+    canonical = _frontmatter_value(_read(f".agents/roles/{role}.md"), "description")
+    claude = _frontmatter_value(_read(f".claude/agents/{role}.md"), "description")
+    codex = tomllib.loads(_read(f".codex/agents/{role}.toml")).get("description")
+
+    assert canonical, f"в каноне роли {role} нет description"
+    assert claude == canonical, (
+        f"Claude adapter для {role} разошёлся с каноном.\n"
+        f"канон:   {canonical}\nадаптер: {claude}"
+    )
+    assert codex == canonical, (
+        f"Codex adapter для {role} разошёлся с каноном.\n"
+        f"канон:   {canonical}\nадаптер: {codex}"
+    )
+
+
+@pytest.mark.parametrize("role", sorted(_role_names(CANONICAL_ROLES, ".md")))
+def test_canonical_role_keeps_routing_hint_out_of_adapters(role: str) -> None:
+    """Подробное «когда применять» остаётся в каноне и не течёт в адаптеры."""
+    canonical_text = _read(f".agents/roles/{role}.md")
+    use_when = _frontmatter_value(canonical_text, "use_when")
+
+    assert use_when, (
+        f"у роли {role} нет use_when — правило маршрутизации должно быть "
+        "записано в каноне, а не растворяться в description адаптеров"
+    )
+    assert use_when not in _read(f".claude/agents/{role}.md")
+    assert use_when not in _read(f".codex/agents/{role}.toml")
