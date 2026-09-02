@@ -14,6 +14,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 
 from .api import ElektronnyGorodAPI
+from .clip_proxy import async_release_clip_cache
 from .const import (
     DOMAIN,
     LOGGER,
@@ -568,6 +569,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     HA-core вызовет их автоматически независимо от исхода platform unload
     (см. audit A-16).
     """
+    # Клипы этого entry больше не нужны — не ждём истечения TTL.
+    async_release_clip_cache(hass, entry.entry_id)
     fcm_listener = hass.data.get(_FCM_DATA, {}).get(entry.entry_id)
     if fcm_listener is not None:
         # Как и в двух других точках остановки: текст исключения зависимости
