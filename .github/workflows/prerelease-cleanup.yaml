@@ -1,0 +1,32 @@
+name: PR Pre-Release Cleanup
+
+# pull_request_target выполняется в контексте base-репозитория и даёт токен с
+# правом записи даже для PR из форка. Код PR здесь намеренно не выкачивается и
+# не выполняется — job состоит из одного вызова gh, поэтому обычный риск
+# pull_request_target не возникает.
+on:
+  pull_request_target:
+    types: [closed, unlabeled]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    # closed — обычная уборка; unlabeled — отзыв опт-ина мейнтейнером, тогда
+    # уже опубликованную сборку тоже надо убрать, а не только запретить новые.
+    if: >-
+      github.event.action == 'closed'
+      || github.event.label.name == 'prerelease'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Delete pre-release and tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh release delete "pr-${PR_NUMBER}" \
+            --repo "${REPO}" \
+            --yes --cleanup-tag || echo "No pre-release for this PR — nothing to delete."

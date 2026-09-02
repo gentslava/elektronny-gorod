@@ -40,7 +40,7 @@ kind: canonical-agent-command
 - [ ] После последнего approval не было содержательного commit. Если head/tree менялся, есть новый freeze и новые candidate-bound attestations **каждого** обязательного reviewer; повторный analysis мог быть delta-scoped.
 - [ ] Review evidence хранится вне candidate tree. Если evidence было добавлено commit-ом, этот новый candidate заново прошёл всю обязательную matrix.
 - [ ] `REVIEW_EVIDENCE_PUBLISHED` — PR содержит durable validation comment для текущего base/head/tree с local gates и всеми reviewer verdicts.
-- [ ] `CI_GREEN` — Python Tests, hassfest и HACS зелёные на текущем head; PR Pre-Release зелёный либо корректно skipped как неприменимый.
+- [ ] `CI_GREEN` — Python Tests, hassfest и HACS зелёные на текущем head; PR Pre-Release зелёный либо корректно skipped как неприменимый. Публикацию пререлиза (`prerelease-publish.yaml`, событие `workflow_run`) в PR checks не видно — проверять отдельно в Actions.
 - [ ] PR не является blocked review-only draft; обычный push/ready-for-review PR произошёл после approval либо recovery flow полностью завершён.
 - [ ] `AUDIT_DONE` — `docs/audit/project-audit.md` актуален.
 - [ ] **quality_scale ≤ gate-confirmed (D-05)** — `manifest:quality_scale` не выше реально подтверждённого гейтами уровня. Bronze ⇒ config_flow-тесты существуют. Несоответствие без записанного waiver = blocker.
@@ -67,7 +67,7 @@ test "$PR_HEAD_SHA" = "$CANDIDATE_SHA"
 gh pr checks --watch
 ```
 
-В итоговом отчёте отдельно подтвердить оба Python Tests jobs, hassfest, HACS и применимый PR Pre-Release. SHA mismatch, pending, failure или cancelled не закрывают `CI_GREEN`.
+В итоговом отчёте отдельно подтвердить оба Python Tests jobs, hassfest, HACS и применимый PR Pre-Release вместе с его стадией публикации. SHA mismatch, pending, failure или cancelled не закрывают `CI_GREEN`.
 
 ### 4. Migration
 

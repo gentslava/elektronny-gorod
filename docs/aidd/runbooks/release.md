@@ -3,6 +3,8 @@ Status: Active Owner: DevOps / Release Agent Last reviewed: 2026-08-14 (release 
 Source files:
 - `.github/workflows/release.yaml`
 - `.github/workflows/prerelease.yaml`
+- `.github/workflows/prerelease-publish.yaml`
+- `.github/workflows/prerelease-cleanup.yaml`
 - `custom_components/elektronny_gorod/manifest.json`
 
 Related docs:
@@ -122,7 +124,9 @@ GitHub auto-generated changelog или вручную.
 
 ## PR pre-release
 
-Workflow [`prerelease.yaml`](../../../.github/workflows/prerelease.yaml) выкатывает pre-release zip с тегом `pr-N` только для **не-draft** PR, меняющих `custom_components/**`. Blocked review-only draft не публикует пользовательскую сборку. Используется для тестирования уже одобренного candidate пользователями.
+Пререлиз выкатывается в два этапа. [`prerelease.yaml`](../../../.github/workflows/prerelease.yaml) собирает zip в артефакт для **не-draft** PR, меняющих `custom_components/**`; [`prerelease-publish.yaml`](../../../.github/workflows/prerelease-publish.yaml) на событии `workflow_run` публикует его как pre-release с тегом `pr-N`. Разделение вынужденное: для PR из форка GitHub выдаёт read-only токен, и создать релиз из прогона на коде PR невозможно. PR из форка публикуется только при наличии метки `prerelease` — она означает, что мейнтейнер осмотрел код и согласен раздавать его сборку пользователям. Blocked review-only draft пользовательскую сборку не публикует. Прогон публикации в PR checks не виден — смотреть во вкладке Actions.
+
+Две особенности метки, о которых нужно помнить. Во-первых, она авторизует **весь PR, а не отдельный коммит**: после её простановки каждый следующий push в ту же ветку публикуется автоматически, без повторного просмотра кода. Если автор PR перестал вызывать доверие — снимите метку: по событию `unlabeled` пререлиз `pr-N` удаляется автоматически. Отдельно стоит воздержаться от метки на PR, который правит `.github/**`: такой PR получает право выполнять произвольные шаги сборки. Во-вторых, релиз перед публикацией удаляется и создаётся заново (иначе тег `pr-N` навсегда остался бы на первом собранном коммите), поэтому при сбое на шаге создания PR временно остаётся вообще без пререлиза — лечится повторным запуском сборки.
 
 Пользователь устанавливает через HACS «Custom repository» → URL PR → ставит `pr-N` версию.
 

@@ -1,0 +1,148 @@
+name: PR Pre-Release Publish
+
+# Запускается в контексте base-репозитория, поэтому GITHUB_TOKEN здесь можно
+# поднять до contents: write даже когда исходный PR пришёл из форка.
+# Код форка тут не выполняется — берётся только собранный артефакт.
+on:
+  workflow_run:
+    workflows: ["PR Pre-Release"]
+    types: [completed]
+
+permissions:
+  contents: write
+  actions: read
+  pull-requests: read
+
+concurrency:
+  group: >-
+    prerelease-publish-${{ github.event.workflow_run.head_repository.full_name
+    }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # Номер PR НЕЛЬЗЯ брать из артефакта: тот собран прогоном на коде PR и
+      # полностью подконтролен его автору — подделанный номер позволил бы
+      # перезаписать пререлиз чужого PR своим zip. Единственные доверенные
+      # данные — поля payload (head_sha, head_repository) и ответы API
+      # base-репозитория. workflow_run.pull_requests для форков пуст, поэтому
+      # PR ищется по head SHA среди открытых.
+      - name: Resolve PR from trusted payload
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          GATE_LABEL: prerelease
+        run: |
+          set -euo pipefail
+          # Точечный запрос по head-ref, а не перебор списка: список пришлось бы
+          # пагинировать, а один head SHA может встречаться сразу у нескольких PR.
+          pr=$(gh api --method GET "repos/${REPO}/pulls" \
+                 -f state=open -f head="${HEAD_OWNER}:${HEAD_BRANCH}" \
+                 --jq 'first')
+          if [ -z "${pr}" ] || [ "${pr}" = "null" ]; then
+            echo "Открытого PR с head ${HEAD_OWNER}:${HEAD_BRANCH} нет — публиковать нечего."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          number=$(printf '%s' "${pr}" | jq -r '.number')
+
+          # Прогон мог устареть: пока он шёл, в ветку успели запушить снова.
+          # Публиковать старый zip поверх свежего нельзя.
+          pr_head=$(printf '%s' "${pr}" | jq -r '.head.sha')
+          if [ "${pr_head}" != "${HEAD_SHA}" ]; then
+            echo "Прогон собран из ${HEAD_SHA}, а head PR #${number} уже ${pr_head}" \
+                 "— устаревшая сборка, публикация пропущена."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Trust-gate: своя ветка публикуется автоматически, форк — только
+          # после явного опт-ина мейнтейнера меткой, иначе любой внешний PR
+          # автоматически становился бы установочной версией pr-N в HACS.
+          if [ "${HEAD_REPO}" != "${REPO}" ]; then
+            if ! printf '%s' "${pr}" \
+                 | jq -e --arg l "${GATE_LABEL}" \
+                     '.labels[]? | select(.name == $l)' >/dev/null; then
+              echo "PR #${number} пришёл из форка ${HEAD_REPO} и не имеет метки" \
+                   "'${GATE_LABEL}' — публикация пропущена."
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "number=${number}" >> "$GITHUB_OUTPUT"
+          echo "PR #${number} (${HEAD_REPO}) — публикуем пререлиз pr-${number}."
+
+      - name: Download pre-release artifact
+        if: steps.pr.outputs.publish == 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pr-prerelease
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Пересоздаём релиз целиком: при обновлении существующего GitHub
+      # игнорирует target_commitish, и тег навсегда остался бы на первом
+      # собранном коммите, расходясь с содержимым ассета.
+      - name: Drop previous pre-release
+        if: steps.pr.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          gh release delete "pr-${PR_NUMBER}" --repo "${REPO}" --yes --cleanup-tag \
+            || echo "Предыдущего пререлиза нет — нечего удалять."
+
+      - name: Re-check PR is still open and opted in
+        if: steps.pr.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
+          GATE_LABEL: prerelease
+        run: |
+          set -euo pipefail
+          pr=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")
+          state=$(printf '%s' "${pr}" | jq -r '.state')
+          if [ "${state}" != "open" ]; then
+            echo "PR #${PR_NUMBER} уже ${state} — публикацию отменяем," \
+                 "иначе останется осиротевший пререлиз."
+            exit 1
+          fi
+          if [ "${HEAD_REPO}" != "${REPO}" ]; then
+            if ! printf '%s' "${pr}" | jq -e --arg l "${GATE_LABEL}" \
+                 '.labels[]? | select(.name == $l)' >/dev/null; then
+              echo "Метку '${GATE_LABEL}' сняли с PR #${PR_NUMBER} — публикация отменена."
+              exit 1
+            fi
+          fi
+
+      - name: Create pre-release
+        if: steps.pr.outputs.publish == 'true'
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          tag_name: pr-${{ steps.pr.outputs.number }}
+          target_commitish: ${{ github.event.workflow_run.head_sha }}
+          name: "PR #${{ steps.pr.outputs.number }} pre-release"
+          body: |
+            Pre-release for PR #${{ steps.pr.outputs.number }}. Use for Home Assistant testing.
+
+            Собрано из слияния ${{ github.event.workflow_run.head_sha }} с базовой веткой.
+          prerelease: true
+          make_latest: false
+          fail_on_unmatched_files: true
+          files: elektronny_gorod.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

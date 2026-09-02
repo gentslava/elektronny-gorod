@@ -181,7 +181,9 @@ PLATFORMS: `[BINARY_SENSOR, CAMERA, EVENT, LOCK, SENSOR, SWITCH]` (`__init__.py:
 | `hassfest.yaml` | manifest validation | ✅ есть |
 | `hacs.yaml` | HACS validation | ✅ есть |
 | `python-tests.yaml` | pytest + coverage (matrix min/current HA) | ✅ есть |
-| `prerelease.yaml` | PR pre-release zip (filtered: paths + draft) | ✅ есть |
+| `prerelease.yaml` | PR pre-release zip в артефакт (filtered: paths + draft) | ✅ есть |
+| `prerelease-publish.yaml` | публикация pre-release `pr-N` (workflow_run) | ✅ есть |
+| `prerelease-cleanup.yaml` | удаление pre-release при закрытии PR | ✅ есть |
 | `release.yaml` | release zip + autocommit | ✅ есть |
 
 ## Brand assets
