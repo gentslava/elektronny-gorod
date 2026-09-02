@@ -20,5 +20,5 @@
     "firebase-messaging>=0.4.5",
     "audioop-lts>=0.2.1;python_version>='3.13'"
   ],
-  "version": "4.0.1"
+  "version": "4.1.0"
 }
