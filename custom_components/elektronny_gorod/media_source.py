@@ -8,8 +8,6 @@ Opaque IDs only — signed URLs are never logged or persisted
 
 from __future__ import annotations
 
-import asyncio
-import time
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -30,11 +28,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 from homeassistant.util import dt as dt_util
 
-from .api import ForpostDownloadError
-from .clip_proxy import (
-    async_register_clip_view,
-    clip_proxy_url,
-)
+from .clip_proxy import async_register_clip_view, clip_proxy_url
 from .const import DOMAIN, LOGGER
 from .history import place_display_name
 
@@ -56,13 +50,6 @@ _DEFAULT_DURATION_LABELS = {
     "duration_min": "{minutes} min",
     "duration_sec": "{seconds} sec",
 }
-
-from .clip_proxy import (
-    _DOWNLOAD_PREPARE_BUDGET,
-    _DOWNLOAD_PREPARE_INTERVAL,
-    _ERROR_PREPARING,
-)
-
 
 def _recent_days(count: int) -> list[date]:
     today = dt_util.now().date()
@@ -167,62 +154,14 @@ class ElektronnyGorodMediaSource(MediaSource):
             or not (event.available and event.goto_enabled)
         ):
             raise Unresolvable("Recording is not available")
-        try:
-            # Проверка готовности + прогрев серверной подготовки; сама
-            # операторская ссылка не покидает HA — браузер получает
-            # same-origin proxy URL (ORB блокирует octet-stream+attachment
-            # cross-origin, runtime 2026-08-30).
-            await self._poll_download(coordinator, camera_id, event_id)
-        except ForpostDownloadError as err:
-            if err.error_code == _ERROR_PREPARING:
-                raise Unresolvable(
-                    "Recording is being prepared, try again shortly"
-                ) from err
-            if err.error_code == "11005":
-                raise Unresolvable(
-                    "Archive is outside the retention window"
-                ) from err
-            raise Unresolvable("Recording is not available") from err
-        except Exception as ex:  # noqa: BLE001 - operator boundary
-            LOGGER.debug(
-                "Media source resolve failed for camera_id=%s event_id=%s (%s)",
-                camera_id,
-                event_id,
-                type(ex).__name__,
-            )
-            raise Unresolvable("Archive is temporarily unavailable") from None
+        # Ссылку у оператора не запрашиваем: каждый минт запускает
+        # подготовку mp4 заново (снимок 2026-05-25 — 4 отказа 423 и ~11 с
+        # ожидания), поэтому минт должен быть ровно один и живёт в прокси.
+        # Доступность события уже проверена выше по данным самого события.
         return PlayMedia(
             url=clip_proxy_url(self._hass, entry_id, event_id),
             mime_type=_MIME_MP4,
         )
-
-    async def _poll_download(
-        self, coordinator: Any, camera_id: str, event_id: str
-    ) -> str:
-        """Fetch the download URL, polling while the operator renders it.
-
-        ErrorCode 102 (`Файл не готов для загрузки`, HTTP 423) — сервер
-        готовит mp4 на demand; мобильное приложение показывает spinner и
-        повторяет запрос. Полняем его контрактом: bounded poll, бюджет
-        `_DOWNLOAD_PREPARE_BUDGET` — потом caller честно скажет "being
-        prepared". Остальные коды не транслируются в ожидание.
-        """
-        deadline = time.monotonic() + _DOWNLOAD_PREPARE_BUDGET
-        while True:
-            try:
-                return await coordinator.api.query_event_download(event_id)
-            except ForpostDownloadError as err:
-                if err.error_code != _ERROR_PREPARING:
-                    raise
-                if time.monotonic() >= deadline:
-                    raise
-                LOGGER.debug(
-                    "Media source download pending for camera_id=%s "
-                    "event_id=%s — waiting for operator preparation",
-                    camera_id,
-                    event_id,
-                )
-                await asyncio.sleep(_DOWNLOAD_PREPARE_INTERVAL)
 
     def _browse_root(self) -> BrowseMedia:
         children: list[BrowseMedia] = []
@@ -236,12 +175,25 @@ class ElektronnyGorodMediaSource(MediaSource):
         children.sort(key=lambda child: child.title)
         return self._directory(_uri(), _SOURCE_TITLE, children)
 
-    def _camera_visible(self, camera_id: str) -> bool:
+    def _camera_visible(self, camera: dict[str, Any]) -> bool:
+        """Скрытые камеры не попадают ни в browse, ни в resolve.
+
+        Скрытие у оператора проверяется первым, потому что доступно всегда.
+        Полагаться на один entity registry нельзя: записи может не быть, если
+        камера появилась в аккаунте уже после setup или сущность удалили, —
+        и тогда скрытая камера оказалась бы видна в архиве.
+        """
+        if camera.get("hidden"):
+            return False
+        camera_id = str(camera.get("id") or "")
+        if not camera_id:
+            return False
         registry = er.async_get(self._hass)
         entity_id = registry.async_get_entity_id(
             "camera", DOMAIN, f"{DOMAIN}_camera_{camera_id}"
         )
         if entity_id is None:
+            # Сущность ещё не создана — скрытие у оператора уже проверено выше.
             return True
         entry = registry.async_get(entity_id)
         return entry is None or entry.hidden_by is None
@@ -254,7 +206,7 @@ class ElektronnyGorodMediaSource(MediaSource):
             if str(camera.get("place_id") or "") != place_id:
                 continue
             camera_id = str(camera.get("id") or "")
-            if not camera_id or not self._camera_visible(camera_id):
+            if not camera_id or not self._camera_visible(camera):
                 continue
             cameras.append(camera)
         return cameras
@@ -317,7 +269,7 @@ class ElektronnyGorodMediaSource(MediaSource):
                 continue
             if str(camera.get("place_id") or "") != place_id:
                 continue
-            if not self._camera_visible(camera_id):
+            if not self._camera_visible(camera):
                 return None
             return camera
         return None

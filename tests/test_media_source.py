@@ -442,7 +442,7 @@ async def test_resolve_returns_play_media_for_valid_event(hass) -> None:
     play = await _source(hass).async_resolve_media(_item(hass, identifier))
 
     coordinator.api.query_camera_events.assert_awaited_once()
-    coordinator.api.query_event_download.assert_awaited_once_with("3001")
+    coordinator.api.query_event_download.assert_not_awaited()
     assert play.mime_type == "video/mp4"
     assert play.url.startswith(
         f"/api/elektronny_gorod/clips/{entry.entry_id}/3001?t="
@@ -517,50 +517,6 @@ async def test_resolve_events_lookup_failure_is_temporarily_unavailable(
     coordinator.api.query_event_download.assert_not_awaited()
 
 
-async def test_resolve_outside_retention(hass) -> None:
-    from custom_components.elektronny_gorod.api import ForpostDownloadError
-
-    coordinator = _coordinator(events=(_event(event_id="3001"),))
-    coordinator.api.query_event_download = AsyncMock(
-        side_effect=ForpostDownloadError("11005")
-    )
-    entry = _entry(hass, coordinator)
-
-    with pytest.raises(Unresolvable, match="outside the retention window"):
-        await _source(hass).async_resolve_media(
-            _item(
-                hass,
-                f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
-            )
-        )
-
-
-async def test_resolve_no_recording_and_transport_error(hass) -> None:
-    from custom_components.elektronny_gorod.api import ForpostDownloadError
-
-    base = f"/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001"
-
-    no_recording = _coordinator(events=(_event(event_id="3001"),))
-    no_recording.api.query_event_download = AsyncMock(
-        side_effect=ForpostDownloadError(None)
-    )
-    entry_a = _entry(hass, no_recording)
-    with pytest.raises(Unresolvable, match="not available"):
-        await _source(hass).async_resolve_media(
-            _item(hass, f"{entry_a.entry_id}{base}")
-        )
-
-    transport = _coordinator(events=(_event(event_id="3001"),))
-    transport.api.query_event_download = AsyncMock(
-        side_effect=RuntimeError("operator down")
-    )
-    entry_b = _entry(hass, transport)
-    with pytest.raises(Unresolvable, match="temporarily unavailable"):
-        await _source(hass).async_resolve_media(
-            _item(hass, f"{entry_b.entry_id}{base}")
-        )
-
-
 async def test_resolve_rejects_unknown_and_hidden_paths(hass) -> None:
     coordinator = _coordinator()
     entry = _entry(hass, coordinator)
@@ -623,9 +579,6 @@ async def test_resolve_failures_log_opaque_context_only(hass, caplog) -> None:
     lookup.api.query_camera_events.side_effect = RuntimeError("boom-secret")
     entry_a = _entry(hass, lookup)
 
-    download = _coordinator(events=(_event(event_id="3001"),))
-    download.api.query_event_download.side_effect = RuntimeError("boom-secret")
-    entry_b = _entry(hass, download)
     caplog.set_level(logging.DEBUG)
 
     with pytest.raises(Unresolvable, match="temporarily unavailable"):
@@ -635,20 +588,13 @@ async def test_resolve_failures_log_opaque_context_only(hass, caplog) -> None:
                 f"{entry_a.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
             )
         )
-    with pytest.raises(Unresolvable, match="temporarily unavailable"):
-        await _source(hass).async_resolve_media(
-            _item(
-                hass,
-                f"{entry_b.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001",
-            )
-        )
 
     assert (
         caplog.text.count(
             "Media source resolve failed for camera_id=111 event_id=3001"
             " (RuntimeError)"
         )
-        == 2
+        == 1
     )
     assert "boom-secret" not in caplog.text
 
@@ -825,51 +771,54 @@ def _resolve_item(hass, entry, camera_id=_INTERCOM_ID, event_id="3001") -> Media
     )
 
 
-def _patched_prepare_clock(ticks):
-    fake_time = MagicMock()
-    fake_time.monotonic.side_effect = ticks
-    return patch(
-        "custom_components.elektronny_gorod.media_source.time", fake_time
-    )
+async def test_resolve_never_mints_the_operator_link(hass) -> None:
+    """Регрессия: ожидание готовности жило и в resolve, и в прокси.
 
-
-async def test_resolve_polls_while_file_prepares(hass) -> None:
-    """ErrorCode 102 = server-side rendering: bounded poll until the link."""
+    Каждый минт запускает подготовку mp4 заново (снимок 2026-05-25: 4 отказа
+    423 и ~11 с ожидания), поэтому минт должен быть ровно один — в прокси.
+    """
     coordinator = _coordinator(events=(_event(),))
     coordinator.api.query_event_download = AsyncMock(
-        side_effect=[
-            ForpostDownloadError("102"),
-            ForpostDownloadError("102"),
-            "https://savevideo.example/signed-clip.mp4",
-        ]
+        return_value="https://savevideo.example/signed-clip.mp4"
     )
     entry = _entry(hass, coordinator)
 
-    with patch(
-        "custom_components.elektronny_gorod.media_source.asyncio.sleep",
-        new_callable=AsyncMock,
-    ) as sleep_mock, _patched_prepare_clock([0, 1, 3]):
-        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+    await _source(hass).async_resolve_media(_resolve_item(hass, entry))
 
-    assert play.url.startswith(f"/api/elektronny_gorod/clips/{entry.entry_id}/")
-    assert "savevideo.example" not in play.url
-    assert coordinator.api.query_event_download.await_count == 3
-    assert sleep_mock.await_count == 2
+    coordinator.api.query_event_download.assert_not_awaited()
 
 
-async def test_resolve_prepare_timeout_is_being_prepared(hass) -> None:
-    coordinator = _coordinator(events=(_event(),))
-    coordinator.api.query_event_download = AsyncMock(
-        side_effect=ForpostDownloadError("102")
+async def test_hidden_camera_without_registry_entry_stays_hidden(hass) -> None:
+    """Регрессия: видимость определялась только по entity registry.
+
+    Камера, скрытая у оператора, но ещё не заведённая как сущность (появилась
+    в аккаунте после setup либо сущность удалили), попадала в архив.
+    """
+    entry = _entry(
+        hass,
+        _coordinator(
+            cameras=[
+                {
+                    "id": _INTERCOM_ID,
+                    "name": "Подъезд",
+                    "place_id": _PLACE_ID,
+                    "source": "intercom",
+                },
+                {
+                    "id": _PUBLIC_ID,
+                    "name": "Двор",
+                    "place_id": _PLACE_ID,
+                    "source": "public",
+                    "hidden": True,
+                },
+            ]
+        ),
     )
-    entry = _entry(hass, coordinator)
 
-    with patch(
-        "custom_components.elektronny_gorod.media_source.asyncio.sleep",
-        new_callable=AsyncMock,
-    ) as sleep_mock, _patched_prepare_clock([0, 1, 3, 5, 7, 100]):
-        with pytest.raises(Unresolvable, match="being prepared"):
-            await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+    source = _source(hass)
+    result = await source.async_browse_media(
+        _item(hass, f"{entry.entry_id}/{_PLACE_ID}")
+    )
 
-    assert coordinator.api.query_event_download.await_count == 5
-    assert sleep_mock.await_count == 4
+    assert [child.title for child in result.children] == ["Подъезд"]
+    assert source._camera(entry.entry_id, _PLACE_ID, _PUBLIC_ID) is None
