@@ -3,6 +3,16 @@ name: PR Pre-Release Publish
 # Запускается в контексте base-репозитория, поэтому GITHUB_TOKEN здесь можно
 # поднять до contents: write даже когда исходный PR пришёл из форка.
 # Код форка тут не выполняется — берётся только собранный артефакт.
+#
+# Отдельного опт-ина для форков нет намеренно: прогон сборки для внешнего
+# контрибьютора GitHub и так не запускает без одобрения мейнтейнера
+# (approval_policy: all_external_contributors), причём заново на каждый push.
+# Без одобрения сборка не доходит до conclusion == success, значит publish не
+# стартует. Метка была бы вторым замком на той же двери и притом более слабым:
+# она ставится один раз на весь PR, а одобрение требуется на каждый коммит.
+#
+# Экшены закреплены мажорными тегами, а не SHA: пины никто не обновляет
+# вручную, и протухший пин фиксирует в том числе будущие уязвимости.
 on:
   workflow_run:
     workflows: ["PR Pre-Release"]
@@ -21,6 +31,10 @@ concurrency:
 
 jobs:
   publish:
+    # НЕСУЩАЯ СТРОКА. Неодобренный прогон завершается как
+    # status=completed + conclusion=action_required, то есть триггер workflow_run
+    # срабатывает и на нём. Единственное, что отделяет недоверенную сборку от
+    # публикации, — эта проверка. Не ослаблять.
     if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -40,7 +54,6 @@ jobs:
           HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
           HEAD_OWNER: ${{ github.event.workflow_run.head_repository.owner.login }}
           HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
-          GATE_LABEL: prerelease
         run: |
           set -euo pipefail
           # Точечный запрос по head-ref, а не перебор списка: список пришлось бы
@@ -63,20 +76,6 @@ jobs:
                  "— устаревшая сборка, публикация пропущена."
             echo "publish=false" >> "$GITHUB_OUTPUT"
             exit 0
-          fi
-
-          # Trust-gate: своя ветка публикуется автоматически, форк — только
-          # после явного опт-ина мейнтейнера меткой, иначе любой внешний PR
-          # автоматически становился бы установочной версией pr-N в HACS.
-          if [ "${HEAD_REPO}" != "${REPO}" ]; then
-            if ! printf '%s' "${pr}" \
-                 | jq -e --arg l "${GATE_LABEL}" \
-                     '.labels[]? | select(.name == $l)' >/dev/null; then
-              echo "PR #${number} пришёл из форка ${HEAD_REPO} и не имеет метки" \
-                   "'${GATE_LABEL}' — публикация пропущена."
-              echo "publish=false" >> "$GITHUB_OUTPUT"
-              exit 0
-            fi
           fi
 
           echo "publish=true" >> "$GITHUB_OUTPUT"
@@ -104,14 +103,12 @@ jobs:
           gh release delete "pr-${PR_NUMBER}" --repo "${REPO}" --yes --cleanup-tag \
             || echo "Предыдущего пререлиза нет — нечего удалять."
 
-      - name: Re-check PR is still open and opted in
+      - name: Re-check PR is still open
         if: steps.pr.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
-          HEAD_REPO: ${{ github.event.workflow_run.head_repository.full_name }}
-          GATE_LABEL: prerelease
         run: |
           set -euo pipefail
           pr=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}")
@@ -120,13 +117,6 @@ jobs:
             echo "PR #${PR_NUMBER} уже ${state} — публикацию отменяем," \
                  "иначе останется осиротевший пререлиз."
             exit 1
-          fi
-          if [ "${HEAD_REPO}" != "${REPO}" ]; then
-            if ! printf '%s' "${pr}" | jq -e --arg l "${GATE_LABEL}" \
-                 '.labels[]? | select(.name == $l)' >/dev/null; then
-              echo "Метку '${GATE_LABEL}' сняли с PR #${PR_NUMBER} — публикация отменена."
-              exit 1
-            fi
           fi
 
       - name: Create pre-release

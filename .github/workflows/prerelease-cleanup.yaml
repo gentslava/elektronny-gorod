@@ -6,18 +6,13 @@ name: PR Pre-Release Cleanup
 # pull_request_target не возникает.
 on:
   pull_request_target:
-    types: [closed, unlabeled]
+    types: [closed]
 
 permissions:
   contents: write
 
 jobs:
   cleanup:
-    # closed — обычная уборка; unlabeled — отзыв опт-ина мейнтейнером, тогда
-    # уже опубликованную сборку тоже надо убрать, а не только запретить новые.
-    if: >-
-      github.event.action == 'closed'
-      || github.event.label.name == 'prerelease'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
