@@ -80,9 +80,7 @@ query_event_download(event_id: str) -> str
 
 HA's `media_source` websocket handlers relay the exception message as plain text (`resolve_media_failed` / `browse_media_failed`), and `HomeAssistantError.__str__` degrades `translation_key`-based errors to a domain.key string on this path. Errors are therefore raised as `Unresolvable` (resolve) / `BrowseError` (browse) with plain English messages — no new translation keys:
 
-Resolve fails before the player opens; everything the operator refuses is
-reported by the proxy as an HTTP status inside the `<video>` element, with the
-mapped code recorded in the HA log.
+Resolve fails before the player opens; everything the operator refuses is reported by the proxy as an HTTP status inside the `<video>` element, with the mapped code recorded in the HA log.
 
 | Condition | Where | Result |
 |---|---|---|

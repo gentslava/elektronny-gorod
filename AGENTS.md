@@ -165,12 +165,9 @@ docs/                      # AIDD-документация (project/architecture
 - `.agents/rules/*.md` — канонические инженерные и process rules.
 - `.agents/commands/*.md` — канонические операционные процедуры.
 - `.agents/hooks/*` — канонические реализации cross-tool gates.
-- `.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md`
-  и `.agents/skills/source-command-*` — только discovery/runtime adapters.
+- `.claude/**`, `.codex/**`, `.cursor/**`, `.github/copilot-instructions.md` и `.agents/skills/source-command-*` — только discovery/runtime adapters.
 
-Адаптер может содержать обязательные для инструмента metadata, glob/path scope
-или wiring, но не копию правила. Внутренние пути в agent contracts задаются от
-корня репозитория в backticks; цепочки `../../..` в adapters запрещены.
+Адаптер может содержать обязательные для инструмента metadata, glob/path scope или wiring, но не копию правила. Внутренние пути в agent contracts задаются от корня репозитория в backticks; цепочки `../../..` в adapters запрещены.
 
 ## Где искать что
 
