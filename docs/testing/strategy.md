@@ -1,7 +1,7 @@
 Status: Active Owner: QA / Testing Agent Last reviewed: 2026-08-14 (backend, integration frontend, website and canonical agent-contract suites synchronized)
 
 Source files:
-- `tests/**` (59 test-модулей + `conftest.py`)
+- `tests/**` (60 test-модулей + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
@@ -31,8 +31,8 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **717 passed, 2 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-08-30) |
-| Test modules | 59 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **752 passed, 0 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-02) |
+| Test modules | 60 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Product website | **69 passed**, `tsc --noEmit` и Vite production build (`website/`) |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
@@ -57,7 +57,7 @@ tests/
 ├── test_http.py / test_api_push.py / test_api_camera.py / test_api_history.py / test_api_sip.py / test_diagnostics.py
 ├── test_camera_*.py / test_call_camera.py / test_go2rtc_*.py
 ├── test_stream_manager*.py / test_sensor_rtsp_urls.py / test_config_flow_keep_warm.py
-├── test_event.py / test_history.py / test_history_ws.py / test_media_source.py / test_api_media.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
+├── test_event.py / test_history.py / test_history_ws.py / test_media_source.py / test_api_media.py / test_clip_proxy.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
 ├── test_sip_*.py / test_uplink_ws.py
 ├── test_secret_log_gate.py / test_audit_reconciliation_gate.py
 ├── test_aidd_contracts.py
@@ -246,7 +246,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 717 passed, 2 skipped (2026-08-30).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 752 passed, 0 skipped (2026-09-02).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

@@ -74,18 +74,26 @@ media-source://elektronny_gorod/                                          → pl
 query_event_download(event_id: str) -> str
 ```
 
-`GET /rest/v1/forpost/events/{event_id}/downloads?container=mp4` → `{"data": "<signed mp4 url>"}` (note: `data` is a string, not an object). The wrapper raises typed errors for the forpost `{errorCode, errorMessage}` shape and non-200 responses. Resolve returns `PlayMedia(url, "video/mp4")` where the URL is a **same-origin proxy link** (`/api/elektronny_gorod/clips/<entry_id>/<event_id>?t=<token>`), not the operator link. The operator's signed URL is used transiently server-side and never reaches the browser: the storage host serves clips as `application/octet-stream` + `Content-Disposition: attachment`, which Chromium's ORB blocks inside `<video>` elements (runtime-verified 2026-08-30). The proxy view (HMAC-SHA256 token, per-boot secret, 10-minute TTL, constant-time verification, `requires_auth=False` following HA's camera/tts signed-URL pattern because `<video>` cannot attach session auth) re-mints a fresh operator link per stream, forces `Content-Type: video/mp4`, and forwards `Range` requests for seeking.
+`GET /rest/v1/forpost/events/{event_id}/downloads?container=mp4` → `{"data": "<signed mp4 url>"}` (note: `data` is a string, not an object). The wrapper raises typed errors for the forpost `{errorCode, errorMessage}` shape and non-200 responses. Resolve returns `PlayMedia(url, "video/mp4")` where the URL is a **same-origin proxy link** (`/api/elektronny_gorod/clips/<entry_id>/<event_id>?t=<token>`), not the operator link. The operator's signed URL is used transiently server-side and never reaches the browser: the storage host serves clips as `application/octet-stream` + `Content-Disposition: attachment`, which Chromium's ORB blocks inside `<video>` elements (runtime-verified 2026-08-30). The proxy view (HMAC-SHA256 token, per-boot secret, 10-minute TTL, constant-time verification, `requires_auth=False` following HA's camera/tts signed-URL pattern because `<video>` cannot attach session auth) mints the operator link **once per event**, waits out the preparation gate, downloads the clip in full and caches it for the token's lifetime, then forces `Content-Type: video/mp4` and serves byte ranges **itself** (`Accept-Ranges`, `206`, `416`). `Range` is never forwarded upstream: the storage host does not advertise `Accept-Ranges`, and the mobile app never sends one — it downloads the whole file and plays it locally (capture 2026-05-25). Forwarding instead of serving ranges is what disabled seeking in Chromium (production 2026-09-02).
 
 ### Error mapping
 
 HA's `media_source` websocket handlers relay the exception message as plain text (`resolve_media_failed` / `browse_media_failed`), and `HomeAssistantError.__str__` degrades `translation_key`-based errors to a domain.key string on this path. Errors are therefore raised as `Unresolvable` (resolve) / `BrowseError` (browse) with plain English messages — no new translation keys:
 
-| Condition | Message |
-|---|---|
-| `errorCode 11005` (archive out of range) | `Archive is outside the retention window` |
-| Event not downloadable (`IsGotoEnabled=0` / `isAvailable=false` / missing `data`) | `Recording is not available` |
-| Transient API/transport failure | `Archive is temporarily unavailable` |
-| Malformed or deep-linked unknown ID | `Unknown media item` |
+Resolve fails before the player opens; everything the operator refuses is
+reported by the proxy as an HTTP status inside the `<video>` element, with the
+mapped code recorded in the HA log.
+
+| Condition | Where | Result |
+|---|---|---|
+| Malformed or deep-linked unknown ID | resolve | `Unknown media item` (`Unresolvable`) |
+| Event not downloadable (`IsGotoEnabled=0` / `isAvailable=false`) | resolve | `Recording is not available` (`Unresolvable`) |
+| Event lookup failure at the operator | resolve | `Archive is temporarily unavailable` (`Unresolvable`) |
+| `errorCode 11005` (archive out of range), missing `data`, any other refusal | proxy | `404` + `LOGGER.warning` carrying the sanitised code |
+| `ErrorCode 102` / HTTP 423 beyond the preparation budget | proxy | `503 Recording is being prepared, try again shortly` |
+| Transport failure, oversized or empty body | proxy | `502 Archive is temporarily unavailable` |
+| Expired or forged clip token (paused past the TTL, then sought) | proxy | `403 Invalid or expired clip link` |
+| Entry unloaded or removed while the player is open | proxy | `404 Unknown media item` |
 
 ### Permissions
 
