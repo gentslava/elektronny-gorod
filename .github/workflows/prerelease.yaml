@@ -28,7 +28,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Prepare pre-release zip
         run: |
@@ -39,7 +39,7 @@ jobs:
       # выполняется на коде PR, поэтому всё его содержимое недоверенное.
       # Публикующий workflow определяет PR сам, из trusted-полей payload.
       - name: Upload pre-release artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pr-prerelease
           path: elektronny_gorod.zip
