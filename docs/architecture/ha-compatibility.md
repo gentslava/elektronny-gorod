@@ -45,12 +45,12 @@ Quality gates:
 | `documentation` | wiki URL | действующая ссылка | ⚠️ контент wiki не подтверждён |
 | `issue_tracker` | issues URL | действующая ссылка | ✅ |
 | `requirements` | `firebase-messaging>=0.4.5`, `audioop-lts>=0.2.1` | все вне HA core, объявлены в manifest | ✅ — `0.4.5` является проверенным минимумом для FCM-вызова и shared HA session; более новые исправления зависимости разрешены осознанно (ADR-0011, A-80), `audioop-lts` нужен для G.711-транскода SIP (A-81; только Python 3.13+, `audioop` удалён из stdlib PEP 594) |
-| `dependencies` | `[]` | HA-интеграции, нужные при старте | ✅ |
+| `dependencies` | `["http"]` | HA-интеграции, нужные при старте | ✅ — `clip_proxy.py` регистрирует `HomeAssistantView` и импортирует `homeassistant.components.http` на уровне модуля |
 | `iot_class` | `cloud_polling` | соответствие реальности | ✅ coordinator polling каждые 5 минут |
 | `config_flow` | `true` | если есть UI flow | ✅ |
 | `integration_type` | `hub` | одна entry → несколько устройств | ✅ |
 | `quality_scale` | `bronze` | не выше подтверждённого gate | ✅ — config-flow/migration tests существуют |
-| `after_dependencies` | ❌ | при необходимости | n/a |
+| `after_dependencies` | `["media_source"]` | при необходимости | ✅ — интеграция предоставляет integration platform `media_source` (`media_source.py`) |
 
 ## HACS / hacs.json
 
@@ -172,7 +172,9 @@ History `EventEntity` additive и не требует config-entry migration: st
 
 PLATFORMS: `[BINARY_SENSOR, CAMERA, EVENT, LOCK, SENSOR, SWITCH]` (`__init__.py:PLATFORMS`).
 
-Зависимости HA-core (`dependencies` в manifest) пусты. Импортированный helper `persistent_notification` и стандартные entity-платформы не требуют отдельного порядка setup через `dependencies`/`after_dependencies`.
+Помимо entity-платформ интеграция предоставляет integration platform `media_source` (`media_source.py`) и регистрирует `HomeAssistantView` (`clip_proxy.py`), поэтому manifest объявляет `dependencies: ["http"]` и `after_dependencies: ["media_source"]`.
+
+Формально discovery работает и без этого: `async_process_integration_platforms` обрабатывает как уже загруженные компоненты, так и `EVENT_COMPONENT_LOADED`, поэтому порядок setup не важен ни в одну сторону. Объявление нужно по двум причинам — оно соответствует конвенции core-интеграций (все, кто регистрирует view, объявляют `http`) и снимает краевой случай конфигурации без `default_config` и без `media_source:`, где архив молча не появился бы. Импортированный helper `persistent_notification` и стандартные entity-платформы отдельного порядка setup по-прежнему не требуют.
 
 ## CI / Validation
 
