@@ -436,6 +436,74 @@ async def test_operator_error_is_recorded_without_exception_details() -> None:
     assert "OPERATOR_SECRET" not in repr(state)
 
 
+async def test_ha_open_does_not_wait_for_preload() -> None:
+    """Прогрев не оплачивается временем старта.
+
+    go2rtc отвечает на PUT /api/preload только когда поднимет поток (2-6 с на
+    камеру по замеру на проде). Раньше HA ждал этот ответ внутри
+    stream_source и не мог добавить следующую камеру.
+    """
+    manager, _, client = _manager()
+    manager.is_camera_eligible = MagicMock(return_value=True)
+
+    gate = asyncio.Event()
+
+    async def _slow_preload(_name):
+        await gate.wait()
+
+    client.async_enable_preload = AsyncMock(side_effect=_slow_preload)
+
+    # Таймаут — часть проверки: если preload снова станет блокирующим,
+    # тест упадёт здесь, а не подвесит прогон.
+    result = await asyncio.wait_for(
+        manager.async_refresh("100", "ha_open"), timeout=5
+    )
+
+    # refresh вернулся, пока go2rtc ещё поднимает поток
+    assert result.proxied is True
+    assert not gate.is_set()
+
+    gate.set()
+    await asyncio.gather(*manager._preload_tasks.values())
+    client.async_enable_preload.assert_awaited_once()
+
+
+async def test_background_refresh_still_waits_for_preload() -> None:
+    """Фоновому циклу спешить некуда — там прогрев остаётся синхронным."""
+    manager, _, client = _manager()
+    manager.is_camera_eligible = MagicMock(return_value=True)
+
+    await manager.async_refresh("100", "background_due")
+
+    client.async_enable_preload.assert_awaited_once()
+    assert not manager._preload_tasks
+    state = manager.camera_state("100")
+    assert state is not None
+    assert state.preloaded is True
+
+
+async def test_stop_cancels_pending_preload_before_cleanup() -> None:
+    """Поздний PUT не должен пережить выгрузку entry."""
+    manager, _, client = _manager()
+    manager.is_camera_eligible = MagicMock(return_value=True)
+
+    gate = asyncio.Event()
+
+    async def _slow_preload(_name):
+        await gate.wait()
+
+    client.async_enable_preload = AsyncMock(side_effect=_slow_preload)
+    await manager.async_refresh("100", "ha_open")
+    assert manager._preload_tasks
+
+    pending = list(manager._preload_tasks.values())
+    await manager.async_stop()
+
+    assert not manager._preload_tasks
+    assert all(task.cancelled() or task.done() for task in pending)
+    # Гейт так и не открыт: PUT был отменён, а не дождался go2rtc.
+    assert not gate.is_set()
+
 async def test_retry_delay_survives_long_operator_outage() -> None:
     """Затяжной отказ оператора не роняет расчёт задержки.
 
