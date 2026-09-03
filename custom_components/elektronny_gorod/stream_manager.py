@@ -556,34 +556,11 @@ class CameraStreamManager:
                 # быть для внешних потребителей.
                 self._schedule_preload(state)
             elif needs_preload:
-                # Claim the stable name before network I/O so unload can issue
-                # an idempotent DELETE even if cancellation races a completed
-                # server-side preload PUT whose response never reaches us.
-                self._owned_preloads.add(state.stream_name)
-                try:
-                    await self.client.async_enable_preload(state.stream_name)
-                except Go2RtcRequestError as err:
-                    self._owned_preloads.discard(state.stream_name)
-                    state.preloaded = False
-                    state.producer_active = False
-                    self._record_failure(state, f"preload_{err.category}")
-                    return StreamRefreshResult(
-                        url=source_url,
-                        proxied=False,
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception:  # noqa: BLE001 - sanitize transport detail
-                    self._owned_preloads.discard(state.stream_name)
-                    state.preloaded = False
-                    state.producer_active = False
-                    self._record_failure(state, "preload_unexpected")
-                    return StreamRefreshResult(
-                        url=source_url,
-                        proxied=False,
-                    )
-                state.preloaded = True
-                state.producer_active = True
+                # Фоновый цикл ждёт прогрев: по его исходу вызывающий узнаёт,
+                # что go2rtc ненадёжен, и получает прямой операторский URL как
+                # fallback (см. camera.py: `if not result.proxied`).
+                if not await self._async_enable_preload(state):
+                    return StreamRefreshResult(url=source_url, proxied=False)
 
             state.last_success = datetime.now(timezone.utc)
             completed = _monotonic()
@@ -607,31 +584,42 @@ class CameraStreamManager:
             if self._inflight.get(camera_id) is current:
                 self._inflight.pop(camera_id, None)
 
+    async def _async_enable_preload(self, state: ManagedCameraState) -> bool:
+        """Enable one go2rtc preload; False means the failure is recorded.
+
+        Имя потока клеймится до сетевого вызова, чтобы выгрузка могла выдать
+        идемпотентный DELETE, даже если отмена гонится с уже выполненным на
+        сервере PUT, ответ которого до нас не дошёл.
+        """
+        self._owned_preloads.add(state.stream_name)
+        try:
+            await self.client.async_enable_preload(state.stream_name)
+        except asyncio.CancelledError:
+            raise
+        except Go2RtcRequestError as err:
+            self._on_preload_failed(state, f"preload_{err.category}")
+            return False
+        except Exception:  # noqa: BLE001 - sanitize transport detail
+            self._on_preload_failed(state, "preload_unexpected")
+            return False
+        state.preloaded = True
+        state.producer_active = True
+        return True
+
+    def _on_preload_failed(self, state: ManagedCameraState, status: str) -> None:
+        self._owned_preloads.discard(state.stream_name)
+        state.preloaded = False
+        state.producer_active = False
+        self._record_failure(state, status)
+
     def _schedule_preload(self, state: ManagedCameraState) -> None:
         """Enable the go2rtc preload without blocking the caller."""
         if state.camera_id in self._preload_tasks or self._stopping:
             return
 
         async def _run() -> None:
-            try:
-                await self.client.async_enable_preload(state.stream_name)
-            except asyncio.CancelledError:
-                raise
-            except Go2RtcRequestError as err:
-                self._owned_preloads.discard(state.stream_name)
-                state.preloaded = False
-                state.producer_active = False
-                self._record_failure(state, f"preload_{err.category}")
-                return
-            except Exception:  # noqa: BLE001 - sanitize transport detail
-                self._owned_preloads.discard(state.stream_name)
-                state.preloaded = False
-                state.producer_active = False
-                self._record_failure(state, "preload_unexpected")
-                return
-            state.preloaded = True
-            state.producer_active = True
-            self._notify_listeners()
+            if await self._async_enable_preload(state):
+                self._notify_listeners()
 
         task = self.hass.async_create_task(
             _run(),
