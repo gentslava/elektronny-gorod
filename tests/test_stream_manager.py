@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -258,6 +258,9 @@ async def test_concurrent_eligible_reasons_share_one_preload_activation() -> Non
 
 
 async def test_sequential_refreshes_mint_separate_operator_urls() -> None:
+    """Операторская ссылка одноразовая: каждый реальный refresh минтит свою."""
+    from custom_components.elektronny_gorod import stream_manager as sm
+
     manager, coordinator, client = _manager(
         stream_side_effect=[
             "https://operator/100?token=FIRST",
@@ -265,8 +268,11 @@ async def test_sequential_refreshes_mint_separate_operator_urls() -> None:
         ]
     )
 
-    first = await manager.async_refresh("100", "ha_open")
-    second = await manager.async_refresh("100", "ha_open")
+    clock = [1000.0]
+    with patch.object(sm, "_monotonic", lambda: clock[0]):
+        first = await manager.async_refresh("100", "ha_open")
+        clock[0] += sm.HA_OPEN_REUSE_SECONDS + 1
+        second = await manager.async_refresh("100", "ha_open")
 
     assert first.proxied is True
     assert second.proxied is True
@@ -277,6 +283,47 @@ async def test_sequential_refreshes_mint_separate_operator_urls() -> None:
     ]
     assert "FIRST" in patched_sources[0]
     assert "SECOND" in patched_sources[1]
+
+
+async def test_second_ha_open_reuses_the_live_stream() -> None:
+    """HA спрашивает источник дважды на камеру — второй минт избыточен.
+
+    Наружу отдаётся стабильный go2rtc URL, а поток уже настроен свежим
+    источником, поэтому повторный поход к оператору ничего не меняет.
+    """
+    from custom_components.elektronny_gorod import stream_manager as sm
+
+    manager, coordinator, client = _manager()
+
+    clock = [1000.0]
+    with patch.object(sm, "_monotonic", lambda: clock[0]):
+        first = await manager.async_refresh("100", "ha_open")
+        clock[0] += 2.0  # HA возвращается через пару секунд
+        second = await manager.async_refresh("100", "ha_open")
+
+    assert first.proxied is True
+    assert second.proxied is True
+    assert second.url == first.url
+    assert coordinator.get_camera_stream.await_count == 1
+    assert client.async_patch_stream.await_count == 1
+
+
+@pytest.mark.parametrize("reason", ["recovery", "active_consumer"])
+async def test_recovery_always_mints_even_within_the_reuse_window(
+    reason: str,
+) -> None:
+    """Переиспользование только для ha_open: recovery обязан взять свежий URL."""
+    from custom_components.elektronny_gorod import stream_manager as sm
+
+    manager, coordinator, _ = _manager()
+
+    clock = [1000.0]
+    with patch.object(sm, "_monotonic", lambda: clock[0]):
+        await manager.async_refresh("100", "ha_open")
+        clock[0] += 1.0
+        await manager.async_refresh("100", reason)
+
+    assert coordinator.get_camera_stream.await_count == 2
 
 
 async def test_empty_operator_url_records_failure_without_patch() -> None:

@@ -51,6 +51,13 @@ ON_DEMAND_REFRESH_REASONS = frozenset({
     "recovery",
     "active_consumer",
 })
+# HA спрашивает источник дважды на каждую камеру: сначала выбирая WebRTC-
+# провайдера, затем создавая поток. Второй заход приходит через пару секунд,
+# когда поток в go2rtc уже настроен свежим источником, а наружу и так отдаётся
+# стабильный go2rtc URL — повторный минт его не меняет, только удваивает
+# запросы к оператору при старте. Окно намеренно короткое и применяется
+# только к `ha_open`: `recovery` и `active_consumer` обязаны минтить заново.
+HA_OPEN_REUSE_SECONDS = 10.0
 
 
 def _monotonic() -> float:
@@ -463,6 +470,15 @@ class CameraStreamManager:
             if not publishable:
                 state.status = "excluded"
                 self._notify_listeners()
+                return self._proxied_result(state)
+            if (
+                reason == "ha_open"
+                and state.present
+                and state.last_success_monotonic is not None
+                and _monotonic() - state.last_success_monotonic
+                < HA_OPEN_REUSE_SECONDS
+            ):
+                # Поток уже поднят свежим источником — переиспользуем его.
                 return self._proxied_result(state)
             try:
                 source_url = await self.coordinator.get_camera_stream(camera_id)
