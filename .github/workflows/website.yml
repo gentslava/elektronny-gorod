@@ -4,12 +4,18 @@ name: Deploy website
 on:
   push:
     branches: [master]
-    # Версия и минимум HA подставляются в разметку при сборке, поэтому их
-    # подъём меняет опубликованный сайт, не трогая его исходники.
     paths:
       - "website/**"
-      - "custom_components/elektronny_gorod/manifest.json"
       - "hacs.json"
+  # Версия подставляется в разметку при сборке, поэтому релиз меняет
+  # опубликованный сайт, не трогая его исходники. Ловить это push-ом по
+  # `manifest.json` нельзя: файл правит `EndBug/add-and-commit` с дефолтным
+  # `GITHUB_TOKEN`, а коммиты этого токена push-событий не порождают —
+  # проверено на релизе 4.1.0, ноль запусков. Поэтому цепляемся за workflow
+  # релиза, который к тому моменту уже поднял версию в манифесте.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -23,6 +29,11 @@ concurrency:
 
 jobs:
   build:
+    # Неудачный релиз не публикует сайт с полусобранной версией.
+    if: >-
+      github.event_name != 'workflow_run'
+      || github.event.workflow_run.conclusion == 'success'
+
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

@@ -634,9 +634,14 @@ class CameraStreamManager:
             eager_start=False,
         )
         self._preload_tasks[state.camera_id] = task
-        task.add_done_callback(
-            lambda _t, cam=state.camera_id: self._preload_tasks.pop(cam, None)
-        )
+        # По идентичности, а не по ключу: колбэк исполняется через `call_soon`,
+        # и к этому моменту для камеры может быть зарегистрирована уже другая
+        # задача — снятие по ключу выселило бы её из-под `async_stop`.
+        def _forget(done: asyncio.Task, cam: str = state.camera_id) -> None:
+            if self._preload_tasks.get(cam) is done:
+                self._preload_tasks.pop(cam, None)
+
+        task.add_done_callback(_forget)
 
     def _proxied_result(self, state: ManagedCameraState) -> StreamRefreshResult:
         """Return the stable credential-aware URL without persisting it."""

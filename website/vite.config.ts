@@ -18,7 +18,7 @@ const repoJson = (relative: string) =>
     readFileSync(fileURLToPath(new URL(relative, import.meta.url)), "utf8"),
   );
 
-const versionPlaceholders = () => ({
+export const versionPlaceholders = () => ({
   name: "eg-version-placeholders",
   transformIndexHtml(html: string) {
     const manifest = repoJson(

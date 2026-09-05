@@ -33,6 +33,7 @@ describe("синхронизация с репозиторием", () => {
     expect(html).toContain('"softwareVersion": "%APP_VERSION%"');
     expect(html).toContain('<span class="chip">%APP_VERSION% ·');
     expect(html).toContain('"operatingSystem": "Home Assistant %MIN_HA%+"');
+    expect(html).toContain('<span class="chip">Home Assistant %MIN_HA%+</span>');
 
     const jsonLdBlock = html.slice(
       html.indexOf("application/ld+json"),
@@ -42,12 +43,42 @@ describe("синхронизация с репозиторием", () => {
     expect(jsonLdBlock).not.toMatch(/\d+\.\d+\.\d+/);
   });
 
-  it("ссылка на release notes ведёт на существующий файл", () => {
+  it("ссылка на release notes ведёт на файл текущей версии", () => {
     const repoPath = project.releaseNotesLatest.split("/blob/master/")[1];
 
     expect(repoPath).toBeDefined();
-    // Ссылка собирается из версии манифеста, поэтому проверяем, что файл
-    // релиза действительно написан — иначе сайт уводит на 404.
+    // Симптом A-103 был именно такой: ссылка вела на прошлый релиз. Проверять
+    // только существование файла мало — старый файл существует.
+    expect(project.releaseNotesLatest).toContain(`/${project.version}.md`);
     expect(() => readRepo(repoPath as string)).not.toThrow();
+  });
+
+  it("сборка подставляет версию вместо плейсхолдеров", async () => {
+    // Через сам конфиг, а не напрямую через функцию: иначе снятие плагина из
+    // `plugins: [...]` оставляло проверку зелёной, а на сайт уезжал буквально
+    // `%APP_VERSION%`.
+    const config = (await import("../vite.config")).default;
+    const plugins = (config as { plugins?: unknown[] }).plugins ?? [];
+    const plugin = plugins.find(
+      (p): p is { name: string; transformIndexHtml: (html: string) => string } =>
+        typeof p === "object" &&
+        p !== null &&
+        (p as { name?: string }).name === "eg-version-placeholders",
+    );
+
+    expect(plugin, "плагин подстановки не подключён в vite.config").toBeDefined();
+
+    const html = readRepo("website/index.html");
+    const rendered = plugin!.transformIndexHtml(html);
+
+    // Без этой проверки снятие плагина оставляло тесты и сборку зелёными, а на
+    // сайт уезжал буквально `%APP_VERSION%` — хуже, чем прошлая версия.
+    expect(rendered).not.toContain("%APP_VERSION%");
+    expect(rendered).not.toContain("%MIN_HA%");
+    expect(rendered).toContain(`"softwareVersion": "${project.version}"`);
+    expect(rendered).toContain(
+      `"operatingSystem": "Home Assistant ${project.minHomeAssistant}+"`,
+    );
+    expect(rendered).toContain(`<span class="chip">${project.version} ·`);
   });
 });

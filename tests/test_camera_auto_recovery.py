@@ -560,11 +560,19 @@ async def test_failed_recovery_widens_cooldown(hass: HomeAssistant, mock_api):
     assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_COOLDOWN * 4
 
 
-async def test_backoff_is_capped(hass: HomeAssistant, mock_api):
-    """Пауза не растёт бесконечно — упирается в потолок."""
+@pytest.mark.parametrize("failures", [7, 99, 1023, 1024, 4096, 100_000])
+async def test_backoff_is_capped(hass: HomeAssistant, mock_api, failures):
+    """Пауза не растёт бесконечно и не переполняет float.
+
+    Счётчик ничем не ограничен, а `2 ** failures` перестаёт помещаться во
+    float примерно на 1024-й неудаче подряд. Прежний тест пинил только 99 и
+    проходил даже без ограничения показателя, поэтому граница проверяется
+    явно: исключение отсюда летит из `@callback`, который зовут HA Stream и
+    оба таймера, и авто-recovery для камеры умерла бы насовсем.
+    """
     cam = await _setup_camera(hass, use_go2rtc=False)
 
-    cam._recovery_failures = 99
+    cam._recovery_failures = failures
 
     assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_BACKOFF_MAX
 
@@ -629,3 +637,21 @@ async def test_manual_open_ignores_backoff(hass: HomeAssistant, mock_api):
 
     assert url == "rtsp://ok/stream"
     assert instance.query_camera_stream.await_count == 1
+
+
+async def test_successful_open_clears_recovery_backoff(hass: HomeAssistant, mock_api):
+    """Успешное открытие камеры возвращает обычный ритм фоновых попыток.
+
+    Иначе камера уносила бы накопленный получасовой интервал в уже здоровый
+    период: оператор отвечает, а первая фоновая попытка ждёт до получаса.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    cam._recovery_failures = 6
+    assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_BACKOFF_MAX
+
+    instance.query_camera_stream = AsyncMock(return_value="rtsp://ok/stream")
+    assert await cam.stream_source() == "rtsp://ok/stream"
+
+    assert cam._recovery_failures == 0
+    assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_COOLDOWN

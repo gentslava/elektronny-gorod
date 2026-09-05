@@ -531,16 +531,17 @@ async def test_retry_delay_survives_long_operator_outage() -> None:
         state.failure_count = failure_count
         manager._record_failure(state, "empty_source")
 
-    # Дошли сюда без OverflowError. Заодно фиксируем саму прогрессию.
-    delays = []
-    for failure_count in (1, 2, 3, 10, 10_000):
+    # Прогрессию берём из того, что планировщик реально получил, а не
+    # пересчитываем формулу в тесте: иначе проверка сравнивала бы её с самой
+    # собой и молчала бы даже при полностью снятом backoff.
+    manager._schedule_due.reset_mock()
+    for failure_count in (0, 1, 2, 9, 9_999):
         state.failure_count = failure_count
-        exponent = min(state.failure_count - 1, RETRY_MAX_EXPONENT)
-        delays.append(
-            min(RETRY_INITIAL_SECONDS * 2**exponent, RETRY_MAX_SECONDS)
-        )
+        manager._record_failure(state, "empty_source")
 
-    assert delays == [15.0, 30.0, 60.0, 300.0, 300.0]
+    scheduled = [call.args[1] for call in manager._schedule_due.call_args_list]
+
+    assert scheduled == [15.0, 30.0, 60.0, 300.0, 300.0]
 
 
 async def test_ha_open_does_not_reuse_after_failure() -> None:
