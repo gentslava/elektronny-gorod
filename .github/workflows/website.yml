@@ -4,7 +4,12 @@ name: Deploy website
 on:
   push:
     branches: [master]
-    paths: ["website/**"]
+    # Версия и минимум HA подставляются в разметку при сборке, поэтому их
+    # подъём меняет опубликованный сайт, не трогая его исходники.
+    paths:
+      - "website/**"
+      - "custom_components/elektronny_gorod/manifest.json"
+      - "hacs.json"
   workflow_dispatch:
 
 permissions:

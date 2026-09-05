@@ -1,11 +1,17 @@
 // Единый источник ссылок и констант сайта. Значения, которые обязаны
 // совпадать с репозиторием, перечислены в docs/sync.md.
+//
+// Версия и минимальная HA не дублируются, а читаются из самих источников:
+// раньше их поднимали руками, и сайт месяцами обещал прошлый релиз и
+// неподдерживаемую версию ядра (A-100).
+import hacs from "../../../hacs.json";
+import manifest from "../../../custom_components/elektronny_gorod/manifest.json";
 
 export const project = {
   name: "Электронный город и Дом.ру для Home Assistant",
   shortName: "elektronny-gorod",
-  version: "4.1.0",
-  minHomeAssistant: "2026.8.1",
+  version: manifest.version,
+  minHomeAssistant: hacs.homeassistant,
   license: "MIT",
   domain: "elektronny_gorod",
   repo: "https://github.com/gentslava/elektronny-gorod",
@@ -19,8 +25,7 @@ export const project = {
     "https://github.com/gentslava/elektronny-gorod/blob/master/docs/features/intercom-two-way-audio/call-screen-setup.md",
   historyCardDocs:
     "https://github.com/gentslava/elektronny-gorod/blob/master/docs/features/mobile-app-parity/history-card.md",
-  releaseNotesLatest:
-    "https://github.com/gentslava/elektronny-gorod/blob/master/docs/releases/4.1.0.md",
+  releaseNotesLatest: `https://github.com/gentslava/elektronny-gorod/blob/master/docs/releases/${manifest.version}.md`,
   // Официальные deep links my.home-assistant.io — уже используются в README.
   hacsDeepLink:
     "https://my.home-assistant.io/redirect/hacs_repository/?owner=gentslava&repository=elektronny-gorod&category=integration",
