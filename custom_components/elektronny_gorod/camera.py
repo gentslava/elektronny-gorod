@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import time
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -56,6 +57,14 @@ STREAM_RECOVERY_COOLDOWN = 30.0
 # столько же ERROR в журнале. Пауза удваивается на каждую неудачу подряд и
 # упирается в потолок; первый же успех сбрасывает счётчик.
 STREAM_RECOVERY_BACKOFF_MAX = 1800.0
+# Показатель ограничивается ДО возведения в степень. Счётчик неудач ничем не
+# ограничен, и `2 ** failures` перестаёт помещаться во float примерно на 1024-й
+# неудаче подряд. Та же форма уже стоила падения в `stream_manager`, только
+# здесь последствие тяжелее: исключение летит из `@callback`, который зовут
+# HA Stream и оба таймера, и авто-recovery для камеры умирает насовсем.
+STREAM_RECOVERY_MAX_EXPONENT = math.ceil(
+    math.log2(STREAM_RECOVERY_BACKOFF_MAX / STREAM_RECOVERY_COOLDOWN)
+)
 
 # A-71 v2 / ADR-0009: интервал poll'а go2rtc producer-health для
 # go2rtc/WebRTC-only пути (камеры без legacy HA Stream worker — напр. лифты).
@@ -419,6 +428,10 @@ class ElektronnyGorodCamera(
             )
             return None
         self._consecutive_empty_count = 0
+        # Успешное открытие — свидетельство того, что оператор снова отвечает.
+        # Без сброса камера уносила бы накопленный получасовой интервал в уже
+        # здоровый период и ждала бы его до первой фоновой попытки.
+        self._note_recovery_outcome(recovered=True)
         if result is None:
             return stream_url
         if not result.proxied:
@@ -509,8 +522,9 @@ class ElektronnyGorodCamera(
         """
         if not self._recovery_failures:
             return STREAM_RECOVERY_COOLDOWN
+        exponent = min(self._recovery_failures, STREAM_RECOVERY_MAX_EXPONENT)
         return min(
-            STREAM_RECOVERY_COOLDOWN * 2**self._recovery_failures,
+            STREAM_RECOVERY_COOLDOWN * 2**exponent,
             STREAM_RECOVERY_BACKOFF_MAX,
         )
 

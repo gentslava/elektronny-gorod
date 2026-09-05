@@ -42,7 +42,8 @@ SemVer. Версия живёт в `manifest.json`, обновляется ав�
 - [ ] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный.
 - [ ] `cd frontend && npm test && npm run typecheck && npm run build` зелёный; собранный bundle не создаёт незакоммиченный diff.
 - [ ] `cd frontend && npm audit --omit=dev` без high/critical findings.
-- [ ] Если менялся `website/**`: `cd website && npm test && npm run typecheck && npm run build` зелёный, `npm audit --omit=dev` без high/critical findings.
+- [ ] `cd website && npm test && npm run typecheck && npm run build` зелёный, `npm audit --omit=dev` без high/critical findings. Прогон нужен **на каждом релизе**, а не только при правках `website/**`: версия и минимальная HA подставляются в разметку при сборке из `manifest.json` и `hacs.json`, поэтому подъём версии меняет сайт, не трогая его исходники.
+- [ ] Файл `docs/releases/<version>.md` написан — на него ведёт ссылка на сайте, собранная из версии манифеста.
 - [ ] `hassfest` зелёный (CI всегда проверяет).
 - [ ] `HACS validate` зелёный.
 - [ ] Все Critical/Important findings обязательных reviews закрыты.
@@ -75,7 +76,7 @@ SemVer. Версия живёт в `manifest.json`, обновляется ав�
    - `manifest.json:version` равен tag;
    - auto-commit GitHub Actions появился в `master`;
    - HACS/hassfest/python-tests на новом HEAD зелёные.
-5. Если релиз менял `website/**`, дождаться зелёного workflow `Deploy website` и проверить на опубликованном сайте номер версии и ссылку на GitHub Release.
+5. Дождаться зелёного workflow `Deploy website` и проверить на опубликованном сайте номер версии и ссылку на release notes. Деплой нужен на каждом релизе: без пересборки сайт продолжит показывать прошлую версию, хотя в исходниках её нет.
 6. HACS подхватит release автоматически.
 
 ### Hotfix flow

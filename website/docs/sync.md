@@ -6,9 +6,9 @@
 
 | Что | Где на сайте | Источник правды |
 |---|---|---|
-| Версия интеграции | `src/data/project.ts: version`, `index.html` (JSON-LD `softwareVersion` и чип в шапке) | `custom_components/elektronny_gorod/manifest.json` |
-| Release notes | `src/data/project.ts: releaseNotesLatest` | последний файл `docs/releases/X.Y.Z.md` |
-| Мин. версия HA | `src/data/project.ts: minHomeAssistant`, тексты compat/бейджей (`2026.8+`) | `hacs.json: homeassistant` |
+| Версия интеграции | ничего — `project.ts` читает `manifest.json`, разметку заполняет Vite при сборке | `custom_components/elektronny_gorod/manifest.json` |
+| Release notes | ничего — ссылка собирается из версии манифеста; нужно лишь написать сам `docs/releases/X.Y.Z.md` | последний файл `docs/releases/X.Y.Z.md` |
+| Мин. версия HA | ничего — `project.ts` читает `hacs.json`, тексты compat выводятся из него | `hacs.json: homeassistant` |
 | Ответы FAQ про прошлые релизы | не синхронизируются: это исторические записи о конкретном переходе, а не заявление о текущей версии | — |
 | Бандл карточки | пересборка сайта (`npm run build`) — бандл импортируется по пути | `custom_components/elektronny_gorod/www/eg-intercom-call-card.js` |
 
@@ -37,4 +37,4 @@
 npm run typecheck && npm test && npm run build
 ```
 
-Тест `automations.test.ts` упадёт, если YAML использует несуществующие домены сервисов; `wizard`/`compat` — если сломалась логика ветвления; `sync.test.ts` — если версия или минимальная HA на сайте разъехались с `manifest.json` и `hacs.json`, а также если ссылка на release notes ведёт на несуществующий файл.
+Тест `automations.test.ts` упадёт, если YAML использует несуществующие домены сервисов; `wizard`/`compat` — если сломалась логика ветвления; `sync.test.ts` — если версию или минимальную HA снова захардкодят вместо чтения из репозитория, а также если файл release notes для текущей версии не написан.
