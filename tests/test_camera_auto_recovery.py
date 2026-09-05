@@ -25,6 +25,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from aiohttp import ClientError
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from homeassistant.core import HomeAssistant
@@ -842,7 +843,8 @@ async def test_snapshot_key_follows_operator_request(hass: HomeAssistant, mock_a
 
     # Другой размер — отдельная запись, чужую не вытесняет.
     instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
-    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+    await cam.async_camera_image(*_SIZE)
+    await _settle_snapshot(cam)
     assert await cam.async_camera_image(None, None) == _JPEG_FULL
 
 
@@ -878,3 +880,83 @@ async def test_unavailable_camera_serves_no_cached_frame(
     assert cam.available is False
 
     assert await cam.async_camera_image(*_SIZE) is None
+
+
+async def test_new_size_served_from_another_size_meanwhile(
+    hass: HomeAssistant, mock_api
+):
+    """Новый размер не заставляет ждать: показываем кадр другого размера.
+
+    HA просит разные размеры для списка, карточки и полноэкранного вида
+    (в проде наблюдались 80x80, 300x169, 390x219, 490x276, 1024x576).
+    Ожидание на каждом новом размере снова давало бы белый экран, хотя кадр
+    камеры в памяти есть — ядро масштабирует JPEG само.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_FULL)
+    immediate = await cam.async_camera_image(1024, 576)
+
+    assert immediate == _JPEG_1, "ответ не должен ждать оператора"
+    await _settle_snapshot(cam)
+    assert await cam.async_camera_image(1024, 576) == _JPEG_FULL
+
+
+async def test_operator_refusal_pauses_snapshot_requests(
+    hass: HomeAssistant, mock_api
+):
+    """Отказ оператора выдерживает паузу вместо запроса на каждый рендер.
+
+    Прод: `531` на `/snapshots` для трёх камер подряд. Кадра это всё равно не
+    даёт, а карточка перерисовывается постоянно.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(side_effect=ClientError("531"))
+
+    assert await cam.async_camera_image(*_SIZE) is None
+    assert instance.query_camera_snapshot.await_count == 1
+
+    for _ in range(5):
+        assert await cam.async_camera_image(*_SIZE) is None
+
+    assert instance.query_camera_snapshot.await_count == 1, (
+        "пауза после отказа не соблюдается"
+    )
+
+
+async def test_snapshot_retry_pause_is_capped(hass: HomeAssistant, mock_api):
+    """Пауза растёт, но не переполняется — урок A-104."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+
+    for failures in (1, 7, 1024, 100_000):
+        cam._snapshot_failures = failures
+        exponent = min(
+            cam._snapshot_failures - 1, camera_module.SNAPSHOT_RETRY_MAX_EXPONENT
+        )
+        delay = min(
+            camera_module.SNAPSHOT_RETRY_INITIAL_SECONDS * 2**exponent,
+            camera_module.SNAPSHOT_RETRY_MAX_SECONDS,
+        )
+        assert delay <= camera_module.SNAPSHOT_RETRY_MAX_SECONDS
+
+
+async def test_recovered_operator_clears_snapshot_pause(
+    hass: HomeAssistant, mock_api
+):
+    """Первый успешный кадр возвращает обычный ритм."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(side_effect=ClientError("531"))
+    await cam.async_camera_image(*_SIZE)
+    assert cam._snapshot_retry_after > 0
+
+    cam._snapshot_retry_after = 0.0
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+    assert cam._snapshot_failures == 0
+    assert cam._snapshot_retry_after == 0.0

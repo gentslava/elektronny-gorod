@@ -59,6 +59,16 @@ SNAPSHOT_FRESH_SECONDS = 10.0
 # живого звонка. Старше потолка — ждём оператора.
 SNAPSHOT_MAX_STALE_SECONDS = 60.0
 
+# Пауза между попытками, когда оператор не отдаёт кадр. Наблюдалось `531` на
+# `/snapshots` для трёх камер подряд: без паузы каждый рендер карточки бил в
+# API, а показать всё равно нечего. Показатель ограничивается ДО возведения в
+# степень — та же ошибка уже стоила падения в двух других местах (A-104).
+SNAPSHOT_RETRY_INITIAL_SECONDS = 15.0
+SNAPSHOT_RETRY_MAX_SECONDS = 300.0
+SNAPSHOT_RETRY_MAX_EXPONENT = math.ceil(
+    math.log2(SNAPSHOT_RETRY_MAX_SECONDS / SNAPSHOT_RETRY_INITIAL_SECONDS)
+)
+
 # A-71 / ADR-0009: минимальный интервал между авто-recovery попытками.
 # HA Stream worker сигналит unavailable на каждый retry-tick (10/20/30с);
 # без cooldown re-fetch забивал бы operator API. См. ADR-0009.
@@ -261,6 +271,8 @@ class ElektronnyGorodCamera(
         # и единственная запись заставляла бы их вытеснять друг друга.
         self._snapshots: dict[tuple[int, int], tuple[bytes, float]] = {}
         self._snapshot_inflight: dict[tuple[int, int], asyncio.Task[bytes | None]] = {}
+        self._snapshot_failures: int = 0
+        self._snapshot_retry_after: float = 0.0
         self._snapshot_task: asyncio.Task[None] | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
@@ -413,7 +425,34 @@ class ElektronnyGorodCamera(
                 self._schedule_snapshot_refresh(size)
                 return image
 
+        # Размера в кэше нет, но кадр этой камеры есть в другом. HA просит
+        # разные размеры для списка, карточки и полноэкранного вида, поэтому
+        # ожидание на каждом новом размере снова показывало бы белый экран.
+        # Ядро масштабирует JPEG само, так что чужой размер здесь уместен.
+        substitute = self._recent_snapshot()
+        if substitute is not None:
+            self._schedule_snapshot_refresh(size)
+            return substitute
+
+        # Показать нечего. Если оператор в отказе — не бьём в него на каждый
+        # рендер: кадра это не даст, а нагрузку создаст.
+        if time.monotonic() < self._snapshot_retry_after:
+            return None
+
         return await self._async_fetch_snapshot(size)
+
+    @callback
+    def _recent_snapshot(self) -> bytes | None:
+        """Самый свежий кадр любого размера, если он ещё не протух."""
+        now = time.monotonic()
+        fresh = [
+            (taken, image)
+            for image, taken in self._snapshots.values()
+            if now - taken < SNAPSHOT_MAX_STALE_SECONDS
+        ]
+        if not fresh:
+            return None
+        return max(fresh)[1]
 
     async def async_fresh_camera_image(
         self, width: int | None = None, height: int | None = None
@@ -466,7 +505,16 @@ class ElektronnyGorodCamera(
         if image and image[:2] == b"\xff\xd8":
             self._image = image
             self._snapshots[size] = (image, time.monotonic())
+            self._snapshot_failures = 0
+            self._snapshot_retry_after = 0.0
             return image
+
+        self._snapshot_failures += 1
+        exponent = min(self._snapshot_failures - 1, SNAPSHOT_RETRY_MAX_EXPONENT)
+        self._snapshot_retry_after = time.monotonic() + min(
+            SNAPSHOT_RETRY_INITIAL_SECONDS * 2**exponent,
+            SNAPSHOT_RETRY_MAX_SECONDS,
+        )
 
         # Оператор не ответил — лучше прошлый кадр, чем пустое место.
         cached = self._snapshots.get(size)

@@ -31,7 +31,7 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **812 passed, 2 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-05; HA 2026.8.1 и 2026.9). Два skip — тесты FCM, требующие `firebase-messaging`: пакет объявлен в `manifest.json`, но в pytest-окружение не ставится. С ним локально 814 passed. |
+| Локальный suite | **816 passed, 2 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-05; HA 2026.8.1 и 2026.9). Два skip — тесты FCM, требующие `firebase-messaging`: пакет объявлен в `manifest.json`, но в pytest-окружение не ставится. С ним локально 818 passed. |
 | Test modules | 61 файл `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Product website | **73 passed**, `tsc --noEmit` и Vite production build (`website/`) |
@@ -247,7 +247,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 812 passed, 2 skipped (2026-09-05).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 816 passed, 2 skipped (2026-09-05).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
