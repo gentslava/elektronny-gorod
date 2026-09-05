@@ -1015,6 +1015,18 @@ Quality gates:
 - **Follow-up:** `permissions` не заданы в `hacs.yaml`, `hassfest.yaml`, `python-tests.yaml` — при `default_workflow_permissions: write` они получают write-токен и запускают сторонние экшены с mutable-ref (`hacs/action@main`, `hassfest@master`). Отдельно стоит завести `.github/dependabot.yml` для экосистемы `github-actions`: остальные workflow всё ещё сидят на `actions/checkout@v4` и `actions/upload-artifact@v4` при актуальных `v7`, а `hacs/action@main` и `hassfest@master` вообще не версионированы.
 - **Acceptance:** первый fork-PR после merge проверяется вручную — `workflow_run` и `pull_request_target` читаются GitHub только из default-ветки, поэтому до merge схема непроверяема.
 
+### A-106. Правки по находкам ревью вносились дословно, без проверки уместности
+
+- **Status:** 🟢 **resolved-in-branch** (pending merge `fix/snapshot-cache`).
+- **Severity:** **P2 (process)** — приводит к дефектам, внесённым ради закрытия gate.
+- **Area:** `AGENTS.md`, [`pre-pr-checklist.md`](../../.agents/rules/pre-pr-checklist.md), [`code-reviewer.md`](../../.agents/roles/code-reviewer.md), `pyrightconfig.json`.
+- **Evidence (2026-09-05):** security-review нашёл fail-open в выборе HTTP-метода и предложил `else: raise ValueError`. Правка внесена дословно — и оказалась формально мёртвым кодом: параметр объявлен `Literal["GET", "POST", "DELETE"]`, ветки исчерпывают тип. Дефект пережил пять кругов ревью четырьмя профилями и был замечен владельцем в IDE, а не гейтом.
+- **Root cause (две причины):**
+  1. Контракт описывал находки односторонне — «Critical и Important findings исправляются», «implementer исправляет их», «pushback и fix обязательны». Шага «проверить, верна ли находка и уместна ли предложенная правка» не было ни в одной формулировке, что создавало давление вносить правки механически. В той же сессии обратный пример подтвердил проблему: рекомендацию аудита по A-15 (`lock` → `button`) владелец отклонил по существу, и это было верно.
+  2. `reportUnreachable` в pyright по умолчанию выключен, поэтому мёртвый код не ловился гейтом вовсе.
+- **Fix:** формулировки во всех трёх контрактах переписаны: находка — утверждение о дефекте, а не наряд; implementer воспроизводит дефект и выбирает способ закрытия; обоснованный отказ — законный исход; правка не должна порождать новый дефект. Ревьюеру предписано разделять «дефект» и «рекомендация по исправлению» и проверять, не создаёт ли его совет недостижимую ветку или проверку, дублирующую тип. `reportUnreachable` и `reportUnusedExpression` включены как ошибки — проверено, что новый недостижимый код роняет гейт.
+- **Остаточный риск:** аудит показал, что другого мёртвого кода в интеграции нет; единственное место — та самая ветка, теперь с `assert_never` и адресным подавлением.
+
 ### A-105. Превью камеры запрашивалось у оператора при каждом открытии
 
 - **Status:** 🟢 **resolved-in-branch** (pending merge `fix/snapshot-cache`).

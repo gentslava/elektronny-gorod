@@ -9,5 +9,7 @@
   "typeCheckingMode": "standard",
   "reportPrivateImportUsage": "none",
   "reportIncompatibleVariableOverride": "none",
-  "reportMissingImports": "error"
+  "reportMissingImports": "error",
+  "reportUnreachable": "error",
+  "reportUnusedExpression": "error"
 }
