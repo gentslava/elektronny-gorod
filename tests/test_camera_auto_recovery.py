@@ -36,6 +36,7 @@ from custom_components.elektronny_gorod.const import (
     CONF_USER_AGENT,
     DOMAIN,
 )
+from custom_components.elektronny_gorod import camera as camera_module
 from custom_components.elektronny_gorod.go2rtc import Go2RtcStreamInfo
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
@@ -525,3 +526,106 @@ async def test_proactive_refresh_not_registered_without_go2rtc(
 ):
     cam_direct = await _setup_camera(hass, use_go2rtc=False)
     assert cam_direct._unsub_proactive_refresh is None
+
+
+# ─── Backoff при устойчивых отказах оператора ──────────────────────────────
+
+
+async def test_failed_recovery_widens_cooldown(hass: HomeAssistant, mock_api):
+    """Неудачная попытка удваивает паузу до следующей.
+
+    Оператор умеет отвечать 500 часами подряд. Без backoff health-poll дёргал
+    recovery раз в минуту бесконечно — впустую и для нас, и для оператора.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_stream = AsyncMock(return_value=None)
+
+    assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_COOLDOWN
+
+    stream = _fake_stream(available=False)
+    cam.stream = stream
+    cam._on_stream_state_change()
+    await hass.async_block_till_done()
+
+    assert cam._recovery_failures == 1
+    assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_COOLDOWN * 2
+
+    # Вторая неудача — ещё вдвое.
+    cam._last_recovery_monotonic = time.monotonic() - 10000.0
+    cam._on_stream_state_change()
+    await hass.async_block_till_done()
+
+    assert cam._recovery_failures == 2
+    assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_COOLDOWN * 4
+
+
+async def test_backoff_is_capped(hass: HomeAssistant, mock_api):
+    """Пауза не растёт бесконечно — упирается в потолок."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+
+    cam._recovery_failures = 99
+
+    assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_BACKOFF_MAX
+
+
+async def test_successful_recovery_resets_backoff(hass: HomeAssistant, mock_api):
+    """Первый успех возвращает обычную паузу — накопленные отказы не липнут."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_stream = AsyncMock(return_value=None)
+
+    stream = _fake_stream(available=False)
+    cam.stream = stream
+    cam._on_stream_state_change()
+    await hass.async_block_till_done()
+    assert cam._recovery_failures == 1
+
+    instance.query_camera_stream = AsyncMock(return_value="rtsp://ok/stream")
+    cam._last_recovery_monotonic = time.monotonic() - 10000.0
+    cam._on_stream_state_change()
+    await hass.async_block_till_done()
+
+    assert cam._recovery_failures == 0
+    assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_COOLDOWN
+
+
+async def test_backoff_suppresses_repeat_attempts(hass: HomeAssistant, mock_api):
+    """Пока backoff не истёк, фоновая попытка не идёт к оператору.
+
+    Это и есть суть фикса: при устойчивом отказе мы перестаём долбить API
+    каждую минуту.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_stream = AsyncMock(return_value=None)
+
+    stream = _fake_stream(available=False)
+    cam.stream = stream
+    cam._on_stream_state_change()
+    await hass.async_block_till_done()
+    assert instance.query_camera_stream.await_count == 1
+
+    # Прошло 45 секунд: старого cooldown (30с) хватило бы, нового (60с) — нет.
+    cam._last_recovery_monotonic = time.monotonic() - 45.0
+    cam._on_stream_state_change()
+    await hass.async_block_till_done()
+
+    assert instance.query_camera_stream.await_count == 1
+
+
+async def test_manual_open_ignores_backoff(hass: HomeAssistant, mock_api):
+    """Ручное открытие камеры пробует поток независимо от накопленных отказов.
+
+    Backoff гасит только фоновые попытки: пользователь, открывший карточку,
+    должен получить свежую попытку сразу.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    cam._recovery_failures = 99
+
+    instance.query_camera_stream = AsyncMock(return_value="rtsp://ok/stream")
+    url = await cam.stream_source()
+
+    assert url == "rtsp://ok/stream"
+    assert instance.query_camera_stream.await_count == 1
