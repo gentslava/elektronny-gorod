@@ -18,6 +18,7 @@ Acceptance:
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from typing import Any
@@ -659,43 +660,104 @@ async def test_successful_open_clears_recovery_backoff(hass: HomeAssistant, mock
 
 # ─── Снимок: кэш и фоновое обновление ──────────────────────────────────────
 
+# Реальные кадры начинаются с JPEG SOI; проверка сигнатуры — часть защиты от
+# того, чтобы тело ошибки оператора попало в кэш как «картинка».
+_JPEG_1 = b"\xff\xd8" + b"FRAME-1"
+_JPEG_2 = b"\xff\xd8" + b"FRAME-2"
+_JPEG_FULL = b"\xff\xd8" + b"FRAME-FULL"
+_OPERATOR_ERROR_BODY = b'{"error":"internal server error"}'
+
+_SIZE = (320, 180)
+
+
+def _age_snapshot(cam, size, seconds: float) -> None:
+    """Состарить закэшированный кадр на заданное число секунд."""
+    image, taken = cam._snapshots[size]
+    cam._snapshots[size] = (image, taken - seconds)
+
+
+async def _settle_snapshot(cam) -> None:
+    """Дождаться фонового обновления детерминированно.
+
+    `async_block_till_done()` фоновые задачи записи не ждёт, а зелёный прогон
+    держался лишь на том, что мок резолвится без реальной приостановки.
+    """
+    task = cam._snapshot_task
+    if task is not None:
+        async with asyncio.timeout(5):
+            await asyncio.shield(task)
+
 
 async def test_snapshot_served_from_cache_while_fresh(hass: HomeAssistant, mock_api):
     """Свежий кадр отдаётся из памяти, оператора не беспокоим."""
     cam = await _setup_camera(hass, use_go2rtc=False)
     instance = mock_api.return_value
-    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
 
-    first = await cam.async_camera_image(320, 180)
-    second = await cam.async_camera_image(320, 180)
+    first = await cam.async_camera_image(*_SIZE)
+    second = await cam.async_camera_image(*_SIZE)
 
-    assert first == second == b"JPEG-1"
+    assert first == second == _JPEG_1
     assert instance.query_camera_snapshot.await_count == 1
 
 
 async def test_stale_snapshot_returned_immediately_and_refreshed(
     hass: HomeAssistant, mock_api
 ):
-    """Устаревший кадр отдаётся сразу, новый едет в фоне.
+    """Устаревший кадр отдаётся сразу, новый едет в фоне."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
 
-    Это и есть лечение белого экрана: карточка показывает прошлый кадр, пока
-    оператор отдаёт свежий, вместо того чтобы ждать его с пустым местом.
+    _age_snapshot(cam, _SIZE, camera_module.SNAPSHOT_FRESH_SECONDS + 1)
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_2)
+
+    stale = await cam.async_camera_image(*_SIZE)
+
+    assert stale == _JPEG_1, "ответ не должен ждать оператора"
+    await _settle_snapshot(cam)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_2
+
+
+async def test_too_stale_snapshot_waits_for_fresh_frame(hass: HomeAssistant, mock_api):
+    """Слишком старый кадр не выдаётся за текущий.
+
+    `camera.snapshot` в автоматизации и постер экрана вызова не поллят камеру,
+    поэтому фонового обновления не дождались бы и приложили бы вид «с момента
+    последнего просмотра».
     """
     cam = await _setup_camera(hass, use_go2rtc=False)
     instance = mock_api.return_value
-    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
 
-    assert await cam.async_camera_image(320, 180) == b"JPEG-1"
+    _age_snapshot(cam, _SIZE, camera_module.SNAPSHOT_MAX_STALE_SECONDS + 1)
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_2)
 
-    # Кадр протух, оператор теперь отдаёт другой.
-    cam._image_monotonic -= camera_module.SNAPSHOT_FRESH_SECONDS + 1
-    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-2")
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_2
 
-    stale = await cam.async_camera_image(320, 180)
 
-    assert stale == b"JPEG-1", "ответ не должен ждать оператора"
-    await hass.async_block_till_done()
-    assert await cam.async_camera_image(320, 180) == b"JPEG-2"
+async def test_operator_error_body_never_becomes_the_frame(
+    hass: HomeAssistant, mock_api
+):
+    """Тело ошибки оператора не подменяет собой кадр.
+
+    Бинарный путь раньше отдавал тело любого ответа, поэтому 500 приходила
+    непустыми байтами, проходила проверку «есть картинка» и залипала в кэше:
+    прошлый исправный кадр уничтожался, а ошибка показывалась как превью.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+
+    _age_snapshot(cam, _SIZE, camera_module.SNAPSHOT_FRESH_SECONDS + 1)
+    instance.query_camera_snapshot = AsyncMock(return_value=_OPERATOR_ERROR_BODY)
+
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+    await _settle_snapshot(cam)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
 
 
 async def test_background_snapshot_failure_keeps_previous_frame(
@@ -704,24 +766,47 @@ async def test_background_snapshot_failure_keeps_previous_frame(
     """Отказ оператора в фоне не оставляет карточку без картинки."""
     cam = await _setup_camera(hass, use_go2rtc=False)
     instance = mock_api.return_value
-    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
-    await cam.async_camera_image(320, 180)
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
 
-    cam._image_monotonic -= camera_module.SNAPSHOT_FRESH_SECONDS + 1
+    _age_snapshot(cam, _SIZE, camera_module.SNAPSHOT_FRESH_SECONDS + 1)
     instance.query_camera_snapshot = AsyncMock(side_effect=RuntimeError("operator 500"))
 
-    assert await cam.async_camera_image(320, 180) == b"JPEG-1"
-    await hass.async_block_till_done()
-    assert await cam.async_camera_image(320, 180) == b"JPEG-1"
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+    await _settle_snapshot(cam)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
 
 
 async def test_first_snapshot_waits_for_operator(hass: HomeAssistant, mock_api):
-    """Показать нечего — приходится дождаться; это единственный такой случай."""
+    """Показать нечего — ждём; и это единственный запрос, без фонового дубля."""
     cam = await _setup_camera(hass, use_go2rtc=False)
     instance = mock_api.return_value
-    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
 
-    assert await cam.async_camera_image(320, 180) == b"JPEG-1"
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+    assert instance.query_camera_snapshot.await_count == 1
+    # Иначе первое открытие стоило бы оператору двух запросов вместо одного.
+    assert cam._snapshot_task is None
+
+
+async def test_concurrent_first_open_makes_one_request(hass: HomeAssistant, mock_api):
+    """Одновременные зрители на холодном кэше не размножают запросы.
+
+    Оператор рвёт параллельные сессии — та же причина, по которой
+    дедуплицирован `stream_source` (A-68).
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+
+    async def _slow_snapshot(*_args, **_kwargs):
+        await asyncio.sleep(0)
+        return _JPEG_1
+
+    instance.query_camera_snapshot = AsyncMock(side_effect=_slow_snapshot)
+
+    results = await asyncio.gather(*(cam.async_camera_image(*_SIZE) for _ in range(5)))
+
+    assert results == [_JPEG_1] * 5
     assert instance.query_camera_snapshot.await_count == 1
 
 
@@ -729,13 +814,67 @@ async def test_snapshot_refresh_is_not_duplicated(hass: HomeAssistant, mock_api)
     """Несколько запросов подряд не плодят фоновых задач."""
     cam = await _setup_camera(hass, use_go2rtc=False)
     instance = mock_api.return_value
-    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
-    await cam.async_camera_image(320, 180)
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
 
-    cam._image_monotonic -= camera_module.SNAPSHOT_FRESH_SECONDS + 1
+    _age_snapshot(cam, _SIZE, camera_module.SNAPSHOT_FRESH_SECONDS + 1)
     for _ in range(5):
-        await cam.async_camera_image(320, 180)
-    await hass.async_block_till_done()
+        await cam.async_camera_image(*_SIZE)
+    await _settle_snapshot(cam)
 
-    # Один первичный запрос плюс одно фоновое обновление.
     assert instance.query_camera_snapshot.await_count == 2
+
+
+async def test_snapshot_key_follows_operator_request(hass: HomeAssistant, mock_api):
+    """Запрос без размеров и с размерами по умолчанию — одна и та же запись.
+
+    Координатор всё равно подставляет ширину по умолчанию, поэтому раздельные
+    ячейки означали бы поход за одинаковым кадром дважды.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_FULL)
+
+    await cam.async_camera_image(None, None)
+    default_size = camera_module._snapshot_size(None, None)
+    assert await cam.async_camera_image(*default_size) == _JPEG_FULL
+    assert instance.query_camera_snapshot.await_count == 1
+
+    # Другой размер — отдельная запись, чужую не вытесняет.
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+    assert await cam.async_camera_image(None, None) == _JPEG_FULL
+
+
+async def test_hidden_camera_serves_no_cached_frame(hass: HomeAssistant, mock_api):
+    """Скрытая камера не отдаёт даже прогретый кадр.
+
+    Guard стоит до кэша; если его переставить ниже, скрытая камера начала бы
+    показывать картинку — молча, вопреки A-63.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+    instance.query_camera_snapshot.reset_mock()
+
+    with patch.object(cam, "_is_hidden", return_value=True):
+        assert await cam.async_camera_image(*_SIZE) is None
+
+    assert instance.query_camera_snapshot.await_count == 0
+
+
+async def test_unavailable_camera_serves_no_cached_frame(
+    hass: HomeAssistant, mock_api
+):
+    """Камера выпала из снапшота координатора — кадр из кэша тоже не отдаём."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+
+    cam.coordinator.data = {"cameras": [], "locks": [], "balances": [],
+                            "places": _places(), "dnd": {}}
+    assert cam.available is False
+
+    assert await cam.async_camera_image(*_SIZE) is None

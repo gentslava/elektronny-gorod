@@ -1,6 +1,6 @@
 """HTTP interface."""
 
-from typing import Literal
+from typing import Literal, assert_never
 
 from aiohttp import ClientError, ClientResponse, ClientTimeout
 
@@ -145,9 +145,23 @@ class HTTP:
         elif method == "DELETE":
             response = await session.delete(url, data=data, headers=headers, timeout=timeout)
         else:
-            raise ValueError(f"Unsupported HTTP method: {method}")
+            # `assert_never` — штатный способ отметить исчерпанность: анализатор
+            # видит здесь `Never` и не считает ветку недостижимым кодом, а если
+            # в `Literal` добавят метод и забудут ветку — падёт статически.
+            # В рантайме остаётся отказ, а не молчаливая подмена метода.
+            assert_never(method)
 
         if binary:
+            # Статус проверяем и здесь: иначе тело ошибки оператора уходит
+            # вызывающему как «данные». Для снимка это означало картинку из
+            # JSON-текста ошибки, которую потребитель принимал за кадр.
+            if not response.ok:
+                LOGGER.error(
+                    "API binary request failed: %s [%s]",
+                    redact_path(endpoint),
+                    response.status,
+                )
+                raise ClientError(response)
             return await response.read()
 
         await _log_response(response)

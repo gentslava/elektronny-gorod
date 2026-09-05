@@ -136,11 +136,28 @@ async def test_camera_image_delegates_to_doorbell_snapshot():
     c = MagicMock()
     c.active_call_media.return_value = ("1013", MagicMock())
     doorbell = MagicMock()
-    doorbell.async_camera_image = AsyncMock(return_value=b"jpeg-bytes")
+    doorbell.async_fresh_camera_image = AsyncMock(return_value=b"jpeg-bytes")
     cam = _cam(c, lambda cid: doorbell if cid == "1013" else None)
     img = await cam.async_camera_image(300, 200)
     assert img == b"jpeg-bytes"
-    doorbell.async_camera_image.assert_awaited_once_with(300, 200)
+    doorbell.async_fresh_camera_image.assert_awaited_once_with(300, 200)
+
+
+async def test_call_screen_snapshot_bypasses_cache():
+    """Экран вызова показывает живой кадр, а не последний просмотренный.
+
+    Гость стоит у двери сейчас; кадр из кэша показал бы прошлое. Приложение
+    оператора в этот момент тоже перезапрашивает снимок (api-reference).
+    """
+    c = MagicMock()
+    c.active_call_media.return_value = ("1013", MagicMock())
+    doorbell = MagicMock()
+    doorbell.async_fresh_camera_image = AsyncMock(return_value=b"live")
+    doorbell.async_camera_image = AsyncMock(return_value=b"cached")
+    cam = _cam(c, lambda cid: doorbell if cid == "1013" else None)
+
+    assert await cam.async_camera_image(300, 200) == b"live"
+    doorbell.async_camera_image.assert_not_awaited()
 
 
 async def test_camera_image_none_without_active_call():
@@ -339,3 +356,4 @@ async def test_stream_source_uses_shared_go2rtc_rtsp_not_operator_pull():
     srcs = upsert.await_args.args[2]
     assert srcs[0] == "rtsp://127.0.0.1:8554/eg_1013#video=copy"
     assert url == "rtsp://127.0.0.1:8554/eg_intercom_call"
+

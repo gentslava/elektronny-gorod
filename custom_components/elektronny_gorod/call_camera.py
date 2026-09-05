@@ -163,6 +163,14 @@ class ElektronnyGorodCallCamera(Camera):
         doorbell = self._active_doorbell()
         if doorbell is None:
             return None
+        # Во время звонка кадр нужен живой: гость стоит у двери сейчас, а не
+        # когда камеру смотрели в прошлый раз. Приложение оператора здесь тоже
+        # перезапрашивает снимок (api-reference §Snapshot). `getattr` — потому
+        # что тип поиска объявлен как базовая `Camera`: у чужой камеры метода
+        # нет, и тогда работает обычный путь.
+        fresh = getattr(doorbell, "async_fresh_camera_image", None)
+        if fresh is not None:
+            return await fresh(width, height)
         return await doorbell.async_camera_image(width, height)
 
     async def stream_source(self) -> str | None:
