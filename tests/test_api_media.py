@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp import ClientError, ClientResponse
-from aioresponses import aioresponses
 
 from custom_components.elektronny_gorod.api import (
     ForpostDownloadError,
@@ -114,18 +113,39 @@ def test_forpost_download_error_sanitizes_message() -> None:
 async def test_query_event_download_real_http_never_logs_signed_url(
     hass, caplog
 ) -> None:
-    """End-to-end through the real HTTP layer: the signed URL never hits logs."""
+    """End-to-end through the real HTTP layer: the signed URL never hits logs.
+
+    Мокаем только транспорт (`session.get`), проходя весь `http.py`: сборку
+    заголовков, redact-логирование запроса и ответа, разбор тела. Прямой mock
+    сессии вместо `aioresponses` — как в go2rtc-тестах: последний несовместим
+    с ClientResponse современных aiohttp.
+    """
     api = _api(hass)
     caplog.set_level(logging.DEBUG)
 
-    with aioresponses() as m:
-        m.get(
-            f"https://{BASE_API_URL}"
-            "/rest/v1/forpost/events/3001/downloads?container=mp4",
-            payload={"data": "https://savevideo.example/signed-clip.mp4"},
-        )
+    endpoint = f"https://{BASE_API_URL}/rest/v1/forpost/events/3001/downloads?container=mp4"
+    # spec нужен: `api.query_event_download` проверяет isinstance(ClientResponse).
+    # `method`/`reason`/`url` объявлены слотами, поэтому задаём их явно.
+    response = MagicMock(spec=ClientResponse)
+    response.url = endpoint
+    response.method = "GET"
+    response.status = 200
+    response.reason = "OK"
+    response.ok = True
+    response.headers = {"Content-Length": "64"}
+    response.json = AsyncMock(
+        return_value={"data": "https://savevideo.example/signed-clip.mp4"}
+    )
+    session = MagicMock()
+    session.get = AsyncMock(return_value=response)
+
+    with patch(
+        "custom_components.elektronny_gorod.http.async_get_clientsession",
+        return_value=session,
+    ):
         url = await api.query_event_download("3001")
 
+    assert session.get.await_args.args[0] == endpoint
     assert url == "https://savevideo.example/signed-clip.mp4"
     assert "savevideo.example" not in caplog.text
 

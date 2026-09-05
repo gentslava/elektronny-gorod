@@ -1,5 +1,7 @@
 """HTTP interface."""
 
+from typing import Literal
+
 from aiohttp import ClientError, ClientResponse, ClientTimeout
 
 from homeassistant.core import HomeAssistant
@@ -94,7 +96,11 @@ class HTTP:
         self._refresh_token: str | None = refresh_token
 
     async def __request(
-        self, endpoint: str, method: str, data: object | None, binary: bool
+        self,
+        endpoint: str,
+        method: Literal["GET", "POST", "DELETE"],
+        data: object | None,
+        binary: bool,
     ) -> ClientResponse | bytes:
         """Make a HTTP request through shared HA aiohttp session.
 
@@ -129,12 +135,17 @@ class HTTP:
             body_size = len(str(data).encode("utf-8"))
         _log_request(url, method, headers, body_size)
         timeout = _BINARY_TIMEOUT if binary else _REST_TIMEOUT
+        # Явный `raise` в конце, а не `else` у DELETE: аннотация `Literal`
+        # проверяется статически, но если её когда-нибудь расширят, метод не
+        # должен молча подмениться на удаление.
         if method == "GET":
             response = await session.get(url, headers=headers, timeout=timeout)
         elif method == "POST":
             response = await session.post(url, data=data, headers=headers, timeout=timeout)
         elif method == "DELETE":
             response = await session.delete(url, data=data, headers=headers, timeout=timeout)
+        else:
+            raise ValueError(f"Unsupported HTTP method: {method}")
 
         if binary:
             return await response.read()

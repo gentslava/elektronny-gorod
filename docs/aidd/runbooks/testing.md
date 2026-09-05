@@ -10,7 +10,7 @@ Suite зелёный; config flow и миграции покрыты реаль�
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install pytest-homeassistant-custom-component
+.venv/bin/pip install pytest-homeassistant-custom-component==0.13.362
 .venv/bin/pip install -r requirements_test.txt
 ```
 
@@ -36,10 +36,10 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 | Что мокаем | Чем | Когда |
 |---|---|---|
-| HTTP к `myhome.proptech.ru` | `AsyncMock` / `aioresponses` | API и config-flow tests |
+| HTTP к `myhome.proptech.ru` | `AsyncMock` на `api.http.*` / mock сессии | API и config-flow tests |
 | HA core (`hass`, ConfigEntry) | `pytest-homeassistant-custom-component` | все integration tests |
 | `async_setup_entry` для config-flow | `patch` | как в текущем conftest.py |
-| go2rtc HTTP | `aioresponses` | go2rtc tests |
+| go2rtc HTTP | прямой mock `session.*` | go2rtc tests |
 | Время / UUID | `unittest.mock.patch` | для стабильных fixtures |
 
 ## Config flow examples

@@ -27,7 +27,7 @@ Quality gates:
 
 ## Требования
 
-- Python 3.12+
+- Python 3.14+ (требование HA 2026.8: `Requires-Python >= 3.14.2`)
 - Home Assistant (dev-инстанс) ≥ HA-min из `hacs.json`
 - git
 - (опционально) Docker / VS Code Dev Container
@@ -75,7 +75,8 @@ hass -c "$HA_CONFIG_DIR" --debug
 ### 5. Запустить тесты
 
 ```bash
-python3 -m venv .venv
+python3.14 -m venv .venv
+.venv/bin/pip install pytest-homeassistant-custom-component==0.13.362
 .venv/bin/pip install -r requirements_test.txt
 PYTHONPATH=. .venv/bin/pytest tests/ -q
 ```
@@ -118,6 +119,27 @@ docker run --rm -v "$(pwd)":/github/workspace ghcr.io/hacs/action:main \
 - Для issue предпочитать встроенную diagnostics-выгрузку: интеграция редактирует известные секреты и персональные поля.
 - Перед публикацией всё равно проверить diagnostics и лог вручную. Не передавать токены, пароли, SMS-коды, заголовки авторизации и персональные данные: сторонние зависимости могут писать собственные сообщения.
 - Не публиковать полный `home-assistant.log`; достаточно короткого фрагмента с debug только для нужного модуля.
+
+## Статический анализ
+
+Типы Home Assistant берутся из установленного ядра, поэтому анализ не
+запускается «всухую»: интерпретатор нужно указать явно.
+
+```bash
+.venv/bin/pip install pyright==1.1.411 firebase-messaging
+.venv/bin/pyright --pythonpath .venv/bin/python
+```
+
+`--pythonpath` обязателен: сам по себе pyright берёт интерпретатор из `PATH`,
+а не из каталога, откуда запущен. В CI это делает `setup-python`.
+`firebase-messaging` — требование `manifest.json`; без него анализ спотыкается
+на импорте в `fcm.py`.
+
+Окружение старее минимума HA даёт ложные ошибки — самая заметная из них
+«`via_device_id` не является определённым ключом в `DeviceInfo`». Это признак
+неактуального `.venv`, а не дефекта кода: пересоберите его командой выше.
+Проверить версию — `.venv/bin/python -c "import homeassistant.const as c;
+print(c.__version__)"`.
 
 ## Next reading
 

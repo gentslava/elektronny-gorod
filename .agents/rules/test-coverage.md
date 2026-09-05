@@ -31,7 +31,7 @@
 
 ### Mock-стратегия
 
-- HTTP к `myhome.proptech.ru` → `aioresponses`.
+- HTTP к `myhome.proptech.ru` → `AsyncMock` на `api.http.*` либо mock сессии через `patch` на `async_get_clientsession`.
 - HA core → `pytest-homeassistant-custom-component`.
 - `async_setup_entry` для config-flow тестов → `patch` (как в текущем `conftest.py`).
 

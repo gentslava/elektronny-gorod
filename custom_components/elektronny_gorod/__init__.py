@@ -41,6 +41,7 @@ from .fcm import (
     async_delete_fcm_repair_issue,
 )
 from .go2rtc import Go2RtcClient, go2rtc_auth_headers
+from .device import async_register_place_devices
 from .history import HistoryManager
 from .history_ws import async_register_history_ws_command
 from .sip.call_controller import DoorbellCallController, Go2RtcConfig
@@ -156,6 +157,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # независимо от успешности platform unload. См. audit A-16.
     entry.async_on_unload(coordinator.async_unsubscribe)
     entry.async_on_unload(entry.add_update_listener(async_update_options))
+
+    # Адреса регистрируются до платформ: сущности ссылаются на них через
+    # `via_device_id`, которому нужен готовый device_id.
+    async_register_place_devices(hass, entry, coordinator.data)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 

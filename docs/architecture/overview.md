@@ -129,7 +129,12 @@ async_setup_entry:
   6. async_migrate_entity_unique_ids — legacy `{id}_{name}` → stable формат (A-12)
   7. entry.async_on_unload(coordinator.async_unsubscribe)
      entry.async_on_unload(entry.add_update_listener(async_update_options))
-  8. await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+  8. device.async_register_place_devices — устройства адресов создаются
+     ЗДЕСЬ, строго до forward-а платформ. Порядок несущий: `via_device_id`
+     (HA 2026.8+) принимает готовый `device_id`, поэтому адрес обязан
+     существовать раньше первой ссылки на него. Перенос forward-а выше или
+     ленивое создание адресов вернёт плоский список устройств (A-100)
+  9. await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
      → каждая платформа читает `coordinator.data` и создаёт entity:
        - camera.async_setup_entry: data["cameras"] → ElektronnyGorodCamera
        - lock.async_setup_entry:   data["locks"]   → ElektronnyGorodLock
@@ -137,17 +142,17 @@ async_setup_entry:
        - switch.async_setup_entry: data["dnd"]      → ElektronnyGorodDNDSwitch (×3 per place)
        - event.async_setup_entry: realtime doorbell + access history entities;
          camera-motion history entities создаются disabled-by-default
-  9. HistoryManager запускается background task после platform setup:
+  10. HistoryManager запускается background task после platform setup:
      restore Store → silent baseline/poll → 5-minute interval; unload отменяет interval
-  10. async_register_history_ws_command(hass) — entity-scoped browse старых вызовов
-  11. async_register_uplink_ws_command(hass) — WS-команда intercom_uplink (ADR-0013)
-  12. await async_register_uplink_card(hass) — static bundle call/history cards
+  11. async_register_history_ws_command(hass) — entity-scoped browse старых вызовов
+  12. async_register_uplink_ws_command(hass) — WS-команда intercom_uplink (ADR-0013)
+  13. await async_register_uplink_card(hass) — static bundle call/history cards
       (команды и static path идемпотентны, регистрируются один раз на интеграцию)
-  13. _migrate_legacy_disabled_state (one-time per entry)
-  14. _sync_visibility — `hidden` из `/settings/screens` → entity.hidden_by=INTEGRATION
-  15. stream_manager.async_start() — registry eligibility уже актуальна;
+  14. _migrate_legacy_disabled_state (one-time per entry)
+  15. _sync_visibility — `hidden` из `/settings/screens` → entity.hidden_by=INTEGRATION
+  16. stream_manager.async_start() — registry eligibility уже актуальна;
       default-off main option оставляет background lifecycle inert
-  16. после последнего fallible await создать/claim per-entry FCM owner:
+  17. после последнего fallible await создать/claim per-entry FCM owner:
       - прежний owner остановлен → зарегистрировать и запустить новый listener;
       - прежний owner не остановлен → оставить его, показать Repairs и завершить
         setup успешно без realtime FCM (остальные платформы работают)
@@ -472,7 +477,7 @@ const + go2rtc ← config_flow
 
 1. **Lock как entity-модель** — домофон не «закрывается». Synthetic state-cycle (UNLOCKED → LOCKED) — cosmetic UX. `button` платформа была бы корректнее. Open: [ADR-0005](../decisions/0005-lock-vs-button.md), статус proposed (breaking change → ждёт планирования).
 2. **`available_sections`** игнорируются (`api.query_sections` исторически вызывался без потребления результата; в текущем `coordinator` вызов удалён, но endpoint в `api.py` остался — кандидат на cleanup при следующем touch coordinator).
-3. **Сильная связанность `coordinator` ↔ `api` ↔ `http`** — coordinator unit-тестируется только с mock `aioresponses` (см. `tests/`); inject-абстракции пока нет.
+3. **Сильная связанность `coordinator` ↔ `api` ↔ `http`** — coordinator unit-тестируется только с mock HTTP-сессии (см. `tests/`); inject-абстракции пока нет.
 4. **UA shared state в `user_agent.place_id`** — кросс-слойная связанность через `self._api.http.user_agent.place_id = place_id`. Из-за этого refresh идёт сериально по places (см. async-паттерны). Лучше прокидывать `place_id` через параметры HTTP-вызовов; рефакторинг open.
 5. **Нет retry/backoff для идемпотентных GET** (остаток A-21). Явный `ClientTimeout` уже есть; POST/login/open_lock намеренно не ретраятся автоматически.
 6. **FCM опирается на приватные API Google** (A-80) — realtime-вызов работает под graceful degradation, но долгосрочная совместимость не гарантирована. Фатальные ошибки зависимости теперь ограничены per-entry circuit breaker: они временно отключают только realtime-уведомления затронутого аккаунта и не создают бесконечный двухминутный restart-loop. Startup, watchdog и unload проходят под одним transition lock; если dependency-клиент не подтвердил остановку, интеграция не теряет ссылку на него, возвращает failed unload и не позволяет HA запустить замену. Claim и start происходят только после последнего fallible setup-await. Если прежний owner не остановился, entry остаётся loaded, но realtime FCM для него отключён с Repairs warning — без setup-retry loop. Removal после failed unload повторяет stop; при повторном failure HA требует restart, а ownership сохраняется до него.

@@ -376,7 +376,12 @@ async def validate_go2rtc(base_url: str, session: ClientSession, username: str |
     return Go2RtcValidationResult(True, "", rtsp_host)
 
 
-async def cleanup_go2rtc_stream(base_url: str, stream_name: str, session: ClientSession, headers: dict = None) -> None:
+async def cleanup_go2rtc_stream(
+    base_url: str,
+    stream_name: str,
+    session: ClientSession,
+    headers: dict | None = None,
+) -> None:
     """Best-effort cleanup stream created by validate_go2rtc."""
     base_url = normalize_base_url(base_url)
     if not base_url or not stream_name:

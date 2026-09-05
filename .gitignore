@@ -28,6 +28,7 @@ env/
 
 # Claude Code / Cursor local overrides
 .claude/settings.local.json
+.claude/worktrees/
 .cursor/settings.local.json
 
 # Research / reverse engineering artifacts — contain secrets, never commit.

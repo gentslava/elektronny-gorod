@@ -21,7 +21,7 @@ kind: canonical-agent-role
 ## Твоя ответственность
 
 - Писать **реальные** тесты по плану из `strategy.md`.
-- Mock-стратегия: `aioresponses` для HTTP, `pytest-homeassistant-custom-component` для HA core.
+- Mock-стратегия: прямой mock сессии (`patch` на `async_get_clientsession`) или `AsyncMock` на `api.http.*` для HTTP, `pytest-homeassistant-custom-component` для HA core. `aioresponses` не используется: он несовместим с `ClientResponse` современных aiohttp.
 - Никаких mock-объектов, которые «всегда возвращают True».
 - Регрессионные тесты при fix-ах багов.
 - Если тест падает — root cause, не «исправить тест».

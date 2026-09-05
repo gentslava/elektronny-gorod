@@ -154,19 +154,29 @@ class SipManager:
             ),
             local_addr=("0.0.0.0", SIP_LOCAL_PORT), remote_addr=(registrar_ip, SIP_PORT),
         )
+        # connection_made уже отработал к этому моменту и создал оба future;
+        # проверка нужна, чтобы отказ транспорта не превращался в AttributeError
+        # посреди ожидания.
+        if sip.registered is None or sip.invite is None:
+            LOGGER.warning("SIP: транспорт не инициализировал ожидания — отмена hold")
+            sip.close()
+            sip_transport.close()
+            return False
+        registered, invite = sip.registered, sip.invite
+
         # Узкий except: единственный реальный исход wait_for здесь — timeout (протокол
         # резолвит future только set_result, не set_exception); OSError — на случай
         # сбоя datagram-транспорта. Программные ошибки (KeyError на creds и т.п.) НЕ
         # глотаем — пусть всплывают в контроллер (P2-1).
         try:
-            await asyncio.wait_for(sip.registered, timeout=REGISTER_TIMEOUT)
+            await asyncio.wait_for(registered, timeout=REGISTER_TIMEOUT)
         except (asyncio.TimeoutError, OSError):
             LOGGER.warning("SIP: REGISTER не подтверждён за %.0fs — отмена hold", REGISTER_TIMEOUT)
             sip.close()
             sip_transport.close()
             return False
         try:
-            invite_msg, addr = await asyncio.wait_for(sip.invite, timeout=INVITE_TIMEOUT)
+            invite_msg, addr = await asyncio.wait_for(invite, timeout=INVITE_TIMEOUT)
         except (asyncio.TimeoutError, OSError):
             LOGGER.warning("SIP: INVITE не пришёл за %.0fs после REGISTER — отмена hold", INVITE_TIMEOUT)
             sip.close()

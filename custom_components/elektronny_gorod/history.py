@@ -138,6 +138,8 @@ class HistoryPoller:
         place_ids: list[int] = []
         for subscriber_place in (self._coordinator.data or {}).get("places") or []:
             place_id = (subscriber_place.get("place") or {}).get("id")
+            if place_id is None:
+                continue
             try:
                 place_ids.append(int(place_id))
             except (TypeError, ValueError):

@@ -692,7 +692,15 @@ async def test_media_source_registered_on_integration_setup(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    assert DOMAIN in hass.data["media_source"]
+    # HA 2026.8 убрал `hass.data["media_source"]`: реестр платформ ленивый.
+    # Регистрацию проверяем через публичный корневой browse.
+    root = await async_browse_media(hass, "media-source://")
+    assert any(
+        child.identifier == DOMAIN or child.media_content_id.startswith(
+            f"media-source://{DOMAIN}"
+        )
+        for child in root.children
+    )
     browse = await async_browse_media(hass, f"media-source://{DOMAIN}")
     assert browse.children[0].title == "Test"
 

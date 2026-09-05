@@ -38,6 +38,7 @@ from .const import (
     SIGNAL_DOORBELL,
 )
 from .coordinator import ElektronnyGorodUpdateCoordinator
+from .device import linked_to_place, place_device_id, place_identifier
 from .history import (
     camera_history_unique_id,
     history_signal,
@@ -111,11 +112,18 @@ def _migrate_single_place_account_history_entity(
     default_entity_id = suffix == "" or (
         suffix.startswith("_") and suffix[1:].isdigit()
     )
-    update: dict[str, str] = {"new_unique_id": new_unique_id}
     new_entity_id = _place_history_entity_id(account_id, place_id)
+    # Явные kwargs, а не распакованный dict: при `**update` проверка типов
+    # раскладывает `str` по всем параметрам `async_update_entity` (их два
+    # десятка) и перестаёт видеть настоящую сигнатуру.
     if default_entity_id and registry.async_get(new_entity_id) is None:
-        update["new_entity_id"] = new_entity_id
-    registry.async_update_entity(legacy_entity_id, **update)
+        registry.async_update_entity(
+            legacy_entity_id,
+            new_unique_id=new_unique_id,
+            new_entity_id=new_entity_id,
+        )
+    else:
+        registry.async_update_entity(legacy_entity_id, new_unique_id=new_unique_id)
 
 
 async def async_setup_entry(
@@ -169,7 +177,11 @@ async def async_setup_entry(
             for place_id in place_ids
         )
     entities.extend(
-        ElektronnyGorodDoorbellEvent(coordinator, lock_info)
+        ElektronnyGorodDoorbellEvent(
+            coordinator,
+            lock_info,
+            place_device_id(hass, entry.entry_id, str(lock_info["place_id"])),
+        )
         for lock_info in by_ac.values()
     )
     entities.extend(
@@ -177,6 +189,7 @@ async def async_setup_entry(
             coordinator,
             lock_info,
             entry_history_signal,
+            place_device_id(hass, entry.entry_id, str(lock_info["place_id"])),
         )
         for lock_info in by_ac.values()
     )
@@ -185,6 +198,9 @@ async def async_setup_entry(
             coordinator,
             camera_info,
             entry_history_signal,
+            place_device_id(
+                hass, entry.entry_id, str(camera_info.get("place_id") or "")
+            ),
         )
         for camera_info in (coordinator.data or {}).get("cameras") or []
         if camera_info.get("source") in ("intercom", "public")
@@ -226,7 +242,7 @@ class ElektronnyGorodPlaceHistoryEvent(
         )
         self.entity_id = _place_history_entity_id(account_id, place_id)
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"place_{place_id}")},
+            identifiers={place_identifier(place_id)},
             name=place_display_name(coordinator.data, place_id),
             manufacturer="Электронный город",
             model="Place",
@@ -289,6 +305,7 @@ class ElektronnyGorodAccessHistoryEvent(
         coordinator: ElektronnyGorodUpdateCoordinator,
         lock_info: dict[str, Any],
         history_dispatch_signal: str,
+        via_device_id: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         place_id = str(lock_info["place_id"])
@@ -303,13 +320,15 @@ class ElektronnyGorodAccessHistoryEvent(
         device_uid = (
             f"entrance_{place_id}_{access_control_id}_{entrance_id or 'main'}"
         )
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_uid)},
-            name=lock_info["name"],
-            manufacturer="Электронный город",
-            model="Intercom",
-            suggested_area=AREA_INTERCOM,
-            via_device=(DOMAIN, f"place_{place_id}"),
+        self._attr_device_info = linked_to_place(
+            DeviceInfo(
+                identifiers={(DOMAIN, device_uid)},
+                name=lock_info["name"],
+                manufacturer="Электронный город",
+                model="Intercom",
+                suggested_area=AREA_INTERCOM,
+            ),
+            via_device_id,
         )
 
     async def async_added_to_hass(self) -> None:
@@ -359,6 +378,7 @@ class ElektronnyGorodCameraHistoryEvent(
         coordinator: ElektronnyGorodUpdateCoordinator,
         camera_info: dict[str, Any],
         history_dispatch_signal: str,
+        via_device_id: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         camera_id = str(camera_info["id"])
@@ -374,13 +394,15 @@ class ElektronnyGorodCameraHistoryEvent(
             device_uid = (
                 f"entrance_{place_id}_{access_control_id}_{entrance_id or 'main'}"
             )
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, device_uid)},
-                name=camera_info.get("name") or camera_id,
-                manufacturer="Электронный город",
-                model="Intercom",
-                suggested_area=AREA_INTERCOM,
-                via_device=(DOMAIN, f"place_{place_id}"),
+            self._attr_device_info = linked_to_place(
+                DeviceInfo(
+                    identifiers={(DOMAIN, device_uid)},
+                    name=camera_info.get("name") or camera_id,
+                    manufacturer="Электронный город",
+                    model="Intercom",
+                    suggested_area=AREA_INTERCOM,
+                ),
+                via_device_id,
             )
         else:
             model = "Indoor Camera" if source == "place" else "Public Camera"
@@ -441,6 +463,7 @@ class ElektronnyGorodDoorbellEvent(
         self,
         coordinator: ElektronnyGorodUpdateCoordinator,
         lock_info: dict[str, Any],
+        via_device_id: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         self._place_id: str = lock_info["place_id"]
@@ -458,13 +481,15 @@ class ElektronnyGorodDoorbellEvent(
             f"entrance_{self._place_id}_{self._access_control_id}_"
             f"{self._entrance_id or 'main'}"
         )
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_uid)},
-            name=self._name,
-            manufacturer="Электронный город",
-            model="Intercom",
-            suggested_area=AREA_INTERCOM,
-            via_device=(DOMAIN, f"place_{self._place_id}"),
+        self._attr_device_info = linked_to_place(
+            DeviceInfo(
+                identifiers={(DOMAIN, device_uid)},
+                name=self._name,
+                manufacturer="Электронный город",
+                model="Intercom",
+                suggested_area=AREA_INTERCOM,
+            ),
+            via_device_id,
         )
 
     async def async_added_to_hass(self) -> None:

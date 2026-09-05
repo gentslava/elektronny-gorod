@@ -12,7 +12,7 @@
 
 ## Python / async
 
-- Python 3.12+, type hints для публичных API.
+- Python 3.14+, type hints для публичных API.
 - `async def` для любых I/O. Никаких `requests` / sync HTTP / `time.sleep` в event loop.
 - `asyncio.sleep` допустим **только** если нет другого варианта; в идеале — таймеры HA (`async_call_later`, `async_track_time_interval`).
 - Никаких новых `aiohttp.ClientSession()` — использовать `homeassistant.helpers.aiohttp_client.async_get_clientsession(hass)`.

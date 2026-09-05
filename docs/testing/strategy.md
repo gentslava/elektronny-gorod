@@ -31,10 +31,10 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **752 passed, 0 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-02) |
-| Test modules | 60 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **780 passed, 2 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-05; HA 2026.8.1 и 2026.9). Два skip — тесты FCM, требующие `firebase-messaging`: пакет объявлен в `manifest.json`, но в pytest-окружение не ставится. С ним локально 782 passed. |
+| Test modules | 61 файл `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
-| Product website | **69 passed**, `tsc --noEmit` и Vite production build (`website/`) |
+| Product website | **73 passed**, `tsc --noEmit` и Vite production build (`website/`) |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction including production-format config-entry title, diagnostics, HTTP no-leak, golden vectors helpers, deterministic secret-log scanner |
 | AIDD gates | Canonical secret/reconciliation hooks; Claude/Codex adapters; candidate-SHA CI, stacked target-ref, role/command/rule parity, thin adapters и path-fence contracts |
@@ -59,12 +59,13 @@ tests/
 ├── test_stream_manager*.py / test_sensor_rtsp_urls.py / test_config_flow_keep_warm.py
 ├── test_event.py / test_history.py / test_history_ws.py / test_media_source.py / test_api_media.py / test_clip_proxy.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
 ├── test_sip_*.py / test_uplink_ws.py
+├── test_device_hierarchy.py
 ├── test_secret_log_gate.py / test_audit_reconciliation_gate.py
 ├── test_aidd_contracts.py
 └── entity, visibility, balance, DND, helpers и migration regressions
 
 frontend/test/                      # 62 Vitest: call card/history/mic/i18n/build
-website/test/                       # 69 Vitest: compat/wizard/scenario/automations
+website/test/                       # 73 Vitest: compat/wizard/scenario/automations/sync
 ```
 
 ## Coverage checklist по слоям
@@ -219,18 +220,18 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 Архитектурные решения, отличные от изначального дизайн-наброска:
 
-- **Matrix-стратегия через `include:`** (не product) — потому что Python и PHC-версии жёстко связаны: PHC 0.13.175 → HA 2024.10.4 → py3.12 (min), PHC 0.13.333 → HA 2026.5.4 → py3.14 (current). Простой `ha-version: [min, stable]` не выражает эту связку.
-- **PHC ставится отдельным `pip install` после `requirements_test.txt`** — версия PHC из matrix, не из файла. `requirements_test.txt` держит только `aioresponses` (PHC сам тянет pytest, pytest-cov, coverage).
-- **Legacy constraints conditional** для min-job: HA 2024.10 транзитивно использует acme<3, ожидающий `josepy.ComparableX509` (удалён в josepy 2.0), а PHC 0.13.175 ещё не разрешает служебный pycares safe-shutdown thread, появившийся в pycares 4.9. Поэтому min-job ставит `josepy<2` и `pycares<4.9`; для current (HA 2026.5+) шаг пропускается.
+- **Matrix-стратегия через `include:`** (не product) — потому что Python и PHC-версии жёстко связаны: PHC 0.13.355 → HA 2026.8.1 → py3.14 (min), PHC 0.13.362 → HA 2026.9 → py3.14 (current). Простой `ha-version: [min, stable]` не выражает эту связку.
+- **PHC ставится отдельным `pip install` после `requirements_test.txt`** — версия PHC из matrix, не из файла. Собственных зависимостей у `requirements_test.txt` больше нет: PHC тянет pytest, pytest-cov и coverage сам.
 - **turbojpeg mock** в `tests/conftest.py` — `pytest-homeassistant-custom-component` не тянет optional HA-extras, нужно для `homeassistant.components.camera.img_util`.
 - **Path-filter на push и pull_request** — docs-only коммиты CI не запускают.
+- **Отдельный job `pyright`** — статический анализ не смешан с прогоном тестов: у него своя установка (HA-типы берутся из ядра, поэтому нужна та же PHC, что в current-job) и своё условие падения. pyright ставится через pip, а не сторонним экшеном.
 - **Coverage artifact** с уникальным именем `coverage-py<v>-phc<v>` (artifact@v4 требует уникальности в matrix).
 
 ## Mock-стратегия
 
 | Что мокаем | Чем |
 |---|---|
-| HTTP-вызовы к API | `aioresponses` или `aiohttp_mock` |
+| HTTP-вызовы к API | прямой mock `session.*` через `patch` на `async_get_clientsession` |
 | HA core | `pytest-homeassistant-custom-component` (предоставляет `hass`, `MockConfigEntry`) |
 | `async_setup_entry` для config-flow тестов | как в текущем `conftest.py` через patch |
 | go2rtc | direct mocked aiohttp context managers for exact method/query/error assertions |
@@ -246,7 +247,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 752 passed, 0 skipped (2026-09-02).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 780 passed, 2 skipped (2026-09-05).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

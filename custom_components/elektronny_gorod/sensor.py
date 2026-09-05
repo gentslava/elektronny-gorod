@@ -19,10 +19,9 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTime
+from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
-from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
@@ -39,6 +38,7 @@ from .const import (
     LOGGER,
     STREAM_MANAGER_DATA,
 )
+from .device import linked_to_place, place_device_id, place_identifier
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .stream_manager import (
     BACKGROUND_REFRESH_INTERVAL,
@@ -82,7 +82,12 @@ async def async_setup_entry(
         cur = by_ac.get(key)
         if cur is None or str(lk.get("entrance_id") or "") < str(cur.get("entrance_id") or ""):
             by_ac[key] = lk
-    entities.extend(ElektronnyGorodCallStateSensor(lk) for lk in by_ac.values())
+    entities.extend(
+        ElektronnyGorodCallStateSensor(
+            lk, place_device_id(hass, entry.entry_id, str(lk.get("place_id") or ""))
+        )
+        for lk in by_ac.values()
+    )
 
     async_add_entities(entities)
 
@@ -197,7 +202,7 @@ class ElektronnyGorodBalanceSensor(
         self._place_id = place_id
         self._attr_unique_id = f"{DOMAIN}_{place_id}_balance"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"place_{place_id}")},
+            identifiers={place_identifier(place_id)},
             name=self._place_display_name(),
             manufacturer="Электронный город",
             model="Place",
@@ -319,7 +324,7 @@ class ElektronnyGorodDaysToBlockSensor(
         self._place_id = place_id
         self._attr_unique_id = f"{DOMAIN}_{place_id}_days_to_block"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"place_{place_id}")},
+            identifiers={place_identifier(place_id)},
         )
 
     @property
@@ -374,7 +379,9 @@ class ElektronnyGorodCallStateSensor(SensorEntity):
         CALL_STATE_ERROR,
     ]
 
-    def __init__(self, lock_info: dict[str, Any]) -> None:
+    def __init__(
+        self, lock_info: dict[str, Any], via_device_id: str | None = None
+    ) -> None:
         self._place_id: str = lock_info["place_id"]
         self._access_control_id: str = lock_info["access_control_id"]
         self._entrance_id = lock_info.get("entrance_id")
@@ -389,13 +396,15 @@ class ElektronnyGorodCallStateSensor(SensorEntity):
             f"entrance_{self._place_id}_{self._access_control_id}_"
             f"{self._entrance_id or 'main'}"
         )
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_uid)},
-            name=self._name,
-            manufacturer="Электронный город",
-            model="Intercom",
-            suggested_area=AREA_INTERCOM,
-            via_device=(DOMAIN, f"place_{self._place_id}"),
+        self._attr_device_info = linked_to_place(
+            DeviceInfo(
+                identifiers={(DOMAIN, device_uid)},
+                name=self._name,
+                manufacturer="Электронный город",
+                model="Intercom",
+                suggested_area=AREA_INTERCOM,
+            ),
+            via_device_id,
         )
 
     async def async_added_to_hass(self) -> None:

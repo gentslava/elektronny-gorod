@@ -10,8 +10,8 @@ Home Assistant **custom integration** `elektronny_gorod` (домен) — инт
 
 ## Стек
 
-- Python 3.12+ (по HA core)
-- HomeAssistant ≥ 2024.10.4 (см. `hacs.json` + [`ha-compatibility.md`](docs/architecture/ha-compatibility.md))
+- Python 3.14+ (по HA core)
+- HomeAssistant ≥ 2026.8.1 (см. `hacs.json` + [`ha-compatibility.md`](docs/architecture/ha-compatibility.md))
 - `aiohttp`, `voluptuous`, `yarl`
 - Тесты: `pytest` + `pytest-homeassistant-custom-component` (`requirements_test.txt`)
 

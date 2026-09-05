@@ -22,6 +22,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import AREA_INTERCOM, DOMAIN, LOGGER
+from .device import linked_to_place, place_device_id
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import lock_unique_id
 
@@ -37,7 +38,14 @@ async def async_setup_entry(
     """Set up Elektronny Gorod Lock based on a config entry."""
     coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     locks = (coordinator.data or {}).get("locks") or []
-    async_add_entities(ElektronnyGorodLock(coordinator, lock_info) for lock_info in locks)
+    async_add_entities(
+        ElektronnyGorodLock(
+            coordinator,
+            lock_info,
+            place_device_id(hass, entry.entry_id, str(lock_info["place_id"])),
+        )
+        for lock_info in locks
+    )
 
 
 class ElektronnyGorodLock(
@@ -62,6 +70,7 @@ class ElektronnyGorodLock(
         self,
         coordinator: ElektronnyGorodUpdateCoordinator,
         lock_info: dict[str, Any],
+        via_device_id: str | None = None,
     ) -> None:
         super().__init__(coordinator)
         self._place_id = lock_info["place_id"]
@@ -85,13 +94,15 @@ class ElektronnyGorodLock(
             f"entrance_{self._place_id}_{self._access_control_id}_"
             f"{self._entrance_id or 'main'}"
         )
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, device_uid)},
-            name=self._name,
-            manufacturer="Электронный город",
-            model="Intercom",
-            suggested_area=AREA_INTERCOM,
-            via_device=(DOMAIN, f"place_{self._place_id}"),
+        self._attr_device_info = linked_to_place(
+            DeviceInfo(
+                identifiers={(DOMAIN, device_uid)},
+                name=self._name,
+                manufacturer="Электронный город",
+                model="Intercom",
+                suggested_area=AREA_INTERCOM,
+            ),
+            via_device_id,
         )
 
         LOGGER.debug("Lock init for entrance_id=%s", self._entrance_id)
