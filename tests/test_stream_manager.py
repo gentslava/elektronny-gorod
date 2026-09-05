@@ -9,7 +9,12 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from custom_components.elektronny_gorod.go2rtc import Go2RtcRequestError
-from custom_components.elektronny_gorod.stream_manager import CameraStreamManager
+from custom_components.elektronny_gorod.stream_manager import (
+    RETRY_INITIAL_SECONDS,
+    RETRY_MAX_EXPONENT,
+    RETRY_MAX_SECONDS,
+    CameraStreamManager,
+)
 
 
 def _manager(
@@ -382,3 +387,34 @@ async def test_operator_error_is_recorded_without_exception_details() -> None:
     assert state is not None
     assert state.status == "operator_error"
     assert "OPERATOR_SECRET" not in repr(state)
+
+
+async def test_retry_delay_survives_long_operator_outage() -> None:
+    """Затяжной отказ оператора не роняет расчёт задержки.
+
+    Потолок `min()` стоял после возведения в степень, поэтому сначала
+    вычислялось `2 ** failure_count` целиком. На проде оператор отдавал 500
+    несколько суток подряд, счётчик перевалил за тысячу — и `_record_failure`
+    падал с `OverflowError`, унося с собой `stream_source()`: камеры
+    переставали открываться вообще.
+    """
+    manager, _, _ = _manager()
+    manager._started = True
+    manager.keep_warm = True
+    manager._schedule_due = MagicMock()
+    state = manager._state_for("100")
+
+    for failure_count in (0, 1, 5, 1023, 4095, 100_000):
+        state.failure_count = failure_count
+        manager._record_failure(state, "empty_source")
+
+    # Дошли сюда без OverflowError. Заодно фиксируем саму прогрессию.
+    delays = []
+    for failure_count in (1, 2, 3, 10, 10_000):
+        state.failure_count = failure_count
+        exponent = min(state.failure_count - 1, RETRY_MAX_EXPONENT)
+        delays.append(
+            min(RETRY_INITIAL_SECONDS * 2**exponent, RETRY_MAX_SECONDS)
+        )
+
+    assert delays == [15.0, 30.0, 60.0, 300.0, 300.0]

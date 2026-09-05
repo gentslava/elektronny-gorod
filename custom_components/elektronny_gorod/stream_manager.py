@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import math
 import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -36,6 +37,14 @@ STARTUP_JITTER_MAX_SECONDS = 60.0
 POLICY_ENABLE_STAGGER_SECONDS = 0.5
 RETRY_INITIAL_SECONDS = 15.0
 RETRY_MAX_SECONDS = 300.0
+# Показатель степени, после которого задержка и так упирается в потолок.
+# Ограничивать приходится ДО возведения в степень: при затяжном отказе
+# оператора счётчик неудач растёт неограниченно, и `2 ** failure_count`
+# перестаёт помещаться во float. Прод 2026-09-05: `OverflowError` после
+# ~1024 неудач подряд — примерно трое с половиной суток отказа на
+# пятиминутном шаге, — и он ронял `stream_source()`, то есть камеры
+# переставали открываться вовсе.
+RETRY_MAX_EXPONENT = math.ceil(math.log2(RETRY_MAX_SECONDS / RETRY_INITIAL_SECONDS))
 BACKGROUND_REFRESH_REASONS = frozenset({"background_due", "reconcile"})
 ON_DEMAND_REFRESH_REASONS = frozenset({
     "ha_open",
@@ -598,8 +607,9 @@ class CameraStreamManager:
             and self.keep_warm
             and self.is_camera_eligible(state.camera_id)
         ):
+            exponent = min(state.failure_count - 1, RETRY_MAX_EXPONENT)
             retry_delay = min(
-                RETRY_INITIAL_SECONDS * (2 ** (state.failure_count - 1)),
+                RETRY_INITIAL_SECONDS * 2**exponent,
                 RETRY_MAX_SECONDS,
             )
             self._schedule_due(state.camera_id, retry_delay)
