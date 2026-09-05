@@ -70,7 +70,15 @@ async def _async_recover_stream(self) -> None:
 
 ### Throttle (защита от шторма)
 
-Worker фейлит каждые 10/20/30с и на каждый отказ зовёт callback. Без cooldown мы бы забили operator API. `STREAM_RECOVERY_COOLDOWN=30s` + recovery идёт через `hass.async_create_background_task` (не блокирует callback, авто-отмена при shutdown). Если свежий URL тоже мёртвый (operator реально down) → падаем в штатный backoff HA, повторная попытка не раньше чем через cooldown.
+Worker фейлит каждые 10/20/30с и на каждый отказ зовёт callback. Без cooldown мы бы забили operator API. `STREAM_RECOVERY_COOLDOWN=30s` + recovery идёт через `hass.async_create_background_task` (не блокирует callback, авто-отмена при shutdown).
+
+### v4 — backoff при устойчивом отказе оператора
+
+Прежняя формулировка «если свежий URL тоже мёртвый → падаем в штатный backoff HA» оказалась неверной для go2rtc-пути: v2-poll дёргает recovery сам, независимо от HA Stream worker, поэтому фиксированный cooldown давал ровно одну попытку в минуту — бесконечно.
+
+**Прод-замер 2026-09-05:** оператор отвечал `500` на `/rest/v1/forpost/cameras/{id}/video` непрерывно с 08:08 до 09:53 для трёх лифтовых камер. `bytes_recv` не менялся (`812318` час за часом), recovery запускался раз в минуту и каждый раз получал ту же ошибку — около 1400 бесполезных запросов в сутки на камеру плюс столько же строк `ERROR` в журнале.
+
+**Решение:** счётчик неудач подряд (`_recovery_failures`); пауза = `STREAM_RECOVERY_COOLDOWN * 2**failures`, потолок `STREAM_RECOVERY_BACKOFF_MAX=1800s`. Первый успех сбрасывает счётчик. Backoff гасит **только** фоновые попытки: `stream_source()` идёт своим путём, поэтому открытая пользователем карточка всегда пробует получить поток заново, сколько бы ни было неудач.
 
 ### v2 — go2rtc producer-health poll (go2rtc/WebRTC-only путь)
 

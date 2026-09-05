@@ -49,6 +49,14 @@ if TYPE_CHECKING:
 # без cooldown re-fetch забивал бы operator API. См. ADR-0009.
 STREAM_RECOVERY_COOLDOWN = 30.0
 
+# Экспоненциальный backoff, когда recovery не помогает. Оператор умеет
+# отвечать 500 на `/video` часами подряд (production 2026-09-05: три камеры,
+# непрерывно с 08:08 до 09:53). Без backoff health-poll дёргал recovery раз в
+# минуту бесконечно — около 1400 бесполезных запросов в сутки на камеру и
+# столько же ERROR в журнале. Пауза удваивается на каждую неудачу подряд и
+# упирается в потолок; первый же успех сбрасывает счётчик.
+STREAM_RECOVERY_BACKOFF_MAX = 1800.0
+
 # A-71 v2 / ADR-0009: интервал poll'а go2rtc producer-health для
 # go2rtc/WebRTC-only пути (камеры без legacy HA Stream worker — напр. лифты).
 # Живой forpost-поток шлёт ~150 КБ/с; `bytes_recv`, замороженный за интервал
@@ -205,6 +213,8 @@ class ElektronnyGorodCamera(
         self._inflight_stream_future: asyncio.Future[str | None] | None = None
         # A-71: monotonic-метка последней авто-recovery (throttle, см. ADR-0009).
         self._last_recovery_monotonic: float = 0.0
+        # Неудачные авто-recovery подряд — основание backoff.
+        self._recovery_failures: int = 0
         # A-71 v2: go2rtc producer-health poll (go2rtc/WebRTC-only путь, лифты).
         # baseline `bytes_recv` с прошлого опроса + unsub таймера.
         self._go2rtc_last_bytes_recv: int | None = None
@@ -481,12 +491,49 @@ class ElektronnyGorodCamera(
         делает PATCH-only refresh, restart не нужен, transition smooth.
         """
         now = time.monotonic()
-        if now - self._last_recovery_monotonic < STREAM_RECOVERY_COOLDOWN:
+        if now - self._last_recovery_monotonic < self._recovery_cooldown:
             return
         self._last_recovery_monotonic = now
         self.hass.async_create_background_task(
             self._async_recover_stream(force_restart=force_restart),
             name=f"{DOMAIN}_stream_recovery_{self._id}",
+        )
+
+    @property
+    def _recovery_cooldown(self) -> float:
+        """Пауза до следующей авто-recovery с учётом неудач подряд.
+
+        Ручное открытие камеры сюда не заходит: `stream_source()` идёт своим
+        путём и всегда пробует получить поток, сколько бы ни было неудач, —
+        backoff гасит только фоновые попытки.
+        """
+        if not self._recovery_failures:
+            return STREAM_RECOVERY_COOLDOWN
+        return min(
+            STREAM_RECOVERY_COOLDOWN * 2**self._recovery_failures,
+            STREAM_RECOVERY_BACKOFF_MAX,
+        )
+
+    @callback
+    def _note_recovery_outcome(self, *, recovered: bool) -> None:
+        """Учесть исход авто-recovery для backoff."""
+        if recovered:
+            if self._recovery_failures:
+                LOGGER.debug(
+                    "Camera %s (%s): stream recovered after %d failed attempt(s)",
+                    self._name,
+                    self._id,
+                    self._recovery_failures,
+                )
+            self._recovery_failures = 0
+            return
+        self._recovery_failures += 1
+        LOGGER.debug(
+            "Camera %s (%s): recovery attempt %d failed — next try in %.0fs",
+            self._name,
+            self._id,
+            self._recovery_failures,
+            self._recovery_cooldown,
         )
 
     async def _async_recover_stream(self, *, force_restart: bool = True) -> None:
@@ -511,12 +558,14 @@ class ElektronnyGorodCamera(
                 "recovery" if force_restart else "active_consumer",
             )
             if not result.url:
+                self._note_recovery_outcome(recovered=False)
                 LOGGER.debug(
                     "Camera %s (%s): stream recovery got empty url — skip",
                     self._name,
                     self._id,
                 )
                 return
+            self._note_recovery_outcome(recovered=True)
             # The proxied RTSP URL is stable: PATCH refreshed its upstream and
             # HA Stream already retries the same URL after EOF. Calling
             # update_source() here races HA's idle stop: its one-shot fast
@@ -526,6 +575,7 @@ class ElektronnyGorodCamera(
         try:
             stream_url = await self.coordinator.get_camera_stream(self._id)
         except Exception as err:  # noqa: BLE001 - sanitize operator boundary
+            self._note_recovery_outcome(recovered=False)
             LOGGER.error(
                 "Camera %s (%s): stream recovery fetch failed (%s)",
                 self._name,
@@ -534,11 +584,13 @@ class ElektronnyGorodCamera(
             )
             return
         if not stream_url:
+            self._note_recovery_outcome(recovered=False)
             LOGGER.debug(
                 "Camera %s (%s): stream recovery got empty url — skip",
                 self._name, self._id,
             )
             return
+        self._note_recovery_outcome(recovered=True)
         LOGGER.debug(
             "Camera %s (%s): auto-recovery — refreshing stalled stream "
             "(force_restart=%s)",

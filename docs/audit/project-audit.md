@@ -1013,6 +1013,18 @@ Quality gates:
 - **Follow-up:** `permissions` не заданы в `hacs.yaml`, `hassfest.yaml`, `python-tests.yaml` — при `default_workflow_permissions: write` они получают write-токен и запускают сторонние экшены с mutable-ref (`hacs/action@main`, `hassfest@master`). Отдельно стоит завести `.github/dependabot.yml` для экосистемы `github-actions`: остальные workflow всё ещё сидят на `actions/checkout@v4` и `actions/upload-artifact@v4` при актуальных `v7`, а `hacs/action@main` и `hassfest@master` вообще не версионированы.
 - **Acceptance:** первый fork-PR после merge проверяется вручную — `workflow_run` и `pull_request_target` читаются GitHub только из default-ветки, поэтому до merge схема непроверяема.
 
+### A-102. Recovery потока долбит оператора при устойчивом отказе
+
+- **Status:** 🟢 **resolved-in-branch** (pending merge `fix/stream-recovery-backoff`).
+- **Severity:** **P2** — деградация внешнего API и шум в журнале; функционально камера и так не работает.
+- **Area:** `camera.py` (`_maybe_schedule_stream_recovery`, `_async_recover_stream`), [ADR-0009](../decisions/0009-camera-stream-auto-recovery.md).
+- **Evidence (прод, 2026-09-05):** оператор отвечал `500` на `/rest/v1/forpost/cameras/{id}/video` непрерывно с 08:08 до 09:53 для трёх лифтовых камер. Журнал: `go2rtc producer frozen (bytes_recv=812318, 1 consumer(s)) — triggering recovery` → запрос → `[500]`, и так раз в минуту без изменений; `bytes_recv` оставался тем же час за часом.
+- **Root cause:** `STREAM_RECOVERY_COOLDOWN` фиксирован на 30 с и ограничивает только частоту, а не число попыток. ADR-0009 предполагал, что при мёртвом URL мы «падаем в штатный backoff HA», но для go2rtc-пути это неверно: v2-poll дёргает recovery сам, независимо от HA Stream worker. Итог — около 1400 бесполезных запросов в сутки на камеру и столько же строк `ERROR`.
+- **Impact:** нагрузка на закрытый API оператора (риск для аккаунта), зашумлённый журнал, маскировка настоящих ошибок. Пользователь при этом видит либо неработающую камеру, либо невнятную ошибку клиента — так, `custom:webrtc-camera` в такой ситуации откатывается на поток снимков и сообщает `codecs not matched: video:JPEG` ([discussion #84](https://github.com/gentslava/elektronny-gorod/discussions/84); связь правдоподобна, но у автора не подтверждена).
+- **Fix:** счётчик неудач подряд, пауза `30 c * 2**failures` с потолком 30 минут, сброс при первом успехе. Ручное открытие камеры backoff не затрагивает — `stream_source()` идёт своим путём и всегда пробует заново.
+- **Tests:** `tests/test_camera_auto_recovery.py` — 5 тестов (рост паузы, потолок, сброс при успехе, подавление повторной фоновой попытки, независимость ручного открытия). Проверено мутациями: снятие backoff, неучёт неудачи, отсутствие сброса при успехе и снятый потолок — каждая роняет прогон.
+- **Follow-up:** сама причина `500` на стороне оператора не диагностирована; отдельно стоит подумать, как показывать пользователю недоступность потока внятнее, чем молчаливым отсутствием видео.
+
 ### A-100. Камеры и замки пропали из HA после обновления ядра до 2026.9
 
 - **Status:** 🟢 **resolved-in-branch** (pending merge `fix/ha-2026-9-via-device`).
