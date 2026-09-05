@@ -666,6 +666,7 @@ async def test_successful_open_clears_recovery_backoff(hass: HomeAssistant, mock
 _JPEG_1 = b"\xff\xd8" + b"FRAME-1"
 _JPEG_2 = b"\xff\xd8" + b"FRAME-2"
 _JPEG_FULL = b"\xff\xd8" + b"FRAME-FULL"
+_JPEG_ICON = b"\xff\xd8" + b"FRAME-ICON"
 _OPERATOR_ERROR_BODY = b'{"error":"internal server error"}'
 
 _SIZE = (320, 180)
@@ -882,27 +883,62 @@ async def test_unavailable_camera_serves_no_cached_frame(
     assert await cam.async_camera_image(*_SIZE) is None
 
 
-async def test_new_size_served_from_another_size_meanwhile(
+async def test_larger_cached_frame_covers_a_smaller_request(
     hass: HomeAssistant, mock_api
 ):
-    """Новый размер не заставляет ждать: показываем кадр другого размера.
+    """Крупный кадр годится вместо мелкого: ядро уменьшит его само.
 
     HA просит разные размеры для списка, карточки и полноэкранного вида
-    (в проде наблюдались 80x80, 300x169, 390x219, 490x276, 1024x576).
-    Ожидание на каждом новом размере снова давало бы белый экран, хотя кадр
-    камеры в памяти есть — ядро масштабирует JPEG само.
+    (в проде наблюдались 80x80, 300x169, 390x219, 490x276, 1024x576), и
+    ожидание на каждом новом размере снова давало бы белый экран.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_FULL)
+    await cam.async_camera_image(1024, 576)
+
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    immediate = await cam.async_camera_image(*_SIZE)
+
+    assert immediate == _JPEG_FULL, "ответ не должен ждать оператора"
+    await _settle_snapshot(cam)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+
+
+async def test_icon_sized_frame_is_not_stretched_over_a_card(
+    hass: HomeAssistant, mock_api
+):
+    """Иконочный кадр не растягивается на большую карточку.
+
+    Подстановка спасает от белого экрана, но `80x80`, растянутый на всю
+    карточку, — нечитаемое месиво: пользователь видит пиксельную кашу вместо
+    камеры. Здесь лучше подождать оператора.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_ICON)
+    await cam.async_camera_image(80, 80)
+
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_FULL)
+    shown = await cam.async_camera_image(490, 276)
+
+    assert shown == _JPEG_FULL, "иконку показывать нельзя, нужен нормальный кадр"
+
+
+async def test_smaller_frame_is_never_upscaled(hass: HomeAssistant, mock_api):
+    """Меньший кадр не подставляется вовсе, даже если разница невелика.
+
+    Увеличение всегда портит картинку, поэтому правило простое: годится
+    только кадр не мельче запрошенного. Уменьшение безвредно.
     """
     cam = await _setup_camera(hass, use_go2rtc=False)
     instance = mock_api.return_value
     instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
-    await cam.async_camera_image(*_SIZE)
+    await cam.async_camera_image(390, 219)
 
     instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_FULL)
-    immediate = await cam.async_camera_image(1024, 576)
 
-    assert immediate == _JPEG_1, "ответ не должен ждать оператора"
-    await _settle_snapshot(cam)
-    assert await cam.async_camera_image(1024, 576) == _JPEG_FULL
+    assert await cam.async_camera_image(490, 276) == _JPEG_FULL
 
 
 async def test_operator_refusal_pauses_snapshot_requests(

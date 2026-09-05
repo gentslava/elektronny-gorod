@@ -438,7 +438,7 @@ class ElektronnyGorodCamera(
         # разные размеры для списка, карточки и полноэкранного вида, поэтому
         # ожидание на каждом новом размере снова показывало бы белый экран.
         # Ядро масштабирует JPEG само, так что чужой размер здесь уместен.
-        substitute = self._recent_snapshot()
+        substitute = self._recent_snapshot(size)
         if substitute is not None:
             self._schedule_snapshot_refresh(size)
             return substitute
@@ -451,17 +451,23 @@ class ElektronnyGorodCamera(
         return await self._async_fetch_snapshot(size)
 
     @callback
-    def _recent_snapshot(self) -> bytes | None:
-        """Самый свежий кадр любого размера, если он ещё не протух."""
+    def _recent_snapshot(self, wanted: tuple[int, int]) -> bytes | None:
+        """Свежайший кадр, годный к показу вместо запрошенного размера.
+
+        Годится только кадр не мельче запрошенного: уменьшение безвредно —
+        ядро масштабирует JPEG само, — а увеличение портит картинку. Иконка
+        80x80, растянутая на карточку, это не «чуть хуже», а нечитаемое
+        месиво; лучше подождать оператора.
+        """
         now = time.monotonic()
-        fresh = [
+        usable = [
             (taken, image)
-            for image, taken in self._snapshots.values()
-            if now - taken < SNAPSHOT_MAX_STALE_SECONDS
+            for (width, _height), (image, taken) in self._snapshots.items()
+            if now - taken < SNAPSHOT_MAX_STALE_SECONDS and width >= wanted[0]
         ]
-        if not fresh:
+        if not usable:
             return None
-        return max(fresh)[1]
+        return max(usable)[1]
 
     async def async_fresh_camera_image(
         self, width: int | None = None, height: int | None = None
