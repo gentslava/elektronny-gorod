@@ -960,3 +960,26 @@ async def test_recovered_operator_clears_snapshot_pause(
     assert await cam.async_camera_image(*_SIZE) == _JPEG_1
     assert cam._snapshot_failures == 0
     assert cam._snapshot_retry_after == 0.0
+
+
+async def test_frame_survives_a_closed_page(hass: HomeAssistant, mock_api):
+    """Кадр переживает закрытие страницы и возврат через несколько минут.
+
+    Фоновое обновление кладёт кадр в память, но забрать его некому, пока
+    карточку не откроют снова. При коротком потолке кадр протухал раньше
+    возвращения пользователя: запрос потрачен, а белый экран остался.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+
+    # Пользователь ушёл на две минуты.
+    _age_snapshot(cam, _SIZE, 120.0)
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_2)
+
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1, (
+        "возврат на страницу не должен ждать оператора"
+    )
+    await _settle_snapshot(cam)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_2
