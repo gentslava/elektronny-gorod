@@ -23,7 +23,7 @@ Quality gates:
 
 Каждая задача в roadmap **ссылается на находку из аудита**. Без evidence — не roadmap, а вишлист.
 
-## Итерация 1 — Hotfix P0 + AIDD MVP (≈ 1-2 дня)
+## Итерация 1 — Hotfix P0 + AIDD MVP ✅ COMPLETED
 
 **Цель:** убрать утечки токенов из логов, исправить тихий баг, заложить AIDD-документацию.
 
@@ -31,20 +31,22 @@ Quality gates:
 
 ### Tasks
 
-- [ ] **A-01** Удалить `LOGGER.debug("Access token is %s", self.access_token)` — [`config_flow.py:77`](../custom_components/elektronny_gorod/config_flow.py#L77).
-- [ ] **A-02** В [`http.py:11-13`](../custom_components/elektronny_gorod/http.py#L11-L13) создать `_redact_headers()` и не логировать `data` для auth endpoints.
-- [ ] **A-03** В [`http.py:22-25`](../custom_components/elektronny_gorod/http.py#L22-L25) ввести redaction body для auth-paths.
-- [ ] **A-04** Заменить `entry.data` → `entry.entry_id` в [`config_flow.py:283, 291`](../custom_components/elektronny_gorod/config_flow.py#L283).
-- [ ] **A-05** Перевести [`http.py`](../custom_components/elektronny_gorod/http.py) на `async_get_clientsession(hass)`; прокинуть `hass` через `ElektronnyGorodAPI` и `ElektronnyGorodUpdateCoordinator`.
-- [ ] **A-06** Исправить `c.get("ID")` → `c.get("id")` в [`coordinator.py:182`](../custom_components/elektronny_gorod/coordinator.py#L182).
-- [ ] **A-07** Удалить `tests/test_config_flow.py` (или пометить `@pytest.mark.skip("rewrite per docs/testing/strategy.md")`).
-- [ ] **A-43** Поднять `import base64` в top of file в [`camera.py`](../custom_components/elektronny_gorod/camera.py); рассмотреть `aiohttp.BasicAuth`.
+- [x] **A-01** Удалить `LOGGER.debug("Access token is %s", self.access_token)` — [`config_flow.py:77`](../custom_components/elektronny_gorod/config_flow.py#L77).
+- [x] **A-02** В [`http.py:11-13`](../custom_components/elektronny_gorod/http.py#L11-L13) создать `_redact_headers()` и не логировать `data` для auth endpoints.
+- [x] **A-03** В [`http.py:22-25`](../custom_components/elektronny_gorod/http.py#L22-L25) ввести redaction body для auth-paths.
+- [x] **A-04** Заменить `entry.data` → `entry.entry_id` в [`config_flow.py:283, 291`](../custom_components/elektronny_gorod/config_flow.py#L283).
+- [x] **A-05** Перевести [`http.py`](../custom_components/elektronny_gorod/http.py) на `async_get_clientsession(hass)`; прокинуть `hass` через `ElektronnyGorodAPI` и `ElektronnyGorodUpdateCoordinator`.
+- [x] **A-06** Исправить `c.get("ID")` → `c.get("id")` в [`coordinator.py:182`](../custom_components/elektronny_gorod/coordinator.py#L182).
+- [x] **A-07** Удалить `tests/test_config_flow.py` (или пометить `@pytest.mark.skip("rewrite per docs/testing/strategy.md")`).
+- [x] **A-43** Поднять `import base64` в top of file в [`camera.py`](../custom_components/elektronny_gorod/camera.py); рассмотреть `aiohttp.BasicAuth`.
 - [ ] **A-45** Добавить `go2rtc_username`/`go2rtc_password` в `TO_REDACT` (создаётся вместе с `diagnostics.py` в Итерации 2; в Итерации 1 — минимум зафиксировать в S-16 + не логировать).
-- [ ] **AIDD-1** Full AIDD заложен (сделано в текущем цикле работы).
-- [ ] **ADR-0001** записать «принятие AIDD».
-- [ ] **Release** hotfix (patch-релиз) с changelog `security: redact tokens in logs`.
+- [x] **AIDD-1** Full AIDD заложен (сделано в текущем цикле работы).
+- [x] **ADR-0001** записать «принятие AIDD».
+- [x] **Release** hotfix (patch-релиз) с changelog `security: redact tokens in logs`.
 
 **Quality gates passed:** `SECURITY_OK` (P0 cleared), `AUDIT_DONE`, `DOCS_UPDATED`.
+
+> Итерация оставалась незакрытой из-за дрейфа: все задачи P0 были сделаны и выпущены, но галочки не проставлялись. Статусы сверены с [`project-audit.md`](audit/project-audit.md) 2026-09-05. Единственный незакрытый пункт — A-45 (`MITIGATED`): go2rtc-креды не логируются и попадают в `TO_REDACT`, но по-прежнему лежат в `entry.data` в открытом виде — это ограничение хранилища HA, а не упущение.
 
 ## Итерация 2 — Bronze quality scale ✅ COMPLETED
 
@@ -113,7 +115,7 @@ Quality gates:
 
 #### HA features
 
-- [ ] **A-15** Решить судьбу `fake_timer_lock` в `lock.py` — либо удалить, либо переписать `lock` → `button`. Требует ADR-0005.
+- [x] **A-15** Решить судьбу `fake_timer_lock` в `lock.py` — либо удалить, либо переписать `lock` → `button`. Требует ADR-0005. **WON'T FIX** (решение владельца 2026-09-05): `lock` точнее отражает суть замка домофона, чем `button`.
 - [ ] **A-22** (остаток) Поведение при 401: pre-auth Bearer-omission уже сделан (PR #35); осталось — собрать HAR со сценарием истечения access_token, затем реализовать `/auth/.../refresh` **точно как в приложении** (см. [ADR-0006](decisions/0006-mirror-app-behavior.md)). До получения HAR — текущее graceful поведение (UpdateFailed → reauth через UI).
 - [ ] **A-25** Native reauth flow (`async_step_reauth_confirm`).
 - [ ] **A-26** Reconfigure flow (`async_step_reconfigure`).
@@ -127,7 +129,7 @@ Quality gates:
 - [x] **A-57** ✅ Finance: account-blocked + days-to-block entities; payment amount/date/link remain safe balance attributes (PR #39; browser navigation is not a HA Button use-case).
 - [x] **A-58 realtime** ✅ Doorbell event delivery implemented through FCM (ADR-0011); REST polling is not the realtime source.
 - [x] **A-58 history remainder** ✅ Реализовано в `feat/durable-event-history`: page-0 silent baseline per source, bounded ID dedup across restart, config-entry-scoped dispatch и отдельный unload-safe poll lifecycle.
-- [ ] **A-59** Video retention helper — `is_within_retention(camera_type, ts)`, проверка перед video URL request. Закрывает ложные 500 для лифт/публичных камер.
+- [x] **A-59** Video retention helper — `is_within_retention(camera_type, ts)`, проверка перед video URL request. Закрывает ложные 500 для лифт/публичных камер.
 - [x] **A-61** ✅ Двойной HTTP устранён: `screens` + `access_controls` prefetch per place (commit `71eb4dd`).
 - [ ] **A-62** FAVORITES section в `_extract_hidden_ids` — расширить парсинг с учётом mixed-typed items. Fallback OK, не блокер.
 
@@ -155,7 +157,7 @@ Quality gates:
 > Логи 2026-05-27 показали 2 новых проблемы после deployment A-64/A-66.
 
 - [x] **A-68** ✅ **P2 defensive** Concurrent `stream_source()` dedup (PR #51). In-flight future-pattern в `Camera.stream_source` — concurrent callers wait first future вместо параллельного fetch. N concurrent callers → 1 HTTP + 1 PUT + 1 `Stream.update_source()` restart. **Scope clarification**: defensive cleanup для concurrent-thrash (Frigate / WebRTC probe / Lovelace card в параллель). **Не фикс** «мигание видео после cold start» — у него отдельный root cause (production-тест 2026-05-27 подтвердил: с A-68 мигание остаётся). Investigation flicker'а перенесена в отдельный track (требует browser-side runtime diagnostic: Network m3u8/m4s + Console MediaSource events).
-- [ ] **A-67** P2 Cold-start go2rtc warmup — **attempted, didn't help**. Эксперимент в 3 итерациях (A-67 PUT-only pre-warm / A-71 active probe via `/api/frame.jpeg` / A-72 `/api/preload` через go2rtc-research): все проверены runtime'ом на production-сервере, ни один не убрал видимое мигание видео. Hypothesis «ffmpeg cold-start race» оказалась неверной (нужна другая diagnostic-сессия). Закрыт без PR'а.
+- [x] **A-67** P2 Cold-start go2rtc warmup — **attempted, didn't help**. Эксперимент в 3 итерациях (A-67 PUT-only pre-warm / A-71 active probe via `/api/frame.jpeg` / A-72 `/api/preload` через go2rtc-research): все проверены runtime'ом на production-сервере, ни один не убрал видимое мигание видео. Hypothesis «ffmpeg cold-start race» оказалась неверной (нужна другая diagnostic-сессия). Закрыт без PR'а.
 
 #### External RTSP after idle (A-82/A-84/A-96, ADR-0014)
 
@@ -173,7 +175,7 @@ Quality gates:
 
 - [ ] **A-30** `extra_state_attributes` — snake_case ключи.
 - [ ] **A-31** UTC в `time.py`.
-- [ ] **A-32** Заменить f-string в `LOGGER.*` на `%`-форматирование во всех местах.
+- [x] **A-32** Заменить f-string в `LOGGER.*` на `%`-форматирование во всех местах.
 - [ ] **A-33** Magic strings → const.
 - [ ] **A-39** Избавиться от reinvented `find/contains/append_unique` в helpers.
 - [ ] **A-40** Удалить мёртвый `ANDROID_DEVICES_CSV` или включить.

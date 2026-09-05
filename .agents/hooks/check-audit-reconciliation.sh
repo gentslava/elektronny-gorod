@@ -170,6 +170,36 @@ if [[ -n "$bad_vocab" ]]; then
     fail=1
 fi
 
+# ── 7. roadmap.md не должен отставать от аудита ────────────────────────────
+# Дрейф накапливался незаметно: задачи делались и выпускались, а галочки в
+# roadmap не проставлялись — на 2026-09-05 из 42 невыполненных пунктов 15
+# были фактически закрыты. Аудит — источник правды (ADR-0010), поэтому
+# сверяем механически.
+ROADMAP="docs/roadmap.md"
+if [[ -f "$ROADMAP" ]]; then
+    stale_roadmap=""
+    while read -r fid; do
+        [[ -n "$fid" ]] || continue
+        # Статус находки в аудите: закрыта, если ✅ RESOLVED без 🟡-оговорки.
+        if awk -v target="$fid" '
+                /^### A-[0-9]+\./ { in_target = ($2 == target ".") }
+                in_target && /^- \*\*Status:\*\*/ {
+                    if ($0 ~ /✅ \*\*RESOLVED\*\*/ && $0 !~ /🟡/) found = 1
+                    in_target = 0
+                }
+                END { exit(found ? 0 : 1) }
+            ' "$AUDIT"
+        then
+            stale_roadmap+="     $fid закрыт в аудите, но не отмечен в roadmap.md"$'\n'
+        fi
+    done < <(grep -oE '^- \[ \] \*\*(A-[0-9]+)\*\*' "$ROADMAP" | grep -oE 'A-[0-9]+' || true)
+    if [[ -n "$stale_roadmap" ]]; then
+        echo "❌ roadmap.md отстал от аудита:"
+        printf '%s' "$stale_roadmap"
+        fail=1
+    fi
+fi
+
 if [[ "$fail" -eq 0 ]]; then
     if [[ "$pending_count" -gt 0 ]]; then
         echo "✅ Reconciliation consistent; $pending_count pending findings remain open."
