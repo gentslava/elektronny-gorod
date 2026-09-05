@@ -136,11 +136,43 @@ async def test_camera_image_delegates_to_doorbell_snapshot():
     c = MagicMock()
     c.active_call_media.return_value = ("1013", MagicMock())
     doorbell = MagicMock()
-    doorbell.async_camera_image = AsyncMock(return_value=b"jpeg-bytes")
+    doorbell.async_fresh_camera_image = AsyncMock(return_value=b"jpeg-bytes")
     cam = _cam(c, lambda cid: doorbell if cid == "1013" else None)
     img = await cam.async_camera_image(300, 200)
     assert img == b"jpeg-bytes"
-    doorbell.async_camera_image.assert_awaited_once_with(300, 200)
+    doorbell.async_fresh_camera_image.assert_awaited_once_with(300, 200)
+
+
+async def test_call_screen_snapshot_bypasses_cache():
+    """Экран вызова показывает живой кадр, а не последний просмотренный.
+
+    Гость стоит у двери сейчас; кадр из кэша показал бы прошлое. Приложение
+    оператора в этот момент тоже перезапрашивает снимок (api-reference).
+    """
+    c = MagicMock()
+    c.active_call_media.return_value = ("1013", MagicMock())
+    doorbell = MagicMock()
+    doorbell.async_fresh_camera_image = AsyncMock(return_value=b"live")
+    doorbell.async_camera_image = AsyncMock(return_value=b"cached")
+    cam = _cam(c, lambda cid: doorbell if cid == "1013" else None)
+
+    assert await cam.async_camera_image(300, 200) == b"live"
+    doorbell.async_camera_image.assert_not_awaited()
+
+
+async def test_mjpeg_fallback_does_not_poll_the_operator_at_stream_rate():
+    """MJPEG-фолбэк экрана вызова не гоняет оператора по кадру за полсекунды.
+
+    Кадр здесь идёт мимо кэша и мимо паузы, то есть каждый оборот лупа ядра —
+    настоящий запрос. На дефолтном интервале это две штуки в секунду на всё
+    время разговора, и ровно тот `/snapshots`, который под нагрузкой отдаёт
+    отказ.
+    """
+    cam = _cam(MagicMock(), lambda cid: None)
+
+    # Верхняя граница тоже нужна: без неё «живой вид» гостя вырождается в
+    # стоп-кадр на весь разговор, и тест этого не заметит.
+    assert 1.0 <= cam.frame_interval <= 5.0
 
 
 async def test_camera_image_none_without_active_call():

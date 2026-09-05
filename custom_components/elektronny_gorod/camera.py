@@ -13,6 +13,7 @@ import logging
 import math
 import time
 from datetime import datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
@@ -24,6 +25,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
+    DEFAULT_SNAPSHOT_WIDTH,
     AREA_INTERCOM,
     AREA_INDOOR_CAM,
     AREA_PUBLIC_CAM,
@@ -45,15 +47,52 @@ from .stream_manager import CameraStreamManager
 if TYPE_CHECKING:
     from homeassistant.components.stream import Stream
 
+# Сколько кадр считается свежим. Пока свежий — отдаём из памяти, вообще не
+# беспокоя оператора; когда устарел, но ещё не протух — отдаём сразу, а
+# обновление уходит в фон. Иначе каждое открытие карточки ждало операторский
+# JPEG и встречало белым экраном.
+#
+# Тридцать секунд, а не десять: карточка HA сама опрашивает камеру примерно
+# раз в десять секунд, поэтому при равном интервале почти каждый опрос попадал
+# в «протух» и порождал фоновый запрос. Картинка подъезда и лифта статична,
+# так что полминуты незаметны, а обращений к оператору втрое меньше.
+SNAPSHOT_FRESH_SECONDS = 30.0
+
+# Предел, после которого кадр уже нельзя показывать как текущий. Минуты здесь
+# мало: страницу закрывают и возвращаются через несколько минут, а к тому
+# моменту фоновой кадр протухал — запрос был потрачен впустую, и пользователя
+# снова встречал белый экран. Пять минут для подъезда и лифта незаметны, а
+# ожидание убирают.
+#
+# Потребителям, которым нужен именно текущий вид, потолок не помощник — им
+# нужен свежий кадр всегда: экран входящего вызова ходит мимо кэша через
+# `async_fresh_camera_image`.
+SNAPSHOT_MAX_STALE_SECONDS = 300.0
+
+# Как часто MJPEG-луп ядра просит кадр. Нагрузку на оператора этот интервал не
+# определяет — запросы гейтит кэш, — но период ядро отмеряет ДО запроса, и при
+# интервале, равном окну свежести, кадр на каждом тике оказывался ровно на
+# границе: обновление срабатывало через раз, и половина показанных кадров была
+# минутной давности. Треть окна убирает биение той же ценой.
+SNAPSHOT_MJPEG_INTERVAL_SECONDS = SNAPSHOT_FRESH_SECONDS / 3
+
+# Сколько разных размеров держим. Реальных немного — список, карточка, полный
+# экран, — поэтому запас невелик и вытесняем самый старый.
+SNAPSHOT_CACHE_ENTRIES = 8
+
+# Пауза между попытками, когда оператор не отдаёт кадр. Наблюдалось `531` на
+# `/snapshots` для трёх камер подряд: без паузы каждый рендер карточки бил в
+# API, а показать всё равно нечего. Показатель ограничивается ДО возведения в
+# степень — та же ошибка уже стоила падения в двух других местах (A-104).
+SNAPSHOT_RETRY_INITIAL_SECONDS = 15.0
+SNAPSHOT_RETRY_MAX_SECONDS = 300.0
+SNAPSHOT_RETRY_MAX_EXPONENT = math.ceil(
+    math.log2(SNAPSHOT_RETRY_MAX_SECONDS / SNAPSHOT_RETRY_INITIAL_SECONDS)
+)
+
 # A-71 / ADR-0009: минимальный интервал между авто-recovery попытками.
 # HA Stream worker сигналит unavailable на каждый retry-tick (10/20/30с);
 # без cooldown re-fetch забивал бы operator API. См. ADR-0009.
-# Сколько снимок считается свежим. Пока он свежий — отдаём из памяти, не
-# беспокоя оператора; когда устарел — всё равно отдаём сразу, а обновление
-# уходит в фон. Иначе каждое открытие карточки ждало операторский JPEG и
-# встречало белым экраном.
-SNAPSHOT_FRESH_SECONDS = 10.0
-
 STREAM_RECOVERY_COOLDOWN = 30.0
 
 # Экспоненциальный backoff, когда recovery не помогает. Оператор умеет
@@ -92,6 +131,13 @@ GO2RTC_HEALTH_POLL_INTERVAL = timedelta(seconds=30)
 # recovery latency (<1с) + 100x client jitter (~800мс) — race-window закрыт.
 # Если v3 пропустит (network blip) — v1/v2 поймают.
 GO2RTC_PROACTIVE_REFRESH_INTERVAL = timedelta(minutes=28, seconds=30)
+
+
+def _snapshot_size(width: int | None, height: int | None) -> tuple[int, int]:
+    """Размер, который реально уйдёт оператору (та же нормализация)."""
+    w = width or DEFAULT_SNAPSHOT_WIDTH
+    h = height or round(w / 16 * 9)
+    return (w, h)
 
 
 def _get_go2rtc_cfg(
@@ -184,6 +230,9 @@ class ElektronnyGorodCamera(
     """
 
     _attr_supported_features = CameraEntityFeature.STREAM
+    # MJPEG-луп ядра дёргает `async_camera_image` по этому интервалу. Дефолтные
+    # 0.5 с давали двадцать холостых оборотов на каждый реально новый кадр.
+    _attr_frame_interval = SNAPSHOT_MJPEG_INTERVAL_SECONDS
     _attr_has_entity_name = True
     _attr_name = None
 
@@ -238,9 +287,12 @@ class ElektronnyGorodCamera(
         self._unsub_health_poll: CALLBACK_TYPE | None = None
         # A-71 v3: proactive keep-alive refresh для активных consumers.
         self._unsub_proactive_refresh: CALLBACK_TYPE | None = None
-        self._image: bytes | None = None
-        self._image_monotonic: float = 0.0
-        self._image_size: tuple[int | None, int | None] | None = None
+        # Кэш на несколько размеров: дашборд и автоматизация просят разные,
+        # и единственная запись заставляла бы их вытеснять друг друга.
+        self._snapshots: dict[tuple[int, int], tuple[bytes, float]] = {}
+        self._snapshot_inflight: dict[tuple[int, int], asyncio.Task[bytes | None]] = {}
+        self._snapshot_failures: int = 0
+        self._snapshot_retry_after: float = 0.0
         self._snapshot_task: asyncio.Task[None] | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
@@ -378,35 +430,197 @@ class ElektronnyGorodCamera(
         if self._is_hidden() or not self.available:
             return None
 
-        size = (width, height)
-        if self._image is not None and self._image_size == size:
-            if time.monotonic() - self._image_monotonic < SNAPSHOT_FRESH_SECONDS:
-                return self._image
+        # Ключ по нормализованному размеру: координатор всё равно подставляет
+        # ширину по умолчанию, поэтому `(None, None)` и `(300, 169)` — один и
+        # тот же запрос к оператору, и держать их в разных ячейках значило бы
+        # ходить за одинаковым кадром дважды.
+        size = _snapshot_size(width, height)
+        cached = self._snapshots.get(size)
+        if cached is not None:
+            image, taken = cached
+            age = time.monotonic() - taken
+            if age < SNAPSHOT_FRESH_SECONDS:
+                return image
+            if age < SNAPSHOT_MAX_STALE_SECONDS:
+                self._schedule_snapshot_refresh(size)
+                return image
+
+        # Размера в кэше нет, но кадр этой камеры есть в другом. HA просит
+        # разные размеры для списка, карточки и полноэкранного вида, поэтому
+        # ожидание на каждом новом размере снова показывало бы белый экран.
+        # Ядро масштабирует JPEG само, так что чужой размер здесь уместен.
+        substitute = self._recent_snapshot(size)
+        if substitute is not None:
             self._schedule_snapshot_refresh(size)
-            return self._image
+            return substitute
+
+        # Показать нечего. Если оператор в отказе — не бьём в него на каждый
+        # рендер: кадра это не даст, а нагрузку создаст.
+        if time.monotonic() < self._snapshot_retry_after:
+            return None
 
         return await self._async_fetch_snapshot(size)
 
-    async def _async_fetch_snapshot(
-        self, size: tuple[int | None, int | None]
-    ) -> bytes | None:
-        """Сходить к оператору за кадром и запомнить его."""
-        image = await self.coordinator.get_camera_snapshot(self._id, *size)
-        if image:
-            self._image = image
-            self._image_size = size
-            self._image_monotonic = time.monotonic()
-        return self._image
+    @callback
+    def _remember_snapshot(self, size: tuple[int, int], image: bytes) -> None:
+        """Положить кадр в кэш, удержав его в пределах бюджета."""
+        now = time.monotonic()
+        for stale in [
+            key
+            for key, (_image, taken) in self._snapshots.items()
+            if now - taken >= SNAPSHOT_MAX_STALE_SECONDS
+        ]:
+            self._snapshots.pop(stale, None)
+
+        self._snapshots[size] = (image, now)
+
+        while len(self._snapshots) > SNAPSHOT_CACHE_ENTRIES:
+            oldest = min(self._snapshots.items(), key=lambda item: item[1][1])[0]
+            self._snapshots.pop(oldest, None)
 
     @callback
-    def _schedule_snapshot_refresh(
-        self, size: tuple[int | None, int | None]
+    def _recent_snapshot(self, wanted: tuple[int, int]) -> bytes | None:
+        """Свежайший кадр, годный к показу вместо запрошенного размера.
+
+        Годится только кадр не мельче запрошенного: уменьшение безвредно —
+        ядро масштабирует JPEG само, — а увеличение портит картинку. Иконка
+        80x80, растянутая на карточку, это не «чуть хуже», а нечитаемое
+        месиво; лучше подождать оператора.
+        """
+        now = time.monotonic()
+        usable = [
+            (taken, image)
+            for (width, _height), (image, taken) in self._snapshots.items()
+            if now - taken < SNAPSHOT_MAX_STALE_SECONDS and width >= wanted[0]
+        ]
+        if not usable:
+            return None
+        return max(usable)[1]
+
+    async def async_fresh_camera_image(
+        self, width: int | None = None, height: int | None = None
+    ) -> bytes | None:
+        """Кадр в обход кэша — для тех, кому нужен именно текущий вид.
+
+        Экран входящего вызова показывает гостя, который стоит у двери прямо
+        сейчас; отдать ему кадр из кэша значило бы показать прошлое. Если
+        оператор кадра не дал — честнее пустое место: вид пятиминутной
+        давности от текущего не отличить.
+        """
+        if self._is_hidden() or not self.available:
+            return None
+        return await self._async_fetch_snapshot(_snapshot_size(width, height))
+
+    async def _async_fetch_snapshot(self, size: tuple[int, int]) -> bytes | None:
+        """Сходить к оператору за кадром и запомнить его.
+
+        Параллельные вызовы объединяются: на холодном кэше карточка, MJPEG-луп
+        и сервис снапшота приходят одновременно, а оператор рвёт параллельные
+        сессии — та же причина, по которой дедуплицирован `stream_source`
+        (A-68).
+        """
+        inflight = self._snapshot_inflight.get(size)
+        if inflight is not None:
+            return await asyncio.shield(inflight)
+
+        # Задача записи, а не hass: снимается при выгрузке и не держит
+        # startup-барьер.
+        task = self._entry.async_create_background_task(
+            self.hass,
+            self._async_fetch_snapshot_impl(size),
+            name=f"{DOMAIN}_camera_snapshot_fetch_{self._id}",
+            eager_start=False,
+        )
+        self._snapshot_inflight[size] = task
+        # Запись снимает сама задача, а не ожидающий кадр. Ядро рвёт ожидание
+        # снимка через 10 с, а запрос к оператору живёт до 60 с: снятие в
+        # `finally` открывало бы вторую параллельную сессию ровно на медленном
+        # операторе — том самом, ради которого дедупликация и заведена.
+        task.add_done_callback(partial(self._release_snapshot_inflight, size))
+        return await asyncio.shield(task)
+
+    @callback
+    def _release_snapshot_inflight(
+        self, size: tuple[int, int], task: asyncio.Task[bytes | None]
     ) -> None:
+        """Убрать завершившуюся задачу, не тронув пришедшую ей на смену."""
+        if self._snapshot_inflight.get(size) is task:
+            self._snapshot_inflight.pop(size, None)
+
+    async def _async_fetch_snapshot_impl(self, size: tuple[int, int]) -> bytes | None:
+        """Один реальный запрос кадра у оператора."""
+        try:
+            image = await self.coordinator.get_camera_snapshot(self._id, *size)
+        except Exception as err:  # noqa: BLE001 - operator boundary
+            LOGGER.debug(
+                "Camera %s (%s): snapshot failed (%s)",
+                self._name,
+                self._id,
+                type(err).__name__,
+            )
+            image = None
+
+        # Вторая линия обороны к проверке статуса в `http.py`: в кэш попадает
+        # только то, что действительно кадр. Тело ошибки оператора — непустые
+        # байты, и без этой проверки оно залипало бы в кэше как «картинка».
+        if image and image[:2] == b"\xff\xd8":
+            if self._snapshot_failures:
+                LOGGER.info(
+                    "Camera %s (%s): оператор снова отдаёт снимки",
+                    self._name,
+                    self._id,
+                )
+            self._remember_snapshot(size, image)
+            self._snapshot_failures = 0
+            self._snapshot_retry_after = 0.0
+            return image
+
+        # Одна строка на отказ, а не на рендер: длительный отказ иначе не
+        # виден вообще — и A-102, и A-105 нашлись разбором прод-логов ровно
+        # по этому эндпоинту.
+        if self._snapshot_failures == 0:
+            LOGGER.warning(
+                "Camera %s (%s): оператор не отдаёт снимок, выдерживаем паузу",
+                self._name,
+                self._id,
+            )
+
+        # Счётчик общий на камеру, а не на размер: оператор отдаёт `531` на
+        # весь `/snapshots` камеры, и успех любого размера значит, что камера
+        # снова отвечает.
+        self._snapshot_failures += 1
+        exponent = min(self._snapshot_failures - 1, SNAPSHOT_RETRY_MAX_EXPONENT)
+        self._snapshot_retry_after = time.monotonic() + min(
+            SNAPSHOT_RETRY_INITIAL_SECONDS * 2**exponent,
+            SNAPSHOT_RETRY_MAX_SECONDS,
+        )
+
+        # Кадра нет — и подставлять здесь нечего. Вызывающий с карточки уже
+        # исчерпал и точный размер, и подстановку, прежде чем идти к
+        # оператору, а экран вызова кэш не устраивает вовсе: гость стоит у
+        # двери сейчас, и вид пятиминутной давности он бы от текущего не
+        # отличил.
+        return None
+
+    @callback
+    def _schedule_snapshot_refresh(self, size: tuple[int, int]) -> None:
         """Обновить кадр в фоне, не задерживая ответ карточке."""
         if self._snapshot_task is not None and not self._snapshot_task.done():
             return
 
+        # Пока оператор в отказе, фоновое обновление тоже ждёт. Иначе пауза
+        # прикрывала только холодный старт, а бьёт по API как раз открытая
+        # карточка: она перерисовывается каждые несколько секунд, и каждый раз
+        # кадр уже устаревший — то есть ровно тот случай, ради которого пауза
+        # и заведена.
+        if time.monotonic() < self._snapshot_retry_after:
+            return
+
         async def _run() -> None:
+            # Пока задача ждала очереди, камеру могли скрыть — тогда идти к
+            # оператору незачем (A-63).
+            if self._is_hidden() or not self.available:
+                return
             try:
                 await self._async_fetch_snapshot(size)
             except Exception as err:  # noqa: BLE001 - operator boundary
@@ -725,6 +939,11 @@ class ElektronnyGorodCamera(
         if self._unsub_proactive_refresh is not None:
             self._unsub_proactive_refresh()
             self._unsub_proactive_refresh = None
+        # Выгрузку записи покрывает ядро, удаление одной сущности — нет.
+        # Снимается обёртка; уже ушедший запрос доживает под `asyncio.shield`
+        # до ответа оператора — это цена дедупликации, один лишний запрос.
+        if self._snapshot_task is not None and not self._snapshot_task.done():
+            self._snapshot_task.cancel()
         await super().async_will_remove_from_hass()
 
     async def _fetch_go2rtc_stream_info(

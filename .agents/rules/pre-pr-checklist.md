@@ -99,7 +99,7 @@ git rev-parse 'HEAD^{tree}'
 - указывает identity, base/head/tree, independence и verdict;
 - проверяет exact candidate и не закрывает gate self-review-ом.
 
-Critical/Important findings нельзя deferred'ить: implementer исправляет их, повторяет затронутые pre-freeze gates, commit/freeze и получает **новые candidate-bound attestations от каждого обязательного reviewer**. Повторный analysis может быть delta-scoped, но verdict относится к новому base/head/tree. До публикации review evidence остаётся provisional session transcript. Сразу после ordinary push Validator переносит его в durable PR comment для текущего base/head/tree. Если evidence добавили commit-ом, это новый candidate и весь цикл attestation повторяется.
+Critical/Important findings нельзя deferred'ить: implementer **разбирает** их — воспроизводит дефект, закрывает его по существу либо аргументированно отклоняет находку как неверную (`WON'T FIX` с обоснованием), — повторяет затронутые pre-freeze gates, commit/freeze и получает **новые candidate-bound attestations от каждого обязательного reviewer**. Дословное внедрение предложенной правки без проверки её уместности не считается закрытием: правка, породившая недостижимый код или лишнюю проверку, — новый дефект, а не исправление. Повторный analysis может быть delta-scoped, но verdict относится к новому base/head/tree. До публикации review evidence остаётся provisional session transcript. Сразу после ordinary push Validator переносит его в durable PR comment для текущего base/head/tree. Если evidence добавили commit-ом, это новый candidate и весь цикл attestation повторяется.
 
 ### 5. Ordinary push + PR
 

@@ -1,6 +1,6 @@
 """HTTP interface."""
 
-from typing import Literal
+from typing import Literal, assert_never
 
 from aiohttp import ClientError, ClientResponse, ClientTimeout
 
@@ -145,9 +145,27 @@ class HTTP:
         elif method == "DELETE":
             response = await session.delete(url, data=data, headers=headers, timeout=timeout)
         else:
-            raise ValueError(f"Unsupported HTTP method: {method}")
+            # Ветка недостижима, пока `Literal` исчерпан ветками выше, — и
+            # `assert_never` именно это и фиксирует: добавят метод в `Literal`,
+            # забыв ветку, — анализ упадёт здесь. В рантайме остаётся отказ, а
+            # не молчаливая подмена метода. Подавление ниже адресное: это
+            # единственное место, где недостижимость намеренная.
+            assert_never(method)  # pyright: ignore[reportUnreachable]
 
         if binary:
+            # Статус проверяем и здесь: иначе тело ошибки оператора уходит
+            # вызывающему как «данные». Для снимка это означало картинку из
+            # JSON-текста ошибки, которую потребитель принимал за кадр.
+            if not response.ok:
+                # Уровень debug: статус уходит вызывающему исключением, а он
+                # уже решает, что это — отказ оператора на снимке (штатное
+                # дело, A-105) или настоящая поломка.
+                LOGGER.debug(
+                    "API binary request failed: %s [%s]",
+                    redact_path(endpoint),
+                    response.status,
+                )
+                raise ClientError(response)
             return await response.read()
 
         await _log_response(response)
