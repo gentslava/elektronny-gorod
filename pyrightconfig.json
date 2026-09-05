@@ -11,5 +11,7 @@
   "reportIncompatibleVariableOverride": "none",
   "reportMissingImports": "error",
   "reportUnreachable": "error",
-  "reportUnusedExpression": "error"
+  "reportUnusedExpression": "error",
+  "venvPath": ".",
+  "venv": ".venv"
 }
