@@ -31,7 +31,7 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **838 passed, 2 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-05; HA 2026.8.1 и 2026.9). Два skip — тесты FCM, требующие `firebase-messaging`: пакет объявлен в `manifest.json`, но в pytest-окружение не ставится. С ним локально 840 passed. |
+| Локальный suite | (репозиторный `.venv` протух: HA 2026.2.3 / Python 3.13 против минимума 2026.8.1 / 3.14 — на нём падает 128 тестов на любом коммите; цифры ниже сняты в окружениях под пины CI) **838 passed, 2 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-05; HA 2026.8.1 и 2026.9). Два skip — тесты FCM, требующие `firebase-messaging`: пакет объявлен в `manifest.json`, но в pytest-окружение не ставится. С ним локально 840 passed. |
 | Test modules | 61 файл `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Product website | **73 passed**, `tsc --noEmit` и Vite production build (`website/`) |

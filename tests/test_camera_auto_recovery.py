@@ -1260,7 +1260,9 @@ async def test_mjpeg_interval_stays_inside_the_freshness_window(
     """
     cam = await _setup_camera(hass, use_go2rtc=False)
 
-    assert 0 < cam.frame_interval < camera_module.SNAPSHOT_FRESH_SECONDS
+    # Нижняя граница — против дефолта ядра (0.5 с), ради замены которого
+    # атрибут и заведён; `0 <` было бы истинно всегда.
+    assert 1.0 <= cam.frame_interval < camera_module.SNAPSHOT_FRESH_SECONDS
 
 
 async def test_operator_refusal_is_logged_once_per_outage(
