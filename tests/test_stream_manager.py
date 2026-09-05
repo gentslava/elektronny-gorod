@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from custom_components.elektronny_gorod.go2rtc import Go2RtcRequestError
 from custom_components.elektronny_gorod.stream_manager import (
+    _monotonic as _stream_manager_monotonic,
     RETRY_INITIAL_SECONDS,
     RETRY_MAX_EXPONENT,
     RETRY_MAX_SECONDS,
@@ -54,6 +55,13 @@ def _manager(
         entry_id="entry-1",
         data={},
         options={},
+        # Фоновые задачи привязаны к записи, а не к hass: так они снимаются
+        # при выгрузке и не держат startup-барьер.
+        async_create_background_task=MagicMock(
+            side_effect=lambda _hass, coro, **kwargs: asyncio.create_task(
+                coro, name=kwargs.get("name")
+            )
+        ),
     )
     hass = MagicMock()
     hass.async_create_task.side_effect = (
@@ -258,6 +266,9 @@ async def test_concurrent_eligible_reasons_share_one_preload_activation() -> Non
 
 
 async def test_sequential_refreshes_mint_separate_operator_urls() -> None:
+    """Операторская ссылка одноразовая: каждый реальный refresh минтит свою."""
+    from custom_components.elektronny_gorod import stream_manager as sm
+
     manager, coordinator, client = _manager(
         stream_side_effect=[
             "https://operator/100?token=FIRST",
@@ -265,8 +276,11 @@ async def test_sequential_refreshes_mint_separate_operator_urls() -> None:
         ]
     )
 
-    first = await manager.async_refresh("100", "ha_open")
-    second = await manager.async_refresh("100", "ha_open")
+    clock = [1000.0]
+    with patch.object(sm, "_monotonic", lambda: clock[0]):
+        first = await manager.async_refresh("100", "ha_open")
+        clock[0] += sm.HA_OPEN_REUSE_SECONDS + 1
+        second = await manager.async_refresh("100", "ha_open")
 
     assert first.proxied is True
     assert second.proxied is True
@@ -277,6 +291,47 @@ async def test_sequential_refreshes_mint_separate_operator_urls() -> None:
     ]
     assert "FIRST" in patched_sources[0]
     assert "SECOND" in patched_sources[1]
+
+
+async def test_second_ha_open_reuses_the_live_stream() -> None:
+    """HA спрашивает источник дважды на камеру — второй минт избыточен.
+
+    Наружу отдаётся стабильный go2rtc URL, а поток уже настроен свежим
+    источником, поэтому повторный поход к оператору ничего не меняет.
+    """
+    from custom_components.elektronny_gorod import stream_manager as sm
+
+    manager, coordinator, client = _manager()
+
+    clock = [1000.0]
+    with patch.object(sm, "_monotonic", lambda: clock[0]):
+        first = await manager.async_refresh("100", "ha_open")
+        clock[0] += 2.0  # HA возвращается через пару секунд
+        second = await manager.async_refresh("100", "ha_open")
+
+    assert first.proxied is True
+    assert second.proxied is True
+    assert second.url == first.url
+    assert coordinator.get_camera_stream.await_count == 1
+    assert client.async_patch_stream.await_count == 1
+
+
+@pytest.mark.parametrize("reason", ["recovery", "active_consumer"])
+async def test_recovery_always_mints_even_within_the_reuse_window(
+    reason: str,
+) -> None:
+    """Переиспользование только для ha_open: recovery обязан взять свежий URL."""
+    from custom_components.elektronny_gorod import stream_manager as sm
+
+    manager, coordinator, _ = _manager()
+
+    clock = [1000.0]
+    with patch.object(sm, "_monotonic", lambda: clock[0]):
+        await manager.async_refresh("100", "ha_open")
+        clock[0] += 1.0
+        await manager.async_refresh("100", reason)
+
+    assert coordinator.get_camera_stream.await_count == 2
 
 
 async def test_empty_operator_url_records_failure_without_patch() -> None:
@@ -389,6 +444,74 @@ async def test_operator_error_is_recorded_without_exception_details() -> None:
     assert "OPERATOR_SECRET" not in repr(state)
 
 
+async def test_ha_open_does_not_wait_for_preload() -> None:
+    """Прогрев не оплачивается временем старта.
+
+    go2rtc отвечает на PUT /api/preload только когда поднимет поток (2-6 с на
+    камеру по замеру на проде). Раньше HA ждал этот ответ внутри
+    stream_source и не мог добавить следующую камеру.
+    """
+    manager, _, client = _manager()
+    manager.is_camera_eligible = MagicMock(return_value=True)
+
+    gate = asyncio.Event()
+
+    async def _slow_preload(_name):
+        await gate.wait()
+
+    client.async_enable_preload = AsyncMock(side_effect=_slow_preload)
+
+    # Таймаут — часть проверки: если preload снова станет блокирующим,
+    # тест упадёт здесь, а не подвесит прогон.
+    result = await asyncio.wait_for(
+        manager.async_refresh("100", "ha_open"), timeout=5
+    )
+
+    # refresh вернулся, пока go2rtc ещё поднимает поток
+    assert result.proxied is True
+    assert not gate.is_set()
+
+    gate.set()
+    await asyncio.gather(*manager._preload_tasks.values())
+    client.async_enable_preload.assert_awaited_once()
+
+
+async def test_background_refresh_still_waits_for_preload() -> None:
+    """Фоновому циклу спешить некуда — там прогрев остаётся синхронным."""
+    manager, _, client = _manager()
+    manager.is_camera_eligible = MagicMock(return_value=True)
+
+    await manager.async_refresh("100", "background_due")
+
+    client.async_enable_preload.assert_awaited_once()
+    assert not manager._preload_tasks
+    state = manager.camera_state("100")
+    assert state is not None
+    assert state.preloaded is True
+
+
+async def test_stop_cancels_pending_preload_before_cleanup() -> None:
+    """Поздний PUT не должен пережить выгрузку entry."""
+    manager, _, client = _manager()
+    manager.is_camera_eligible = MagicMock(return_value=True)
+
+    gate = asyncio.Event()
+
+    async def _slow_preload(_name):
+        await gate.wait()
+
+    client.async_enable_preload = AsyncMock(side_effect=_slow_preload)
+    await manager.async_refresh("100", "ha_open")
+    assert manager._preload_tasks
+
+    pending = list(manager._preload_tasks.values())
+    await manager.async_stop()
+
+    assert not manager._preload_tasks
+    assert all(task.cancelled() or task.done() for task in pending)
+    # Гейт так и не открыт: PUT был отменён, а не дождался go2rtc.
+    assert not gate.is_set()
+
 async def test_retry_delay_survives_long_operator_outage() -> None:
     """Затяжной отказ оператора не роняет расчёт задержки.
 
@@ -418,3 +541,51 @@ async def test_retry_delay_survives_long_operator_outage() -> None:
         )
 
     assert delays == [15.0, 30.0, 60.0, 300.0, 300.0]
+
+
+async def test_ha_open_does_not_reuse_after_failure() -> None:
+    """Окно переиспользования не действует, если последняя попытка провалилась.
+
+    `last_success_monotonic` остаётся от прошлого успеха, поэтому в течение
+    десяти секунд после неудачи он всё ещё выглядит свежим. Без проверки
+    статуса HA получал бы ссылку на поток, который go2rtc уже не обслуживает.
+    """
+    manager, coordinator, _ = _manager()
+    manager._started = True
+    state = manager._state_for("100")
+    state.present = True
+    state.status = "ready"
+    state.last_success_monotonic = _stream_manager_monotonic()
+
+    # Успешное окно: к оператору не идём.
+    first = await manager.async_refresh("100", "ha_open")
+    assert first.proxied is True
+    assert coordinator.get_camera_stream.await_count == 0
+
+    # Та же свежесть, но последняя попытка неудачна — окно не применяется.
+    state.status = "empty_source"
+    second = await manager.async_refresh("100", "ha_open")
+
+    assert coordinator.get_camera_stream.await_count == 1, (
+        "после неудачи источник обязан запрашиваться заново"
+    )
+    assert second.proxied is True
+
+
+async def test_preload_task_is_owned_by_config_entry() -> None:
+    """Прогрев запускается задачей записи, а не голой задачей hass.
+
+    Разница не косметическая: задача записи снимается при её выгрузке и не
+    удерживает startup-барьер HA, пока go2rtc поднимает поток.
+    """
+    manager, _, _ = _manager()
+    manager._started = True
+    state = manager._state_for("100")
+
+    manager._schedule_preload(state)
+    await asyncio.gather(*manager._preload_tasks.values(), return_exceptions=True)
+
+    manager.entry.async_create_background_task.assert_called_once()
+    assert (
+        manager.entry.async_create_background_task.call_args.args[0] is manager.hass
+    )

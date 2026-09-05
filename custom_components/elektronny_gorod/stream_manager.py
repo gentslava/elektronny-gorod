@@ -51,6 +51,13 @@ ON_DEMAND_REFRESH_REASONS = frozenset({
     "recovery",
     "active_consumer",
 })
+# HA спрашивает источник дважды на каждую камеру: сначала выбирая WebRTC-
+# провайдера, затем создавая поток. Второй заход приходит через пару секунд,
+# когда поток в go2rtc уже настроен свежим источником, а наружу и так отдаётся
+# стабильный go2rtc URL — повторный минт его не меняет, только удваивает
+# запросы к оператору при старте. Окно намеренно короткое и применяется
+# только к `ha_open`: `recovery` и `active_consumer` обязаны минтить заново.
+HA_OPEN_REUSE_SECONDS = 10.0
 
 
 def _monotonic() -> float:
@@ -124,6 +131,7 @@ class CameraStreamManager:
         self._reconcile_lock = asyncio.Lock()
         self._listeners: set[Callable[[], None]] = set()
         self._owned_preloads: set[str] = set()
+        self._preload_tasks: dict[str, asyncio.Task] = {}
         self._started = False
         self._stopping = False
 
@@ -171,6 +179,14 @@ class CameraStreamManager:
         async with self._reconcile_lock:
             pass
         self._inflight.clear()
+        # Фоновые preload завершаем до удаления owned-имён: иначе поздний PUT
+        # поднял бы поток уже после cleanup и пережил бы выгрузку.
+        preloads = list(self._preload_tasks.values())
+        for task in preloads:
+            task.cancel()
+        if preloads:
+            await asyncio.gather(*preloads, return_exceptions=True)
+        self._preload_tasks.clear()
         await self._async_remove_owned_preloads()
         self._listeners.clear()
 
@@ -464,6 +480,19 @@ class CameraStreamManager:
                 state.status = "excluded"
                 self._notify_listeners()
                 return self._proxied_result(state)
+            if (
+                reason == "ha_open"
+                and state.present
+                # Без проверки статуса окно переиспользовало поток и после
+                # неудачной попытки: `last_success_monotonic` остаётся от
+                # прошлого успеха и десять секунд ещё выглядит свежим.
+                and state.status == "ready"
+                and state.last_success_monotonic is not None
+                and _monotonic() - state.last_success_monotonic
+                < HA_OPEN_REUSE_SECONDS
+            ):
+                # Поток уже поднят свежим источником — переиспользуем его.
+                return self._proxied_result(state)
             try:
                 source_url = await self.coordinator.get_camera_stream(camera_id)
             except asyncio.CancelledError:
@@ -520,35 +549,22 @@ class CameraStreamManager:
             needs_preload = state.eligible and not (
                 state.preloaded and state.producer_active
             )
-            if needs_preload:
-                # Claim the stable name before network I/O so unload can issue
-                # an idempotent DELETE even if cancellation races a completed
-                # server-side preload PUT whose response never reaches us.
-                self._owned_preloads.add(state.stream_name)
-                try:
-                    await self.client.async_enable_preload(state.stream_name)
-                except Go2RtcRequestError as err:
-                    self._owned_preloads.discard(state.stream_name)
-                    state.preloaded = False
-                    state.producer_active = False
-                    self._record_failure(state, f"preload_{err.category}")
-                    return StreamRefreshResult(
-                        url=source_url,
-                        proxied=False,
-                    )
-                except asyncio.CancelledError:
-                    raise
-                except Exception:  # noqa: BLE001 - sanitize transport detail
-                    self._owned_preloads.discard(state.stream_name)
-                    state.preloaded = False
-                    state.producer_active = False
-                    self._record_failure(state, "preload_unexpected")
-                    return StreamRefreshResult(
-                        url=source_url,
-                        proxied=False,
-                    )
-                state.preloaded = True
-                state.producer_active = True
+            if needs_preload and reason == "ha_open":
+                # go2rtc отвечает на PUT /api/preload только когда реально
+                # поднимет поток: запустит ffmpeg, подключится к RTSP оператора
+                # и дождётся первых пакетов — замер на проде дал 2-6 секунд на
+                # камеру. HA ждал этот ответ внутри stream_source и не мог
+                # добавить следующую камеру, поэтому прогрев оплачивался
+                # временем старта интеграции. Самому HA ожидание не нужно:
+                # поток уже пропатчен свежим источником, а тёплым он должен
+                # быть для внешних потребителей.
+                self._schedule_preload(state)
+            elif needs_preload:
+                # Фоновый цикл ждёт прогрев: по его исходу вызывающий узнаёт,
+                # что go2rtc ненадёжен, и получает прямой операторский URL как
+                # fallback (см. camera.py: `if not result.proxied`).
+                if not await self._async_enable_preload(state):
+                    return StreamRefreshResult(url=source_url, proxied=False)
 
             state.last_success = datetime.now(timezone.utc)
             completed = _monotonic()
@@ -571,6 +587,56 @@ class CameraStreamManager:
             current = asyncio.current_task()
             if self._inflight.get(camera_id) is current:
                 self._inflight.pop(camera_id, None)
+
+    async def _async_enable_preload(self, state: ManagedCameraState) -> bool:
+        """Enable one go2rtc preload; False means the failure is recorded.
+
+        Имя потока клеймится до сетевого вызова, чтобы выгрузка могла выдать
+        идемпотентный DELETE, даже если отмена гонится с уже выполненным на
+        сервере PUT, ответ которого до нас не дошёл.
+        """
+        self._owned_preloads.add(state.stream_name)
+        try:
+            await self.client.async_enable_preload(state.stream_name)
+        except asyncio.CancelledError:
+            raise
+        except Go2RtcRequestError as err:
+            self._on_preload_failed(state, f"preload_{err.category}")
+            return False
+        except Exception:  # noqa: BLE001 - sanitize transport detail
+            self._on_preload_failed(state, "preload_unexpected")
+            return False
+        state.preloaded = True
+        state.producer_active = True
+        return True
+
+    def _on_preload_failed(self, state: ManagedCameraState, status: str) -> None:
+        self._owned_preloads.discard(state.stream_name)
+        state.preloaded = False
+        state.producer_active = False
+        self._record_failure(state, status)
+
+    def _schedule_preload(self, state: ManagedCameraState) -> None:
+        """Enable the go2rtc preload without blocking the caller."""
+        if state.camera_id in self._preload_tasks or self._stopping:
+            return
+
+        async def _run() -> None:
+            if await self._async_enable_preload(state):
+                self._notify_listeners()
+
+        # Через entry, а не hass: задача снимается при выгрузке записи и не
+        # держит startup-барьер HA, пока go2rtc поднимает поток.
+        task = self.entry.async_create_background_task(
+            self.hass,
+            _run(),
+            name=f"elektronny_gorod_stream_preload_{state.camera_id}",
+            eager_start=False,
+        )
+        self._preload_tasks[state.camera_id] = task
+        task.add_done_callback(
+            lambda _t, cam=state.camera_id: self._preload_tasks.pop(cam, None)
+        )
 
     def _proxied_result(self, state: ManagedCameraState) -> StreamRefreshResult:
         """Return the stable credential-aware URL without persisting it."""

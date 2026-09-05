@@ -210,7 +210,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     _sync_visibility(hass, entry, coordinator.data or {})
 
     if stream_manager is not None:
-        await stream_manager.async_start()
+        # Reconcile с go2rtc не нужен для готовности entry: камеры получают
+        # источник через stream_source, а публикация догоняет фоном. Ожидание
+        # здесь удлиняло setup ровно на время похода к go2rtc.
+        entry.async_create_background_task(
+            hass,
+            stream_manager.async_start(),
+            name=f"{DOMAIN}_stream_manager_start",
+        )
 
     # A surviving dependency client degrades only realtime FCM. Do not raise
     # ConfigEntryNotReady: HA would retry setup forever and recreate log churn.
