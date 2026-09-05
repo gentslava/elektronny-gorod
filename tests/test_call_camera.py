@@ -160,6 +160,19 @@ async def test_call_screen_snapshot_bypasses_cache():
     doorbell.async_camera_image.assert_not_awaited()
 
 
+async def test_mjpeg_fallback_does_not_poll_the_operator_at_stream_rate():
+    """MJPEG-фолбэк экрана вызова не гоняет оператора по кадру за полсекунды.
+
+    Кадр здесь идёт мимо кэша и мимо паузы, то есть каждый оборот лупа ядра —
+    настоящий запрос. На дефолтном интервале это две штуки в секунду на всё
+    время разговора, и ровно тот `/snapshots`, который под нагрузкой отдаёт
+    отказ.
+    """
+    cam = _cam(MagicMock(), lambda cid: None)
+
+    assert cam.frame_interval >= 1.0
+
+
 async def test_camera_image_none_without_active_call():
     """Вне вызова — None (нет кадра), без NotImplementedError."""
     c = MagicMock()
@@ -356,4 +369,3 @@ async def test_stream_source_uses_shared_go2rtc_rtsp_not_operator_pull():
     srcs = upsert.await_args.args[2]
     assert srcs[0] == "rtsp://127.0.0.1:8554/eg_1013#video=copy"
     assert url == "rtsp://127.0.0.1:8554/eg_intercom_call"
-

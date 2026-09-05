@@ -13,6 +13,7 @@ import logging
 import math
 import time
 from datetime import datetime, timedelta
+from functools import partial
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
@@ -72,6 +73,10 @@ SNAPSHOT_MAX_STALE_SECONDS = 300.0
 # `/snapshots` для трёх камер подряд: без паузы каждый рендер карточки бил в
 # API, а показать всё равно нечего. Показатель ограничивается ДО возведения в
 # степень — та же ошибка уже стоила падения в двух других местах (A-104).
+# Сколько разных размеров держим. Реальных немного — список, карточка, полный
+# экран, — поэтому запас невелик и вытесняем самый старый.
+SNAPSHOT_CACHE_ENTRIES = 8
+
 SNAPSHOT_RETRY_INITIAL_SECONDS = 15.0
 SNAPSHOT_RETRY_MAX_SECONDS = 300.0
 SNAPSHOT_RETRY_MAX_EXPONENT = math.ceil(
@@ -451,6 +456,23 @@ class ElektronnyGorodCamera(
         return await self._async_fetch_snapshot(size)
 
     @callback
+    def _remember_snapshot(self, size: tuple[int, int], image: bytes) -> None:
+        """Положить кадр в кэш, удержав его в пределах бюджета."""
+        now = time.monotonic()
+        for stale in [
+            key
+            for key, (_image, taken) in self._snapshots.items()
+            if now - taken >= SNAPSHOT_MAX_STALE_SECONDS
+        ]:
+            self._snapshots.pop(stale, None)
+
+        self._snapshots[size] = (image, now)
+
+        while len(self._snapshots) > SNAPSHOT_CACHE_ENTRIES:
+            oldest = min(self._snapshots.items(), key=lambda item: item[1][1])[0]
+            self._snapshots.pop(oldest, None)
+
+    @callback
     def _recent_snapshot(self, wanted: tuple[int, int]) -> bytes | None:
         """Свежайший кадр, годный к показу вместо запрошенного размера.
 
@@ -493,13 +515,29 @@ class ElektronnyGorodCamera(
         if inflight is not None:
             return await asyncio.shield(inflight)
 
-        task = self.hass.async_create_task(self._async_fetch_snapshot_impl(size))
+        # Задача записи, а не hass: снимается при выгрузке и не держит
+        # startup-барьер.
+        task = self._entry.async_create_background_task(
+            self.hass,
+            self._async_fetch_snapshot_impl(size),
+            name=f"{DOMAIN}_camera_snapshot_fetch_{self._id}",
+            eager_start=False,
+        )
         self._snapshot_inflight[size] = task
-        try:
-            return await asyncio.shield(task)
-        finally:
-            if self._snapshot_inflight.get(size) is task:
-                self._snapshot_inflight.pop(size, None)
+        # Запись снимает сама задача, а не ожидающий кадр. Ядро рвёт ожидание
+        # снимка через 10 с, а запрос к оператору живёт до 60 с: снятие в
+        # `finally` открывало бы вторую параллельную сессию ровно на медленном
+        # операторе — том самом, ради которого дедупликация и заведена.
+        task.add_done_callback(partial(self._release_snapshot_inflight, size))
+        return await asyncio.shield(task)
+
+    @callback
+    def _release_snapshot_inflight(
+        self, size: tuple[int, int], task: asyncio.Task[bytes | None]
+    ) -> None:
+        """Убрать завершившуюся задачу, не тронув пришедшую ей на смену."""
+        if self._snapshot_inflight.get(size) is task:
+            self._snapshot_inflight.pop(size, None)
 
     async def _async_fetch_snapshot_impl(self, size: tuple[int, int]) -> bytes | None:
         """Один реальный запрос кадра у оператора."""
@@ -519,11 +557,14 @@ class ElektronnyGorodCamera(
         # байты, и без этой проверки оно залипало бы в кэше как «картинка».
         if image and image[:2] == b"\xff\xd8":
             self._image = image
-            self._snapshots[size] = (image, time.monotonic())
+            self._remember_snapshot(size, image)
             self._snapshot_failures = 0
             self._snapshot_retry_after = 0.0
             return image
 
+        # Счётчик общий на камеру, а не на размер: оператор отдаёт `531` на
+        # весь `/snapshots` камеры, и успех любого размера значит, что камера
+        # снова отвечает.
         self._snapshot_failures += 1
         exponent = min(self._snapshot_failures - 1, SNAPSHOT_RETRY_MAX_EXPONENT)
         self._snapshot_retry_after = time.monotonic() + min(
@@ -531,14 +572,26 @@ class ElektronnyGorodCamera(
             SNAPSHOT_RETRY_MAX_SECONDS,
         )
 
-        # Оператор не ответил — лучше прошлый кадр, чем пустое место.
+        # Оператор не ответил — лучше прошлый кадр, чем пустое место. Но
+        # только не протухший: иначе экран вызова показал бы предыдущего
+        # посетителя как стоящего у двери сейчас.
         cached = self._snapshots.get(size)
-        return cached[0] if cached else self._image
+        if cached is not None and time.monotonic() - cached[1] < SNAPSHOT_MAX_STALE_SECONDS:
+            return cached[0]
+        return self._recent_snapshot(size)
 
     @callback
     def _schedule_snapshot_refresh(self, size: tuple[int, int]) -> None:
         """Обновить кадр в фоне, не задерживая ответ карточке."""
         if self._snapshot_task is not None and not self._snapshot_task.done():
+            return
+
+        # Пока оператор в отказе, фоновое обновление тоже ждёт. Иначе пауза
+        # прикрывала только холодный старт, а бьёт по API как раз открытая
+        # карточка: она перерисовывается каждые несколько секунд, и каждый раз
+        # кадр уже устаревший — то есть ровно тот случай, ради которого пауза
+        # и заведена.
+        if time.monotonic() < self._snapshot_retry_after:
             return
 
         async def _run() -> None:

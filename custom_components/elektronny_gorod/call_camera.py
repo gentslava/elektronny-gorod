@@ -31,12 +31,20 @@ from .go2rtc import remove_audio_stream, upsert_audio_stream
 from .sip.call_controller import CALL_STREAM_NAME, DoorbellCallController
 
 
+# Как часто MJPEG-фолбэк экрана вызова просит новый кадр. Дефолтные 0.5 с
+# ядра здесь дороже, чем у обычной камеры: кадр вызова идёт мимо кэша и мимо
+# паузы, то есть каждый оборот — реальный запрос к оператору, и на всё время
+# разговора это две штуки в секунду. Две секунды всё ещё «живой» вид гостя.
+CALL_FRAME_INTERVAL_SECONDS = 2.0
+
+
 class ElektronnyGorodCallCamera(Camera):
     """Camera-сущность активного вызова (video домофона + downlink-аудио)."""
 
     _attr_has_entity_name = True
     _attr_name = None  # имя берётся из DeviceInfo(name="Вызов домофона")
     _attr_supported_features = CameraEntityFeature.STREAM
+    _attr_frame_interval = CALL_FRAME_INTERVAL_SECONDS
 
     def __init__(
         self,

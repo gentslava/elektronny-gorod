@@ -701,6 +701,9 @@ async def test_snapshot_served_from_cache_while_fresh(hass: HomeAssistant, mock_
 
     assert first == second == _JPEG_1
     assert instance.query_camera_snapshot.await_count == 1
+    # Счётчик один и без этой строки: фоновая задача стартует не сразу, и
+    # проверять надо сам факт её постановки, а не результат.
+    assert cam._snapshot_task is None, "свежий кадр не нуждается в обновлении"
 
 
 async def test_stale_snapshot_returned_immediately_and_refreshed(
@@ -838,8 +841,12 @@ async def test_snapshot_key_follows_operator_request(hass: HomeAssistant, mock_a
     instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_FULL)
 
     await cam.async_camera_image(None, None)
-    default_size = camera_module._snapshot_size(None, None)
-    assert await cam.async_camera_image(*default_size) == _JPEG_FULL
+    # Размеры сверяем с проводом и литералом, а не с самой нормализацией:
+    # иначе любая согласованная поломка ключа осталась бы незамеченной.
+    assert instance.query_camera_snapshot.await_args.args[1:] == (300, 169)
+    assert (300, 169) in cam._snapshots
+
+    assert await cam.async_camera_image(300, 169) == _JPEG_FULL
     assert instance.query_camera_snapshot.await_count == 1
 
     # Другой размер — отдельная запись, чужую не вытесняет.
@@ -964,20 +971,26 @@ async def test_operator_refusal_pauses_snapshot_requests(
     )
 
 
-async def test_snapshot_retry_pause_is_capped(hass: HomeAssistant, mock_api):
-    """Пауза растёт, но не переполняется — урок A-104."""
-    cam = await _setup_camera(hass, use_go2rtc=False)
+@pytest.mark.parametrize("failures", [0, 6, 1023, 99_999])
+async def test_snapshot_retry_pause_is_capped(
+    hass: HomeAssistant, mock_api, failures
+):
+    """Пауза растёт, но не переполняется — урок A-104.
 
-    for failures in (1, 7, 1024, 100_000):
-        cam._snapshot_failures = failures
-        exponent = min(
-            cam._snapshot_failures - 1, camera_module.SNAPSHOT_RETRY_MAX_EXPONENT
-        )
-        delay = min(
-            camera_module.SNAPSHOT_RETRY_INITIAL_SECONDS * 2**exponent,
-            camera_module.SNAPSHOT_RETRY_MAX_SECONDS,
-        )
-        assert delay <= camera_module.SNAPSHOT_RETRY_MAX_SECONDS
+    Смотрим на состояние после реального отказа, а не на арифметику,
+    переписанную в теле теста: та проходила при любом продовом коде, включая
+    буквальный рецидив переполнения.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(side_effect=ClientError("531"))
+    cam._snapshot_failures = failures
+
+    await cam._async_fetch_snapshot_impl(_SIZE)
+
+    # Метку берём после запроса: остаток паузы заведомо не больше потолка.
+    pause = cam._snapshot_retry_after - time.monotonic()
+    assert 0 < pause <= camera_module.SNAPSHOT_RETRY_MAX_SECONDS
 
 
 async def test_recovered_operator_clears_snapshot_pause(
@@ -996,6 +1009,218 @@ async def test_recovered_operator_clears_snapshot_pause(
     assert await cam.async_camera_image(*_SIZE) == _JPEG_1
     assert cam._snapshot_failures == 0
     assert cam._snapshot_retry_after == 0.0
+
+
+async def test_operator_refusal_pauses_background_refresh(
+    hass: HomeAssistant, mock_api
+):
+    """Пауза действует и на фоновое обновление, а не только на первый кадр.
+
+    Прод-триггер наступает при открытых карточках, то есть на прогретом кэше:
+    карточка перерисовывается каждые несколько секунд, кадр каждый раз
+    устаревший, и без этой проверки каждый рендер уходил к оператору — ровно
+    то, против чего пауза и заведена.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+
+    instance.query_camera_snapshot = AsyncMock(side_effect=ClientError("531"))
+    _age_snapshot(cam, _SIZE, camera_module.SNAPSHOT_FRESH_SECONDS + 1)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+    await _settle_snapshot(cam)
+    assert instance.query_camera_snapshot.await_count == 1
+
+    # Пауза после первого отказа — не символическая.
+    assert cam._snapshot_retry_after - time.monotonic() > 10.0
+
+    for _ in range(5):
+        assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+        await _settle_snapshot(cam)
+
+    assert instance.query_camera_snapshot.await_count == 1, (
+        "фоновое обновление игнорирует паузу"
+    )
+
+
+async def test_refusal_does_not_serve_a_frame_past_the_ceiling(
+    hass: HomeAssistant, mock_api
+):
+    """Отказ оператора не повод показать протухший кадр как текущий.
+
+    Иначе автоматизация «позвонили в дверь → снимок» молча сохранила бы
+    вчерашний вид вместо честного отсутствия кадра.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+
+    _age_snapshot(cam, _SIZE, camera_module.SNAPSHOT_MAX_STALE_SECONDS + 1)
+    instance.query_camera_snapshot = AsyncMock(side_effect=ClientError("531"))
+
+    assert await cam.async_camera_image(*_SIZE) is None
+
+
+async def test_refusal_does_not_stretch_an_icon_over_a_card(
+    hass: HomeAssistant, mock_api
+):
+    """При отказе оператора правило размера тоже действует.
+
+    Запрет на растягивание иконки зафиксирован отдельным тестом, но обходился
+    через путь отказа — два правила в одном файле противоречили друг другу.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_ICON)
+    await cam.async_camera_image(80, 80)
+
+    instance.query_camera_snapshot = AsyncMock(side_effect=ClientError("531"))
+
+    assert await cam.async_camera_image(490, 276) is None
+
+
+async def test_snapshot_cache_stays_within_budget(hass: HomeAssistant, mock_api):
+    """Кэш не растёт бесконечно: размер задаёт запрос, а не мы.
+
+    Ширина приходит из query-строки `/api/camera_proxy`, поэтому число разных
+    ключей ограничено только числом обращений.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+
+    for width in range(100, 100 + 3 * camera_module.SNAPSHOT_CACHE_ENTRIES):
+        await cam.async_camera_image(width, 100)
+
+    assert len(cam._snapshots) <= camera_module.SNAPSHOT_CACHE_ENTRIES
+
+
+async def test_cancelled_wait_does_not_start_a_second_request(
+    hass: HomeAssistant, mock_api
+):
+    """Отмена ожидания не открывает вторую сессию к оператору.
+
+    Ядро рвёт ожидание снимка через 10 с, а запрос живёт до 60 с. Снятие
+    записи о запросе в `finally` ожидающего кадра означало бы, что медленный
+    оператор — тот самый, ради которого дедупликация и нужна, — получает два
+    параллельных запроса.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    release = asyncio.Event()
+
+    async def _slow(*_args, **_kwargs):
+        await release.wait()
+        return _JPEG_1
+
+    instance.query_camera_snapshot = AsyncMock(side_effect=_slow)
+
+    first = asyncio.create_task(cam.async_camera_image(*_SIZE))
+    for _ in range(3):
+        await asyncio.sleep(0)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+    second = asyncio.create_task(cam.async_camera_image(*_SIZE))
+    for _ in range(3):
+        await asyncio.sleep(0)
+    release.set()
+
+    assert await second == _JPEG_1
+    assert instance.query_camera_snapshot.await_count == 1, (
+        "отмена ожидания открыла второй запрос к оператору"
+    )
+
+
+async def test_fresh_image_bypasses_the_cache(hass: HomeAssistant, mock_api):
+    """Экран вызова получает текущий кадр, а не прошлый.
+
+    Гость стоит у двери сейчас; кадр из кэша показал бы предыдущего.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_2)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1, "кэш ещё свеж"
+
+    assert await cam.async_fresh_camera_image(*_SIZE) == _JPEG_2
+
+
+async def test_removal_cancels_background_refresh(hass: HomeAssistant, mock_api):
+    """Удаление сущности снимает фоновый фетч, а не оставляет его на мёртвой."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+    _age_snapshot(cam, _SIZE, camera_module.SNAPSHOT_FRESH_SECONDS + 1)
+
+    release = asyncio.Event()
+
+    async def _slow(*_args, **_kwargs):
+        await release.wait()
+        return _JPEG_2
+
+    instance.query_camera_snapshot = AsyncMock(side_effect=_slow)
+    await cam.async_camera_image(*_SIZE)
+    task = cam._snapshot_task
+    assert task is not None and not task.done()
+
+    await cam.async_will_remove_from_hass()
+    release.set()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+async def test_freshness_window_is_half_a_minute(hass: HomeAssistant, mock_api):
+    """Окно свежести — тридцать секунд, а не десять.
+
+    Число подобрано по проду: карточка опрашивает камеру примерно раз в
+    десять секунд, и при равном окне почти каждый опрос уходил в фон.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+
+    _age_snapshot(cam, _SIZE, 25.0)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+    assert cam._snapshot_task is None, "кадр 25 с ещё свежий"
+
+    _age_snapshot(cam, _SIZE, 10.0)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1
+    assert cam._snapshot_task is not None, "кадр 35 с пора обновить"
+    await _settle_snapshot(cam)
+    assert instance.query_camera_snapshot.await_count == 2
+
+
+async def test_staleness_ceiling_is_five_minutes(hass: HomeAssistant, mock_api):
+    """Потолок устаревания — пять минут, а не одна.
+
+    При коротком потолке кадр протухал, пока страница закрыта, и возвращение
+    пользователя снова встречало белым экраном.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+
+    instance.query_camera_snapshot = AsyncMock(side_effect=ClientError("531"))
+    _age_snapshot(cam, _SIZE, 290.0)
+    assert await cam.async_camera_image(*_SIZE) == _JPEG_1, (
+        "кадр моложе потолка ещё показываем"
+    )
+    await _settle_snapshot(cam)
+
+    _age_snapshot(cam, _SIZE, 20.0)
+    assert await cam.async_camera_image(*_SIZE) is None, (
+        "кадр старше потолка выдавать нельзя"
+    )
 
 
 async def test_frame_survives_a_closed_page(hass: HomeAssistant, mock_api):

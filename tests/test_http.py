@@ -8,6 +8,7 @@ import logging
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from aiohttp import ClientError
 
 from custom_components.elektronny_gorod.http import HTTP
 
@@ -160,6 +161,20 @@ async def test_delete_uses_rest_timeout(http_client, fake_session):
     await http_client.delete("/rest/v1/something", '{"x": 1}')
 
     assert fake_session.delete.await_args.kwargs["timeout"] is _REST_TIMEOUT
+
+
+async def test_binary_error_body_is_not_returned_as_data(http_client, fake_session):
+    """Тело ошибки оператора не уходит вызывающему как «данные».
+
+    Бинарный путь возвращал содержимое любого ответа. На `531`/`500` это были
+    непустые байты JSON-ошибки, и потребитель снимка принимал их за кадр.
+    """
+    resp = _FakeResponse(531)
+    resp.read = AsyncMock(return_value=b'{"error":"camera busy"}')
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ClientError):
+        await http_client.get("/rest/v1/cameras/1/snapshot", binary=True)
 
 
 async def test_binary_get_uses_binary_timeout(http_client, fake_session):
