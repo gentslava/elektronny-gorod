@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { project } from "../src/data/project";
 
 import {
   FEATURES,
@@ -13,7 +14,7 @@ describe("compatibility engine", () => {
       features: ["video"],
     });
     expect(r.blocked).toBe(true);
-    expect(r.summary).toContain("2024.10.4");
+    expect(r.summary).toContain(project.minHomeAssistant);
     expect(r.items).toHaveLength(0);
   });
 

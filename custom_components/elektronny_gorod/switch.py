@@ -21,6 +21,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, LOGGER
+from .device import place_identifier
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
 DND_ROOT = "DO_NOT_DISTURB_ROOT"
@@ -93,7 +94,7 @@ class ElektronnyGorodDNDSwitch(
             f"{DOMAIN}_dnd_{self._place_id}_{_TRANSLATION_KEYS[dnd_type]}"
         )
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"place_{self._place_id}")},
+            identifiers={place_identifier(self._place_id)},
         )
 
     # ------------------------------------------------------------------ #

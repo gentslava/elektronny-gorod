@@ -9,6 +9,7 @@ on:
       - 'tests/**'
       - 'pytest.ini'
       - 'requirements_test.txt'
+      - 'pyrightconfig.json'
       - '.github/workflows/python-tests.yaml'
   pull_request:
     paths:
@@ -16,8 +17,16 @@ on:
       - 'tests/**'
       - 'pytest.ini'
       - 'requirements_test.txt'
+      - 'pyrightconfig.json'
       - '.github/workflows/python-tests.yaml'
   workflow_dispatch:
+
+# Версия для pyright-job: он обязан типизировать против того же ядра, что и
+# current-плечо матрицы. Значение продублировано в `strategy.matrix` намеренно —
+# GitHub не раскрывает контекст `env` внутри `strategy`, поэтому при подъёме
+# версии правятся оба места.
+env:
+  PHC_CURRENT: '0.13.362'
 
 jobs:
   pytest:
@@ -27,11 +36,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - phc-version: '0.13.175'
-            ha-label: '2024.10 (min)'
-            python-version: '3.12'
-          - phc-version: '0.13.333'
-            ha-label: '2026.5 (current)'
+          - phc-version: '0.13.355'
+            ha-label: '2026.8 (min)'
+            python-version: '3.14'
+          - phc-version: '0.13.362'
+            ha-label: '2026.9 (current)'
             python-version: '3.14'
     steps:
       - uses: actions/checkout@v4
@@ -49,17 +58,6 @@ jobs:
           pip install pytest-homeassistant-custom-component==${{ matrix.phc-version }}
           pip install -r requirements_test.txt
 
-      - name: Apply legacy HA constraints
-        if: matrix.phc-version == '0.13.175'
-        run: |
-          # HA 2024.10 транзитивно тянет acme<3, которая всё ещё ожидает
-          # josepy.ComparableX509. josepy>=2 этот атрибут удалил
-          # → AttributeError при загрузке pytest-homeassistant-custom-component.
-          # PHC 0.13.175 также считает pycares>=4.9 safe-shutdown thread
-          # утечкой; новые PHC уже разрешают этот служебный daemon-thread.
-          # Для current (HA 2026.5+) оба ограничения не нужны.
-          pip install 'josepy<2' 'pycares<4.9'
-
       - name: Run pytest
         run: |
           pytest tests/ -v \
@@ -75,3 +73,33 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
           retention-days: 14
+
+  pyright:
+    name: pyright (static analysis)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+          cache: 'pip'
+          cache-dependency-path: requirements_test.txt
+
+      # Типы HA берутся из ядра, поэтому нужна та же версия, что в current-job
+      # (env.PHC_CURRENT — общий пин, чтобы job-ы не разъехались).
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest-homeassistant-custom-component==${{ env.PHC_CURRENT }}
+          pip install -r requirements_test.txt
+          # Требование manifest: без него reportMissingImports даёт ложную
+          # ошибку и приходится ослаблять правило (A-101).
+          pip install 'firebase-messaging>=0.4.5'
+          pip install pyright==1.1.411
+
+      # Через pip, а не сторонний экшен: одной зависимостью с mutable-ref
+      # меньше (см. A-98 follow-up).
+      - name: Run pyright
+        run: pyright

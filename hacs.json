@@ -1,7 +1,7 @@
 {
-    "name": "Электронный город",
-    "homeassistant": "2024.10.4",
-    "zip_release": true,
-    "filename": "elektronny_gorod.zip",
-    "country": "RU"
-  }
+  "name": "Электронный город",
+  "homeassistant": "2026.8.1",
+  "zip_release": true,
+  "filename": "elektronny_gorod.zip",
+  "country": "RU"
+}

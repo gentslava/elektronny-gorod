@@ -14,7 +14,7 @@ import {
 import { project } from "../data/project";
 
 const HA_OPTIONS: { value: HaVersion; label: string }[] = [
-  { value: "ok", label: "2024.10.4 или новее" },
+  { value: "ok", label: `${project.minHomeAssistant} или новее` },
   { value: "old", label: "Старее" },
   { value: "unknown", label: "Не знаю" },
 ];

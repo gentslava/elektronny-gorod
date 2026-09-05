@@ -48,6 +48,7 @@ elektronny-gorod/
 ├── README.en_EN.md                ← пользовательская документация (EN)
 ├── info.md                        ← краткая HACS feature/config card
 ├── hacs.json                      ← HACS manifest
+├── pyrightconfig.json             ← статический анализ: scope, подавления, интерпретатор
 │
 ├── custom_components/elektronny_gorod/
 │   ├── manifest.json              ← HA integration manifest
@@ -88,6 +89,7 @@ elektronny-gorod/
 │   │   └── eg-intercom-call-card.js ← общий bundle экрана вызова и history card
 │   ├── services.yaml              ← сервисы answer / hangup (A-81)
 │   ├── go2rtc.py                  ← validation/audio + stream/preload client
+│   ├── device.py                  ← иерархия устройств: адрес как родитель (via_device_id)
 │   ├── entity_migration.py        ← стабильные unique_id + registry migration
 │   ├── diagnostics.py             ← redact-нутая diagnostics-выгрузка (S-08)
 │   ├── helpers.py                 ← utils + auth crypto
@@ -113,7 +115,7 @@ elektronny-gorod/
 ├── .github/workflows/
 │   ├── hassfest.yaml              ← manifest validation
 │   ├── hacs.yaml                  ← HACS validation
-│   ├── python-tests.yaml           ← pytest matrix min/current HA
+│   ├── python-tests.yaml           ← pytest matrix min/current HA + job pyright
 │   ├── release.yaml               ← release zip + auto-commit (на event release)
 │   ├── prerelease.yaml            ← PR pre-release: сборка zip в артефакт (pull_request)
 │   ├── prerelease-publish.yaml    ← публикация pre-release `pr-N` (workflow_run)
@@ -168,6 +170,7 @@ elektronny-gorod/
 | [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) | `DataUpdateCoordinator` | `update_interval=5min`, `_async_update_data` → `{places, balances, cameras, locks}` (ADR-0002) |
 | [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, sanitized history DTO (`query_events`, `query_camera_events`), push-registration и SIP credentials | использует shared `HTTP` (ADR-0008); history parsers не сохраняют backend `message` |
 | [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
+| [`device.py`](../../custom_components/elektronny_gorod/device.py) | иерархия устройств | адрес регистрируется до forward-а платформ; `place_device_id` читает id из реестра со scope по entry; `linked_to_place` пропускает ключ вместо `None`, иначе связь стёрлась бы |
 | [`history.py`](../../custom_components/elektronny_gorod/history.py) | отдельный polling durable history | silent page-0 baseline per source; bounded ID dedup в HA `Store`; entry-scoped dispatcher; 5-minute interval; camera polling только для enabled motion-history entities; partial failure isolation |
 | [`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) | read-only WebSocket browse старых вызовов | `elektronny_gorod/history`; проверка `POLICY_READ`; place entity охватывает access controls одного места, per-device entity — один access control; page `0..100`; безопасные source metadata |
 
@@ -247,6 +250,7 @@ elektronny-gorod/
 | Файл | Статус |
 |---|---|
 | [`tests/conftest.py`](../../tests/conftest.py) | fixtures + `enable_custom_integrations` auto-applied |
+| [`tests/test_device_hierarchy.py`](../../tests/test_device_hierarchy.py) | адрес как родитель домофонов: привязка к своему месту при нескольких адресах, точка входа без камеры, перепривязка плоского устройства, entry-scoping и пропуск ключа при неизвестном адресе |
 | [`tests/test_entity_migration.py`](../../tests/test_entity_migration.py) | unit-тесты `_camera_new_uid`/`_lock_new_uid` + golden vector для `lock_unique_id` |
 | [`tests/test_logging_redact.py`](../../tests/test_logging_redact.py) | unit-тесты `_logging.redact()` + `redact_path()` |
 | [`tests/test_diagnostics.py`](../../tests/test_diagnostics.py) | redaction secrets/options, non-sensitive preserved, coordinator counts-only, TO_REDACT ⊇ SENSITIVE_KEYS |

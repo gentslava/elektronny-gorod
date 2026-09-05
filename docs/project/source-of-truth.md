@@ -75,12 +75,12 @@ Quality gates:
 
 | Источник | Значение |
 |---|---|
-| `hacs.json:3` | `2024.10.4` |
+| `hacs.json:3` | `2026.8.1` |
 | `info.md` | (производный от hacs.json) |
-| `README.md` badge | `2024.10+` ✅ |
-| Код (`ConfigFlowResult`, `LockState`) | ≥ 2024.10 ✅ совпадает с hacs.json |
+| `README.md` badge | `2026.8+` ✅ |
+| Код (`DeviceInfo.via_device_id`) | ≥ 2026.8 ✅ совпадает с hacs.json |
 
-**Резолюция:** ✅ закрыт. Все источники синхронизированы на `2024.10.4` — первая stable HA с `LockState` enum, который импортирует `lock.py`. См. audit [A-11](../audit/project-audit.md#a-11-hacsjson-minimum-ha--202280).
+**Резолюция:** ✅ закрыт. Все источники синхронизированы на `2026.8.1` — первая stable HA, где `DeviceInfo` принимает `via_device_id`: без него устройства интеграции теряют группировку по адресу (A-100). Прежний минимум `2024.10.4` держался на `LockState` enum, см. audit [A-11](../audit/project-audit.md#a-11-hacsjson-minimum-ha--202280).
 
 ### Конфликт 2: iot_class vs реальная модель
 

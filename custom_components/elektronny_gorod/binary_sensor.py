@@ -20,6 +20,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, LOGGER
+from .device import place_identifier
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
 
@@ -58,7 +59,7 @@ class ElektronnyGorodBlockedBinarySensor(
         self._place_id = place_id
         self._attr_unique_id = f"{DOMAIN}_{place_id}_blocked"
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, f"place_{place_id}")},
+            identifiers={place_identifier(place_id)},
         )
 
     @property

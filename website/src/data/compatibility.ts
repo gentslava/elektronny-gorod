@@ -1,6 +1,8 @@
 // Единый конфиг-источник проверки совместимости. Все правила — здесь,
 // UI только рендерит результат. Формулировки честные: без «100% работает».
 
+import { project } from "./project";
+
 export type Device = "intercom" | "camera" | "lock";
 export type HaVersion = "ok" | "old" | "unknown";
 
@@ -58,7 +60,8 @@ export const FEATURES: Record<FeatureId, { label: string; devices: Device[] }> =
   "motion-history": { label: "История движения камеры", devices: ["camera"] },
 };
 
-const MIN_HA = "2024.10.4";
+// Из project.ts, а не копией: минимум обязан совпадать с hacs.json (docs/sync.md).
+const MIN_HA = project.minHomeAssistant;
 
 function itemFor(feature: FeatureId, device: Device): CompatItem {
   const meta = FEATURES[feature];

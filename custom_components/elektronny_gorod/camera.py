@@ -36,6 +36,7 @@ from .const import (
     STREAM_MANAGER_DATA,
 )
 from .call_camera import ElektronnyGorodCallCamera
+from .device import linked_to_place, place_device_id
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .go2rtc import go2rtc_auth_headers
 from .stream_manager import CameraStreamManager
@@ -104,6 +105,9 @@ async def async_setup_entry(
             coordinator,
             camera_info,
             stream_manager=stream_manager,
+            via_device_id=place_device_id(
+                hass, entry.entry_id, str(camera_info.get("place_id") or "")
+            ),
         )
         for camera_info in cameras
     )
@@ -165,9 +169,12 @@ class ElektronnyGorodCamera(
         camera_info: dict[str, Any],
         *,
         stream_manager: CameraStreamManager | None,
+        via_device_id: str | None = None,
     ) -> None:
         # Camera.__init__ инициализирует Entity-state; затем регистрируемся в coordinator.
-        CoordinatorEntity.__init__(self, coordinator)
+        # Явные вызовы, а не super(): порядок здесь значимый, а MRO дал бы обратный.
+        # Проверка типов не параметризует unbound `CoordinatorEntity.__init__`.
+        CoordinatorEntity.__init__(self, coordinator)  # pyright: ignore[reportArgumentType]
         Camera.__init__(self)
 
         self._id = str(camera_info.get("id") or "")
@@ -208,13 +215,15 @@ class ElektronnyGorodCamera(
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
             device_uid = f"entrance_{place_id}_{ac_id}_{entrance_id or 'main'}"
-            self._attr_device_info = DeviceInfo(
-                identifiers={(DOMAIN, device_uid)},
-                name=self._name,
-                manufacturer="Электронный город",
-                model="Intercom",
-                suggested_area=AREA_INTERCOM,
-                via_device=(DOMAIN, f"place_{place_id}"),
+            self._attr_device_info = linked_to_place(
+                DeviceInfo(
+                    identifiers={(DOMAIN, device_uid)},
+                    name=self._name,
+                    manufacturer="Электронный город",
+                    model="Intercom",
+                    suggested_area=AREA_INTERCOM,
+                ),
+                via_device_id,
             )
         else:
             # source="place" — личные подписочные камеры из /rest/v1/.../cameras
@@ -403,7 +412,11 @@ class ElektronnyGorodCamera(
         if result is None:
             return stream_url
         if not result.proxied:
-            state = self._stream_manager.camera_state(self._id)
+            # `result` не None только когда менеджер существует (см. выше);
+            # анализатор эти два факта не связывает.
+            state = self._stream_manager.camera_state(  # pyright: ignore[reportOptionalMemberAccess]
+                self._id
+            )
             LOGGER.error(
                 "Camera %s (%s): go2rtc недоступен (%s); fallback на direct "
                 "operator URL. Проверь go2rtc_username/password в integration "

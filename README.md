@@ -3,7 +3,7 @@
 <p>
   <a href="https://hacs.xyz"><img src="https://img.shields.io/badge/HACS-Custom-41BDF5" alt="HACS Custom"/></a>
   <img src="https://img.shields.io/github/v/release/gentslava/elektronny-gorod?label=release&color=blue" alt="Release"/>
-  <img src="https://img.shields.io/badge/Home%20Assistant-2024.10%2B-blue?logo=home-assistant" alt="Home Assistant"/>
+  <img src="https://img.shields.io/badge/Home%20Assistant-2026.8%2B-blue?logo=home-assistant" alt="Home Assistant"/>
   <img src="https://img.shields.io/github/license/gentslava/elektronny-gorod?color=green" alt="License"/>
   <img src="https://img.shields.io/badge/Custom%20Integration-orange" alt="Custom Integration"/>
   <img src="https://img.shields.io/badge/Elektronny%20Gorod-API-green" alt="Elektronny Gorod API"/>

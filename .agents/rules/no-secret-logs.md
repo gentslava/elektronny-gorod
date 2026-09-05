@@ -43,7 +43,7 @@ LOGGER.info("Entry %s exists", entry.entry_id)
 
 ## Pre-commit hook
 
-Claude- и Codex-адаптеры делегируют единой AST-проверке `.agents/hooks/check-secret-logs.py`. Канонический worktree-aware entrypoint `bash .agents/hooks/check-secret-logs.sh` сам выбирает проектный Python 3.12+.
+Claude- и Codex-адаптеры делегируют единой AST-проверке `.agents/hooks/check-secret-logs.py`. Канонический worktree-aware entrypoint `bash .agents/hooks/check-secret-logs.sh` сам выбирает Python 3.12+ (сканеру нужен только `ast`, поэтому его минимум ниже проектного).
 
 ## Связь
 

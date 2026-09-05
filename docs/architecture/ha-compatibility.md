@@ -57,7 +57,7 @@ Quality gates:
 | Поле | Текущее | Замечание |
 |---|---|---|
 | `name` | `Электронный город` | ✅ |
-| `homeassistant` | `2024.10.4` | ✅ — `LockState` enum появился в 2024.10 |
+| `homeassistant` | `2026.8.1` | ✅ — `DeviceInfo.via_device_id` (иерархия устройств) появился в 2026.8 |
 | `zip_release` | `true` | ✅ |
 | `filename` | `elektronny_gorod.zip` | ✅ |
 | `country` | `RU` | ✅ |

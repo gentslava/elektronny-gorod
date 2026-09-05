@@ -23,7 +23,7 @@
 | «Не беспокоить» (домофонные и управляющие звонки) | `switch.py` |
 | Blueprint-ы `doorbell_call_notify`, `doorbell_screen_controller`, экран `/doorbell-call/call` | `call-screen-setup.md` |
 | Opt-in публикация камер по внешнему RTSP (go2rtc) | ADR-0014, README |
-| HA ≥ 2024.10.4, HACS zip release, quality_scale bronze | `hacs.json`, `manifest.json` |
+| HA ≥ 2026.8.1, HACS zip release, quality_scale bronze | `hacs.json`, `manifest.json` |
 
 ### Ограничения и честные оговорки (обязательны на сайте)
 
