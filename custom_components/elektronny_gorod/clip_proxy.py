@@ -18,7 +18,7 @@ import hashlib
 import hmac
 import secrets
 import time
-from typing import Any
+from typing import Any, Final, Literal
 
 from aiohttp import ClientError, ClientTimeout, web
 from homeassistant.components.http import HomeAssistantView
@@ -133,11 +133,15 @@ def async_release_clip_cache(hass: HomeAssistant, entry_id: str) -> None:
         locks.pop(key, None)
 
 
-_RANGE_IGNORE = "ignore"
-_RANGE_UNSATISFIABLE = "unsatisfiable"
+# Literal, а не просто str: иначе проверка типов не сужает результат
+# `_parse_range` до кортежа после сравнения с sentinel-ами.
+_RANGE_IGNORE: Final[Literal["ignore"]] = "ignore"
+_RANGE_UNSATISFIABLE: Final[Literal["unsatisfiable"]] = "unsatisfiable"
 
 
-def _parse_range(header: str, total: int) -> tuple[int, int] | str:
+def _parse_range(
+    header: str, total: int
+) -> tuple[int, int] | Literal["ignore", "unsatisfiable"]:
     """Разобрать один byte-range.
 
     RFC 9110 §14.2 различает два случая, и путать их нельзя: неразбираемый

@@ -106,27 +106,29 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not isinstance(phone, str) or not phone.strip():
                     errors[CONF_PHONE] = "invalid_phone"
 
-            if not errors:
-                self.phone = str(phone).strip()
-                LOGGER.debug("Phone captured (length=%d)", len(self.phone))
+                # Внутри ветки, а не рядом: иначе user_input без CONF_PHONE и
+                # без ошибок доходил сюда с несвязанным `phone`.
+                if not errors:
+                    self.phone = str(phone).strip()
+                    LOGGER.debug("Phone captured (length=%d)", len(self.phone))
 
-                # Fetch contracts for the phone number
-                try:
-                    res = await self.api.query_contracts(self.phone)
+                    # Fetch contracts for the phone number
+                    try:
+                        res = await self.api.query_contracts(self.phone)
 
-                    # If password is required, go to password step
-                    if res.get("password"):
-                        return await self.async_step_password()
+                        # If password is required, go to password step
+                        if res.get("password"):
+                            return await self.async_step_password()
 
-                    # Otherwise user must choose a contract and confirm via SMS
-                    contracts = res.get("contracts")
-                    if not contracts:
-                        errors[CONF_PHONE] = "no_contracts"
-                    else:
-                        self.contracts = contracts
-                        return await self.async_step_contract()
-                except ValueError as e:
-                    errors[CONF_PHONE] = str(e)
+                        # Otherwise user must choose a contract and confirm via SMS
+                        contracts = res.get("contracts")
+                        if not contracts:
+                            errors[CONF_PHONE] = "no_contracts"
+                        else:
+                            self.contracts = contracts
+                            return await self.async_step_contract()
+                    except ValueError as e:
+                        errors[CONF_PHONE] = str(e)
 
         if self.show_advanced_options:
             data_schema = vol.Schema({
@@ -375,27 +377,28 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                 if not result.ok:
                     errors["base"] = result.error
 
-            if not errors:
-                data = {
-                    **self._entry_data,
-                    CONF_USE_GO2RTC: True,
-                    CONF_GO2RTC_BASE_URL: base_url,
-                    CONF_GO2RTC_RTSP_HOST: result.rtsp_host,
-                    CONF_GO2RTC_USERNAME: username,
-                    CONF_GO2RTC_PASSWORD: password,
-                    CONF_GO2RTC_KEEP_WARM: bool(
-                        user_input.get(
-                            CONF_GO2RTC_KEEP_WARM, DEFAULT_GO2RTC_KEEP_WARM
-                        )
-                    ),
-                    CONF_GO2RTC_KEEP_WARM_HIDDEN: bool(
-                        user_input.get(
-                            CONF_GO2RTC_KEEP_WARM_HIDDEN,
-                            DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
-                        )
-                    ),
-                }
-                return self.async_create_entry(title=data[CONF_NAME], data=data)
+                # Внутри `else`: `result` существует только когда base_url задан.
+                if not errors:
+                    data = {
+                        **self._entry_data,
+                        CONF_USE_GO2RTC: True,
+                        CONF_GO2RTC_BASE_URL: base_url,
+                        CONF_GO2RTC_RTSP_HOST: result.rtsp_host,
+                        CONF_GO2RTC_USERNAME: username,
+                        CONF_GO2RTC_PASSWORD: password,
+                        CONF_GO2RTC_KEEP_WARM: bool(
+                            user_input.get(
+                                CONF_GO2RTC_KEEP_WARM, DEFAULT_GO2RTC_KEEP_WARM
+                            )
+                        ),
+                        CONF_GO2RTC_KEEP_WARM_HIDDEN: bool(
+                            user_input.get(
+                                CONF_GO2RTC_KEEP_WARM_HIDDEN,
+                                DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
+                            )
+                        ),
+                    }
+                    return self.async_create_entry(title=data[CONF_NAME], data=data)
 
         schema = vol.Schema({
             vol.Required(CONF_GO2RTC_BASE_URL, default=DEFAULT_GO2RTC_BASE_URL): str,

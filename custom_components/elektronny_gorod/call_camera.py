@@ -16,7 +16,7 @@ from aiohttp import ClientTimeout
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.core import Event, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
-from homeassistant.helpers.entity import DeviceInfo
+from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import (
     CALL_STATE_ACTIVE,

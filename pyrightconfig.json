@@ -1,0 +1,13 @@
+{
+  "include": [
+    "custom_components/elektronny_gorod"
+  ],
+  "exclude": [
+    "**/__pycache__"
+  ],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "standard",
+  "reportPrivateImportUsage": "none",
+  "reportIncompatibleVariableOverride": "none",
+  "reportMissingImports": "error"
+}

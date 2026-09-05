@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+import subprocess
 import tomllib
+
+import yaml
+from pathlib import Path
 
 import pytest
 
@@ -165,6 +168,32 @@ def test_final_reviewer_roles_share_candidate_invariants(
     assert "кажд" in text
 
 
+def _tracked_files(root: Path) -> list[Path]:
+    """Файлы под `root`: и версионируемые, и ещё не добавленные в индекс."""
+    listing = subprocess.run(
+        # --others --exclude-standard: новый адаптер проверяется ещё до
+        # добавления в индекс, а gitignore отсекает рабочий мусор — локальные
+        # worktree агентов и кеши.
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "--",
+            str(root.relative_to(REPO_ROOT)),
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return [
+        REPO_ROOT / name for name in listing.stdout.split("\0") if name
+    ]
+
+
 def test_instruction_adapters_have_no_parent_relative_markdown_paths() -> None:
     roots = (
         REPO_ROOT / ".agents",
@@ -174,7 +203,11 @@ def test_instruction_adapters_have_no_parent_relative_markdown_paths() -> None:
     )
     files = [REPO_ROOT / ".github/copilot-instructions.md"]
     for root in roots:
-        files.extend(path for path in root.rglob("*") if path.is_file())
+        tracked = _tracked_files(root)
+        # Проверять по каталогу: общий список заполнен ещё до цикла, поэтому
+        # `assert files` пропустил бы пустой листинг любого из корней.
+        assert tracked, f"листинг {root.relative_to(REPO_ROOT)} пуст"
+        files.extend(tracked)
 
     for path in files:
         if path.suffix not in {".md", ".mdc", ".toml"}:
@@ -260,3 +293,32 @@ def test_canonical_role_keeps_routing_hint_out_of_adapters(role: str) -> None:
     )
     assert use_when not in _read(f".claude/agents/{role}.md")
     assert use_when not in _read(f".codex/agents/{role}.toml")
+
+
+def test_pyright_job_types_against_current_matrix_core() -> None:
+    """Job `pyright` типизирует против того же ядра, что и current-плечо.
+
+    Половина гейта из A-100 статическая: pyright видит `via_device` в
+    `DeviceInfo` только на 2026.9. Если версии разъедутся, эта половина тихо
+    перестанет соответствовать прогоняемому ядру. GitHub не раскрывает `env`
+    внутри `strategy`, поэтому пин продублирован руками — сверяем дубль и то,
+    что job действительно берёт его из `env`, а не из своего литерала.
+    """
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github/workflows/python-tests.yaml").read_text()
+    )
+
+    env_pin = workflow["env"]["PHC_CURRENT"]
+    arms = workflow["jobs"]["pytest"]["strategy"]["matrix"]["include"]
+    current = [arm for arm in arms if "current" in arm["ha-label"]]
+
+    assert len(current) == 1, f"ожидалось одно current-плечо, найдено {len(current)}"
+    assert current[0]["phc-version"] == env_pin, (
+        f"pyright типизирует против {env_pin}, "
+        f"а current-плечо матрицы — {current[0]['phc-version']}"
+    )
+
+    # Равенство бессмысленно, если сам job берёт версию не из `env`.
+    steps = workflow["jobs"]["pyright"]["steps"]
+    installs = "\n".join(step.get("run", "") for step in steps)
+    assert "pytest-homeassistant-custom-component==${{ env.PHC_CURRENT }}" in installs

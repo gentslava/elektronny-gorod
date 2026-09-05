@@ -450,7 +450,7 @@ class DoorbellFcmListener:
             return
         data = (notification or {}).get("data") or {}
         push_type = data.get("PushType") or data.get("google.c.a.m_l")
-        event_type = _PUSH_TYPE_EVENT.get(push_type)
+        event_type = _PUSH_TYPE_EVENT.get(str(push_type)) if push_type else None
         if not event_type:
             # Не дропаем молча: если оператор шлёт end-пуш на сброс/таймаут
             # неизвестным типом — увидим его здесь и замаппим в следующем слайсе.

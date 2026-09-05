@@ -865,7 +865,9 @@ class CameraStreamManager:
         if not self._stopping:
             await self.async_reconcile()
 
-    def _handle_registry_update(self, event: Event) -> None:
+    def _handle_registry_update(
+        self, event: Event[er.EventEntityRegistryUpdatedData]
+    ) -> None:
         entity_id = str((event.data or {}).get("entity_id") or "")
         if not entity_id.startswith("camera."):
             return

@@ -93,7 +93,12 @@ class ElektronnyGorodMediaSource(MediaSource):
     def _coordinator(self, entry_id: str) -> Any | None:
         return (self._hass.data.get(DOMAIN) or {}).get(entry_id)
 
-    async def async_browse_media(self, item: MediaSourceItem) -> BrowseMedia:
+    # Возвращаем `BrowseMedia`, тогда как база объявляет `BrowseMediaSource`.
+    # Ядро читает только поля `BrowseMedia`, поэтому рантайм корректен, но
+    # контракт шире базового — сужение это отдельный рефакторинг (A-101).
+    async def async_browse_media(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, item: MediaSourceItem
+    ) -> BrowseMedia:
         identifier = item.identifier or ""
         if not identifier:
             return self._browse_root()
@@ -309,6 +314,8 @@ class ElektronnyGorodMediaSource(MediaSource):
         except ValueError as err:
             raise BrowseError("Unknown media item") from err
         coordinator = self._coordinator(entry_id)
+        if coordinator is None:
+            raise BrowseError("Unknown media item")
         lower, upper = _day_bounds(day)
         try:
             events = await coordinator.api.query_camera_events(
