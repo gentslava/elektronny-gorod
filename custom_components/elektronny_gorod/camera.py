@@ -48,6 +48,12 @@ if TYPE_CHECKING:
 # A-71 / ADR-0009: минимальный интервал между авто-recovery попытками.
 # HA Stream worker сигналит unavailable на каждый retry-tick (10/20/30с);
 # без cooldown re-fetch забивал бы operator API. См. ADR-0009.
+# Сколько снимок считается свежим. Пока он свежий — отдаём из памяти, не
+# беспокоя оператора; когда устарел — всё равно отдаём сразу, а обновление
+# уходит в фон. Иначе каждое открытие карточки ждало операторский JPEG и
+# встречало белым экраном.
+SNAPSHOT_FRESH_SECONDS = 10.0
+
 STREAM_RECOVERY_COOLDOWN = 30.0
 
 # Экспоненциальный backoff, когда recovery не помогает. Оператор умеет
@@ -121,6 +127,7 @@ async def async_setup_entry(
         ElektronnyGorodCamera(
             coordinator,
             camera_info,
+            entry=entry,
             stream_manager=stream_manager,
             via_device_id=place_device_id(
                 hass, entry.entry_id, str(camera_info.get("place_id") or "")
@@ -185,6 +192,7 @@ class ElektronnyGorodCamera(
         coordinator: ElektronnyGorodUpdateCoordinator,
         camera_info: dict[str, Any],
         *,
+        entry: ConfigEntry,
         stream_manager: CameraStreamManager | None,
         via_device_id: str | None = None,
     ) -> None:
@@ -231,6 +239,9 @@ class ElektronnyGorodCamera(
         # A-71 v3: proactive keep-alive refresh для активных consumers.
         self._unsub_proactive_refresh: CALLBACK_TYPE | None = None
         self._image: bytes | None = None
+        self._image_monotonic: float = 0.0
+        self._image_size: tuple[int | None, int | None] | None = None
+        self._snapshot_task: asyncio.Task[None] | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
             device_uid = f"entrance_{place_id}_{ac_id}_{entrance_id or 'main'}"
@@ -263,6 +274,7 @@ class ElektronnyGorodCamera(
                 suggested_area=area,
             )
 
+        self._entry = entry
         self._stream_manager = stream_manager
         self._use_go2rtc = stream_manager is not None
         self._go2rtc_stream_name = f"eg_{self._id}"
@@ -356,13 +368,65 @@ class ElektronnyGorodCamera(
     async def async_camera_image(
         self, width: int | None = None, height: int | None = None
     ) -> bytes | None:
-        """Return bytes of camera image."""
+        """Вернуть кадр камеры, по возможности не дожидаясь оператора.
+
+        Свежий снимок отдаём из памяти. Устаревший — тоже отдаём сразу, а
+        обновление уходит в фон: карточка показывает прошлый кадр вместо
+        белого экрана, пока едет новый. Ждём оператора только когда показать
+        нечего — на самом первом открытии камеры.
+        """
         if self._is_hidden() or not self.available:
             return None
-        image = await self.coordinator.get_camera_snapshot(self._id, width, height)
+
+        size = (width, height)
+        if self._image is not None and self._image_size == size:
+            if time.monotonic() - self._image_monotonic < SNAPSHOT_FRESH_SECONDS:
+                return self._image
+            self._schedule_snapshot_refresh(size)
+            return self._image
+
+        return await self._async_fetch_snapshot(size)
+
+    async def _async_fetch_snapshot(
+        self, size: tuple[int | None, int | None]
+    ) -> bytes | None:
+        """Сходить к оператору за кадром и запомнить его."""
+        image = await self.coordinator.get_camera_snapshot(self._id, *size)
         if image:
             self._image = image
+            self._image_size = size
+            self._image_monotonic = time.monotonic()
         return self._image
+
+    @callback
+    def _schedule_snapshot_refresh(
+        self, size: tuple[int | None, int | None]
+    ) -> None:
+        """Обновить кадр в фоне, не задерживая ответ карточке."""
+        if self._snapshot_task is not None and not self._snapshot_task.done():
+            return
+
+        async def _run() -> None:
+            try:
+                await self._async_fetch_snapshot(size)
+            except Exception as err:  # noqa: BLE001 - operator boundary
+                # Отказ оператора не должен всплывать из фоновой задачи:
+                # у карточки остаётся прошлый кадр, это лучше пустого места.
+                LOGGER.debug(
+                    "Camera %s (%s): background snapshot failed (%s)",
+                    self._name,
+                    self._id,
+                    type(err).__name__,
+                )
+
+        # Задача записи, а не hass: снимается при выгрузке и не держит
+        # startup-барьер.
+        self._snapshot_task = self._entry.async_create_background_task(
+            self.hass,
+            _run(),
+            name=f"{DOMAIN}_camera_snapshot_{self._id}",
+            eager_start=False,
+        )
 
     async def stream_source(self) -> str | None:
         """Return the source of the stream.

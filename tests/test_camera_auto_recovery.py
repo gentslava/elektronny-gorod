@@ -655,3 +655,87 @@ async def test_successful_open_clears_recovery_backoff(hass: HomeAssistant, mock
 
     assert cam._recovery_failures == 0
     assert cam._recovery_cooldown == camera_module.STREAM_RECOVERY_COOLDOWN
+
+
+# ─── Снимок: кэш и фоновое обновление ──────────────────────────────────────
+
+
+async def test_snapshot_served_from_cache_while_fresh(hass: HomeAssistant, mock_api):
+    """Свежий кадр отдаётся из памяти, оператора не беспокоим."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
+
+    first = await cam.async_camera_image(320, 180)
+    second = await cam.async_camera_image(320, 180)
+
+    assert first == second == b"JPEG-1"
+    assert instance.query_camera_snapshot.await_count == 1
+
+
+async def test_stale_snapshot_returned_immediately_and_refreshed(
+    hass: HomeAssistant, mock_api
+):
+    """Устаревший кадр отдаётся сразу, новый едет в фоне.
+
+    Это и есть лечение белого экрана: карточка показывает прошлый кадр, пока
+    оператор отдаёт свежий, вместо того чтобы ждать его с пустым местом.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
+
+    assert await cam.async_camera_image(320, 180) == b"JPEG-1"
+
+    # Кадр протух, оператор теперь отдаёт другой.
+    cam._image_monotonic -= camera_module.SNAPSHOT_FRESH_SECONDS + 1
+    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-2")
+
+    stale = await cam.async_camera_image(320, 180)
+
+    assert stale == b"JPEG-1", "ответ не должен ждать оператора"
+    await hass.async_block_till_done()
+    assert await cam.async_camera_image(320, 180) == b"JPEG-2"
+
+
+async def test_background_snapshot_failure_keeps_previous_frame(
+    hass: HomeAssistant, mock_api
+):
+    """Отказ оператора в фоне не оставляет карточку без картинки."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
+    await cam.async_camera_image(320, 180)
+
+    cam._image_monotonic -= camera_module.SNAPSHOT_FRESH_SECONDS + 1
+    instance.query_camera_snapshot = AsyncMock(side_effect=RuntimeError("operator 500"))
+
+    assert await cam.async_camera_image(320, 180) == b"JPEG-1"
+    await hass.async_block_till_done()
+    assert await cam.async_camera_image(320, 180) == b"JPEG-1"
+
+
+async def test_first_snapshot_waits_for_operator(hass: HomeAssistant, mock_api):
+    """Показать нечего — приходится дождаться; это единственный такой случай."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
+
+    assert await cam.async_camera_image(320, 180) == b"JPEG-1"
+    assert instance.query_camera_snapshot.await_count == 1
+
+
+async def test_snapshot_refresh_is_not_duplicated(hass: HomeAssistant, mock_api):
+    """Несколько запросов подряд не плодят фоновых задач."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=b"JPEG-1")
+    await cam.async_camera_image(320, 180)
+
+    cam._image_monotonic -= camera_module.SNAPSHOT_FRESH_SECONDS + 1
+    for _ in range(5):
+        await cam.async_camera_image(320, 180)
+    await hass.async_block_till_done()
+
+    # Один первичный запрос плюс одно фоновое обновление.
+    assert instance.query_camera_snapshot.await_count == 2
