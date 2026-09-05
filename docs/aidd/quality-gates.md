@@ -177,7 +177,7 @@ Used by agents:
 |---|---|
 | Purpose | git-история feature-ветки стабилизирована до candidate freeze и останется чистой перед merge |
 | Owner | Git Historian (`.agents/roles/git-historian.md`); Validator/root fallback |
-| Required evidence | commit list + diff against `<target-ref>`; нет WIP/DIAG/debug/typo-only цепочек; дальнейший rebase/squash не запланирован; при rewrite создан локальный backup ref |
+| Required evidence | commit list + diff against `<target-ref>`; нет WIP/DIAG/debug/typo-only цепочек; дальнейший rebase/squash не запланирован; при rewrite создан локальный backup ref, а для tree-preserving rewrite приложены совпадающий tree SHA и пустой diff с ним |
 | Pass | `git log --oneline <target-ref>..HEAD` показывает logically-grouped conventional commits; rationale понятен из subject/body; после freeze история не меняется |
 | Fail | >3 hotfix-ов подряд на одну фичу; коммиты «WIP», «fix typo», «revert prev»; DIAG/debug код в финальном diff |
 | Stop | не закрывать `CANDIDATE_FROZEN` и не merge-ить без cleanup; force-push в master запрещён |

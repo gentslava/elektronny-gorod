@@ -124,7 +124,7 @@ git diff <target-ref>..HEAD --stat    # diff должен совпадать с 
 
 ### 5. Publication hand-off
 
-После rewrite **не push-ить сразу**. Зафиксировать новый base/head/tree, объявить прежние approvals/evidence/CI stale и передать candidate на повторные local gates, freeze и verdict каждого обязательного reviewer-а. Только Validator после этих approvals публикует feature-ветку; для уже опубликованной истории — с точным `--force-with-lease=<expected-old-sha>` после свежего fetch.
+После rewrite **не push-ить сразу**. Зафиксировать новый base/head/tree. Если дерево изменилось — объявить прежние approvals/evidence/CI stale и передать candidate на повторные local gates, freeze и verdict каждого обязательного reviewer-а. Если rewrite tree-preserving (tree SHA тот же, `git diff <backup-ref>..HEAD` пуст) — approvals сохраняются, достаточно приложить это доказательство. Только Validator после этих approvals публикует feature-ветку; для уже опубликованной истории — с точным `--force-with-lease=<expected-old-sha>` после свежего fetch.
 
 🔴 **Запрещено** force-push в `master` / `main` / `dev` — даже с lease. 🔴 Если в ветку были чужие коммиты после твоего последнего pull — STOP, не переписывай чужую работу. Сначала уточни у автора.
 

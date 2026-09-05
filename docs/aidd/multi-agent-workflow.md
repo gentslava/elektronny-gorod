@@ -149,7 +149,7 @@ Validator — обязанность root/lead orchestrator во всех под
 | Gate | `HISTORY_CLEAN` |
 | Canonical role | `.agents/roles/git-historian.md` |
 
-Если отдельная роль недоступна, те же проверки выполняет Validator/root. Любой history rewrite инвалидирует candidate и все прежние approvals.
+Если отдельная роль недоступна, те же проверки выполняет Validator/root. History rewrite инвалидирует candidate и прежние approvals, **если меняет дерево**. Перезапись ради читаемости истории дерево не меняет: тогда достаточно сверить, что все изменения на месте — совпадение tree SHA и пустой diff с backup-ref.
 
 ### 10. Reverse Engineer Agent
 

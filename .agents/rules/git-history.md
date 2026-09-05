@@ -30,6 +30,8 @@
 - После каждой существенной hotfix-серии (>3 hotfix-ов подряд на одну фичу).
 - Перед обычным push/PR; после freeze/review history rewrite запрещён без нового candidate и повторных attestations всех обязательных reviewers (ADR-0015), а после публикации — также без нового PR evidence comment и CI run (ADR-0015).
 
+Исключение — **tree-preserving rewrite**: если после squash/rebase итоговое дерево совпадает с аттестованным (`git rev-parse HEAD^{tree}`) и `git diff <backup-ref>..HEAD` пуст, ревьюерам нечего перепроверять — содержимое кандидата не изменилось. Аттестации остаются в силе, меняется только head. Требуется приложить доказательство: старый и новый head, совпадающий tree SHA и пустой diff с backup-веткой.
+
 ## Кто исполняет
 
 - Каноническая роль `.agents/roles/git-historian.md`; Claude и Codex запускают её через свои тонкие адаптеры.

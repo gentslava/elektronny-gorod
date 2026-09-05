@@ -23,7 +23,7 @@ kind: canonical-agent-command
 - [ ] `TESTS_PASS` — `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный.
 - [ ] `SECURITY_PRECHECK_OK` был закрыт до candidate freeze: secret/redaction checks зелёные, известных Critical/Important security findings не осталось.
 - [ ] `DOCS_UPDATED` — maintenance rules применены (обе оси, ADR-0010).
-- [ ] `HISTORY_CLEAN` был завершён до freeze; после review не было rebase/squash/history rewrite.
+- [ ] `HISTORY_CLEAN` был завершён до freeze; после review не было rebase/squash/history rewrite, менявшего дерево (tree-preserving squash допустим при приложенном доказательстве).
 - [ ] `CANDIDATE_FROZEN` — PR evidence содержит пустой `git status --short`, merge-base SHA, head SHA и tree SHA clean committed candidate.
 - [ ] `REVIEW_OK` — каждый обязательный reviewer:
   - явно указал identity и `Participated in implementation: no`;
