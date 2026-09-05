@@ -10,6 +10,7 @@ import pytest
 
 from custom_components.elektronny_gorod.go2rtc import Go2RtcRequestError
 from custom_components.elektronny_gorod.stream_manager import (
+    _monotonic as _stream_manager_monotonic,
     RETRY_INITIAL_SECONDS,
     RETRY_MAX_EXPONENT,
     RETRY_MAX_SECONDS,
@@ -54,6 +55,13 @@ def _manager(
         entry_id="entry-1",
         data={},
         options={},
+        # Фоновые задачи привязаны к записи, а не к hass: так они снимаются
+        # при выгрузке и не держат startup-барьер.
+        async_create_background_task=MagicMock(
+            side_effect=lambda _hass, coro, **kwargs: asyncio.create_task(
+                coro, name=kwargs.get("name")
+            )
+        ),
     )
     hass = MagicMock()
     hass.async_create_task.side_effect = (
@@ -533,3 +541,51 @@ async def test_retry_delay_survives_long_operator_outage() -> None:
         )
 
     assert delays == [15.0, 30.0, 60.0, 300.0, 300.0]
+
+
+async def test_ha_open_does_not_reuse_after_failure() -> None:
+    """Окно переиспользования не действует, если последняя попытка провалилась.
+
+    `last_success_monotonic` остаётся от прошлого успеха, поэтому в течение
+    десяти секунд после неудачи он всё ещё выглядит свежим. Без проверки
+    статуса HA получал бы ссылку на поток, который go2rtc уже не обслуживает.
+    """
+    manager, coordinator, _ = _manager()
+    manager._started = True
+    state = manager._state_for("100")
+    state.present = True
+    state.status = "ready"
+    state.last_success_monotonic = _stream_manager_monotonic()
+
+    # Успешное окно: к оператору не идём.
+    first = await manager.async_refresh("100", "ha_open")
+    assert first.proxied is True
+    assert coordinator.get_camera_stream.await_count == 0
+
+    # Та же свежесть, но последняя попытка неудачна — окно не применяется.
+    state.status = "empty_source"
+    second = await manager.async_refresh("100", "ha_open")
+
+    assert coordinator.get_camera_stream.await_count == 1, (
+        "после неудачи источник обязан запрашиваться заново"
+    )
+    assert second.proxied is True
+
+
+async def test_preload_task_is_owned_by_config_entry() -> None:
+    """Прогрев запускается задачей записи, а не голой задачей hass.
+
+    Разница не косметическая: задача записи снимается при её выгрузке и не
+    удерживает startup-барьер HA, пока go2rtc поднимает поток.
+    """
+    manager, _, _ = _manager()
+    manager._started = True
+    state = manager._state_for("100")
+
+    manager._schedule_preload(state)
+    await asyncio.gather(*manager._preload_tasks.values(), return_exceptions=True)
+
+    manager.entry.async_create_background_task.assert_called_once()
+    assert (
+        manager.entry.async_create_background_task.call_args.args[0] is manager.hass
+    )

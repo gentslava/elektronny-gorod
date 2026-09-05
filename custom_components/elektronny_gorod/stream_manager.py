@@ -483,6 +483,10 @@ class CameraStreamManager:
             if (
                 reason == "ha_open"
                 and state.present
+                # Без проверки статуса окно переиспользовало поток и после
+                # неудачной попытки: `last_success_monotonic` остаётся от
+                # прошлого успеха и десять секунд ещё выглядит свежим.
+                and state.status == "ready"
                 and state.last_success_monotonic is not None
                 and _monotonic() - state.last_success_monotonic
                 < HA_OPEN_REUSE_SECONDS
@@ -621,7 +625,10 @@ class CameraStreamManager:
             if await self._async_enable_preload(state):
                 self._notify_listeners()
 
-        task = self.hass.async_create_task(
+        # Через entry, а не hass: задача снимается при выгрузке записи и не
+        # держит startup-барьер HA, пока go2rtc поднимает поток.
+        task = self.entry.async_create_background_task(
+            self.hass,
             _run(),
             name=f"elektronny_gorod_stream_preload_{state.camera_id}",
             eager_start=False,

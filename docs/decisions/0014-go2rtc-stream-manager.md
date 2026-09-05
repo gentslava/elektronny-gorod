@@ -70,6 +70,12 @@ eligible(camera) =
 14. `ElektronnyGorodCamera` сохраняет проверенные ADR-0009 recovery triggers, но делегирует manager'у operator-camera writes. Entity proactive 28:30 timer пропускает background-eligible camera: manager preload не считается external viewer, а staggered cadence остаётся у manager. Proxied recovery не вызывает `HA Stream.update_source()` с неизменным RTSP URL: после PATCH HA retry-ит тот же URL самостоятельно, без fast-restart/idle-stop race.
 15. Source URL живёт только внутри refresh coroutine/result. Detached state и diagnostic sensor содержат только credential-free имя/RTSP URL, sanitized status, producer/preload/consumer observations и freshness.
 
+### Стоимость первого открытия (2026-09)
+
+16. Прогрев go2rtc не блокирует `stream_source()`. `PUT /api/preload` возвращается только после того, как go2rtc реально поднял поток — ffmpeg плюс RTSP-коннект к оператору, — поэтому на пути `ha_open` ожидание стоило 2–6 секунд на камеру и растягивало setup записи примерно до 20 секунд. Прогрев ушёл в фоновую задачу **записи** (`entry.async_create_background_task`): она снимается при выгрузке и не удерживает startup-барьер HA. Фоновым причинам (`background_due`, `reconcile`) прогрев по-прежнему дожидается — там некуда спешить, а его исход нужен вызывающему.
+
+17. HA опрашивает `stream_source()` дважды подряд при открытии карточки. Второй запрос в пределах `HA_OPEN_REUSE_SECONDS` переиспользует уже поднятый поток вместо повторного минта у оператора — go2rtc-URL стабилен, и повторный минт менял бы только счётчик запросов. Окно применяется **только** к `ha_open` и только когда последняя попытка завершилась успехом: `recovery` и `active_consumer` обязаны минтить заново, а после неудачи `last_success_monotonic` ещё десять секунд выглядит свежим и без проверки статуса вернул бы ссылку на поток, который go2rtc уже не обслуживает.
+
 ## Consequences
 
 ### Positive
