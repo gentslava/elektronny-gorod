@@ -170,7 +170,9 @@ async def test_mjpeg_fallback_does_not_poll_the_operator_at_stream_rate():
     """
     cam = _cam(MagicMock(), lambda cid: None)
 
-    assert cam.frame_interval >= 1.0
+    # Верхняя граница тоже нужна: без неё «живой вид» гостя вырождается в
+    # стоп-кадр на весь разговор, и тест этого не заметит.
+    assert 1.0 <= cam.frame_interval <= 5.0
 
 
 async def test_camera_image_none_without_active_call():

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -1091,10 +1092,16 @@ async def test_snapshot_cache_stays_within_budget(hass: HomeAssistant, mock_api)
     instance = mock_api.return_value
     instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
 
-    for width in range(100, 100 + 3 * camera_module.SNAPSHOT_CACHE_ENTRIES):
+    widths = list(range(100, 100 + 3 * camera_module.SNAPSHOT_CACHE_ENTRIES))
+    for width in widths:
         await cam.async_camera_image(width, 100)
 
     assert len(cam._snapshots) <= camera_module.SNAPSHOT_CACHE_ENTRIES
+    # Вытесняется самый старый, а не самый свежий: иначе бюджет соблюдён, но
+    # только что загруженный кадр каждый раз выбрасывается — то есть A-105
+    # возвращается, как только размеров становится больше бюджета.
+    assert (widths[-1], 100) in cam._snapshots
+    assert (widths[0], 100) not in cam._snapshots
 
 
 async def test_cancelled_wait_does_not_start_a_second_request(
@@ -1175,6 +1182,113 @@ async def test_removal_cancels_background_refresh(hass: HomeAssistant, mock_api)
 
     with pytest.raises(asyncio.CancelledError):
         await task
+
+
+async def test_call_screen_shows_nothing_rather_than_a_past_visitor(
+    hass: HomeAssistant, mock_api
+):
+    """Экран вызова при отказе оператора не подставляет кадр из кэша.
+
+    Кадр пятиминутной давности от текущего не отличить, а смотрят на него
+    ровно чтобы понять, кто стоит у двери прямо сейчас. Пустое место честнее.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+    assert cam._snapshots[_SIZE][0] == _JPEG_1
+
+    instance.query_camera_snapshot = AsyncMock(side_effect=ClientError("531"))
+
+    assert await cam.async_fresh_camera_image(*_SIZE) is None
+
+
+async def test_substitution_picks_the_freshest_admissible_frame(
+    hass: HomeAssistant, mock_api
+):
+    """Из годных кадров подставляется свежайший, а не первый попавшийся."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(640, 360)
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_2)
+    await cam.async_camera_image(800, 450)
+
+    # Больший кадр устарел, меньший (но всё ещё годный) свеж.
+    _age_snapshot(cam, (800, 450), 200.0)
+
+    assert await cam.async_camera_image(320, 180) == _JPEG_1
+
+
+async def test_operator_request_belongs_to_the_entry(
+    hass: HomeAssistant, mock_api
+):
+    """Запрос к оператору снимается вместе с выгрузкой записи.
+
+    Запрос живёт до минуты. Оставшись за `hass`, он пережил бы выгрузку и
+    перезагрузку интеграции.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    release = asyncio.Event()
+
+    async def _slow(*_args, **_kwargs):
+        await release.wait()
+        return _JPEG_1
+
+    instance.query_camera_snapshot = AsyncMock(side_effect=_slow)
+    pending = asyncio.create_task(cam.async_camera_image(*_SIZE))
+    for _ in range(3):
+        await asyncio.sleep(0)
+    task = cam._snapshot_inflight[_SIZE]
+
+    assert await hass.config_entries.async_unload(cam._entry.entry_id)
+    release.set()
+
+    assert task.cancelled(), "операторский запрос пережил выгрузку записи"
+    pending.cancel()
+
+
+async def test_mjpeg_interval_stays_inside_the_freshness_window(
+    hass: HomeAssistant, mock_api
+):
+    """Интервал MJPEG строго меньше окна свежести.
+
+    При равенстве ядро отмеряет период до запроса, кадр на каждом тике
+    оказывается ровно на границе окна, и обновление срабатывает через раз —
+    половина показанных кадров минутной давности при той же нагрузке.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+
+    assert 0 < cam.frame_interval < camera_module.SNAPSHOT_FRESH_SECONDS
+
+
+async def test_operator_refusal_is_logged_once_per_outage(
+    hass: HomeAssistant, mock_api, caplog
+):
+    """Отказ виден в журнале, но одной строкой, а не на каждый рендер.
+
+    Прежний ERROR на каждый запрос и был спамом; молчание же означает, что
+    длительный отказ не виден вообще — а обе прошлые находки по этому
+    эндпоинту нашлись именно разбором прод-логов.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(side_effect=ClientError("531"))
+
+    with caplog.at_level(logging.INFO):
+        for _ in range(5):
+            await cam._async_fetch_snapshot_impl(_SIZE)
+
+        refusals = [r for r in caplog.records if "не отдаёт снимок" in r.msg]
+        assert len(refusals) == 1, "отказ должен логироваться по фронту"
+        assert refusals[0].levelno == logging.WARNING
+
+        instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+        await cam._async_fetch_snapshot_impl(_SIZE)
+
+    recovered = [r for r in caplog.records if "снова отдаёт снимки" in r.msg]
+    assert len(recovered) == 1
 
 
 async def test_freshness_window_is_half_a_minute(hass: HomeAssistant, mock_api):

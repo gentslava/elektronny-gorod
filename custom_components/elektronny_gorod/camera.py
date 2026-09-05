@@ -69,14 +69,21 @@ SNAPSHOT_FRESH_SECONDS = 30.0
 # `async_fresh_camera_image`.
 SNAPSHOT_MAX_STALE_SECONDS = 300.0
 
-# Пауза между попытками, когда оператор не отдаёт кадр. Наблюдалось `531` на
-# `/snapshots` для трёх камер подряд: без паузы каждый рендер карточки бил в
-# API, а показать всё равно нечего. Показатель ограничивается ДО возведения в
-# степень — та же ошибка уже стоила падения в двух других местах (A-104).
+# Как часто MJPEG-луп ядра просит кадр. Нагрузку на оператора этот интервал не
+# определяет — запросы гейтит кэш, — но период ядро отмеряет ДО запроса, и при
+# интервале, равном окну свежести, кадр на каждом тике оказывался ровно на
+# границе: обновление срабатывало через раз, и половина показанных кадров была
+# минутной давности. Треть окна убирает биение той же ценой.
+SNAPSHOT_MJPEG_INTERVAL_SECONDS = SNAPSHOT_FRESH_SECONDS / 3
+
 # Сколько разных размеров держим. Реальных немного — список, карточка, полный
 # экран, — поэтому запас невелик и вытесняем самый старый.
 SNAPSHOT_CACHE_ENTRIES = 8
 
+# Пауза между попытками, когда оператор не отдаёт кадр. Наблюдалось `531` на
+# `/snapshots` для трёх камер подряд: без паузы каждый рендер карточки бил в
+# API, а показать всё равно нечего. Показатель ограничивается ДО возведения в
+# степень — та же ошибка уже стоила падения в двух других местах (A-104).
 SNAPSHOT_RETRY_INITIAL_SECONDS = 15.0
 SNAPSHOT_RETRY_MAX_SECONDS = 300.0
 SNAPSHOT_RETRY_MAX_EXPONENT = math.ceil(
@@ -225,7 +232,7 @@ class ElektronnyGorodCamera(
     _attr_supported_features = CameraEntityFeature.STREAM
     # MJPEG-луп ядра дёргает `async_camera_image` по этому интервалу. Дефолтные
     # 0.5 с давали двадцать холостых оборотов на каждый реально новый кадр.
-    _attr_frame_interval = SNAPSHOT_FRESH_SECONDS
+    _attr_frame_interval = SNAPSHOT_MJPEG_INTERVAL_SECONDS
     _attr_has_entity_name = True
     _attr_name = None
 
@@ -280,7 +287,6 @@ class ElektronnyGorodCamera(
         self._unsub_health_poll: CALLBACK_TYPE | None = None
         # A-71 v3: proactive keep-alive refresh для активных consumers.
         self._unsub_proactive_refresh: CALLBACK_TYPE | None = None
-        self._image: bytes | None = None
         # Кэш на несколько размеров: дашборд и автоматизация просят разные,
         # и единственная запись заставляла бы их вытеснять друг друга.
         self._snapshots: dict[tuple[int, int], tuple[bytes, float]] = {}
@@ -497,7 +503,9 @@ class ElektronnyGorodCamera(
         """Кадр в обход кэша — для тех, кому нужен именно текущий вид.
 
         Экран входящего вызова показывает гостя, который стоит у двери прямо
-        сейчас; отдать ему кадр из кэша значило бы показать прошлое.
+        сейчас; отдать ему кадр из кэша значило бы показать прошлое. Если
+        оператор кадра не дал — честнее пустое место: вид пятиминутной
+        давности от текущего не отличить.
         """
         if self._is_hidden() or not self.available:
             return None
@@ -556,11 +564,26 @@ class ElektronnyGorodCamera(
         # только то, что действительно кадр. Тело ошибки оператора — непустые
         # байты, и без этой проверки оно залипало бы в кэше как «картинка».
         if image and image[:2] == b"\xff\xd8":
-            self._image = image
+            if self._snapshot_failures:
+                LOGGER.info(
+                    "Camera %s (%s): оператор снова отдаёт снимки",
+                    self._name,
+                    self._id,
+                )
             self._remember_snapshot(size, image)
             self._snapshot_failures = 0
             self._snapshot_retry_after = 0.0
             return image
+
+        # Одна строка на отказ, а не на рендер: длительный отказ иначе не
+        # виден вообще — и A-102, и A-105 нашлись разбором прод-логов ровно
+        # по этому эндпоинту.
+        if self._snapshot_failures == 0:
+            LOGGER.warning(
+                "Camera %s (%s): оператор не отдаёт снимок, выдерживаем паузу",
+                self._name,
+                self._id,
+            )
 
         # Счётчик общий на камеру, а не на размер: оператор отдаёт `531` на
         # весь `/snapshots` камеры, и успех любого размера значит, что камера
@@ -572,13 +595,12 @@ class ElektronnyGorodCamera(
             SNAPSHOT_RETRY_MAX_SECONDS,
         )
 
-        # Оператор не ответил — лучше прошлый кадр, чем пустое место. Но
-        # только не протухший: иначе экран вызова показал бы предыдущего
-        # посетителя как стоящего у двери сейчас.
-        cached = self._snapshots.get(size)
-        if cached is not None and time.monotonic() - cached[1] < SNAPSHOT_MAX_STALE_SECONDS:
-            return cached[0]
-        return self._recent_snapshot(size)
+        # Кадра нет — и подставлять здесь нечего. Вызывающий с карточки уже
+        # исчерпал и точный размер, и подстановку, прежде чем идти к
+        # оператору, а экран вызова кэш не устраивает вовсе: гость стоит у
+        # двери сейчас, и вид пятиминутной давности он бы от текущего не
+        # отличил.
+        return None
 
     @callback
     def _schedule_snapshot_refresh(self, size: tuple[int, int]) -> None:
@@ -917,8 +939,9 @@ class ElektronnyGorodCamera(
         if self._unsub_proactive_refresh is not None:
             self._unsub_proactive_refresh()
             self._unsub_proactive_refresh = None
-        # Выгрузку записи покрывает ядро, удаление одной сущности — нет:
-        # иначе фоновый фетч продолжил бы работать на мёртвую сущность.
+        # Выгрузку записи покрывает ядро, удаление одной сущности — нет.
+        # Снимается обёртка; уже ушедший запрос доживает под `asyncio.shield`
+        # до ответа оператора — это цена дедупликации, один лишний запрос.
         if self._snapshot_task is not None and not self._snapshot_task.done():
             self._snapshot_task.cancel()
         await super().async_will_remove_from_hass()
