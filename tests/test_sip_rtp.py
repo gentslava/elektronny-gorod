@@ -1,6 +1,8 @@
 """Unit-тесты RTP-пакетов (sip/rtp.py)."""
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import struct
 
 import pytest
@@ -73,3 +75,121 @@ def test_parse_rtp_payload() -> None:
 
 def test_parse_rtp_payload_too_short() -> None:
     assert parse_rtp_payload(b"\x00" * 8) is None
+
+
+# ─── Транспорт: приём звука гостя и отправка своего ─────────────────────────
+
+
+def _endpoint(on_downlink=None, payload_type: int = 0):
+    from custom_components.elektronny_gorod.sip.rtp import RtpSession
+
+    endpoint = RtpSession(payload_type, on_downlink=on_downlink)
+    transport = MagicMock()
+    endpoint.connection_made(transport)
+    return endpoint, transport
+
+
+def test_guest_audio_reaches_the_bridge() -> None:
+    """Полезная нагрузка из пакета домофона доходит до моста."""
+    from custom_components.elektronny_gorod.sip.rtp import build_rtp_packet
+
+    heard: list[bytes] = []
+    endpoint, _ = _endpoint(on_downlink=heard.append)
+    packet = build_rtp_packet(0, 1, 0, 12345, b"\xff" * 160, marker=False)
+
+    endpoint.datagram_received(packet, ("10.0.0.5", 5004))
+
+    assert heard == [b"\xff" * 160]
+
+
+def test_audio_after_stop_is_ignored() -> None:
+    """После отбоя пакеты домофона больше не разбираются.
+
+    Иначе опоздавший пакет уже завершённого разговора попал бы в мост
+    следующего звонка.
+    """
+    from custom_components.elektronny_gorod.sip.rtp import build_rtp_packet
+
+    heard: list[bytes] = []
+    endpoint, transport = _endpoint(on_downlink=heard.append)
+    endpoint.stop()
+
+    endpoint.datagram_received(build_rtp_packet(0, 1, 0, 1, b"\xff" * 160), ("h", 1))
+
+    assert heard == []
+    transport.close.assert_called_once()
+
+
+def test_stop_is_idempotent() -> None:
+    """Повторный отбой не должен падать — его зовут из нескольких мест."""
+    endpoint, transport = _endpoint()
+    endpoint.stop()
+    endpoint.stop()
+    transport.close.assert_called_once()
+
+
+def test_garbage_packet_is_dropped_quietly() -> None:
+    heard: list[bytes] = []
+    endpoint, _ = _endpoint(on_downlink=heard.append)
+
+    endpoint.datagram_received(b"\x00\x01", ("h", 1))
+
+    assert heard == []
+
+
+async def test_uplink_marks_the_first_packet_and_keeps_the_rhythm() -> None:
+    """Первый пакет помечен маркером, дальше — своя нумерация и метки времени.
+
+    Маркер активирует latching у домофона: без него первый пакет он может
+    отбросить, и микрофон не слышно.
+    """
+    import asyncio
+
+    from custom_components.elektronny_gorod.sip.rtp import FRAME_BYTES
+
+    endpoint, transport = _endpoint()
+    stop = asyncio.Event()
+    frames = [b"\x01" * FRAME_BYTES, b"\x02" * FRAME_BYTES]
+
+    def provider():
+        return frames.pop(0) if frames else stop.set() or None
+
+    await endpoint.run_uplink("10.0.0.5", 5004, provider, stop)
+
+    sent = [call.args[0] for call in transport.sendto.call_args_list]
+    assert len(sent) >= 2
+    assert sent[0][1] & 0x80, "на первом пакете должен стоять маркер"
+    assert not sent[1][1] & 0x80, "на последующих маркера быть не должно"
+    assert sent[1][2:4] != sent[0][2:4], "номер пакета должен расти"
+
+
+async def test_uplink_substitutes_silence_when_there_is_nothing_to_send() -> None:
+    """Пауза микрофона не должна обрывать поток — вместо кадра идёт тишина."""
+    import asyncio
+
+    endpoint, transport = _endpoint(payload_type=8)
+    stop = asyncio.Event()
+    calls = {"n": 0}
+
+    def provider():
+        calls["n"] += 1
+        if calls["n"] > 2:
+            stop.set()
+        return None
+
+    await endpoint.run_uplink("10.0.0.5", 5004, provider, stop)
+
+    payload = transport.sendto.call_args_list[0].args[0][12:]
+    assert set(payload) == {0xD5}, "тишина A-law"
+
+
+async def test_uplink_stops_when_the_socket_dies() -> None:
+    """Обрыв сокета завершает отправку, а не крутит цикл вхолостую."""
+    import asyncio
+
+    endpoint, transport = _endpoint()
+    transport.sendto.side_effect = OSError("сокет закрыт")
+
+    await endpoint.run_uplink("10.0.0.5", 5004, lambda: None, asyncio.Event())
+
+    transport.sendto.assert_called_once()
