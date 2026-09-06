@@ -75,16 +75,23 @@ async def _log_response(response: ClientResponse) -> None:
     )
 
 
-def is_unauthorized(err: BaseException) -> bool:
-    """Оператор отверг токен: нужна новая авторизация, а не повтор запроса.
+def error_status(err: BaseException) -> int | None:
+    """Статус ответа оператора, если исключение его несёт.
 
     Ответ лежит в аргументе исключения — так его кладёт `ClientError(response)`
-    здесь же, и так его разбирают вызывающие в `api.py`. Проверка вынесена,
-    чтобы распаковка `args[0]` жила в одном месте, а не расползалась.
+    здесь же. Прямая распаковка `err.args[0]` роняла `IndexError` на
+    исключениях без аргументов: таймаут или сетевая ошибка при входе
+    превращались не в понятное сообщение формы, а в «неизвестную ошибку» с
+    трассировкой, потому что config flow ловит только `ValueError`.
     """
     args = getattr(err, "args", ())
     response = args[0] if args else None
-    return isinstance(response, ClientResponse) and response.status == 401
+    return response.status if isinstance(response, ClientResponse) else None
+
+
+def is_unauthorized(err: BaseException) -> bool:
+    """Оператор отверг токен: нужна новая авторизация, а не повтор запроса."""
+    return error_status(err) == 401
 
 
 class HTTP:

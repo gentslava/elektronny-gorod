@@ -12,7 +12,7 @@ from aiohttp import ClientError, ClientResponse
 
 from homeassistant.core import HomeAssistant
 
-from .http import HTTP
+from .http import error_status, HTTP
 from .user_agent import UserAgent
 
 # Эндпоинты привязки push-токена (зеркало приложения, см. FINDINGS §FCM).
@@ -132,7 +132,7 @@ class ElektronnyGorodAPI:
             raise ValueError("unknown_status")
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 400:
+            if error_status(e) == 400:
                 raise ValueError("invalid_login")
             if isinstance(e, ValueError):
                 raise
@@ -159,7 +159,7 @@ class ElektronnyGorodAPI:
             return await response.json()
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 400:
+            if error_status(e) == 400:
                 raise ValueError("invalid_password")
             raise ValueError("unknown_status")
 
@@ -185,7 +185,7 @@ class ElektronnyGorodAPI:
             return
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 429:
+            if error_status(e) == 429:
                 raise ValueError("limit_exceeded")
             raise ValueError("unknown_status")
 
@@ -212,7 +212,7 @@ class ElektronnyGorodAPI:
             return await response.json()
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 406:
+            if error_status(e) == 406:
                 raise ValueError("invalid_format")
             raise ValueError("unknown_status")
 
@@ -230,7 +230,7 @@ class ElektronnyGorodAPI:
             return profile.get("data") if profile else {}
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 401:
+            if error_status(e) == 401:
                 raise ValueError("unauthorized")
             raise ValueError("unknown_status")
 
