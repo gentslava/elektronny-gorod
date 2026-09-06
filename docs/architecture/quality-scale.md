@@ -46,7 +46,7 @@ External reference:
 | `docs-actions` | ✅ сервисы документированы | `services.yaml`, release docs |
 | `docs-high-level-description` | ✅ README | — |
 | `docs-installation-instructions` | ✅ README | — |
-| `docs-removal-instructions` | ⚠️ нет в README | — |
+| `docs-removal-instructions` | ✅ раздел «Удаление»: что удаляется, что остаётся в go2rtc | README (ru/en) |
 | `entity-event-setup` | ✅ платформы forward-нуты | `__init__.py` |
 | `entity-unique-id` | ✅ стабильные UID + registry migration | `entity_migration.py` |
 | `has-entity-name` | ✅ HA entity naming pattern | entity platforms |
@@ -65,8 +65,8 @@ External reference:
 |---|---|---|
 | `action-exceptions` | n/a | — |
 | `config-entry-unloading` | ✅ есть | — |
-| `docs-configuration-parameters` | ⚠️ README поверхностный | расширить |
-| `docs-installation-parameters` | ⚠️ есть | детализировать |
+| `docs-configuration-parameters` | ✅ таблица параметров go2rtc с умолчаниями и назначением | README (ru/en) |
+| `docs-installation-parameters` | ✅ что нужно до начала + таблица полей каждого шага настройки | README (ru/en) |
 | `entity-unavailable` | ✅ через `CoordinatorEntity.available` + data presence | — |
 | `integration-owner` | ✅ `codeowners` | — |
 | `log-when-unavailable` | ✅ отказ подзапроса логируется по фронту: одна строка на пропажу, одна на возвращение | `coordinator.py:_note_failure` |

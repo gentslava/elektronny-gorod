@@ -49,6 +49,7 @@ The integration mirrors the APIs of the official My Home and Umnyy Dom.ru apps: 
 
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Removal](#removal)
 - [What's new in 4.1.0](#whats-new-in-410)
 - [What was in 4.0.1](#what-was-in-401)
 - [Highlights of the 4.0 line](#highlights-of-the-40-line)
@@ -113,6 +114,12 @@ Restart Home Assistant.
 ### Via [HACS](https://hacs.xyz/)
 <a href="https://my.home-assistant.io/redirect/hacs_repository/?owner=gentslava&repository=elektronny-gorod&category=integration" target="_blank"><img src="https://my.home-assistant.io/badges/hacs_repository.svg" alt="Open your Home Assistant instance and open a repository inside the Home Assistant Community Store." /></a>
 
+### Before you start
+
+A phone or contract number registered with the operator, and access to SMS on that number. If the operator has a password set for your account, the SMS step is skipped and the password is asked instead.
+
+go2rtc is optional. Without it cameras work but have no audio; see [Camera connection via go2rtc](#camera-connection-via-go2rtc).
+
 ## Configuration
 <a href="https://my.home-assistant.io/redirect/config_flow_start/?domain=elektronny_gorod" target="_blank"><img src="https://my.home-assistant.io/badges/config_flow_start.svg" alt="Open your Home Assistant instance and start setting up a new integration." /></a>
 
@@ -123,6 +130,47 @@ or manually:
 3. Click the "+" button to add a new integration.
 4. Search for "Elektronny Gorod" and select it.
 5. Follow the on-screen instructions to complete the integration setup.
+
+### What the setup asks for
+
+| Step | Field | What to enter |
+|---|---|---|
+| Sign in | Phone or contract number | The number registered with the operator |
+| Sign in → Advanced | Access token | Optional. With a token on hand the SMS step is skipped — the field sits in a collapsed section |
+| Contract | Contract | Picked from the ones found for the number; address and account number are shown |
+| SMS code | Code | Four digits from the operator's message |
+| Password | Password | Asked instead of SMS when the operator has a password set |
+| go2rtc | — | A menu: configure go2rtc now, or skip and add it later |
+
+The same account can be added more than once — one entry per contract.
+
+### go2rtc parameters
+
+Set during setup and changed later via "Configure" on the integration entry.
+
+| Parameter | Default | What it does |
+|---|---|---|
+| Use go2rtc | off | Adds audio to camera streams. Without it video works, audio does not |
+| go2rtc API URL | `http://127.0.0.1:1984` | Where the integration fetches streams from. Validated on save |
+| go2rtc username | empty | Only if authentication is enabled on go2rtc |
+| go2rtc password | empty | Only if authentication is enabled on go2rtc |
+| Publish enabled cameras for external RTSP | off | Keeps streams up so they can be pulled from outside — Frigate, for example |
+| Also publish hidden cameras | off | Works only together with the previous one. Entities disabled in Home Assistant are never published |
+
+External publishing is opt-in and off by default: permanently running streams load both the operator and go2rtc.
+
+## Removal
+
+1. Configuration → Devices & Services → "Elektronny Gorod".
+2. On the entry, open the "⋮" menu → "Delete".
+
+What happens on removal:
+
+- entities, devices and their state history are removed along with the entry;
+- the push token is unbound at the operator, so intercom calls stop reaching this Home Assistant;
+- streams named `eg_<camera id>` **stay in the go2rtc configuration** — the integration does not delete them. If go2rtc is used for this integration only, those entries can be removed from `go2rtc.yaml` by hand.
+
+To remove the integration itself rather than one account: open "Elektronny Gorod" in HACS and choose "Remove", or delete the `custom_components/elektronny_gorod` directory for a manual install. Restart Home Assistant afterwards.
 
 ## Features
 
