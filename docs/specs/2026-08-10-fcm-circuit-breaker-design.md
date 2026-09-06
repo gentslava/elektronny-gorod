@@ -15,8 +15,7 @@ The timestamped production report supplies direct crash-boundary evidence: the i
 
 ### Second failure mode: the disabled dependency fuse
 
-Field evidence from 2026-08-12 shows a different shape of the same issue: Home
-Assistant becomes unresponsive while the log fills with one repeating traceback `_listen → _receive_msg → readexactly → raise self._exception`, whose frame list grows on every repetition.
+Field evidence from 2026-08-12 shows a different shape of the same issue: Home Assistant becomes unresponsive while the log fills with one repeating traceback `_listen → _receive_msg → readexactly → raise self._exception`, whose frame list grows on every repetition.
 
 That path is invisible to the watchdog. The integration previously passed `abort_on_sequential_error_count=None`, which makes the guard in `_try_increment_error_count` (`fcmpushclient.py:568`) permanently false and `_terminate()` unreachable. The `while self.do_listen` loop in `_listen` then re-reads a dead `StreamReader`; `readexactly` re-raises the single stored `_exception` object, appending a frame to its traceback each time, and the dependency prints the whole thing through `_logger.exception` on every iteration. The loop runs in the shared event loop, so Home Assistant starves and traceback formatting degrades quadratically. Meanwhile `run_state` returns to `STARTED` after each successful login (`fcmpushclient.py:600`), so `is_started()` — which is exactly `run_state == STARTED` (`fcmpushclient.py:790`)
 — keeps reporting a healthy receiver and the circuit never opens.

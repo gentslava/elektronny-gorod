@@ -10,8 +10,7 @@
 
 Роли, правила и процедуры одновременно существовали в `.claude/**`, `.codex/**`, `.cursor/**`, Copilot instructions и command skills. Одно изменение требовало синхронной правки нескольких почти одинаковых файлов. Копии уже расходились, а Markdown links зависели от глубины каталога и порождали цепочки `../../..` при переносе текста между tools.
 
-Инструменты при этом действительно требуют разные discovery formats. Claude
-Code использует `CLAUDE.md`, Markdown subagents/rules/commands и settings hooks; Codex читает `AGENTS.md` и TOML agent profiles. Эти форматы являются runtime metadata, но не основанием хранить несколько версий поведения.
+Инструменты при этом действительно требуют разные discovery formats. Claude Code использует `CLAUDE.md`, Markdown subagents/rules/commands и settings hooks; Codex читает `AGENTS.md` и TOML agent profiles. Эти форматы являются runtime metadata, но не основанием хранить несколько версий поведения.
 
 ## Decision
 
