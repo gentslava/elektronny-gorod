@@ -1,7 +1,7 @@
 Status: Active Owner: QA / Testing Agent Last reviewed: 2026-08-14 (backend, integration frontend, website and canonical agent-contract suites synchronized)
 
 Source files:
-- `tests/**` (60 test-модулей + `conftest.py`)
+- `tests/**` (69 test-модулей + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
@@ -31,8 +31,8 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **840 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-05; `.venv` собран под пин CI `PHC_CURRENT`: Python 3.14.7, HA 2026.9.0b6). На минимуме 2026.8.1 — **838 passed, 2 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-05; HA 2026.8.1 и 2026.9). Два skip — тесты FCM, требующие `firebase-messaging`: на минимальном пине пакет не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
-| Test modules | 61 файл `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **1145 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-07; `.venv` собран под пин CI `PHC_CURRENT`: Python 3.14.7, HA 2026.9.0b6). На минимуме 2026.8.1 — **1143 passed, 2 skipped** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-07; HA 2026.8.1 и 2026.9). Два skip — тесты FCM, требующие `firebase-messaging`: на минимальном пине пакет не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
+| Test modules | 69 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Product website | **73 passed**, `tsc --noEmit` и Vite production build (`website/`) |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
@@ -44,7 +44,7 @@ Quality gates:
 | Media Source archive | browse hierarchy place → camera → day → event, opaque-ID navigation, signed-URL resolve без persistence, retention/playability errors, hidden-camera exclusion, event→camera binding на resolve (event_id из пути валиден только среди событий этой камеры/дня), transient-vs-no-recording mapping, boundary logging с opaque IDs, multi-entry root |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Website CI | `website.yml`: typecheck + Vitest + production build перед GitHub Pages deploy |
-| Coverage | Процент намеренно не фиксируется без свежего coverage-run; каноническая команда приведена ниже |
+| Coverage | **97.20%** общий, все 42 модуля выше 95% (замер 2026-09-07). Порог держит CI (`--cov-fail-under=95`), поэтому цифра не может протухнуть незаметно; каноническая команда приведена ниже |
 
 Остающиеся gap-и: нет полностью автоматизированного live-теста против оператора и физического домофона; часть широкого REST API покрыта точечными контрактными тестами. Live/PCAP evidence хранится отдельно в `research/intercom-call-probe/`.
 
@@ -247,7 +247,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 838 passed, 2 skipped (2026-09-05).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 1145 passed (2026-09-07); на минимальном пине 1143 passed, 2 skipped.
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [ ] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

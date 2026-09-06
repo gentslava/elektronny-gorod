@@ -238,3 +238,187 @@ def test_held_call_release_closes_both_sockets() -> None:
 
     sip.close.assert_called_once()
     transport.close.assert_called_once()
+
+
+# ─── Удержание вызова: что мешает его принять ───────────────────────────────
+
+
+def _sip_pair(*, registered=True, invite=True, futures=True):
+    """Поддельная SIP-сессия с управляемыми ожиданиями."""
+    loop = asyncio.get_event_loop()
+    sip = MagicMock()
+    if futures:
+        sip.registered = loop.create_future()
+        sip.invite = loop.create_future()
+        if registered:
+            sip.registered.set_result(True)
+        if invite:
+            sip.invite.set_result((MagicMock(), ("10.0.0.9", 5060)))
+    else:
+        sip.registered = None
+        sip.invite = None
+    return sip, MagicMock()
+
+
+async def _hold(manager, sip, transport, **kwargs):
+    loop = asyncio.get_running_loop()
+    loop.create_datagram_endpoint = AsyncMock(return_value=(transport, sip))
+    with (
+        patch(f"{_MODULE}.socket.gethostbyname", return_value="10.0.0.1"),
+        patch(f"{_MODULE}._outbound_ip", return_value="10.0.0.2"),
+    ):
+        return await manager.register_and_hold(
+            AsyncMock(return_value={"login": "1", "password": "p", "realm": "r"}),
+            **kwargs,
+        )
+
+
+async def test_hold_keeps_the_call_ringing() -> None:
+    """Успешное удержание: вызов звонит, ответа ещё нет."""
+    manager = SipManager("FCM")
+    sip, transport = _sip_pair()
+
+    assert await _hold(manager, sip, transport) is True
+
+    sip.send_trying.assert_called_once()
+    assert manager.holding
+
+
+async def test_second_call_does_not_displace_the_first() -> None:
+    """Пока идёт разговор, второй звонок не перехватывает линию."""
+    manager = SipManager("FCM")
+    _active(manager)
+    sip, transport = _sip_pair()
+
+    assert await _hold(manager, sip, transport) is False
+    sip.send_trying.assert_not_called()
+
+
+async def test_transport_without_waiters_is_abandoned() -> None:
+    """Транспорт не поднял ожидания — отменяем удержание, а не падаем."""
+    manager = SipManager("FCM")
+    sip, transport = _sip_pair(futures=False)
+
+    assert await _hold(manager, sip, transport) is False
+
+    sip.close.assert_called_once()
+    transport.close.assert_called_once()
+
+
+async def test_registration_timeout_releases_the_line() -> None:
+    """Оператор не подтвердил регистрацию — линия освобождается.
+
+    Иначе сокет остался бы занят, и следующий звонок не прошёл бы.
+    """
+    manager = SipManager("FCM")
+    sip, transport = _sip_pair(registered=False, invite=False)
+
+    with patch(f"{_MODULE}.REGISTER_TIMEOUT", 0.01):
+        assert await _hold(manager, sip, transport) is False
+
+    sip.close.assert_called_once()
+    transport.close.assert_called_once()
+    assert not manager.holding
+
+
+async def test_call_that_never_arrives_releases_the_line() -> None:
+    """Зарегистрировались, а вызова нет — тоже освобождаем линию."""
+    manager = SipManager("FCM")
+    sip, transport = _sip_pair(invite=False)
+
+    with patch(f"{_MODULE}.INVITE_TIMEOUT", 0.01):
+        assert await _hold(manager, sip, transport) is False
+
+    sip.close.assert_called_once()
+    assert not manager.holding
+
+
+async def test_accept_without_a_held_call_is_refused() -> None:
+    assert await SipManager("FCM").accept() is False
+
+
+# ─── Приём вызова: разбор предложения домофона ──────────────────────────────
+
+
+def _held_with_sdp(manager: SipManager, body: str) -> MagicMock:
+    """Держимый вызов с заданным SDP-предложением домофона."""
+    held = MagicMock(spec=HeldCall)
+    held.invite_msg = MagicMock(body=body)
+    held.addr = ("10.0.0.9", 5060)
+    held.local_ip = "10.0.0.2"
+    held.sip = MagicMock()
+    held.sip_transport = MagicMock()
+    manager._held = held
+    return held
+
+
+_OFFER = (
+    "v=0\r\no=- 1 1 IN IP4 10.0.0.9\r\ns=-\r\nc=IN IP4 10.0.0.9\r\n"
+    "t=0 0\r\nm=audio 5004 RTP/AVP 0\r\na=rtpmap:0 PCMU/8000\r\n"
+)
+
+
+async def test_accepting_a_call_starts_audio_both_ways() -> None:
+    """Приём вызова поднимает приём звука гостя и отправку своего.
+
+    Ответ уходит немедленно: домофон начинает слать RTP сразу, и задержка
+    здесь означала бы потерянное начало фразы.
+    """
+    manager = SipManager("FCM")
+    held = _held_with_sdp(manager, _OFFER)
+    loop = asyncio.get_running_loop()
+    rtp = MagicMock(run_uplink=AsyncMock())
+    loop.create_datagram_endpoint = AsyncMock(return_value=(MagicMock(), rtp))
+
+    assert await manager.accept(on_downlink=lambda frame: None) is True
+
+    held.sip.answer.assert_called_once()
+    assert manager.in_call and not manager.holding
+    assert rtp.run_uplink.called or manager._active is not None
+
+
+async def test_accepting_a_call_with_a_broken_payload_type() -> None:
+    """Нечисловой тип нагрузки в предложении — отказ без падения.
+
+    Предложение приходит из сети и доверять ему нельзя: исключение здесь
+    оставило бы поднятый мост висеть.
+    """
+    manager = SipManager("FCM")
+    held = _held_with_sdp(
+        manager, _OFFER.replace("RTP/AVP 0", "RTP/AVP не-число")
+    )
+
+    assert await manager.accept() is False
+
+    held.release.assert_called_once()
+    assert not manager.in_call and not manager.holding
+
+
+async def test_fallback_answer_holds_then_accepts() -> None:
+    """Запасной путь: если удержания не было, делаем его и сразу принимаем."""
+    manager = SipManager("FCM")
+    sip, transport = _sip_pair()
+    loop = asyncio.get_running_loop()
+    loop.create_datagram_endpoint = AsyncMock(return_value=(transport, sip))
+    manager.accept = AsyncMock(return_value=True)
+
+    with (
+        patch(f"{_MODULE}.socket.gethostbyname", return_value="10.0.0.1"),
+        patch(f"{_MODULE}._outbound_ip", return_value="10.0.0.2"),
+    ):
+        assert await manager.async_answer(
+            AsyncMock(return_value={"login": "1", "password": "p", "realm": "r"})
+        ) is True
+
+    manager.accept.assert_awaited_once()
+
+
+async def test_fallback_answer_gives_up_if_the_call_cannot_be_held() -> None:
+    """Не удержали вызов — принимать нечего."""
+    manager = SipManager("FCM")
+    manager.register_and_hold = AsyncMock(return_value=False)
+    manager.accept = AsyncMock()
+
+    assert await manager.async_answer(AsyncMock()) is False
+
+    manager.accept.assert_not_awaited()

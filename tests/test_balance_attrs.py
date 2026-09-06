@@ -255,9 +255,79 @@ async def test_attribute_keys_are_snake_case_and_translated(
     bad = sorted(k for k in ours if not snake.match(k))
     assert not bad, f"ключи не snake_case: {bad}"
 
-    base = pathlib.Path("custom_components/elektronny_gorod")
+    base = pathlib.Path(__file__).resolve().parent.parent / "custom_components/elektronny_gorod"
     for name in ("strings.json", "translations/ru.json", "translations/en.json"):
         data = json.loads((base / name).read_text(encoding="utf-8"))
         translated = data["entity"]["sensor"]["balance"].get("state_attributes", {})
         missing = sorted(ours - set(translated))
         assert not missing, f"{name}: нет перевода имени для {missing}"
+
+
+# ─── Имя адреса и разбор даты ───────────────────────────────────────────────
+
+
+def _balance_sensor(place: dict, finance: dict | None = None):
+    """Сенсор баланса поверх заданного места, без поднятия платформы."""
+    from unittest.mock import MagicMock
+
+    from custom_components.elektronny_gorod.sensor import ElektronnyGorodBalanceSensor
+
+    coordinator = MagicMock()
+    coordinator.data = {
+        "places": [{"place": place}],
+        "balances": [{"place_id": PLACE_ID, **(finance or {})}],
+    }
+    return ElektronnyGorodBalanceSensor(coordinator, PLACE_ID)
+
+
+@pytest.mark.parametrize(
+    ("place", "expected"),
+    [
+        ({"id": PLACE_ID, "address": {"visibleAddress": "Улица 1"}}, "Улица 1"),
+        ({"id": PLACE_ID, "address": "Улица 2"}, "Улица 2"),
+        ({"id": PLACE_ID, "address": {}, "name": "Дача"}, "Дача"),
+        ({"id": PLACE_ID}, f"Place {PLACE_ID}"),
+        ({"id": "другое"}, f"Place {PLACE_ID}"),
+    ],
+)
+def test_place_name_falls_back_through_what_the_operator_gave(place, expected) -> None:
+    """Имя адреса берётся по убыванию точности, до запасного варианта.
+
+    Оператор отдаёт адрес в трёх разных формах в зависимости от типа места;
+    без запасного варианта сенсор остался бы без человекочитаемого имени.
+    """
+    assert _balance_sensor(place)._place_display_name() == expected
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("2026-06-01T00:00:00+07:00", "2026-06-01T00:00:00+07:00"),
+        ("не дата вовсе", "не дата вовсе"),
+        (None, None),
+    ],
+)
+def test_payment_date_is_passed_through_or_kept_as_is(raw, expected) -> None:
+    """Неразобранная дата отдаётся как есть, а не теряется.
+
+    Формат у оператора менялся; терять значение хуже, чем отдать сырое.
+    """
+    sensor = _balance_sensor({"id": PLACE_ID}, {"payment_date": raw})
+    assert sensor.extra_state_attributes["target_date"] == expected
+
+
+def test_blocked_sensor_without_data_is_unknown() -> None:
+    """Пока баланс не загружен, признак блокировки не выдумывается."""
+    from unittest.mock import MagicMock
+
+    from custom_components.elektronny_gorod.binary_sensor import (
+        ElektronnyGorodBlockedBinarySensor,
+    )
+
+    coordinator = MagicMock()
+    coordinator.data = {"balances": []}
+    sensor = ElektronnyGorodBlockedBinarySensor(coordinator, PLACE_ID)
+
+    assert sensor._balance_info is None
+    assert sensor.is_on is None
+    assert sensor.available is False

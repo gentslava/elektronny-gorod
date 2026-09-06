@@ -191,3 +191,68 @@ async def test_binary_get_uses_binary_timeout(http_client, fake_session):
     timeout = fake_session.get.await_args.kwargs["timeout"]
     assert timeout is _BINARY_TIMEOUT
     assert timeout.total == 60
+
+
+async def test_non_auth_response_is_logged_with_its_status(
+    http_client, fake_session, caplog
+) -> None:
+    """Обычный ответ логируется статусом, без тела и заголовков."""
+    import logging
+
+    fake_session.get = AsyncMock(return_value=_FakeResponse(200))
+
+    with caplog.at_level(logging.DEBUG):
+        await http_client.get("/rest/v1/places")
+
+    assert any("Response" in r.msg for r in caplog.records)
+
+
+async def test_post_body_size_is_logged_not_the_body(
+    http_client, fake_session, caplog
+) -> None:
+    """В журнал уходит размер тела, а не само тело.
+
+    В теле лежат пароль и код из SMS — писать его нельзя даже на отладке.
+    """
+    import logging
+
+    fake_session.post = AsyncMock(return_value=_FakeResponse(200))
+
+    with caplog.at_level(logging.DEBUG):
+        await http_client.post("/auth/v2/auth/x/password", '{"hash1": "СЕКРЕТ"}')
+
+    assert not any("СЕКРЕТ" in str(r.msg) % (r.args or ()) for r in caplog.records)
+
+
+async def test_auth_response_is_logged_without_its_size(
+    http_client, fake_session, caplog
+) -> None:
+    """У ответа на вход не логируется даже размер.
+
+    По размеру видно, чем кончилась попытка входа: успех и отказ различаются
+    длиной тела.
+    """
+    import logging
+
+    fake_session.post = AsyncMock(return_value=_FakeResponse(200))
+
+    with caplog.at_level(logging.DEBUG):
+        await http_client.post("/auth/v2/auth/x/password", "{}")
+
+    responses = [r for r in caplog.records if "Response" in str(r.msg)]
+    assert responses, "ответ должен попасть в журнал"
+    assert not any("Content-Length" in str(r.msg) for r in responses)
+
+
+async def test_binary_body_size_is_measured_without_decoding(
+    http_client, fake_session, caplog
+) -> None:
+    """Двоичное тело измеряется как есть, без попытки его прочитать текстом."""
+    import logging
+
+    fake_session.post = AsyncMock(return_value=_FakeResponse(200))
+
+    with caplog.at_level(logging.DEBUG):
+        await http_client.post("/rest/v1/upload", b"\xff\xd8\x00\x01")
+
+    assert any("Request" in str(r.msg) for r in caplog.records)

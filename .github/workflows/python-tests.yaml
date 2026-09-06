@@ -58,12 +58,16 @@ jobs:
           pip install pytest-homeassistant-custom-component==${{ matrix.phc-version }}
           pip install -r requirements_test.txt
 
+      # Порог правила Silver `test-coverage`. Без него заявка в манифесте
+      # держалась бы на разовом ручном замере: ADR-0010 D-05 требует не
+      # поднимать уровень выше подтверждённого гейтами.
       - name: Run pytest
         run: |
           pytest tests/ -v \
             --cov=custom_components.elektronny_gorod \
             --cov-report=term-missing \
-            --cov-report=xml
+            --cov-report=xml \
+            --cov-fail-under=95
 
       - name: Upload coverage artifact
         if: always()

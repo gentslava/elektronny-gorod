@@ -833,3 +833,111 @@ async def test_hangup_clears_active_immediately(controller):
     controller._manager.async_hangup = AsyncMock()
     await controller.async_hangup()
     assert controller.current_call() is None
+
+
+# ─── Отбой сообщает, было ли что снимать ────────────────────────────────────
+
+
+async def test_hangup_reports_nothing_to_tear_down(controller) -> None:
+    """На покое отбой честно говорит, что снимать было нечего.
+
+    По этому ответу сервис решает, отказать пользователю или промолчать.
+    """
+    assert await controller.async_hangup() is False
+
+
+async def test_hangup_reports_a_dismissed_ringing_call(controller) -> None:
+    """Отклонённый звонок — это тоже «было что снимать»."""
+    controller.handle_signal(_ring())
+
+    assert await controller.async_hangup() is True
+
+
+async def test_hangup_reports_a_live_conversation_past_the_window(
+    controller,
+) -> None:
+    """Разговор с истёкшим окном ответа снимать есть что.
+
+    Дедлайн приходит от оператора при звонке и на ответ не продлевается.
+    Судить о живости разговора по нему нельзя: `current_call()` уже пуст, а
+    мост и микрофон работают. Именно на этой подмене строилась регрессия,
+    из-за которой кнопка «Завершить» переставала работать.
+    """
+    controller.handle_signal(_ring())
+    manager = MagicMock(async_hangup=AsyncMock())
+    controller._manager = manager
+    controller._active = None  # окно ответа истекло, разговор продолжается
+
+    assert controller.current_call() is None, "предпосылка: окно закрыто"
+    assert await controller.async_hangup() is True
+    manager.async_hangup.assert_awaited_once()
+
+
+# ─── Удержание вызова: условия, при которых оно не начинается ───────────────
+
+
+async def test_hold_skipped_when_a_call_is_already_held(controller) -> None:
+    """Второй звонок не поднимает вторую регистрацию поверх первой."""
+    controller.handle_signal(_ring())
+    controller._manager = MagicMock()
+
+    await controller._async_hold_current()
+
+    assert controller._manager is not None
+
+
+async def test_hold_skipped_without_a_ringing_call(controller) -> None:
+    """Держать нечего — регистрацию не поднимаем."""
+    await controller._async_hold_current()
+
+    assert controller._manager is None
+
+
+async def test_hold_skipped_without_a_push_token(controller) -> None:
+    """Без push-токена регистрация невозможна — деградируем молча для SIP.
+
+    Токен нужен оператору, чтобы связать регистрацию с этим устройством;
+    без него попытка обречена, и тратить на неё окно ответа незачем.
+    """
+    from custom_components.elektronny_gorod.sip.call_controller import (
+        DoorbellCallController,
+    )
+
+    api = MagicMock()
+    api.mint_sip_device = AsyncMock(return_value={})
+    c = DoorbellCallController(_hass(), api, lambda: None)
+    c.handle_signal(_ring())
+
+    await c._async_hold_current()
+
+    assert c._manager is None
+
+
+async def test_media_is_absent_without_a_bridge(controller) -> None:
+    """Пока моста нет, экрану вызова отдавать нечего."""
+    controller.handle_signal(_ring())
+
+    assert controller.active_call_media() is None
+
+
+async def test_release_of_a_held_call_is_idempotent(controller) -> None:
+    """Снять держимый вызов дважды безопасно — сигналы приходят с двух сторон."""
+    controller._manager = MagicMock(holding=True, async_hangup=AsyncMock())
+
+    await controller._async_release_held()
+    await controller._async_release_held()
+
+    assert controller._manager is None
+
+
+async def test_downlink_counts_the_first_packet(controller) -> None:
+    """Первый принятый пакет отмечается — по нему видно, что звук пошёл.
+
+    Без этой отметки в журнале нельзя отличить «гость молчит» от «звук не
+    доходит вовсе».
+    """
+    controller.downlink_packets = 0
+
+    controller._on_downlink(b"\xff" * 160)
+
+    assert controller.downlink_packets == 1

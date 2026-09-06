@@ -32,3 +32,20 @@ def test_parse_returns_none_on_short_packet() -> None:
 def test_parse_returns_none_without_address_attribute() -> None:
     header = struct.pack("!HHI", 0x0101, 0, _MAGIC) + b"\x00" * 12
     assert parse_stun_binding_response(header) is None
+
+
+def test_parse_legacy_mapped_address() -> None:
+    """Старая форма адреса (без XOR) тоже разбирается.
+
+    Часть STUN-серверов до сих пор отвечает `MAPPED-ADDRESS`; не разобрав
+    его, интеграция не узнает свой внешний адрес и подставит в SDP не тот —
+    звук пойдёт в никуда.
+    """
+    value = struct.pack(
+        "!BBHI", 0, 0x01, 5060,
+        struct.unpack("!I", socket.inet_aton("203.0.113.7"))[0],
+    )
+    attr = struct.pack("!HH", 0x0001, len(value)) + value
+    header = struct.pack("!HHI", 0x0101, len(attr), _MAGIC) + b"\x00" * 12
+
+    assert parse_stun_binding_response(header + attr) == ("203.0.113.7", 5060)

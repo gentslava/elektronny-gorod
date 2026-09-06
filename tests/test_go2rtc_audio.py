@@ -122,3 +122,97 @@ async def test_reset_while_closing_still_counts_as_open() -> None:
         new=AsyncMock(return_value=(MagicMock(), writer)),
     ):
         assert await _probe_rtsp_port("127.0.0.1", 8554, 1.0) is True
+
+
+# ─── Снятие стрима вызова ───────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("status", [200, 204, 404])
+async def test_cleanup_accepts_gone_and_removed(status: int) -> None:
+    """Уже снятый стрим (404) — такой же успех, как только что снятый.
+
+    Иначе повторная уборка выглядела бы как ошибка и уходила в бесконечные
+    попытки.
+    """
+    from custom_components.elektronny_gorod.go2rtc import cleanup_go2rtc_stream
+
+    resp = _resp(status)
+    session = MagicMock()
+    session.delete = MagicMock(return_value=_Ctx(resp))
+
+    await cleanup_go2rtc_stream("http://go2rtc:1984", "eg_call", session)
+
+    assert "src=eg_call" in session.delete.call_args.args[0]
+    # Успех распознан: тело ответа не читалось ради текста ошибки.
+    resp.text.assert_not_awaited()
+
+
+async def test_cleanup_survives_a_refusal() -> None:
+    """Уборка best-effort: отказ go2rtc не должен всплывать наверх."""
+    from custom_components.elektronny_gorod.go2rtc import cleanup_go2rtc_stream
+
+    session = MagicMock()
+    session.delete = MagicMock(return_value=_Ctx(_resp(500)))
+
+    await cleanup_go2rtc_stream("http://go2rtc:1984", "eg_call", session)
+
+
+async def test_cleanup_survives_a_network_error() -> None:
+    from aiohttp import ClientError
+
+    from custom_components.elektronny_gorod.go2rtc import cleanup_go2rtc_stream
+
+    session = MagicMock()
+    session.delete = MagicMock(side_effect=ClientError("сеть"))
+
+    await cleanup_go2rtc_stream("http://go2rtc:1984", "eg_call", session)
+
+
+async def test_remove_audio_stream_delegates_to_cleanup() -> None:
+    from custom_components.elektronny_gorod.go2rtc import remove_audio_stream
+
+    session = MagicMock()
+    session.delete = MagicMock(return_value=_Ctx(_resp(200)))
+
+    await remove_audio_stream("http://go2rtc:1984", "eg_call", session)
+
+    assert session.delete.called
+
+
+# ─── Создание стрима вызова: запасной путь ──────────────────────────────────
+
+
+async def test_audio_stream_falls_back_to_put_on_network_error() -> None:
+    """Сбой сети на PATCH не отменяет попытку создать стрим заново."""
+    from aiohttp import ClientError
+
+    session = MagicMock()
+    session.patch = MagicMock(side_effect=ClientError("сеть"))
+    session.put = MagicMock(return_value=_Ctx(_resp(200)))
+
+    await upsert_audio_stream("http://go2rtc:1984", "eg_call", ["src"], session)
+
+    assert session.put.called
+
+
+@pytest.mark.parametrize(
+    "put_outcome",
+    [_resp(500), None],
+)
+async def test_audio_stream_reports_a_real_failure(put_outcome) -> None:
+    """Если и запасной путь не сработал, вызывающий должен об этом узнать.
+
+    Молчаливый отказ означал бы разговор без звука без единого следа в
+    журнале.
+    """
+    from aiohttp import ClientError
+
+    session = MagicMock()
+    session.patch = MagicMock(return_value=_Ctx(_resp(500)))
+    if put_outcome is None:
+        session.put = MagicMock(side_effect=ClientError("сеть"))
+    else:
+        session.put = MagicMock(return_value=_Ctx(put_outcome))
+
+    with pytest.raises(RuntimeError):
+        await upsert_audio_stream("http://go2rtc:1984", "eg_call", ["src"], session)

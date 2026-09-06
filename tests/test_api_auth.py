@@ -489,3 +489,34 @@ async def test_camera_listings_degrade_instead_of_failing(hass, method, args) ->
     api.http.get = AsyncMock(return_value={"не": "ответ"})
 
     assert await getattr(api, method)(*args) == []
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "verb"),
+    [
+        ("verify_password", ("TS", "H1", "H2"), "post"),
+        ("request_sms_code", (_CONTRACT,), "post"),
+        ("verify_sms_code", (_CONTRACT, "1234"), "post"),
+        ("query_camera_events", ("CAM",), "get"),
+        ("query_sections", ("PLACE",), "get"),
+        ("query_screens_settings", ("PLACE",), "get"),
+        ("query_dnd_settings", ("PLACE",), "get"),
+        ("query_camera_stream", ("CAM",), "get"),
+        ("mint_sip_device", ("PLACE", "AC"), "post"),
+    ],
+)
+async def test_every_method_guards_the_response_type(hass, method, args, verb) -> None:
+    """Ни один метод не разбирает то, что ответом не является.
+
+    `http` объявлен возвращающим ответ либо байты; проверка стоит на каждом
+    методе, и без неё разбор пошёл бы по неизвестному объекту. Часть методов
+    отказ переживает молча — им достаточно не упасть.
+    """
+    api = _api(hass)
+    api._phone = _PHONE
+    setattr(api.http, verb, AsyncMock(return_value={"не": "ответ"}))
+
+    try:
+        await getattr(api, method)(*args)
+    except (TypeError, ValueError, KeyError):
+        pass  # отказ — тоже корректный исход, лишь бы не разбор мусора

@@ -337,3 +337,72 @@ async def test_remove_entry_deletes_fcm_repair_issue(
 
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
     mock_remove_entry_api.return_value.unregister_push_device.assert_awaited_once()
+
+
+async def test_unload_blocked_when_fcm_stop_raises(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Исключение при остановке приёмника блокирует выгрузку так же, как отказ.
+
+    Иначе второй приёмник наложился бы на первый, и звонки начали бы
+    приходить дважды или не приходить вовсе. Текст исключения наружу не
+    выпускаем — HA положил бы его в причину записи и показал пользователю.
+    """
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    listener = MagicMock()
+    listener.async_stop = AsyncMock(side_effect=RuntimeError("СЕКРЕТНЫЙ_ТОКЕН"))
+    hass.data[f"{DOMAIN}_fcm_listeners"] = {entry.entry_id: listener}
+
+    import logging
+
+    with (
+        caplog.at_level(logging.WARNING),
+        patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new=AsyncMock(return_value=True),
+        ) as unload_platforms,
+    ):
+        assert await async_unload_entry(hass, entry) is False
+
+    unload_platforms.assert_not_awaited()
+    assert hass.data[f"{DOMAIN}_fcm_listeners"][entry.entry_id] is listener
+    logged = " ".join(str(r.msg) % (r.args or ()) for r in caplog.records)
+    assert "СЕКРЕТНЫЙ_ТОКЕН" not in logged, "текст исключения ушёл в журнал"
+    assert "RuntimeError" in logged, "тип исключения нужен для диагностики"
+
+
+async def test_removal_keeps_ownership_when_stop_is_unconfirmed(
+    hass: HomeAssistant,
+) -> None:
+    """Неподтверждённая остановка приёмника оставляет владение за нами.
+
+    Отпустить его значило бы бросить приёмник, про который неизвестно,
+    остановился ли он.
+    """
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {}
+    listener = MagicMock()
+    listener.async_stop = AsyncMock(side_effect=RuntimeError("сломался"))
+    hass.data[f"{DOMAIN}_fcm_listeners"] = {entry.entry_id: listener}
+
+    await async_remove_entry(hass, entry)
+
+    assert hass.data[f"{DOMAIN}_fcm_listeners"][entry.entry_id] is listener
+
+
+async def test_removal_releases_ownership_after_a_confirmed_stop(
+    hass: HomeAssistant,
+) -> None:
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {}
+    listener = MagicMock()
+    listener.async_stop = AsyncMock(return_value=True)
+    hass.data[f"{DOMAIN}_fcm_listeners"] = {entry.entry_id: listener}
+
+    await async_remove_entry(hass, entry)
+
+    assert entry.entry_id not in hass.data[f"{DOMAIN}_fcm_listeners"]
