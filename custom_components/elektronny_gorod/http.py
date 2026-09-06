@@ -75,6 +75,18 @@ async def _log_response(response: ClientResponse) -> None:
     )
 
 
+def is_unauthorized(err: BaseException) -> bool:
+    """Оператор отверг токен: нужна новая авторизация, а не повтор запроса.
+
+    Ответ лежит в аргументе исключения — так его кладёт `ClientError(response)`
+    здесь же, и так его разбирают вызывающие в `api.py`. Проверка вынесена,
+    чтобы распаковка `args[0]` жила в одном месте, а не расползалась.
+    """
+    args = getattr(err, "args", ())
+    response = args[0] if args else None
+    return isinstance(response, ClientResponse) and response.status == 401
+
+
 class HTTP:
     def __init__(
         self,
