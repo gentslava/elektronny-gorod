@@ -9,6 +9,15 @@
             "command": ".codex/hooks/post-edit-redaction-check.sh"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".codex/hooks/post-edit-markdown-wrap.sh"
+          }
+        ]
       }
     ],
     "SessionStart": [
