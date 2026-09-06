@@ -33,7 +33,7 @@ from .const import (
     SIGNAL_DOORBELL,
     SIP_DATA as _SIP_DATA,
 )
-from .coordinator import ElektronnyGorodUpdateCoordinator
+from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 from .entity_migration import async_migrate_entity_unique_ids, lock_unique_id
 from .fcm import (
     DoorbellFcmListener,
@@ -101,7 +101,9 @@ async def _async_register_fcm_listener(
     return True
 
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(
+    hass: HomeAssistant, entry: ElektronnyGorodConfigEntry
+) -> bool:
     """Set up Elektronny Gorod from a config entry."""
     coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
     await coordinator.async_config_entry_first_refresh()
@@ -572,7 +574,9 @@ async def async_remove_config_entry_device(
     return True
 
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(
+    hass: HomeAssistant, entry: ElektronnyGorodConfigEntry
+) -> bool:
     """Unload a config entry.
 
     Cleanup-функции coordinator-а (dispatcher listener, options listener)

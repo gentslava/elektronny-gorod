@@ -1014,18 +1014,30 @@ Quality gates:
 - **Follow-up:** `permissions` не заданы в `hacs.yaml`, `hassfest.yaml`, `python-tests.yaml` — при `default_workflow_permissions: write` они получают write-токен и запускают сторонние экшены с mutable-ref (`hacs/action@main`, `hassfest@master`). Отдельно стоит завести `.github/dependabot.yml` для экосистемы `github-actions`: остальные workflow всё ещё сидят на `actions/checkout@v4` и `actions/upload-artifact@v4` при актуальных `v7`, а `hacs/action@main` и `hassfest@master` вообще не версионированы.
 - **Acceptance:** первый fork-PR после merge проверяется вручную — `workflow_run` и `pull_request_target` читаются GitHub только из default-ветки, поэтому до merge схема непроверяема.
 
-### A-109. Уровень Silver заявлен в манифесте
+### A-109. Заявка Silver была поднята и отозвана в тот же день
 
-- **Status:** 🟢 **resolved-in-branch** (pending merge `refactor/runtime-data-silver`).
-- **Severity:** **P3** — заявка уровня качества, не дефект.
-- **Area:** `manifest.json`, [`quality-scale.md`](../architecture/quality-scale.md).
-- **Что закрыто по дороге:** `config-flow-test-coverage` (86% → 100%, [A-107](project-audit.md)), `reauthentication-flow` и автозапуск по 401 ([A-108](project-audit.md)), `parallel-updates` во всех шести платформах, `log-when-unavailable` (жалоба по фронту вместо строки на каждый цикл), три правила документации, `runtime-data`.
-- **`runtime-data` — с осознанным исключением.** Координатор переехал в `entry.runtime_data`, а вместе с ним появился типизированный алиас `ElektronnyGorodConfigEntry`: раньше платформы читали `hass.data[...]` и получали `Any`, теперь тип доезжает до pyright (проверено пробой с несуществующим атрибутом). Реестр FCM намеренно оставлен в `hass.data`: ядро удаляет `runtime_data` при выгрузке, а этот реестр обязан её пережить — при неподтверждённой остановке listener-а владение удерживается, чтобы не осиротить приёмник. Реестры SIP-контроллера и stream-manager перенести можно, но они трогают ту же деликатную lifecycle-логику, поэтому вынесены в follow-up отдельным изменением.
-- **Остаток Bronze:** `brands` — требует иконки в стороннем репозитории `home-assistant/brands`, от кода не зависит и решается отдельным PR туда.
+- **Status:** ✅ **RESOLVED** — `1607abb` (PR #95); откат заявки — прямой правкой `master`.
+- **Severity:** **P2 (process)** — ложная заявка уровня качества в отгружаемом манифесте.
+- **Area:** `manifest.json`, [`quality-scale.md`](../architecture/quality-scale.md), [`summary.md`](../summary.md).
+- **Что произошло:** после закрытия пяти правил Silver уровень был поднят в манифесте с `bronze` на `silver`. Независимый `ha-expert` показал, что два правила уровня не выполнены, и заявка отозвана в том же изменении.
+- **Root cause:** Silver-правило `test-coverage` («above 95% test coverage for all integration modules») спутано с Bronze-правилом `config-flow-test-coverage` (100% на `config_flow.py`). Второе действительно закрыто в [A-107](project-audit.md), и его evidence был подставлен под первое. Замер на кандидате: общее покрытие **85%**, ниже 95% — 19 модулей, в том числе `api.py` 44%, `sip/bridge.py` 30%, `sip/protocol.py` 43%, `sip/manager.py` 48%. Формулировка правила перепроверена у первоисточника.
+- **Второе невыполненное правило:** `action-exceptions`. В документе стояло `n/a`, хотя интеграция регистрирует два действия. Сервис `answer` без активного вызова завершается успешно и молча пишет предупреждение в лог (`__init__.py:289-298`), `hangup` не сигнализирует вовсе — ровно тот дефект, который в этом же релизе исправлен для `lock.lock`. Вынесено в [A-110](project-audit.md).
+- **Смежная ошибка, снята:** в первом заходе записано, что из Bronze остаётся `brands` и нужен PR в сторонний репозиторий. Это неверно — бренд опубликован: `custom_integrations/elektronny_gorod` содержит `icon.png`, `icon@2x.png`, `logo.png`, `logo@2x.png` (проверено 2026-09-06, контроль на несуществующей интеграции даёт 404). По написанному кто-то пошёл бы открывать ненужный PR.
+- **Почему это не поймали автоматически:** hassfest выходит из IQS-валидатора для не-core интеграций сразу (`script/hassfest/quality_scale.py`), а Home Assistant поле `quality_scale` у кастомных вовсе не читает (`loader.py:854-859` возвращает `custom`). Единственная проверка такой заявки — независимый reviewer, и правило D-05 в [ADR-0010](../decisions/0010-aidd-state-reconciliation.md) требует ровно этого: не поднимать уровень выше подтверждённого гейтами.
+- **Что осталось сделанным:** пять правил Silver закрыты по-настоящему и откатом не затронуты — переавторизация ([A-108](project-audit.md)), покрытие config flow ([A-107](project-audit.md)), `parallel-updates`, `log-when-unavailable`, документация. Плюс `runtime-data`: координатор переехал в `entry.runtime_data` с типизированным алиасом.
+
+### A-110. Сервисы ответа и отбоя молча ничего не делают
+
+- **Status:** 🔴 **OPEN**.
+- **Severity:** **P2** — элемент управления, который не работает и не объясняет почему.
+- **Area:** `__init__.py:289-298`, `services.yaml`.
+- **Evidence (2026-09-06):** `elektronny_gorod.answer` без активного вызова домофона проходит по всем контроллерам, не находит вызова и пишет `LOGGER.warning`, завершаясь успешно. `elektronny_gorod.hangup` не сигнализирует об отсутствии вызова вовсе.
+- **Почему это дефект:** для вызывающего успешный сервис означает «сделано». Автоматизация, построенная на `answer`, не отличит ответ на звонок от промаха по времени. Это тот же класс, что кнопка «Закрыть» у замка, исправленная в этом релизе: правило Silver `action-exceptions` требует поднимать `ServiceValidationError`, когда пользователь ссылается на то, чего нет.
+- **Связь:** блокирует заявку Silver вместе с `test-coverage` ([A-109](project-audit.md)).
 
 ### A-108. Отзыв токена не приводил к предложению войти заново
 
-- **Status:** 🟢 **resolved-in-branch** (pending merge `feat/config-flow-coverage-silver`).
+- **Status:** ✅ **RESOLVED** — `fd268ae` (PR #93).
 - **Severity:** **P2** — интеграция замолкала без объяснения причины.
 - **Area:** `coordinator.py`, `config_flow.py`, `http.py`.
 - **Evidence (2026-09-06):** при 401 от `/rest/v3/subscriber-places` координатор поднимал `UpdateFailed`. Нативного шага переавторизации во флоу не было вовсе — правило Silver `reauthentication-flow` числилось «работает, но без `async_step_reauth_confirm`».
@@ -1036,7 +1048,7 @@ Quality gates:
 
 ### A-107. Config flow опирался на свойство ядра, удаляемое в 2027.6
 
-- **Status:** 🟢 **resolved-in-branch** (pending merge `feat/config-flow-coverage-silver`).
+- **Status:** ✅ **RESOLVED** — `fd268ae` (PR #93).
 - **Severity:** **P2** — сейчас тихий UX-дефект, с HA 2027.6 полная поломка настройки.
 - **Area:** `config_flow.py:async_step_user`.
 - **Evidence (2026-09-06):** прогон тестов печатает предупреждение ядра «The deprecated function show_advanced_options was called from elektronny_gorod. It will be removed in HA Core 2027.6». В исходнике ядра (`data_entry_flow.py:650-666`, проверено и на 2026.8.1, и на 2026.9.0b6) свойство помечено `breaks_in_ha_version="2027.6"` и на всё время депрекации **безусловно возвращает `True`**.

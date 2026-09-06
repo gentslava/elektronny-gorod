@@ -14,7 +14,6 @@ from typing import Any
 from aiohttp import ClientError
 
 from homeassistant.components.lock import LockEntity, LockState
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo

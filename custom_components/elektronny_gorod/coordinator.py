@@ -52,10 +52,9 @@ from .user_agent import UserAgent
 UPDATE_INTERVAL = timedelta(minutes=5)
 
 
-# Запись с уже разобранным координатором. Ядро само удаляет `runtime_data`
-# при выгрузке, поэтому забыть подчистить состояние невозможно — в отличие от
-# `hass.data[DOMAIN][entry_id]`, который снимался вручную и только при удачной
-# выгрузке платформ.
+# Запись с уже разобранным координатором. Состояние снимает ядро, поэтому
+# забыть подчистить его невозможно — в отличие от `hass.data[DOMAIN][entry_id]`,
+# который снимался вручную.
 type ElektronnyGorodConfigEntry = ConfigEntry[ElektronnyGorodUpdateCoordinator]
 
 
@@ -65,11 +64,17 @@ def async_get_coordinator(
 ) -> "ElektronnyGorodUpdateCoordinator | None":
     """Координатор загруженной записи, либо None.
 
-    Проверка состояния обязательна: ядро удаляет `runtime_data` при выгрузке,
-    поэтому у выгруженной записи атрибута попросту нет.
+    Проверка состояния обязательна: после успешной выгрузки ядро удаляет
+    `runtime_data`, и обращение к нему у выгруженной записи упало бы.
     """
     entry = hass.config_entries.async_get_entry(entry_id)
-    if entry is None or entry.state is not ConfigEntryState.LOADED:
+    if entry is None or entry.domain != DOMAIN:
+        # Реестр записей глобальный. Раньше домен проверялся неявно — поиск шёл
+        # по нашему словарю, — и чужой идентификатор просто не находился. Без
+        # этой строки он доходит до `runtime_data` чужой интеграции: у media
+        # source идентификатор приходит из пользовательского `media-source://`.
+        return None
+    if entry.state is not ConfigEntryState.LOADED:
         return None
     return entry.runtime_data
 

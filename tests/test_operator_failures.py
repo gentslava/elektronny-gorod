@@ -174,3 +174,38 @@ async def test_persistent_failure_logs_once_not_every_cycle(
 
         recovered = [r for r in caplog.records if "снова отвечают" in r.msg]
         assert len(recovered) == 1
+
+
+async def test_foreign_entry_id_is_not_resolved(hass: HomeAssistant) -> None:
+    """Идентификатор чужой интеграции не доходит до её данных.
+
+    Реестр записей глобальный. Раньше домен проверялся неявно — координатор
+    искали в нашем словаре, и чужой идентификатор просто не находился. У media
+    source идентификатор приходит из пользовательского `media-source://`-адреса,
+    поэтому без явной проверки запрос уходил в `runtime_data` чужой записи.
+    """
+    from homeassistant.config_entries import ConfigEntryState
+
+    from custom_components.elektronny_gorod.coordinator import async_get_coordinator
+
+    foreign = MockConfigEntry(domain="sun", title="Sun")
+    foreign.add_to_hass(hass)
+    foreign.runtime_data = object()
+    foreign.mock_state(hass, ConfigEntryState.LOADED)
+
+    assert async_get_coordinator(hass, foreign.entry_id) is None
+    assert async_get_coordinator(hass, "нет такой записи") is None
+
+
+async def test_unloaded_entry_is_not_resolved(hass: HomeAssistant) -> None:
+    """У выгруженной записи данных нет — ядро их удаляет."""
+    from homeassistant.config_entries import ConfigEntryState
+
+    from custom_components.elektronny_gorod.coordinator import async_get_coordinator
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    entry.runtime_data = object()
+    entry.mock_state(hass, ConfigEntryState.NOT_LOADED)
+
+    assert async_get_coordinator(hass, entry.entry_id) is None

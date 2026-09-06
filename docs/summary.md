@@ -42,7 +42,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | HACS validation CI | ✅ зелёный |
 | pytest CI | ✅ есть; точная matrix задаётся [`python-tests.yaml`](../.github/workflows/python-tests.yaml) |
 | Реальные тесты | ✅ pytest CI и локальный gate настроены; актуальные команды, состав и последний baseline — в [`testing/strategy.md`](testing/strategy.md) |
-| Integration Quality Scale | ✅ Bronze defensible: config_flow + миграции покрыты тестами (A-73 закрыт, `3a60b15`) |
+| Integration Quality Scale | ✅ Bronze заявлен; к Silver закрыто пять правил из семи, остаются `test-coverage` (85% против 95%) и `action-exceptions` |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
 | Документация для пользователя | ✅ RU/EN README, HACS info и опубликованные release notes 4.0.1 дают обязательную информацию по FCM hotfix; обзор 4.0.0 сохраняет экран вызова, durable history и opt-in внешний RTSP |
 | AIDD документация для агентов | ✅ process/source-of-truth контракты синхронизированы; candidate-bound review lifecycle подтверждён release PR #80 и A-97 закрыт; актуальные findings — в [`project-audit.md`](audit/project-audit.md) |
