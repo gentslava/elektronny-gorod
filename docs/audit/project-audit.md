@@ -1028,7 +1028,7 @@ Quality gates:
 
 ### A-110. Сервисы ответа и отбоя молча ничего не делают
 
-- **Status:** 🔴 **OPEN**.
+- **Status:** 🟢 **resolved-in-branch** (pending merge ).
 - **Severity:** **P2** — элемент управления, который не работает и не объясняет почему.
 - **Area:** `__init__.py:289-298`, `services.yaml`.
 - **Evidence (2026-09-06):** `elektronny_gorod.answer` без активного вызова домофона проходит по всем контроллерам, не находит вызова и пишет `LOGGER.warning`, завершаясь успешно. `elektronny_gorod.hangup` не сигнализирует об отсутствии вызова вовсе.

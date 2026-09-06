@@ -130,7 +130,12 @@ async def test_diagnostics_coordinator_snapshot_is_counts_only(
 
 
 async def test_diagnostics_without_coordinator(hass: HomeAssistant) -> None:
-    """Без coordinator в hass.data — diagnostics не падает, секция отсутствует."""
+    """Запись не загружена — diagnostics не падает, секция отсутствует.
+
+    Это единственное место, которое удерживает проверку состояния в
+    `async_get_coordinator`: без неё обращение к `runtime_data` у выгруженной
+    записи упадёт. Упростив тест, легко снять пин, не заметив этого.
+    """
     entry = _make_entry()
     entry.add_to_hass(hass)
 

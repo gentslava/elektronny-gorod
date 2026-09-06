@@ -11,6 +11,7 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.core import HomeAssistant, ServiceCall
 
 from .api import ElektronnyGorodAPI
@@ -98,6 +99,19 @@ async def _async_register_fcm_listener(
             registry.pop(entry.entry_id)
 
     entry.async_on_unload(stop_and_release)
+    return True
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Зарегистрировать действия интеграции один раз, до загрузки записей.
+
+    Правило Bronze `action-setup`: действие должно существовать даже когда
+    запись не загружена — иначе автоматизация, ссылающаяся на него, падает
+    при проверке с «сервис не найден», и человек не понимает, что дело в
+    недоступной интеграции, а не в его сценарии. Проверка живого вызова
+    живёт в самом хендлере и отвечает понятной ошибкой.
+    """
+    _async_register_sip_services(hass)
     return True
 
 
@@ -197,7 +211,6 @@ async def async_setup_entry(
         async_dispatcher_connect(hass, SIGNAL_DOORBELL, sip_controller.handle_signal)
     )
     hass.data.setdefault(_SIP_DATA, {})[entry.entry_id] = sip_controller
-    _async_register_sip_services(hass)
     async_register_history_ws_command(hass)
     # Phase C (ADR-0013): WS-команда uplink-микрофона (браузер → HA-WS → SIP)
     # + раздача Lovelace-карты микрофона статикой.
@@ -291,11 +304,27 @@ def _async_register_sip_services(hass: HomeAssistant) -> None:
             if controller.current_call() is not None:
                 await controller.async_answer()
                 return
-        LOGGER.warning("Сервис answer: нет активного вызова домофона — нечего отвечать")
+        # Успешно завершиться, ничего не сделав, — значит соврать вызывающему.
+        # Автоматизация не отличит ответ на звонок от промаха по времени, а
+        # человек в интерфейсе не поймёт, почему кнопка молчит. Тот же случай,
+        # что кнопка «Закрыть» у замка (правило Silver `action-exceptions`).
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="no_active_call"
+        )
 
     async def _hangup(_call: ServiceCall) -> None:
+        # Спрашиваем контроллер, было ли что снимать, а не «идёт ли вызов»:
+        # `current_call()` гаснет по истечении окна ответа, а разговор живёт
+        # дальше. Отбой по этому признаку отказывался завершать живой
+        # разговор с открытым микрофоном — он держался до страховки.
+        torn_down = False
         for controller in list(hass.data.get(_SIP_DATA, {}).values()):
-            await controller.async_hangup()
+            if await controller.async_hangup():
+                torn_down = True
+        if not torn_down:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="no_active_call"
+            )
 
     hass.services.async_register(DOMAIN, SERVICE_ANSWER, _answer)
     hass.services.async_register(DOMAIN, SERVICE_HANGUP, _hangup)

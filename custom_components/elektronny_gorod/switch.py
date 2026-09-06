@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -171,11 +172,11 @@ class ElektronnyGorodDNDSwitch(
         """Send POST с обновлённым нашим item.status, refresh coordinator."""
         items = self._dnd_items
         if not items:
-            LOGGER.warning(
-                "DND %s for place=%s: no items in coordinator, skipping toggle",
-                self._dnd_type, self._place_id,
+            # Успешно завершиться, не переключив, — значит соврать: человек
+            # видит, что тумблер вернулся, и не понимает почему.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="dnd_unavailable"
             )
-            return
 
         payload: list[dict[str, Any]] = []
         for item in items:
@@ -186,11 +187,10 @@ class ElektronnyGorodDNDSwitch(
 
         ok = await self.coordinator.async_set_dnd(self._place_id, payload)
         if not ok:
-            LOGGER.warning(
-                "DND POST failed for place=%s type=%s status=%s",
-                self._place_id, self._dnd_type, status,
+            # Оператор отказал — сообщаем, а не делаем вид, что переключили.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="dnd_rejected"
             )
-            return
 
         # Refresh coordinator чтобы entity увидела новый state.
         await self.coordinator.async_request_refresh()

@@ -275,6 +275,15 @@
   "exceptions": {
     "cannot_lock": {
       "message": "The intercom cannot be locked: the latch is released by the hardware and locks itself after a few seconds."
+    },
+    "no_active_call": {
+      "message": "No incoming intercom call right now — there is nothing to answer or hang up."
+    },
+    "dnd_unavailable": {
+      "message": "Do Not Disturb settings are not loaded yet — try again in a moment."
+    },
+    "dnd_rejected": {
+      "message": "The operator did not accept the Do Not Disturb change."
     }
   }
 }

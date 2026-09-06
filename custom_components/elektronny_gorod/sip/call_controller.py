@@ -347,8 +347,14 @@ class DoorbellCallController:
                 await self._teardown_audio_bridge(bridge)
             return ok
 
-    async def async_hangup(self) -> None:
+    async def async_hangup(self) -> bool:
         """Завершить разговор (BYE) / снять держимый (release) + снять аудио-мост.
+
+        Возвращает, было ли что снимать. Судить об этом снаружи нельзя:
+        `current_call()` гаснет по истечении **окна ответа**, а разговор живёт
+        дальше — до страховки. Сервис, спросивший «идёт ли вызов» вместо
+        «есть ли что снимать», отказывался завершать живой разговор с
+        открытым микрофоном.
 
         Под `_answer_lock` — иначе гонка с `async_answer`: пока answer внутри
         лока await-ит `_setup_audio_bridge` (`self._bridge` ещё None, ставится
@@ -361,6 +367,9 @@ class DoorbellCallController:
             self._cancel_hold_timeout()
             manager, self._manager = self._manager, None
             bridge, self._bridge = self._bridge, None
+            had_call = (
+                manager is not None or bridge is not None or self._active is not None
+            )
             self._clear_uplink_sink()
             if manager is not None:
                 await manager.async_hangup()
@@ -368,6 +377,7 @@ class DoorbellCallController:
                 self._fire_call_state(False)
             self._active = None  # вызов окончен — не оставляем висеть до idle-reset
             await self._teardown_audio_bridge(bridge)
+            return had_call
 
     async def _async_release_held(self) -> None:
         """FCM `ended` при держимом (CANCEL не пришёл) — снять held + dismiss."""
