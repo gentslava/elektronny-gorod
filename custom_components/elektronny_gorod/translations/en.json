@@ -113,7 +113,21 @@
   "entity": {
     "sensor": {
       "balance": {
-        "name": "Account balance"
+        "name": "Account balance",
+        "state_attributes": {
+          "amount_sum": {
+            "name": "Amount due"
+          },
+          "target_date": {
+            "name": "Payment date"
+          },
+          "payment_link": {
+            "name": "Payment link"
+          },
+          "blocked": {
+            "name": "Account blocked"
+          }
+        }
       },
       "days_to_block": {
         "name": "Days to block"
@@ -185,7 +199,24 @@
     },
     "lock": {
       "lock": {
-        "name": "Lock"
+        "name": "Lock",
+        "state_attributes": {
+          "place_id": {
+            "name": "Place ID"
+          },
+          "access_control_id": {
+            "name": "Access control ID"
+          },
+          "entrance_id": {
+            "name": "Entrance ID"
+          },
+          "name": {
+            "name": "Intercom name"
+          },
+          "openable": {
+            "name": "Can be opened"
+          }
+        }
       }
     },
     "switch": {

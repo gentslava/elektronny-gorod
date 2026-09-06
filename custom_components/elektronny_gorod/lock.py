@@ -137,18 +137,22 @@ class ElektronnyGorodLock(
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Return the state attributes of the lock.
 
-        Ключи — Title Case для обратной совместимости с пользовательскими
-        автоматизациями (A-30 → snake_case отложен в Итерацию 3).
+        Ключи snake_case, имена переводятся через `state_attributes` в
+        `strings.json`: Title Case выглядел прилично только по-английски, а
+        в шаблоне читался как `state_attr(..., 'Place ID')` — с пробелами и
+        заглавными, чего не делает ни одна интеграция.
         """
         info = self._coordinator_lock_info
         if info is None:
             return None
         return {
-            "Place ID": str(info.get("place_id")),
-            "Access control ID": str(info.get("access_control_id")),
-            "Entrance ID": str(info.get("entrance_id")),
-            "Name": info.get("name"),
-            "Openable": str(info.get("openable")),
+            "place_id": str(info.get("place_id")),
+            "access_control_id": str(info.get("access_control_id")),
+            "entrance_id": str(info.get("entrance_id")),
+            # Имя от оператора; с `friendly_name` не совпадает — то составное.
+            "name": info.get("name"),
+            # Булево, а не строка: `"False"` истинно в шаблоне.
+            "openable": bool(info.get("openable")),
         }
 
     @property

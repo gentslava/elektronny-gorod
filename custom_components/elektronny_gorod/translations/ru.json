@@ -113,7 +113,21 @@
   "entity": {
     "sensor": {
       "balance": {
-        "name": "Баланс аккаунта"
+        "name": "Баланс аккаунта",
+        "state_attributes": {
+          "amount_sum": {
+            "name": "Сумма к оплате"
+          },
+          "target_date": {
+            "name": "Дата платежа"
+          },
+          "payment_link": {
+            "name": "Ссылка на оплату"
+          },
+          "blocked": {
+            "name": "Аккаунт заблокирован"
+          }
+        }
       },
       "days_to_block": {
         "name": "Дней до блокировки"
@@ -185,7 +199,24 @@
     },
     "lock": {
       "lock": {
-        "name": "Замок"
+        "name": "Замок",
+        "state_attributes": {
+          "place_id": {
+            "name": "Идентификатор адреса"
+          },
+          "access_control_id": {
+            "name": "Идентификатор домофона"
+          },
+          "entrance_id": {
+            "name": "Идентификатор подъезда"
+          },
+          "name": {
+            "name": "Название у оператора"
+          },
+          "openable": {
+            "name": "Можно открыть"
+          }
+        }
       }
     },
     "switch": {

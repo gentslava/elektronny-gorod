@@ -81,7 +81,7 @@ API ([api-reference §Access controls](../architecture/api-reference.md#access-c
 - `state_class = SensorStateClass.TOTAL` (HA long-term statistics для денег)
 - `native_unit_of_measurement = "RUB"` (ISO 4217 — требование `MONETARY` device_class; константа `CURRENCY_RUBLE` удалена из `homeassistant.const`)
 
-`extra_state_attributes` оставлены с Title Case ключами (`"Amount sum"` и т.д.) — A-30 (snake_case) перенесён в Итерацию 3 как breaking change для пользовательских YAML.
+`extra_state_attributes` переведены на snake_case с переводами имён через `state_attributes` (A-30, breaking в 5.0.0). Title Case выглядел приемлемо только по-английски: имена атрибутов Home Assistant переводит лишь по snake_case-ключам, поэтому в русском интерфейсе они оставались английскими.
 
 ## Consequences
 
