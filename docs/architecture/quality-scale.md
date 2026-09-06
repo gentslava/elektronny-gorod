@@ -50,7 +50,7 @@ External reference:
 | `entity-event-setup` | ✅ платформы forward-нуты | `__init__.py` |
 | `entity-unique-id` | ✅ стабильные UID + registry migration | `entity_migration.py` |
 | `has-entity-name` | ✅ HA entity naming pattern | entity platforms |
-| `runtime-data` | ⚠️ используется `hass.data[DOMAIN][entry_id]` — допустимо, но `entry.runtime_data` рекомендован | `__init__.py:async_setup_entry` |
+| `runtime-data` | ✅ координатор в `entry.runtime_data` с типизированным алиасом; реестр FCM намеренно оставлен в `hass.data` — он обязан пережить выгрузку | `coordinator.py`, `__init__.py` |
 | `test-before-configure` | ✅ профиль и go2rtc проверяются до create entry | `config_flow.py` |
 | `test-before-setup` | ✅ `async_config_entry_first_refresh` | `__init__.py:async_setup_entry` |
 | `unique-config-entry` | ✅ проверка дубликата | `config_flow.py` |

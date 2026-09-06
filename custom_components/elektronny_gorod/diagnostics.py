@@ -15,6 +15,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
 from ._logging import SENSITIVE_KEYS
+from .coordinator import async_get_coordinator
 from .const import (
     CONF_ACCOUNT_ID,
     CONF_CONTRACT,
@@ -48,7 +49,7 @@ async def async_get_config_entry_diagnostics(
     }
 
     # Снимок coordinator — только счётчики (без значений/PII).
-    coordinator = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    coordinator = async_get_coordinator(hass, entry.entry_id)
     data = getattr(coordinator, "data", None)
     if isinstance(data, dict):
         diagnostics["coordinator"] = {

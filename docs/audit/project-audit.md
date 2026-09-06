@@ -1014,6 +1014,15 @@ Quality gates:
 - **Follow-up:** `permissions` не заданы в `hacs.yaml`, `hassfest.yaml`, `python-tests.yaml` — при `default_workflow_permissions: write` они получают write-токен и запускают сторонние экшены с mutable-ref (`hacs/action@main`, `hassfest@master`). Отдельно стоит завести `.github/dependabot.yml` для экосистемы `github-actions`: остальные workflow всё ещё сидят на `actions/checkout@v4` и `actions/upload-artifact@v4` при актуальных `v7`, а `hacs/action@main` и `hassfest@master` вообще не версионированы.
 - **Acceptance:** первый fork-PR после merge проверяется вручную — `workflow_run` и `pull_request_target` читаются GitHub только из default-ветки, поэтому до merge схема непроверяема.
 
+### A-109. Уровень Silver заявлен в манифесте
+
+- **Status:** 🟢 **resolved-in-branch** (pending merge `refactor/runtime-data-silver`).
+- **Severity:** **P3** — заявка уровня качества, не дефект.
+- **Area:** `manifest.json`, [`quality-scale.md`](../architecture/quality-scale.md).
+- **Что закрыто по дороге:** `config-flow-test-coverage` (86% → 100%, [A-107](project-audit.md)), `reauthentication-flow` и автозапуск по 401 ([A-108](project-audit.md)), `parallel-updates` во всех шести платформах, `log-when-unavailable` (жалоба по фронту вместо строки на каждый цикл), три правила документации, `runtime-data`.
+- **`runtime-data` — с осознанным исключением.** Координатор переехал в `entry.runtime_data`, а вместе с ним появился типизированный алиас `ElektronnyGorodConfigEntry`: раньше платформы читали `hass.data[...]` и получали `Any`, теперь тип доезжает до pyright (проверено пробой с несуществующим атрибутом). Реестр FCM намеренно оставлен в `hass.data`: ядро удаляет `runtime_data` при выгрузке, а этот реестр обязан её пережить — при неподтверждённой остановке listener-а владение удерживается, чтобы не осиротить приёмник. Реестры SIP-контроллера и stream-manager перенести можно, но они трогают ту же деликатную lifecycle-логику, поэтому вынесены в follow-up отдельным изменением.
+- **Остаток Bronze:** `brands` — требует иконки в стороннем репозитории `home-assistant/brands`, от кода не зависит и решается отдельным PR туда.
+
 ### A-108. Отзыв токена не приводил к предложению войти заново
 
 - **Status:** 🟢 **resolved-in-branch** (pending merge `feat/config-flow-coverage-silver`).

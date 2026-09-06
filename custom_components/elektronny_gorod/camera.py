@@ -40,7 +40,7 @@ from .const import (
 )
 from .call_camera import ElektronnyGorodCallCamera
 from .device import linked_to_place, place_device_id
-from .coordinator import ElektronnyGorodUpdateCoordinator
+from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 from .go2rtc import go2rtc_auth_headers
 from .stream_manager import CameraStreamManager
 
@@ -148,7 +148,7 @@ def _snapshot_size(width: int | None, height: int | None) -> tuple[int, int]:
 
 
 def _get_go2rtc_cfg(
-    entry: ConfigEntry,
+    entry: ElektronnyGorodConfigEntry,
 ) -> tuple[bool, str | None, str | None, str | None, str | None]:
     use_go2rtc = (
         entry.options.get(CONF_USE_GO2RTC)
@@ -164,11 +164,11 @@ def _get_go2rtc_cfg(
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ElektronnyGorodConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Elektronny Gorod Camera based on a config entry."""
-    coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     cameras = (coordinator.data or {}).get("cameras") or []
     stream_manager: CameraStreamManager | None = hass.data.get(
         STREAM_MANAGER_DATA, {}
@@ -248,7 +248,7 @@ class ElektronnyGorodCamera(
         coordinator: ElektronnyGorodUpdateCoordinator,
         camera_info: dict[str, Any],
         *,
-        entry: ConfigEntry,
+        entry: ElektronnyGorodConfigEntry,
         stream_manager: CameraStreamManager | None,
         via_device_id: str | None = None,
     ) -> None:

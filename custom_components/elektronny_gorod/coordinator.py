@@ -29,7 +29,7 @@ import json
 from typing import Any
 
 from homeassistant.components import persistent_notification
-from homeassistant.config_entries import ConfigEntry
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.exceptions import ConfigEntryAuthFailed
@@ -50,6 +50,28 @@ from .helpers import dedupe_by_id
 from .user_agent import UserAgent
 
 UPDATE_INTERVAL = timedelta(minutes=5)
+
+
+# Запись с уже разобранным координатором. Ядро само удаляет `runtime_data`
+# при выгрузке, поэтому забыть подчистить состояние невозможно — в отличие от
+# `hass.data[DOMAIN][entry_id]`, который снимался вручную и только при удачной
+# выгрузке платформ.
+type ElektronnyGorodConfigEntry = ConfigEntry[ElektronnyGorodUpdateCoordinator]
+
+
+@callback
+def async_get_coordinator(
+    hass: HomeAssistant, entry_id: str
+) -> "ElektronnyGorodUpdateCoordinator | None":
+    """Координатор загруженной записи, либо None.
+
+    Проверка состояния обязательна: ядро удаляет `runtime_data` при выгрузке,
+    поэтому у выгруженной записи атрибута попросту нет.
+    """
+    entry = hass.config_entries.async_get_entry(entry_id)
+    if entry is None or entry.state is not ConfigEntryState.LOADED:
+        return None
+    return entry.runtime_data
 
 
 class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):

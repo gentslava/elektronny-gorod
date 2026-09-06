@@ -39,7 +39,7 @@ from .const import (
     STREAM_MANAGER_DATA,
 )
 from .device import linked_to_place, place_device_id, place_identifier
-from .coordinator import ElektronnyGorodUpdateCoordinator
+from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 from .stream_manager import (
     BACKGROUND_REFRESH_INTERVAL,
     CameraStreamManager,
@@ -56,11 +56,11 @@ PARALLEL_UPDATES = 0
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ElektronnyGorodConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Elektronny Gorod Sensors (balance + days_to_block per place)."""
-    coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
 
     balances = (coordinator.data or {}).get("balances") or []
     entities: list[SensorEntity] = []
