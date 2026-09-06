@@ -9,7 +9,7 @@
 | sensor.{addr}_days_to_block | sensor (new) | days_to_block |
 
 Note: `payment_link` остаётся как attribute у `sensor.balance` (поле
-"Payment link" в extra_state_attributes). Button entity для оплаты убран —
+`payment_link` в extra_state_attributes). Button entity для оплаты убран —
 HA не имеет server-side browser-launch, redirect делается через client-side
 (Lovelace card `tap_action: url` или mobile_app push с OPEN_URL action).
 """
@@ -192,7 +192,7 @@ async def test_days_to_block_has_duration_device_class(
 async def test_payment_link_available_as_balance_sensor_attribute(
     hass: HomeAssistant, mock_api
 ):
-    """payment_link доступен в `sensor.balance.attributes["Payment link"]`.
+    """payment_link доступен в `sensor.balance.attributes["payment_link"]`.
 
     Пользователь использует через Lovelace `tap_action: url` (с template на
     attribute) или automation с mobile_app.notify (action OPEN_URL).
@@ -210,4 +210,54 @@ async def test_payment_link_available_as_balance_sensor_attribute(
     eid = registry.async_get_entity_id("sensor", DOMAIN, uid)
     assert eid is not None
     state = hass.states.get(eid)
-    assert state.attributes.get("Payment link") == "https://pay.example/xyz"
+    assert state.attributes.get("payment_link") == "https://pay.example/xyz"
+
+
+async def test_attribute_keys_are_snake_case_and_translated(
+    hass: HomeAssistant, mock_api
+):
+    """Ключи атрибутов — snake_case, и у каждого есть перевод имени.
+
+    Title Case выглядел прилично только по-английски: в русском интерфейсе
+    имена атрибутов оставались английскими, потому что переводить их HA
+    может лишь по `state_attributes` из `strings.json`. А в шаблоне такой
+    ключ читался как `state_attr(..., 'Payment link')` — с пробелом и
+    заглавной, чего не делает ни одна интеграция.
+    """
+    import json
+    import pathlib
+    import re
+
+    _, set_finance = mock_api
+    set_finance(payment_link="https://pay.example/xyz")
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    uid = f"{DOMAIN}_{PLACE_ID}_balance"
+    eid = registry.async_get_entity_id("sensor", DOMAIN, uid)
+    assert eid is not None
+    state = hass.states.get(eid)
+
+    # Атрибуты самого ядра (friendly_name, device_class, …) не наши.
+    core_attrs = {
+        "friendly_name", "device_class", "state_class", "icon",
+        "unit_of_measurement", "supported_features", "attribution",
+        "entity_picture", "assumed_state",
+    }
+    ours = {k for k in state.attributes if k not in core_attrs}
+    assert ours, "сенсор баланса потерял свои атрибуты"
+
+    snake = re.compile(r"^[a-z][a-z0-9_]*$")
+    bad = sorted(k for k in ours if not snake.match(k))
+    assert not bad, f"ключи не snake_case: {bad}"
+
+    base = pathlib.Path("custom_components/elektronny_gorod")
+    for name in ("strings.json", "translations/ru.json", "translations/en.json"):
+        data = json.loads((base / name).read_text(encoding="utf-8"))
+        translated = data["entity"]["sensor"]["balance"].get("state_attributes", {})
+        missing = sorted(ours - set(translated))
+        assert not missing, f"{name}: нет перевода имени для {missing}"

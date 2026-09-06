@@ -263,9 +263,8 @@ class ElektronnyGorodBalanceSensor(
     def extra_state_attributes(self) -> dict[str, Any] | None:
         """Дополнительные атрибуты (payment info).
 
-        Ключи — Title Case для обратной совместимости с пользовательскими
-        автоматизациями. Перевод на snake_case — отдельный slice (A-30,
-        Итерация 3 / Silver), требует release notes как breaking change.
+        Ключи snake_case, имена переводятся через `state_attributes` в
+        `strings.json` (A-30).
         """
         info = self._balance_info
         if info is None:
@@ -274,21 +273,22 @@ class ElektronnyGorodBalanceSensor(
         payment_sum = info.get("payment_sum")
         amount_sum = round(payment_sum, 2) if payment_sum is not None else None
 
+        # Дату отдаём как есть, в ISO: раньше она форматировалась здесь под
+        # русскую локаль, и сравнить её в автоматизации было нельзя. Формат
+        # под язык пользователя — дело фронтенда, а не интеграции.
         payment_date = info.get("payment_date")
         target_date = None
         if payment_date is not None:
             try:
-                target_date = datetime.fromisoformat(payment_date).strftime(
-                    "%d.%m.%Y, %H:%M:%S"
-                )
+                target_date = datetime.fromisoformat(payment_date).isoformat()
             except (TypeError, ValueError):
                 target_date = payment_date
 
         return {
-            "Amount sum": amount_sum,
-            "Target date": target_date,
-            "Payment link": info.get("payment_link"),
-            "Blocked": info.get("blocked"),
+            "amount_sum": amount_sum,
+            "target_date": target_date,
+            "payment_link": info.get("payment_link"),
+            "blocked": info.get("blocked"),
         }
 
     @callback
