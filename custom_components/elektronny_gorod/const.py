@@ -24,6 +24,8 @@ LOGGER = logging.getLogger(__name__)
 CONF_ACCESS_TOKEN: Final = "access_token"
 CONF_REFRESH_TOKEN: Final = "refresh_token"
 CONF_PHONE: Final = "phone"
+# Ключ свёрнутой секции формы, а не поле конфигурации: значение туда не пишется.
+CONF_ADVANCED: Final = "advanced"
 CONF_PASSWORD: Final = "password"
 CONF_CONTRACT: Final = "contract"
 CONF_SMS: Final = "sms"

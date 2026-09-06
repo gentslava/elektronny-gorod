@@ -3,6 +3,7 @@ import voluptuous as vol
 
 from typing import Any, cast
 
+from homeassistant.data_entry_flow import SectionConfig, section
 from homeassistant.config_entries import (
     ConfigEntry,
     ConfigFlow,
@@ -17,6 +18,7 @@ from .const import (
     DOMAIN,
     LOGGER,
     CONF_ACCESS_TOKEN,
+    CONF_ADVANCED,
     CONF_REFRESH_TOKEN,
     CONF_PHONE,
     CONF_PASSWORD,
@@ -87,29 +89,24 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input:
-            # Advanced mode: user can paste an access token instead of doing SMS/password flow
-            if CONF_ACCESS_TOKEN in user_input:
-                token = user_input.get(CONF_ACCESS_TOKEN)
-                if not isinstance(token, str) or not token.strip():
-                    errors[CONF_ACCESS_TOKEN] = "invalid_access_token"
-                else:
-                    self.access_token = token.strip()
-                    LOGGER.debug("Credentials captured (length=%d)", len(self.access_token))
-                    try:
-                        return await self.get_account()
-                    except ValueError as e:
-                        errors[CONF_PHONE] = str(e)
+            advanced = user_input.get(CONF_ADVANCED) or {}
+            token = str(advanced.get(CONF_ACCESS_TOKEN) or "").strip()
+            phone = str(user_input.get(CONF_PHONE) or "").strip()
 
-            # Standard mode: phone-based flow
-            if CONF_PHONE in user_input:
-                phone = user_input.get(CONF_PHONE)
-                if not isinstance(phone, str) or not phone.strip():
-                    errors[CONF_PHONE] = "invalid_phone"
-
-                # Внутри ветки, а не рядом: иначе user_input без CONF_PHONE и
-                # без ошибок доходил сюда с несвязанным `phone`.
+            # Токен вперёд: если человек его вставил, он знает, что делает, и
+            # проходить SMS ему незачем.
+            if token:
+                self.access_token = token
+                LOGGER.debug("Credentials captured (length=%d)", len(self.access_token))
+                try:
+                    return await self.get_account()
+                except ValueError as e:
+                    errors[CONF_PHONE] = str(e)
+            elif not phone:
+                errors[CONF_PHONE] = "invalid_phone"
+            else:
                 if not errors:
-                    self.phone = str(phone).strip()
+                    self.phone = phone
                     LOGGER.debug("Phone captured (length=%d)", len(self.phone))
 
                     # Fetch contracts for the phone number
@@ -130,14 +127,19 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     except ValueError as e:
                         errors[CONF_PHONE] = str(e)
 
-        # Оба поля показываем всегда. Раньше выбор зависел от
-        # `show_advanced_options`, но ядро объявило свойство устаревшим и на
-        # всё время депрекации возвращает из него `True` — то есть ветку
-        # «только телефон» уже никто не видел, а в HA 2027.6 свойство
-        # исчезает совсем и обращение к нему уронило бы весь config flow.
+        # Токен убран в свёрнутую секцию. Раньше набор полей выбирался по
+        # `show_advanced_options` — переключателю «Расширенный режим» в
+        # профиле пользователя. Ядро объявило свойство устаревшим, на время
+        # депрекации возвращает из него `True` (то есть поле токена видели
+        # уже все) и удаляет его в HA 2027.6. Секция возвращает исходный
+        # замысел и не зависит от настроек аккаунта: обычный человек видит
+        # одно поле, опытный разворачивает второе.
         data_schema = vol.Schema({
             vol.Optional(CONF_PHONE): str,
-            vol.Optional(CONF_ACCESS_TOKEN): str,
+            vol.Optional(CONF_ADVANCED): section(
+                vol.Schema({vol.Optional(CONF_ACCESS_TOKEN): str}),
+                SectionConfig(collapsed=True),
+            ),
         })
 
         return self.async_show_form(

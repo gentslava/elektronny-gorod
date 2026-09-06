@@ -27,6 +27,13 @@ from .device import linked_to_place, place_device_id
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import lock_unique_id
 
+# Сущности не опрашивают оператора поодиночке: данные приходят из
+# координатора одним циклом на всю запись, поэтому ограничивать параллельные
+# обновления нечем и незачем. Константа объявлена явно — правило Silver
+# `parallel-updates` требует не полагаться на умолчание ядра, которое зависит
+# от того, синхронный ли `update` у сущности.
+PARALLEL_UPDATES = 0
+
 LOCK_UNLOCK_DELAY = 5  # секунды cosmetic-UX «открыто»
 LOCK_JAMMED_DELAY = 2
 

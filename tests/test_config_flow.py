@@ -21,6 +21,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.elektronny_gorod.const import (
     DOMAIN,
     CONF_ACCESS_TOKEN,
+    CONF_ADVANCED,
     CONF_ACCOUNT_ID,
     CONF_CONTRACT,
     CONF_OPERATOR_ID,
@@ -167,7 +168,7 @@ async def test_user_access_token_advanced(
         DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}}
     )
     assert result["type"] == FlowResultType.MENU
 
@@ -188,7 +189,7 @@ async def test_go2rtc_setup_valid(
         DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}}
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "go2rtc"}
@@ -242,7 +243,7 @@ async def test_abort_already_configured(
         DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}}
     )
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "already_configured"
@@ -261,7 +262,7 @@ async def test_reauth_updates_entry_and_aborts(
             DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
         )
         result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_ACCESS_TOKEN: "NEW_AT"}
+            result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "NEW_AT"}}
         )
 
     assert result["type"] == FlowResultType.ABORT
@@ -278,19 +279,23 @@ async def test_reauth_updates_entry_and_aborts(
 # нашла abort `no_contracts` без перевода — вместо текста показался бы ключ.
 
 
-async def test_empty_access_token_shows_error(
+async def test_empty_submit_asks_for_phone(
     hass: HomeAssistant, mock_api: MagicMock
 ) -> None:
-    """Пустой токен в расширенном режиме — форма с ошибкой, не падение."""
+    """Ни телефона, ни токена — просим телефон, а не падаем.
+
+    Пробелы в поле токена считаются незаполненным полем: человек его открыл,
+    но ничего не вставил.
+    """
     result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
+        DOMAIN, context={"source": SOURCE_USER}
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ACCESS_TOKEN: "   "}
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "   "}}
     )
 
     assert result["type"] == FlowResultType.FORM
-    assert result["errors"] == {CONF_ACCESS_TOKEN: "invalid_access_token"}
+    assert result["errors"] == {CONF_PHONE: "invalid_phone"}
 
 
 async def test_profile_failure_after_token_shows_error(
@@ -303,7 +308,7 @@ async def test_profile_failure_after_token_shows_error(
         DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}}
     )
 
     assert result["type"] == FlowResultType.FORM
@@ -477,7 +482,7 @@ async def test_go2rtc_without_url_shows_error(
         DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}}
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "go2rtc"}
@@ -498,7 +503,7 @@ async def test_go2rtc_validation_failure_shows_reason(
         DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}}
     )
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "go2rtc"}
@@ -539,20 +544,26 @@ async def test_unknown_contract_shows_error(
 async def test_first_step_offers_phone_and_token(
     hass: HomeAssistant, mock_api: MagicMock
 ) -> None:
-    """Первый шаг спрашивает телефон и, для опытных, токен.
+    """Телефон на виду, токен — в свёрнутой секции.
 
-    Набор полей больше не зависит от `show_advanced_options`: ядро объявило
-    свойство устаревшим и на всё время депрекации возвращает `True`, поэтому
-    ветка «только телефон» была недостижима, а в HA 2027.6 обращение к
-    свойству уронило бы config flow целиком.
+    Раньше набор полей выбирался по `show_advanced_options` — переключателю
+    «Расширенный режим» в профиле пользователя. Ядро объявило свойство
+    устаревшим, на время депрекации возвращает `True` (то есть поле токена
+    видели уже все) и удаляет его в HA 2027.6. Секция возвращает исходный
+    замысел и от настроек аккаунта не зависит.
     """
     result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": False}
+        DOMAIN, context={"source": SOURCE_USER}
     )
 
     assert result["step_id"] == "user"
-    keys = {str(k) for k in result["data_schema"].schema}
-    assert keys == {CONF_PHONE, CONF_ACCESS_TOKEN}
+    schema = result["data_schema"].schema
+    assert {str(k) for k in schema} == {CONF_PHONE, CONF_ADVANCED}
+
+    # Токен спрятан в свёрнутую секцию: обычный человек его не видит.
+    advanced = schema[next(k for k in schema if str(k) == CONF_ADVANCED)]
+    assert advanced.options["collapsed"] is True
+    assert {str(k) for k in advanced.schema.schema} == {CONF_ACCESS_TOKEN}
 
 
 async def test_config_flow_avoids_deprecated_core_api() -> None:
@@ -622,26 +633,32 @@ async def test_go2rtc_steps_without_entry_data_abort(hass: HomeAssistant) -> Non
     assert configured["reason"] == "missing_entry_data"
 
 
-async def test_abort_reasons_are_translated() -> None:
-    """У каждой причины отказа есть текст во всех трёх файлах переводов.
+async def test_flow_messages_are_translated() -> None:
+    """У каждой причины отказа и каждого ключа ошибки есть текст.
 
-    Без перевода Home Assistant показывает пользователю сырой ключ. Так и было
-    с `no_contracts`, пока покрытие этих веток не довели до конца.
+    Без перевода Home Assistant показывает пользователю сырой ключ. Так было
+    сразу с двумя — `no_contracts` и `invalid_contract`, — пока покрытие этих
+    веток не довели до конца. Ключи, которые приходят текстом ошибки от
+    оператора (`str(e)`), сюда не попадают: их набор задаёт не наш код.
     """
     import json
     import pathlib
     import re
 
     base = pathlib.Path("custom_components/elektronny_gorod")
-    used = set(re.findall(
-        r'async_abort\(reason="([a-z_]+)"', (base / "config_flow.py").read_text()
-    ))
-    assert used, "не нашли ни одной причины отказа — проверка выродилась"
+    source = (base / "config_flow.py").read_text(encoding="utf-8")
+
+    aborts = set(re.findall(r'async_abort\(reason="([a-z_]+)"', source))
+    errors = set(re.findall(r'errors\[[^\]]+\]\s*=\s*"([a-z_]+)"', source))
+    assert aborts and errors, "проверка выродилась: ничего не нашли в исходнике"
 
     for name in ("strings.json", "translations/ru.json", "translations/en.json"):
         data = json.loads((base / name).read_text(encoding="utf-8"))
-        missing = sorted(used - set(data["config"].get("abort", {})))
-        assert not missing, f"{name}: нет перевода для {missing}"
+        config = data["config"]
+        missing_aborts = sorted(aborts - set(config.get("abort", {})))
+        missing_errors = sorted(errors - set(config.get("error", {})))
+        assert not missing_aborts, f"{name}: нет перевода отказа {missing_aborts}"
+        assert not missing_errors, f"{name}: нет перевода ошибки {missing_errors}"
 
 
 async def test_options_flow_requires_url_when_enabled(

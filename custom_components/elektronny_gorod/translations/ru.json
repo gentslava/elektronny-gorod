@@ -23,7 +23,6 @@
     },
     "error": {
       "invalid_login": "Проверьте правильность введенных данных",
-      "invalid_access_token": "Некорректный токен доступа",
       "invalid_phone": "Некорректный номер телефона",
       "no_contracts": "Не найден договор",
       "unregistered": "Данный аккаунт не зарегистрирован",
@@ -39,13 +38,22 @@
       "go2rtc_rtsp_port_closed": "HTTP API go2rtc доступен, но RTSP-порт (8554) закрыт. Проверьте firewall, bind-address, или что go2rtc собран с поддержкой RTSP.",
       "unknown_status": "Неизвестный ответ получен. Пожалуйста, создайте issue.",
       "unauthorized": "Ошибка авторизации",
-      "unknown": "Неожиданная ошибка"
+      "unknown": "Неожиданная ошибка",
+      "invalid_contract": "Выбранный договор больше не доступен. Начните заново и выберите ещё раз."
     },
     "step": {
       "user": {
         "data": {
-          "phone": "Номер телефона или договора",
-          "access_token": "Access token (при наличии)"
+          "phone": "Номер телефона или договора"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Для опытных",
+            "description": "Позволяет обойти вход по SMS, если токен доступа уже есть.",
+            "data": {
+              "access_token": "Токен доступа"
+            }
+          }
         }
       },
       "contract": {
