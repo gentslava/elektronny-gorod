@@ -70,6 +70,10 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         LOGGER.info("Integration loading entry %s", entry.entry_id)
 
+        # Виды данных, по которым оператор сейчас молчит: `(что, place_id)`.
+        # Нужны, чтобы сообщить об отказе один раз, а не каждый цикл.
+        self._failing: set[tuple[str, str]] = set()
+
         # Dispatcher listener (для будущих фич; сейчас no-op).
         self._unsub_notifications: Callable[[], None] = async_dispatcher_connect(
             hass,
@@ -175,8 +179,9 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 balance = await self._fetch_balance(place_id)
             except Exception as ex:  # noqa: BLE001
-                LOGGER.warning("Balance fetch failed for place_id=%s: %s", place_id, ex)
+                self._note_failure("Баланс", place_id, ex)
             else:
+                self._note_success("Баланс", place_id)
                 if balance:
                     balances.append(balance)
 
@@ -187,15 +192,17 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             try:
                 screens = await self._api.query_screens_settings(place_id)
             except Exception as ex:  # noqa: BLE001
-                LOGGER.warning("Screens fetch failed for place_id=%s: %s", place_id, ex)
+                self._note_failure("Настройки экранов", place_id, ex)
                 screens = {}
+            else:
+                self._note_success("Настройки экранов", place_id)
             try:
                 access_controls = await self._api.query_access_controls(place_id)
             except Exception as ex:  # noqa: BLE001
-                LOGGER.warning(
-                    "Access controls fetch failed for place_id=%s: %s", place_id, ex
-                )
+                self._note_failure("Домофоны", place_id, ex)
                 access_controls = []
+            else:
+                self._note_success("Домофоны", place_id)
 
             hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
             hidden_entrance_ids = self._extract_hidden_ids(screens, "ACCESS_CONTROLS")
@@ -205,20 +212,25 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     place_id, access_controls, hidden_cam_ids, hidden_entrance_ids
                 ))
             except Exception as ex:  # noqa: BLE001
-                LOGGER.warning("Cameras fetch failed for place_id=%s: %s", place_id, ex)
+                self._note_failure("Камеры", place_id, ex)
+            else:
+                self._note_success("Камеры", place_id)
 
             try:
                 locks.extend(self._collect_locks_for_place(
                     place_id, access_controls, hidden_entrance_ids
                 ))
             except Exception as ex:  # noqa: BLE001
-                LOGGER.warning("Locks fetch failed for place_id=%s: %s", place_id, ex)
+                self._note_failure("Замки", place_id, ex)
+            else:
+                self._note_success("Замки", place_id)
 
             try:
                 dnd_items = await self._api.query_dnd_settings(place_id)
             except Exception as ex:  # noqa: BLE001
-                LOGGER.warning("DND fetch failed for place_id=%s: %s", place_id, ex)
+                self._note_failure("Режим «не беспокоить»", place_id, ex)
             else:
+                self._note_success("Режим «не беспокоить»", place_id)
                 if dnd_items:
                     dnd[str(place_id)] = dnd_items
 
@@ -236,6 +248,34 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             "locks": locks,
             "dnd": dnd,
         }
+
+    @callback
+    def _note_failure(self, what: str, place_id: str, err: Exception) -> None:
+        """Сообщить об отказе один раз, а не на каждом цикле обновления.
+
+        Отказ отдельного подзапроса устойчив: оператор молчит про баланс или
+        камеры сутками. Прежний `warning` на каждом цикле давал под три сотни
+        одинаковых строк в сутки на каждый отказавший вид данных — правило
+        Silver `log-when-unavailable` требует обратного: сказать о пропаже
+        один раз и один раз о возвращении. Пишем тип исключения, а не текст:
+        в тексте оператора может оказаться адрес или идентификатор.
+        """
+        key = (what, str(place_id))
+        if key in self._failing:
+            return
+        self._failing.add(key)
+        LOGGER.warning(
+            "%s недоступны для place_id=%s (%s)", what, place_id, type(err).__name__
+        )
+
+    @callback
+    def _note_success(self, what: str, place_id: str) -> None:
+        """Сообщить о возвращении данных, если до этого был отказ."""
+        key = (what, str(place_id))
+        if key not in self._failing:
+            return
+        self._failing.discard(key)
+        LOGGER.info("%s снова отвечают для place_id=%s", what, place_id)
 
     @staticmethod
     def _iter_place_ids(

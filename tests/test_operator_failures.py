@@ -1,9 +1,11 @@
-"""Отзыв токена должен приводить к предложению войти заново.
+"""Реакция на отказы оператора: отзыв токена и устойчивое молчание.
 
-Раньше 401 от оператора поднимался как `UpdateFailed` — то есть «повторим
-позже». Повтором это не лечится: токен отозван, и сколько ни ждать, ответ
-будет тот же. Запись просто уходила в «недоступна», а пользователю оставалось
-догадываться, что делать.
+Отзыв токена раньше поднимался как `UpdateFailed` — то есть «повторим позже».
+Повтором это не лечится: сколько ни ждать, ответ будет тот же. Запись просто
+уходила в «недоступна», а пользователю оставалось догадываться, что делать.
+
+Устойчивое молчание по отдельным видам данных, наоборот, логировалось на
+каждом цикле обновления — раз в пять минут, бесконечно.
 """
 from __future__ import annotations
 
@@ -119,3 +121,56 @@ async def test_operator_outage_does_not_ask_for_credentials(
 
     assert entry.state is ConfigEntryState.SETUP_RETRY
     assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+
+
+async def test_persistent_failure_logs_once_not_every_cycle(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Устойчивый отказ подзапроса — одна строка, а не одна на каждый цикл.
+
+    Оператор молчит про отдельные виды данных сутками. При обновлении раз в
+    пять минут прежний `warning` на каждом цикле давал под три сотни
+    одинаковых строк в сутки на каждый отказавший вид.
+    """
+    import logging
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[{
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "1000000", "address": "addr"},
+        }])
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(return_value=[])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(side_effect=ClientError(_response(500)))
+
+        coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
+
+        with caplog.at_level(logging.INFO):
+            for _ in range(5):
+                await coordinator._async_update_data()
+
+            complaints = [r for r in caplog.records if "недоступны" in r.msg]
+            assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
+
+            # Данные вернулись — об этом должно быть сказано ровно один раз.
+            api.query_balance = AsyncMock(return_value={"balance": 1.0})
+            for _ in range(3):
+                await coordinator._async_update_data()
+
+        recovered = [r for r in caplog.records if "снова отвечают" in r.msg]
+        assert len(recovered) == 1

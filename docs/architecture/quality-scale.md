@@ -69,10 +69,10 @@ External reference:
 | `docs-installation-parameters` | ⚠️ есть | детализировать |
 | `entity-unavailable` | ✅ через `CoordinatorEntity.available` + data presence | — |
 | `integration-owner` | ✅ `codeowners` | — |
-| `log-when-unavailable` | ⚠️ coordinator error path есть; правило отдельно не аудировано | проверить по rule text |
-| `parallel-updates` | ⚠️ явный атрибут не задан | проверить по platform semantics |
-| `reauthentication-flow` | ⚠️ работает, но без `async_step_reauth_confirm` | переписать в HA-нативный паттерн |
-| `test-coverage` | ⚠️ suite широкий; свежий coverage-процент не заявлен | coverage-run перед Silver claim |
+| `log-when-unavailable` | ✅ отказ подзапроса логируется по фронту: одна строка на пропажу, одна на возвращение | `coordinator.py:_note_failure` |
+| `parallel-updates` | ✅ `PARALLEL_UPDATES = 0` во всех шести платформах (данные из координатора) | платформы |
+| `reauthentication-flow` | ✅ `async_step_reauth` / `async_step_reauth_confirm`; 401 поднимает `ConfigEntryAuthFailed` | `config_flow.py`, `coordinator.py` |
+| `test-coverage` | ✅ `config_flow.py` 100% (требование правила), общий 84% | 2026-09-06 |
 
 **Silver blockers:**
 1. Нативный reauth (`async_step_reauth_confirm`).
