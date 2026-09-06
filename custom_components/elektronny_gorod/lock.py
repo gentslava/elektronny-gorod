@@ -13,9 +13,10 @@ from typing import Any
 
 from aiohttp import ClientError
 
-from homeassistant.components.lock import LockEntity, LockState
+from homeassistant.components.lock import LockEntity, LockEntityFeature, LockState
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
@@ -65,6 +66,11 @@ class ElektronnyGorodLock(
 
     _attr_has_entity_name = True
     _attr_translation_key = "lock"
+    # Домофон именно открывает дверь, а не отпирает замок «до следующего
+    # запирания», и в домене `lock` это отдельное действие. Без объявления
+    # сущность предлагала только «Закрыть»/«Открыть замок», а действия,
+    # которое точно описывает домофон, не было вовсе.
+    _attr_supported_features = LockEntityFeature.OPEN
 
     def __init__(
         self,
@@ -172,10 +178,24 @@ class ElektronnyGorodLock(
         return self._state == LockState.LOCKED
 
     async def async_lock(self, **kwargs: Any) -> None:
-        """Lock не поддерживается API оператора — это домофон. См. ADR-0005."""
-        LOGGER.info("async_lock is not supported (intercom)")
-        self._state = LockState.LOCKED
-        self.async_write_ha_state()
+        """Запереть домофон нельзя — он запирается сам. См. ADR-0005.
+
+        Раньше метод молча выставлял `LOCKED` и писал в лог. Со стороны
+        пользователя это выглядело как кнопка, которая ничего не делает и
+        никак этого не объясняет. Честнее отказать: защёлку отпускает само
+        железо через несколько секунд, и повлиять на это мы не можем.
+        """
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="cannot_lock"
+        )
+
+    async def async_open(self, **kwargs: Any) -> None:
+        """Открыть дверь — то же действие, что `unlock`.
+
+        Существующие автоматизации зовут `lock.unlock`, ломать их незачем,
+        поэтому оба сервиса ведут к одному вызову оператора.
+        """
+        await self.async_unlock(**kwargs)
 
     async def async_unlock(self, **kwargs: Any) -> None:
         """Trigger door-open. Synthetic state-cycle через async_call_later."""

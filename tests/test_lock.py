@@ -1,0 +1,193 @@
+"""Тесты сущности замка (домофона).
+
+До этого файла `lock.py` не был покрыт ничем: ни действия, ни атрибуты.
+Именно поэтому незамеченной прожила кнопка «Закрыть», которая молча ничего
+не делала, и отсутствие действия «Открыть» — единственного, которое домофон
+на самом деле умеет.
+"""
+from __future__ import annotations
+
+import json
+from typing import Any
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from homeassistant.components.lock import LockEntityFeature
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
+
+from custom_components.elektronny_gorod.const import (
+    CONF_ACCESS_TOKEN,
+    CONF_OPERATOR_ID,
+    CONF_REFRESH_TOKEN,
+    CONF_USER_AGENT,
+    DOMAIN,
+)
+from custom_components.elektronny_gorod.entity_migration import lock_unique_id
+from custom_components.elektronny_gorod.user_agent import UserAgent
+
+PLACE_ID = "1000000"
+AC_ID = "2000"
+ENTRANCE_ID = "3000"
+
+
+def _access_controls() -> list[dict[str, Any]]:
+    return [{
+        "id": AC_ID,
+        "name": "Intercom",
+        "entrances": [{
+            "id": ENTRANCE_ID,
+            "name": "Entrance 1",
+            "allowOpen": True,
+        }],
+    }]
+
+
+@pytest.fixture
+def mock_api():
+    """API mock: одно место с одним замком."""
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as mock_cls:
+        instance = mock_cls.return_value
+        instance.http = AsyncMock()
+        instance.http.user_agent = AsyncMock()
+        instance.query_places = AsyncMock(return_value=[{
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": PLACE_ID, "address": "addr"},
+        }])
+        instance.query_access_controls = AsyncMock(return_value=_access_controls())
+        instance.query_cameras = AsyncMock(return_value=[])
+        instance.query_public_cameras = AsyncMock(return_value=[])
+        instance.query_screens_settings = AsyncMock(return_value={})
+        instance.query_dnd_settings = AsyncMock(return_value=[])
+        instance.query_balance = AsyncMock(return_value=None)
+        instance.open_lock = AsyncMock()
+        yield instance
+
+
+def _make_config_entry() -> MockConfigEntry:
+    ua = UserAgent()
+    ua.operator_id = "1"
+    return MockConfigEntry(
+        domain=DOMAIN,
+        version=3,
+        unique_id="test_unique_subscriber_S1",
+        title="Test",
+        data={
+            CONF_ACCESS_TOKEN: "T1",
+            CONF_REFRESH_TOKEN: "R1",
+            CONF_OPERATOR_ID: "1",
+            CONF_USER_AGENT: json.dumps(ua.json()),
+            "account_id": "A1",
+            "subscriber_id": "S1",
+            "use_go2rtc": False,
+            "go2rtc_base_url": "http://127.0.0.1:1984",
+            "go2rtc_rtsp_host": "127.0.0.1",
+        },
+    )
+
+
+async def _setup_lock(hass: HomeAssistant) -> str:
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    eid = registry.async_get_entity_id(
+        "lock", DOMAIN, lock_unique_id(PLACE_ID, AC_ID, ENTRANCE_ID)
+    )
+    assert eid is not None, "замок не создан"
+    return eid
+
+
+async def test_open_action_is_offered(hass: HomeAssistant, mock_api):
+    """Домофон объявляет «Открыть» — действие, которое он и выполняет.
+
+    Без объявления сущность предлагала только запереть и отпереть, а
+    `lock.open` не работал вовсе.
+    """
+    eid = await _setup_lock(hass)
+    state = hass.states.get(eid)
+
+    features = LockEntityFeature(state.attributes["supported_features"])
+    assert LockEntityFeature.OPEN in features
+
+
+async def test_open_service_opens_the_door(hass: HomeAssistant, mock_api):
+    """`lock.open` доходит до оператора."""
+    eid = await _setup_lock(hass)
+
+    await hass.services.async_call(
+        "lock", "open", {"entity_id": eid}, blocking=True
+    )
+
+    mock_api.open_lock.assert_awaited_once_with(PLACE_ID, AC_ID, ENTRANCE_ID)
+
+
+async def test_unlock_still_opens_the_door(hass: HomeAssistant, mock_api):
+    """`lock.unlock` работает по-прежнему — автоматизации зовут его."""
+    eid = await _setup_lock(hass)
+
+    await hass.services.async_call(
+        "lock", "unlock", {"entity_id": eid}, blocking=True
+    )
+
+    mock_api.open_lock.assert_awaited_once_with(PLACE_ID, AC_ID, ENTRANCE_ID)
+
+
+async def test_lock_refuses_with_a_reason(hass: HomeAssistant, mock_api):
+    """Запереть домофон нельзя, и он об этом говорит.
+
+    Раньше метод молча выставлял `LOCKED` и писал в лог: со стороны
+    пользователя кнопка просто ничего не делала. Оператора при этом не
+    трогаем — запирает защёлку само железо.
+    """
+    eid = await _setup_lock(hass)
+
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            "lock", "lock", {"entity_id": eid}, blocking=True
+        )
+
+    assert err.value.translation_key == "cannot_lock"
+    assert mock_api.open_lock.await_count == 0
+
+
+async def test_attributes_are_snake_case_and_typed(hass: HomeAssistant, mock_api):
+    """Ключи snake_case, `openable` булев, имена переводятся.
+
+    Строка `"False"` истинна в шаблоне, поэтому проверка `openable` раньше
+    срабатывала всегда.
+    """
+    import pathlib
+    import re
+
+    eid = await _setup_lock(hass)
+    attrs = hass.states.get(eid).attributes
+
+    assert attrs["place_id"] == PLACE_ID
+    assert attrs["access_control_id"] == AC_ID
+    assert attrs["entrance_id"] == ENTRANCE_ID
+    assert attrs["openable"] is True
+
+    core_attrs = {
+        "friendly_name", "device_class", "icon", "supported_features",
+        "attribution", "entity_picture", "assumed_state", "code_format",
+    }
+    ours = {k for k in attrs if k not in core_attrs}
+    snake = re.compile(r"^[a-z][a-z0-9_]*$")
+    bad = sorted(k for k in ours if not snake.match(k))
+    assert not bad, f"ключи не snake_case: {bad}"
+
+    base = pathlib.Path("custom_components/elektronny_gorod")
+    for name in ("strings.json", "translations/ru.json", "translations/en.json"):
+        data = json.loads((base / name).read_text(encoding="utf-8"))
+        translated = data["entity"]["lock"]["lock"].get("state_attributes", {})
+        missing = sorted(ours - set(translated))
+        assert not missing, f"{name}: нет перевода имени для {missing}"
+        assert "cannot_lock" in data.get("exceptions", {}), f"{name}: нет текста отказа"

@@ -246,5 +246,10 @@
       "name": "Hang up doorbell call",
       "description": "End the active intercom call."
     }
+  },
+  "exceptions": {
+    "cannot_lock": {
+      "message": "The intercom cannot be locked: the latch is released by the hardware and locks itself after a few seconds."
+    }
   }
 }
