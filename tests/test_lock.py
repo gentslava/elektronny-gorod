@@ -7,8 +7,9 @@
 from __future__ import annotations
 
 import json
+from datetime import timedelta
 from typing import Any
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -172,10 +173,93 @@ async def test_attributes_are_snake_case_and_typed(hass: HomeAssistant, mock_api
     bad = sorted(k for k in ours if not snake.match(k))
     assert not bad, f"ключи не snake_case: {bad}"
 
-    base = pathlib.Path("custom_components/elektronny_gorod")
+    base = pathlib.Path(__file__).resolve().parent.parent / "custom_components/elektronny_gorod"
     for name in ("strings.json", "translations/ru.json", "translations/en.json"):
         data = json.loads((base / name).read_text(encoding="utf-8"))
         translated = data["entity"]["lock"]["lock"].get("state_attributes", {})
         missing = sorted(ours - set(translated))
         assert not missing, f"{name}: нет перевода имени для {missing}"
         assert "cannot_lock" in data.get("exceptions", {}), f"{name}: нет текста отказа"
+
+
+async def test_unlock_failure_shows_jammed(hass: HomeAssistant, mock_api):
+    """Оператор не открыл — замок честно показывает заедание.
+
+    Молчаливый возврат в «заперто» выглядел бы как успешное открытие двери,
+    которая на самом деле не открылась.
+    """
+    from aiohttp import ClientError
+
+    eid = await _setup_lock(hass)
+    mock_api.open_lock = AsyncMock(side_effect=ClientError("531"))
+
+    await hass.services.async_call(
+        "lock", "unlock", {"entity_id": eid}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    assert hass.states.get(eid).state == "jammed"
+
+
+async def test_repeated_unlock_does_not_stack_timers(hass: HomeAssistant, mock_api):
+    """Второе нажатие переносит возврат в «заперто», а не заводит второй таймер.
+
+    Иначе первый таймер вернул бы состояние посреди второго открытия.
+    """
+    eid = await _setup_lock(hass)
+    await hass.services.async_call("lock", "unlock", {"entity_id": eid}, blocking=True)
+    await hass.async_block_till_done()
+    await hass.services.async_call("lock", "unlock", {"entity_id": eid}, blocking=True)
+    await hass.async_block_till_done()
+
+    assert mock_api.open_lock.await_count == 2
+    assert hass.states.get(eid).state in ("unlocked", "unlocking")
+
+
+async def test_lock_without_coordinator_data_has_no_attributes(
+    hass: HomeAssistant, mock_api
+):
+    """Пока данных нет, атрибутов тоже нет — вместо выдуманных значений."""
+    from custom_components.elektronny_gorod.lock import ElektronnyGorodLock
+
+    coordinator = MagicMock()
+    coordinator.data = {"locks": []}
+    lock = ElektronnyGorodLock(
+        coordinator,
+        {
+            "place_id": PLACE_ID,
+            "access_control_id": AC_ID,
+            "entrance_id": ENTRANCE_ID,
+            "name": "Entrance 1",
+            "openable": True,
+        },
+    )
+
+    assert lock.extra_state_attributes is None
+    assert lock.available is False
+
+
+async def test_lock_returns_to_locked_after_the_door_closes(
+    hass: HomeAssistant, mock_api
+):
+    """Замок сам возвращается в «заперто» — защёлку запирает железо.
+
+    Без возврата состояние навсегда осталось бы «отперто», и автоматизации,
+    построенные на нём, перестали бы срабатывать на следующем открытии.
+    """
+    from homeassistant.util import dt as dt_util
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    from custom_components.elektronny_gorod.lock import LOCK_UNLOCK_DELAY
+
+    eid = await _setup_lock(hass)
+    await hass.services.async_call("lock", "unlock", {"entity_id": eid}, blocking=True)
+    await hass.async_block_till_done()
+    assert hass.states.get(eid).state == "unlocked"
+
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=LOCK_UNLOCK_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+
+    assert hass.states.get(eid).state == "locked"

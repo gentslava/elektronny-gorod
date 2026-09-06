@@ -1360,3 +1360,167 @@ async def test_frame_survives_a_closed_page(hass: HomeAssistant, mock_api):
     )
     await _settle_snapshot(cam)
     assert await cam.async_camera_image(*_SIZE) == _JPEG_2
+
+
+# ─── Восстановление потока: отказы оператора ───────────────────────────────
+
+
+async def test_recovery_survives_operator_failure(hass: HomeAssistant, mock_api):
+    """Отказ оператора при восстановлении не должен всплывать наружу.
+
+    Восстановление запускается из колбэка состояния потока; исключение оттуда
+    ушло бы в журнал трассировкой и не дало бы отработать backoff.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_stream = AsyncMock(side_effect=ClientError("531"))
+    cam.stream = _fake_stream(available=False)
+
+    cam._on_stream_state_change()
+    await hass.async_block_till_done()
+
+    assert cam._recovery_failures == 1, "неудача должна учитываться в паузе"
+
+
+async def test_recovery_without_url_counts_as_failure(hass: HomeAssistant, mock_api):
+    """Пустой адрес — тоже неудача: восстанавливать нечем."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_stream = AsyncMock(return_value=None)
+    stream = _fake_stream(available=False)
+    cam.stream = stream
+
+    cam._on_stream_state_change()
+    await hass.async_block_till_done()
+
+    assert cam._recovery_failures == 1
+    stream.update_source.assert_not_called()
+
+
+async def test_recovery_survives_a_failing_stream_worker(
+    hass: HomeAssistant, mock_api
+):
+    """Отказ самого HA Stream при подстановке адреса не роняет камеру."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    stream = _fake_stream(available=False)
+    stream.update_source.side_effect = RuntimeError("worker занят")
+    cam.stream = stream
+
+    cam._on_stream_state_change()
+    await hass.async_block_till_done()
+
+    assert cam._recovery_failures == 0, "адрес получен — попытка удачная"
+
+
+
+# ─── Вспомогательные пути камеры ────────────────────────────────────────────
+
+
+async def test_rtsp_urls_require_go2rtc(hass: HomeAssistant, mock_api):
+    """Без go2rtc адреса потока не существует, и об этом говорится прямо.
+
+    Скрытый адрес с пустыми полями увёл бы отладку в сторону: человек искал
+    бы проблему в сети, а go2rtc просто не настроен.
+    """
+    cam = await _setup_camera(hass, use_go2rtc=False)
+
+    assert cam._rtsp_url_redacted() == "<unconfigured>"
+    with pytest.raises(RuntimeError):
+        cam._rtsp_url()
+
+
+async def test_hidden_camera_gives_no_fresh_frame(hass: HomeAssistant, mock_api):
+    """Скрытая камера не отдаёт кадр даже экрану вызова."""
+    from homeassistant.helpers import entity_registry as er
+
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    registry = er.async_get(hass)
+    registry.async_update_entity(cam.entity_id, hidden_by=er.RegistryEntryHider.USER)
+    await hass.async_block_till_done()
+
+    assert await cam.async_fresh_camera_image(*_SIZE) is None
+
+
+async def test_background_refresh_stops_for_a_hidden_camera(
+    hass: HomeAssistant, mock_api
+):
+    """Пока фоновая задача ждала очереди, камеру скрыли — к оператору не идём."""
+    from homeassistant.helpers import entity_registry as er
+
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    instance = mock_api.return_value
+    instance.query_camera_snapshot = AsyncMock(return_value=_JPEG_1)
+    await cam.async_camera_image(*_SIZE)
+    _age_snapshot(cam, _SIZE, camera_module.SNAPSHOT_FRESH_SECONDS + 1)
+
+    await cam.async_camera_image(*_SIZE)  # ставит фоновую задачу
+    registry = er.async_get(hass)
+    registry.async_update_entity(cam.entity_id, hidden_by=er.RegistryEntryHider.USER)
+    await hass.async_block_till_done()
+    await _settle_snapshot(cam)
+
+    assert instance.query_camera_snapshot.await_count == 1
+
+
+async def test_indoor_camera_gets_its_own_model(hass: HomeAssistant, mock_api):
+    """Личная камера отличается от общедомовой моделью и зоной.
+
+    Оператор их не разделяет в одном списке, а в интерфейсе разница видна.
+    """
+    coordinator = MagicMock()
+    coordinator.data = {"cameras": []}
+    entry = _make_config_entry()
+    entry.runtime_data = coordinator
+
+    cam = camera_module.ElektronnyGorodCamera(
+        coordinator,
+        {"id": "900", "name": "Кухня", "source": "place"},
+        entry=entry,
+        stream_manager=None,
+    )
+
+    assert cam.device_info["model"] == "Indoor Camera"
+
+
+async def test_doorbell_lookup_finds_the_camera_of_the_call(
+    hass: HomeAssistant, mock_api
+):
+    """Экран вызова находит камеру звонящего домофона по её идентификатору.
+
+    Не найдя, он остался бы без видео — при том что камера в системе есть.
+    """
+    await _setup_camera(hass, use_go2rtc=True)
+    call_cam = next(
+        ent
+        for ent in hass.data["camera"].entities
+        if type(ent).__name__ == "ElektronnyGorodCallCamera"
+    )
+
+    assert call_cam._doorbell_lookup(CAM_A) is not None
+    assert call_cam._doorbell_lookup("нет такой камеры") is None
+
+
+async def test_stream_creation_subscribes_to_stalls(hass: HomeAssistant, mock_api):
+    """Созданный поток подписывается на срыв — иначе восстановление не запустится."""
+    cam = await _setup_camera(hass, use_go2rtc=False)
+    stream = _fake_stream(available=True)
+
+    with patch(
+        "homeassistant.components.camera.Camera.async_create_stream",
+        new=AsyncMock(return_value=stream),
+    ):
+        assert await cam.async_create_stream() is stream
+
+    stream.set_update_callback.assert_called_once_with(cam._on_stream_state_change)
+
+
+async def test_stream_creation_without_a_stream_is_harmless(
+    hass: HomeAssistant, mock_api
+):
+    cam = await _setup_camera(hass, use_go2rtc=False)
+
+    with patch(
+        "homeassistant.components.camera.Camera.async_create_stream",
+        new=AsyncMock(return_value=None),
+    ):
+        assert await cam.async_create_stream() is None

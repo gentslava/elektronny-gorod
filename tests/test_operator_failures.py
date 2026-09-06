@@ -209,3 +209,188 @@ async def test_unloaded_entry_is_not_resolved(hass: HomeAssistant) -> None:
     entry.mock_state(hass, ConfigEntryState.NOT_LOADED)
 
     assert async_get_coordinator(hass, entry.entry_id) is None
+
+
+async def test_no_places_is_not_a_failure(hass: HomeAssistant) -> None:
+    """Учётная запись без адресов — пустой набор данных, а не ошибка.
+
+    Так бывает у только что оформленного договора: интеграция должна
+    загрузиться и ждать, а не уходить в повторные попытки.
+    """
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[])
+
+        data = await ElektronnyGorodUpdateCoordinator(hass, entry=entry)._async_update_data()
+
+    assert data == {"places": [], "balances": [], "cameras": [], "locks": [], "dnd": {}}
+
+
+async def test_one_broken_kind_of_data_does_not_sink_the_rest(
+    hass: HomeAssistant,
+) -> None:
+    """Отказ по одному виду данных не уносит остальные.
+
+    Оператор регулярно молчит про что-то одно; терять из-за этого камеры и
+    замки было бы несоразмерно.
+    """
+    from aiohttp import ClientError
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[{
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "1000000", "address": "addr"},
+        }])
+        api.query_balance = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_screens_settings = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_access_controls = AsyncMock(return_value=[{
+            "id": "AC1",
+            "name": "Intercom",
+            "entrances": [{"id": "E1", "name": "Подъезд 1", "allowOpen": True}],
+        }])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(side_effect=ClientError(_response(500)))
+
+        data = await ElektronnyGorodUpdateCoordinator(hass, entry=entry)._async_update_data()
+
+    assert data["balances"] == [] and data["dnd"] == {}
+    assert len(data["locks"]) == 1, "замки должны пережить отказ по балансу"
+
+
+async def test_every_kind_of_data_degrades_on_its_own(hass: HomeAssistant) -> None:
+    """Отказ по домофонам, камерам и замкам не уносит соседей.
+
+    Оператор отказывает по одному виду данных, а не по всем сразу — терять
+    из-за этого весь набор было бы несоразмерно.
+    """
+    from aiohttp import ClientError
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[{
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "1000000", "address": "addr"},
+        }])
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_cameras = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_public_cameras = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(return_value={"balance": 1.0})
+
+        coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
+        data = await coordinator._async_update_data()
+
+    assert data["cameras"] == [] and data["locks"] == []
+    assert len(data["balances"]) == 1, "баланс должен пережить отказ по камерам"
+
+
+async def test_place_without_identifier_is_skipped(hass: HomeAssistant) -> None:
+    """Место без идентификатора пропускается, а не роняет обновление."""
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[
+            {"subscriber": {"id": "S1"}, "place": {}},
+            {"subscriber": {"id": "S1"}},
+        ])
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(return_value=[])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(return_value=None)
+
+        data = await ElektronnyGorodUpdateCoordinator(hass, entry=entry)._async_update_data()
+
+    assert data["cameras"] == []
+
+
+async def test_intercom_camera_is_taken_from_the_entrance(hass: HomeAssistant) -> None:
+    """Камера домофона берётся из подъезда — там связь точнее.
+
+    На уровне домофона идентификатор камеры у оператора бывает
+    рассогласован, поэтому первично поле подъезда.
+    """
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[{
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "1000000", "address": "addr"},
+        }])
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(return_value=[{
+            "id": "AC1",
+            "name": "Домофон",
+            "externalCameraId": "CAM_AC",
+            "entrances": [
+                {"id": "E1", "name": "Подъезд 1", "allowOpen": True,
+                 "externalCameraId": "CAM_ENTRANCE"},
+            ],
+        }])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(return_value=None)
+
+        data = await ElektronnyGorodUpdateCoordinator(hass, entry=entry)._async_update_data()
+
+    ids = {c["id"] for c in data["cameras"]}
+    assert "CAM_ENTRANCE" in ids
+    assert len(data["locks"]) == 1

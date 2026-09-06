@@ -6,7 +6,7 @@ NB: консолидация go2rtc-клиента (R1-R6) отложена — 
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -75,3 +75,50 @@ def test_go2rtc_auth_headers():
     assert go2rtc_auth_headers("u", "") == {}
     h = go2rtc_auth_headers("user", "pass")
     assert h["Authorization"].startswith("Basic ")
+
+
+# ─── Проба RTSP-порта ───────────────────────────────────────────────────────
+
+
+async def test_open_rtsp_port_is_detected() -> None:
+    """Открытый порт распознаётся — иначе настройку отвергнут зря."""
+    from custom_components.elektronny_gorod.go2rtc import _probe_rtsp_port
+
+    writer = MagicMock()
+    writer.wait_closed = AsyncMock()
+    with patch(
+        "custom_components.elektronny_gorod.go2rtc.asyncio.open_connection",
+        new=AsyncMock(return_value=(MagicMock(), writer)),
+    ):
+        assert await _probe_rtsp_port("127.0.0.1", 8554, 1.0) is True
+    writer.close.assert_called_once()
+
+
+@pytest.mark.parametrize("failure", [OSError("отказано"), TimeoutError()])
+async def test_closed_rtsp_port_is_reported(failure) -> None:
+    """Закрытый порт находят при настройке, а не когда видео не пошло.
+
+    HTTP-интерфейс go2rtc может отвечать, а RTSP быть закрыт брандмауэром
+    или собран без модуля — без этой пробы человек узнаёт об этом только
+    когда камера не воспроизводится.
+    """
+    from custom_components.elektronny_gorod.go2rtc import _probe_rtsp_port
+
+    with patch(
+        "custom_components.elektronny_gorod.go2rtc.asyncio.open_connection",
+        new=AsyncMock(side_effect=failure),
+    ):
+        assert await _probe_rtsp_port("127.0.0.1", 8554, 1.0) is False
+
+
+async def test_reset_while_closing_still_counts_as_open() -> None:
+    """Обрыв при закрытии пробы не означает, что порт закрыт."""
+    from custom_components.elektronny_gorod.go2rtc import _probe_rtsp_port
+
+    writer = MagicMock()
+    writer.wait_closed = AsyncMock(side_effect=OSError("connection reset"))
+    with patch(
+        "custom_components.elektronny_gorod.go2rtc.asyncio.open_connection",
+        new=AsyncMock(return_value=(MagicMock(), writer)),
+    ):
+        assert await _probe_rtsp_port("127.0.0.1", 8554, 1.0) is True
