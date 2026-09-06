@@ -18,7 +18,8 @@
       "missing_access_token": "Access token is missing. Please run the setup again.",
       "already_configured": "Device is already configured",
       "reauth_successful": "Re-authentication was successful",
-      "missing_entry_data": "Failed to store setup data. Please run the setup again."
+      "missing_entry_data": "Failed to store setup data. Please run the setup again.",
+      "no_contracts": "No contracts found for this phone number."
     },
     "error": {
       "invalid_login": "Please check that the entered details are correct",

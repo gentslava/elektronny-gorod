@@ -1014,6 +1014,17 @@ Quality gates:
 - **Follow-up:** `permissions` не заданы в `hacs.yaml`, `hassfest.yaml`, `python-tests.yaml` — при `default_workflow_permissions: write` они получают write-токен и запускают сторонние экшены с mutable-ref (`hacs/action@main`, `hassfest@master`). Отдельно стоит завести `.github/dependabot.yml` для экосистемы `github-actions`: остальные workflow всё ещё сидят на `actions/checkout@v4` и `actions/upload-artifact@v4` при актуальных `v7`, а `hacs/action@main` и `hassfest@master` вообще не версионированы.
 - **Acceptance:** первый fork-PR после merge проверяется вручную — `workflow_run` и `pull_request_target` читаются GitHub только из default-ветки, поэтому до merge схема непроверяема.
 
+### A-107. Config flow опирался на свойство ядра, удаляемое в 2027.6
+
+- **Status:** 🟢 **resolved-in-branch** (pending merge `feat/config-flow-coverage-silver`).
+- **Severity:** **P2** — сейчас тихий UX-дефект, с HA 2027.6 полная поломка настройки.
+- **Area:** `config_flow.py:async_step_user`.
+- **Evidence (2026-09-06):** прогон тестов печатает предупреждение ядра «The deprecated function show_advanced_options was called from elektronny_gorod. It will be removed in HA Core 2027.6». В исходнике ядра (`data_entry_flow.py:650-666`, проверено и на 2026.8.1, и на 2026.9.0b6) свойство помечено `breaks_in_ha_version="2027.6"` и на всё время депрекации **безусловно возвращает `True`**.
+- **Root cause:** первый шаг выбирал схему формы по `self.show_advanced_options`. Раз свойство всегда истинно, ветка «спрашиваем только телефон» была недостижима на всех поддерживаемых версиях: поле для вставки access-токена показывалось каждому пользователю, а не только опытному. Тест на это не падал, потому что ветку никто не покрывал — она и попала в список непокрытых строк.
+- **Fix:** условие снято, обе формы объединены в одну. Наблюдаемое поведение не меняется (оно и так было таким), но исчезают и мёртвая ветка, и обращение к удаляемому API. Тест `test_config_flow_avoids_deprecated_core_api` не даёт свойству вернуться.
+- **Связь:** тот же класс поломки, что [A-100](project-audit.md) — ядро убрало `via_device`, и установки остались без камер и замков. Разница в том, что здесь срок известен заранее.
+- **Смежная находка:** причина отказа `no_contracts` использовалась в `async_abort`, но перевода в `config.abort` не имела — пользователь увидел бы сырой ключ вместо текста. Добавлена в три файла переводов; `test_abort_reasons_are_translated` проверяет, что у каждой причины отказа есть текст.
+
 ### A-106. Правки по находкам ревью вносились дословно, без проверки уместности
 
 - **Status:** ✅ **RESOLVED** — `8c6deb5` (PR #90).

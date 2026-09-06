@@ -36,6 +36,7 @@ from custom_components.elektronny_gorod.const import (
     CONF_GO2RTC_USERNAME,
     CONF_GO2RTC_PASSWORD,
 )
+from custom_components.elektronny_gorod.config_flow import ElektronnyGorodConfigFlow
 from custom_components.elektronny_gorod.go2rtc import Go2RtcValidationResult
 
 
@@ -268,3 +269,393 @@ async def test_reauth_updates_entry_and_aborts(
     # data обновлена свежим токеном.
     assert entry.data[CONF_ACCESS_TOKEN] == "NEW_AT"
     reload.assert_awaited_once()
+
+
+# ─── Ветки ошибок: правило Silver `config-flow-test-coverage` ───────────────
+#
+# Пользователь ошибается чаще, чем делает всё правильно, и именно эти ветки
+# решают, увидит он объяснение или пустую форму. Проверка их покрытия сразу
+# нашла abort `no_contracts` без перевода — вместо текста показался бы ключ.
+
+
+async def test_empty_access_token_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Пустой токен в расширенном режиме — форма с ошибкой, не падение."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_TOKEN: "   "}
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {CONF_ACCESS_TOKEN: "invalid_access_token"}
+
+
+async def test_profile_failure_after_token_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Токен принят, но профиль не отдался — сообщение вместо трассировки."""
+    mock_api.query_profile = AsyncMock(side_effect=ValueError("unauthorized"))
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {CONF_PHONE: "unauthorized"}
+
+
+async def test_phone_without_contracts_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Номер известен оператору, но договоров нет."""
+    mock_api.query_contracts.return_value = {"password": False, "contracts": []}
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PHONE: "+79990000000"}
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {CONF_PHONE: "no_contracts"}
+
+
+async def test_contracts_request_failure_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Оператор отказал на запросе договоров."""
+    mock_api.query_contracts = AsyncMock(side_effect=ValueError("limit_exceeded"))
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PHONE: "+79990000000"}
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {CONF_PHONE: "limit_exceeded"}
+
+
+async def _to_password_step(hass: HomeAssistant, mock_api: MagicMock):
+    mock_api.query_contracts.return_value = {"password": True}
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PHONE: "+79990000000"}
+    )
+
+
+async def test_empty_password_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Пустой пароль — снова форма пароля с ошибкой."""
+    result = await _to_password_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PASSWORD: ""}
+    )
+
+    assert result["step_id"] == "password"
+    assert result["errors"] == {CONF_PASSWORD: "invalid_password"}
+
+
+async def test_password_rejected_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Оператор ответил без токена — пароль не подошёл."""
+    mock_api.verify_password = AsyncMock(return_value={"operatorId": 1})
+
+    result = await _to_password_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PASSWORD: "wrong"}
+    )
+
+    assert result["step_id"] == "password"
+    assert result["errors"] == {CONF_PASSWORD: "invalid_password"}
+
+
+async def test_password_request_failure_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Оператор отказал при проверке пароля."""
+    mock_api.verify_password = AsyncMock(side_effect=ValueError("invalid_login"))
+
+    result = await _to_password_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PASSWORD: "secret"}
+    )
+
+    assert result["errors"] == {CONF_PASSWORD: "invalid_login"}
+
+
+async def _to_contract_step(hass: HomeAssistant, mock_api: MagicMock):
+    mock_api.query_contracts.return_value = {"password": False, "contracts": [_CONTRACT]}
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PHONE: "+79990000000"}
+    )
+
+
+async def test_sms_request_failure_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Договор выбран, но SMS не ушла."""
+    mock_api.request_sms_code = AsyncMock(side_effect=ValueError("limit_exceeded"))
+
+    result = await _to_contract_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_CONTRACT: "2104659"}
+    )
+
+    assert result["step_id"] == "contract"
+    assert result["errors"] == {CONF_CONTRACT: "limit_exceeded"}
+
+
+async def _to_sms_step(hass: HomeAssistant, mock_api: MagicMock):
+    result = await _to_contract_step(hass, mock_api)
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_CONTRACT: "2104659"}
+    )
+
+
+async def test_empty_sms_code_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Пустой код — форма кода с ошибкой."""
+    result = await _to_sms_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_SMS: ""}
+    )
+
+    assert result["step_id"] == "sms"
+    assert result["errors"] == {CONF_SMS: "invalid_code"}
+
+
+async def test_sms_code_rejected_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Оператор ответил без токена — код не подошёл."""
+    mock_api.verify_sms_code = AsyncMock(return_value={"operatorId": 1})
+
+    result = await _to_sms_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_SMS: "0000"}
+    )
+
+    assert result["errors"] == {CONF_SMS: "invalid_code"}
+
+
+async def test_sms_verification_failure_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Оператор отказал при проверке кода."""
+    mock_api.verify_sms_code = AsyncMock(side_effect=ValueError("invalid_code"))
+
+    result = await _to_sms_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_SMS: "0000"}
+    )
+
+    assert result["errors"] == {CONF_SMS: "invalid_code"}
+
+
+async def test_go2rtc_without_url_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock, _mock_clientsession
+) -> None:
+    """Настройка go2rtc без адреса — форма с ошибкой, оператор не дёргается."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "go2rtc"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_GO2RTC_BASE_URL: ""}
+    )
+
+    assert result["step_id"] == "go2rtc"
+    assert result["errors"] == {"base": "go2rtc_required_fields"}
+
+
+async def test_go2rtc_validation_failure_shows_reason(
+    hass: HomeAssistant, mock_api: MagicMock, _mock_clientsession
+) -> None:
+    """Причина отказа go2rtc доходит до пользователя как есть."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"next_step_id": "go2rtc"}
+    )
+
+    with patch(
+        "custom_components.elektronny_gorod.config_flow.validate_go2rtc",
+        new=AsyncMock(
+            return_value=Go2RtcValidationResult(
+                ok=False, error="go2rtc_auth_failed", rtsp_host=None
+            )
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_GO2RTC_BASE_URL: "http://127.0.0.1:1984"}
+        )
+
+    assert result["errors"] == {"base": "go2rtc_auth_failed"}
+
+
+async def test_unknown_contract_shows_error(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Выбран договор, которого нет в списке."""
+    result = await _to_contract_step(hass, mock_api)
+    flow = hass.config_entries.flow._progress[result["flow_id"]]
+
+    # Через форму такой ответ не пройдёт — `vol.In` отсечёт его раньше, — но
+    # шаг обязан пережить и его: список договоров приходит от оператора и
+    # между показом формы и ответом мог смениться.
+    outcome = await flow.async_step_contract({CONF_CONTRACT: "999999"})
+    assert outcome["errors"] == {CONF_CONTRACT: "invalid_contract"}
+
+    outcome = await flow.async_step_contract({CONF_CONTRACT: ""})
+    assert outcome["errors"] == {CONF_CONTRACT: "invalid_contract"}
+
+
+async def test_first_step_offers_phone_and_token(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Первый шаг спрашивает телефон и, для опытных, токен.
+
+    Набор полей больше не зависит от `show_advanced_options`: ядро объявило
+    свойство устаревшим и на всё время депрекации возвращает `True`, поэтому
+    ветка «только телефон» была недостижима, а в HA 2027.6 обращение к
+    свойству уронило бы config flow целиком.
+    """
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": False}
+    )
+
+    assert result["step_id"] == "user"
+    keys = {str(k) for k in result["data_schema"].schema}
+    assert keys == {CONF_PHONE, CONF_ACCESS_TOKEN}
+
+
+async def test_config_flow_avoids_deprecated_core_api() -> None:
+    """`show_advanced_options` в коде не осталось.
+
+    Ядро удаляет свойство в HA 2027.6. Это тот же класс поломки, что убрал
+    `via_device` в 2026.9 и оставил установки без камер и замков.
+    """
+    import pathlib
+
+    source = pathlib.Path(
+        "custom_components/elektronny_gorod/config_flow.py"
+    ).read_text(encoding="utf-8")
+    # Ищем обращение, а не упоминание: объясняющий комментарий остаётся.
+    assert "self.show_advanced_options" not in source
+
+
+# ─── Защитные проверки внутреннего состояния ────────────────────────────────
+#
+# Через форму сюда не прийти: шаги вызываются по порядку и заполняют состояние
+# сами. Но шаг обязан пережить и рассинхрон — например, если поток возобновили
+# после перезапуска. Проверяем прямым вызовом, иначе эти ветки нельзя ни
+# покрыть, ни доказать, что причина отказа переводится.
+
+
+def _bare_flow(hass: HomeAssistant):
+    flow = ElektronnyGorodConfigFlow()
+    flow.hass = hass
+    return flow
+
+
+async def test_password_step_without_phone_aborts(hass: HomeAssistant) -> None:
+    flow = _bare_flow(hass)
+    result = await flow.async_step_password({CONF_PASSWORD: "secret"})
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "missing_phone"
+
+
+async def test_contract_step_without_contracts_aborts(hass: HomeAssistant) -> None:
+    flow = _bare_flow(hass)
+    result = await flow.async_step_contract()
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "no_contracts"
+
+
+async def test_sms_step_without_contract_aborts(hass: HomeAssistant) -> None:
+    flow = _bare_flow(hass)
+    result = await flow.async_step_sms({CONF_SMS: "1234"})
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "missing_contract"
+
+
+async def test_account_step_without_token_aborts(hass: HomeAssistant) -> None:
+    flow = _bare_flow(hass)
+    result = await flow.get_account()
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "missing_access_token"
+
+
+async def test_go2rtc_steps_without_entry_data_abort(hass: HomeAssistant) -> None:
+    """Оба go2rtc-шага отказывают, если данные записи не собраны."""
+    flow = _bare_flow(hass)
+    skipped = await flow.async_step_skip_go2rtc()
+    configured = await flow.async_step_go2rtc()
+
+    assert skipped["reason"] == "missing_entry_data"
+    assert configured["reason"] == "missing_entry_data"
+
+
+async def test_abort_reasons_are_translated() -> None:
+    """У каждой причины отказа есть текст во всех трёх файлах переводов.
+
+    Без перевода Home Assistant показывает пользователю сырой ключ. Так и было
+    с `no_contracts`, пока покрытие этих веток не довели до конца.
+    """
+    import json
+    import pathlib
+    import re
+
+    base = pathlib.Path("custom_components/elektronny_gorod")
+    used = set(re.findall(
+        r'async_abort\(reason="([a-z_]+)"', (base / "config_flow.py").read_text()
+    ))
+    assert used, "не нашли ни одной причины отказа — проверка выродилась"
+
+    for name in ("strings.json", "translations/ru.json", "translations/en.json"):
+        data = json.loads((base / name).read_text(encoding="utf-8"))
+        missing = sorted(used - set(data["config"].get("abort", {})))
+        assert not missing, f"{name}: нет перевода для {missing}"
+
+
+async def test_options_flow_requires_url_when_enabled(
+    hass: HomeAssistant, _mock_clientsession
+) -> None:
+    """Включили go2rtc в настройках, но не указали адрес."""
+    entry = _existing_entry(hass)
+    result = await hass.config_entries.options.async_init(entry.entry_id)
+    assert result["step_id"] == "init"
+
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_USE_GO2RTC: True, CONF_GO2RTC_BASE_URL: ""}
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["errors"] == {"base": "go2rtc_required_fields"}
+

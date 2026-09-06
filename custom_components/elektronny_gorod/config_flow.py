@@ -130,13 +130,15 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     except ValueError as e:
                         errors[CONF_PHONE] = str(e)
 
-        if self.show_advanced_options:
-            data_schema = vol.Schema({
-                vol.Optional(CONF_PHONE): str,
-                vol.Optional(CONF_ACCESS_TOKEN): str,
-            })
-        else:
-            data_schema = vol.Schema({vol.Required(CONF_PHONE): str})
+        # Оба поля показываем всегда. Раньше выбор зависел от
+        # `show_advanced_options`, но ядро объявило свойство устаревшим и на
+        # всё время депрекации возвращает из него `True` — то есть ветку
+        # «только телефон» уже никто не видел, а в HA 2027.6 свойство
+        # исчезает совсем и обращение к нему уронило бы весь config flow.
+        data_schema = vol.Schema({
+            vol.Optional(CONF_PHONE): str,
+            vol.Optional(CONF_ACCESS_TOKEN): str,
+        })
 
         return self.async_show_form(
             step_id="user",
