@@ -24,11 +24,11 @@
       "missing_access_token": "Access token is missing. Please run the setup again.",
       "already_configured": "Device is already configured",
       "reauth_successful": "Re-authentication was successful",
-      "missing_entry_data": "Failed to store setup data. Please run the setup again."
+      "missing_entry_data": "Failed to store setup data. Please run the setup again.",
+      "no_contracts": "No contracts found for this phone number."
     },
     "error": {
       "invalid_login": "Please check that the entered details are correct",
-      "invalid_access_token": "Invalid access token",
       "invalid_phone": "Invalid phone number",
       "no_contracts": "No contract found",
       "unregistered": "This account is not registered",
@@ -44,13 +44,22 @@
       "go2rtc_rtsp_port_closed": "[%key:component::elektronny_gorod::common::go2rtc_rtsp_port_closed%]",
       "unknown_status": "Received an unknown response. Please create an issue.",
       "unauthorized": "Authorization error",
-      "unknown": "Unexpected error"
+      "unknown": "Unexpected error",
+      "invalid_contract": "Selected contract is no longer available. Start over and pick again."
     },
     "step": {
       "user": {
         "data": {
-          "phone": "Phone or contract number",
-          "access_token": "Access token (if available)"
+          "phone": "Phone or contract number"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced",
+            "description": "Skip the SMS flow if you already have an access token.",
+            "data": {
+              "access_token": "Access token"
+            }
+          }
         }
       },
       "contract": {

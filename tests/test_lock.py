@@ -2,8 +2,7 @@
 
 До этого файла `lock.py` не был покрыт ничем: ни действия, ни атрибуты.
 Именно поэтому незамеченной прожила кнопка «Закрыть», которая молча ничего
-не делала, и отсутствие действия «Открыть» — единственного, которое домофон
-на самом деле умеет.
+не делала.
 """
 from __future__ import annotations
 
@@ -105,28 +104,17 @@ async def _setup_lock(hass: HomeAssistant) -> str:
     return eid
 
 
-async def test_open_action_is_offered(hass: HomeAssistant, mock_api):
-    """Домофон объявляет «Открыть» — действие, которое он и выполняет.
+async def test_single_control_for_a_single_action(hass: HomeAssistant, mock_api):
+    """Домофон не объявляет «Открыть»: физическое действие у него одно.
 
-    Без объявления сущность предлагала только запереть и отпереть, а
-    `lock.open` не работал вовсе.
+    В домене `lock` это отдельная возможность «отпустить защёлку», но у
+    домофона она совпадает с «отпереть» — дверь человек открывает рукой.
+    Объявление добавило бы в карточку вторую кнопку для того же вызова.
     """
     eid = await _setup_lock(hass)
     state = hass.states.get(eid)
 
-    features = LockEntityFeature(state.attributes["supported_features"])
-    assert LockEntityFeature.OPEN in features
-
-
-async def test_open_service_opens_the_door(hass: HomeAssistant, mock_api):
-    """`lock.open` доходит до оператора."""
-    eid = await _setup_lock(hass)
-
-    await hass.services.async_call(
-        "lock", "open", {"entity_id": eid}, blocking=True
-    )
-
-    mock_api.open_lock.assert_awaited_once_with(PLACE_ID, AC_ID, ENTRANCE_ID)
+    assert not LockEntityFeature(state.attributes["supported_features"] or 0)
 
 
 async def test_unlock_still_opens_the_door(hass: HomeAssistant, mock_api):

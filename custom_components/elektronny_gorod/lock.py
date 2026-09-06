@@ -13,7 +13,7 @@ from typing import Any
 
 from aiohttp import ClientError
 
-from homeassistant.components.lock import LockEntity, LockEntityFeature, LockState
+from homeassistant.components.lock import LockEntity, LockState
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
@@ -26,6 +26,13 @@ from .const import AREA_INTERCOM, DOMAIN, LOGGER
 from .device import linked_to_place, place_device_id
 from .coordinator import ElektronnyGorodUpdateCoordinator
 from .entity_migration import lock_unique_id
+
+# Сущности не опрашивают оператора поодиночке: данные приходят из
+# координатора одним циклом на всю запись, поэтому ограничивать параллельные
+# обновления нечем и незачем. Константа объявлена явно — правило Silver
+# `parallel-updates` требует не полагаться на умолчание ядра, которое зависит
+# от того, синхронный ли `update` у сущности.
+PARALLEL_UPDATES = 0
 
 LOCK_UNLOCK_DELAY = 5  # секунды cosmetic-UX «открыто»
 LOCK_JAMMED_DELAY = 2
@@ -66,11 +73,6 @@ class ElektronnyGorodLock(
 
     _attr_has_entity_name = True
     _attr_translation_key = "lock"
-    # Домофон именно открывает дверь, а не отпирает замок «до следующего
-    # запирания», и в домене `lock` это отдельное действие. Без объявления
-    # сущность предлагала только «Закрыть»/«Открыть замок», а действия,
-    # которое точно описывает домофон, не было вовсе.
-    _attr_supported_features = LockEntityFeature.OPEN
 
     def __init__(
         self,
@@ -189,16 +191,15 @@ class ElektronnyGorodLock(
             translation_domain=DOMAIN, translation_key="cannot_lock"
         )
 
-    async def async_open(self, **kwargs: Any) -> None:
-        """Открыть дверь — то же действие, что `unlock`.
-
-        Существующие автоматизации зовут `lock.unlock`, ломать их незачем,
-        поэтому оба сервиса ведут к одному вызову оператора.
-        """
-        await self.async_unlock(**kwargs)
-
     async def async_unlock(self, **kwargs: Any) -> None:
-        """Trigger door-open. Synthetic state-cycle через async_call_later."""
+        """Отпереть — единственное, что домофон умеет.
+
+        `LockEntityFeature.OPEN` намеренно не объявляется. В домене `lock` оно
+        означает отдельное действие «отпустить защёлку», но у домофона это то
+        же самое, что отпереть: физическое действие одно, дверь человек
+        открывает рукой. Объявление добавило бы в карточку вторую кнопку, не
+        добавив возможности.
+        """
         LOGGER.info("Unlock %s", self.unique_id)
         self._state = LockState.UNLOCKING
         self.async_write_ha_state()

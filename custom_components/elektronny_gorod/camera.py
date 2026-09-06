@@ -111,6 +111,13 @@ STREAM_RECOVERY_MAX_EXPONENT = math.ceil(
     math.log2(STREAM_RECOVERY_BACKOFF_MAX / STREAM_RECOVERY_COOLDOWN)
 )
 
+# Сущности не опрашивают оператора поодиночке: данные приходят из
+# координатора одним циклом на всю запись, поэтому ограничивать параллельные
+# обновления нечем и незачем. Константа объявлена явно — правило Silver
+# `parallel-updates` требует не полагаться на умолчание ядра, которое зависит
+# от того, синхронный ли `update` у сущности.
+PARALLEL_UPDATES = 0
+
 # A-71 v2 / ADR-0009: интервал poll'а go2rtc producer-health для
 # go2rtc/WebRTC-only пути (камеры без legacy HA Stream worker — напр. лифты).
 # Живой forpost-поток шлёт ~150 КБ/с; `bytes_recv`, замороженный за интервал

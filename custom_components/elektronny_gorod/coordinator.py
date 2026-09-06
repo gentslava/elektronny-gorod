@@ -32,9 +32,11 @@ from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import ElektronnyGorodAPI
+from .http import is_unauthorized
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_OPERATOR_ID,
@@ -147,6 +149,12 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         try:
             places = await self._api.query_places()
         except Exception as ex:  # noqa: BLE001
+            # 401 повтором не лечится: токен отозван, и ждать нечего. Home
+            # Assistant по этому исключению сам предложит войти заново, а
+            # раньше запись просто уходила в «недоступна» без объяснения.
+            if is_unauthorized(ex):
+                LOGGER.warning("Оператор отверг токен — нужна повторная авторизация")
+                raise ConfigEntryAuthFailed("token rejected by operator") from ex
             LOGGER.exception("Failed to load subscriber places")
             raise UpdateFailed(f"places: {ex}") from ex
 

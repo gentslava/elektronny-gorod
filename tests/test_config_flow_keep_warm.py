@@ -14,6 +14,7 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.elektronny_gorod.const import (
     CONF_ACCESS_TOKEN,
+    CONF_ADVANCED,
     CONF_ACCOUNT_ID,
     CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_KEEP_WARM,
@@ -55,7 +56,7 @@ async def _open_initial_go2rtc_form(hass: HomeAssistant):
         context={"source": SOURCE_USER, "show_advanced_options": True},
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}}
     )
     return await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "go2rtc"}
@@ -166,7 +167,7 @@ async def test_skip_go2rtc_persists_keep_warm_off(
         context={"source": SOURCE_USER, "show_advanced_options": True},
     )
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}}
     )
     finish = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"next_step_id": "skip_go2rtc"}

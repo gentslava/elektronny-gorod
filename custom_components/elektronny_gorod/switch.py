@@ -24,6 +24,13 @@ from .const import DOMAIN, LOGGER
 from .device import place_identifier
 from .coordinator import ElektronnyGorodUpdateCoordinator
 
+# Сущности не опрашивают оператора поодиночке: данные приходят из
+# координатора одним циклом на всю запись, поэтому ограничивать параллельные
+# обновления нечем и незачем. Константа объявлена явно — правило Silver
+# `parallel-updates` требует не полагаться на умолчание ядра, которое зависит
+# от того, синхронный ли `update` у сущности.
+PARALLEL_UPDATES = 0
+
 DND_ROOT = "DO_NOT_DISTURB_ROOT"
 DND_INTERCOM = "INTERCOM_CALLS"
 DND_MGMT = "MANAGEMENT_COMPANY_CALLS"
