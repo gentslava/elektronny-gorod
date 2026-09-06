@@ -98,6 +98,22 @@
           "go2rtc_keep_warm": "Publish enabled cameras for external RTSP",
           "go2rtc_keep_warm_hidden": "Also publish hidden cameras"
         }
+      },
+      "reauth_confirm": {
+        "title": "Sign in again",
+        "description": "The operator rejected the saved token for {account}. Sign in again — cameras, locks and settings are kept.",
+        "data": {
+          "phone": "Phone or contract number"
+        },
+        "sections": {
+          "advanced": {
+            "name": "Advanced",
+            "description": "Skip the SMS flow if you already have an access token.",
+            "data": {
+              "access_token": "Access token"
+            }
+          }
+        }
       }
     }
   },

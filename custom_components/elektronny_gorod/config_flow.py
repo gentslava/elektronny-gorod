@@ -1,10 +1,13 @@
 import json
 import voluptuous as vol
 
+from collections.abc import Mapping
+
 from typing import Any, cast
 
 from homeassistant.data_entry_flow import SectionConfig, section
 from homeassistant.config_entries import (
+    SOURCE_REAUTH,
     ConfigEntry,
     ConfigFlow,
     ConfigFlowResult,
@@ -127,14 +130,23 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
                     except ValueError as e:
                         errors[CONF_PHONE] = str(e)
 
-        # Токен убран в свёрнутую секцию. Раньше набор полей выбирался по
-        # `show_advanced_options` — переключателю «Расширенный режим» в
-        # профиле пользователя. Ядро объявило свойство устаревшим, на время
-        # депрекации возвращает из него `True` (то есть поле токена видели
-        # уже все) и удаляет его в HA 2027.6. Секция возвращает исходный
-        # замысел и не зависит от настроек аккаунта: обычный человек видит
-        # одно поле, опытный разворачивает второе.
-        data_schema = vol.Schema({
+        return self.async_show_form(
+            step_id="user",
+            data_schema=self._credentials_schema(),
+            errors=errors,
+        )
+
+    @callback
+    def _credentials_schema(self) -> vol.Schema:
+        """Форма входа: телефон на виду, токен в свёрнутой секции.
+
+        Раньше набор полей выбирался по `show_advanced_options` —
+        переключателю «Расширенный режим» в профиле пользователя. Ядро
+        объявило свойство устаревшим, на время депрекации возвращает из него
+        `True` (то есть поле токена видели уже все) и удаляет его в HA 2027.6.
+        Секция возвращает исходный замысел и от настроек аккаунта не зависит.
+        """
+        return vol.Schema({
             vol.Optional(CONF_PHONE): str,
             vol.Optional(CONF_ADVANCED): section(
                 vol.Schema({vol.Optional(CONF_ACCESS_TOKEN): str}),
@@ -142,11 +154,28 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
         })
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=data_schema,
-            errors=errors,
-        )
+    async def async_step_reauth(
+        self, entry_data: Mapping[str, Any]
+    ) -> ConfigFlowResult:
+        """Оператор отверг токен — Home Assistant просит войти заново."""
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        """Повторный вход в ту же учётную запись.
+
+        Отдельный шаг, а не «добавьте интеграцию ещё раз»: по нему ядро само
+        показывает кнопку в уведомлении о проблеме, а по завершении обновляет
+        существующую запись вместо создания второй.
+        """
+        if user_input is None:
+            return self.async_show_form(
+                step_id="reauth_confirm",
+                data_schema=self._credentials_schema(),
+                description_placeholders={"account": self._get_reauth_entry().title},
+            )
+        return await self.async_step_user(user_input)
 
     async def async_step_password(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Ask for password and complete password-based authentication."""
@@ -303,7 +332,15 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_USER_AGENT: json.dumps(self.user_agent.json()),
         }
 
-        # Existing-entry / reauth logic
+        # Переавторизация: ядро знает, какую запись чинить, поэтому искать её
+        # сравнением полей не нужно. `data_updates` дописывает поверх
+        # существующих данных, так что настройки go2rtc сохраняются сами.
+        if self.source == SOURCE_REAUTH:
+            return self.async_update_reload_and_abort(
+                self._get_reauth_entry(), data_updates=data
+            )
+
+        # Повторная настройка руками: ту же учётную запись добавляют ещё раз.
         for entry in self._async_current_entries():
             if data[CONF_ACCESS_TOKEN] == entry.data.get(CONF_ACCESS_TOKEN):
                 LOGGER.info("Entry %s already exists", entry.entry_id)

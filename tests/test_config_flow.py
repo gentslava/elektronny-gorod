@@ -676,3 +676,112 @@ async def test_options_flow_requires_url_when_enabled(
     assert result["type"] == FlowResultType.FORM
     assert result["errors"] == {"base": "go2rtc_required_fields"}
 
+
+# ─── Переавторизация: правило Silver `reauthentication-flow` ────────────────
+
+
+async def test_reauth_updates_existing_entry(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Повторный вход чинит запись, а не создаёт вторую.
+
+    Раньше нативного пути не было вовсе: пользователю оставалось добавлять
+    интеграцию заново и надеяться, что она узнает старую запись по совпадению
+    имени, номера счёта и абонента.
+    """
+    entry = _existing_entry(hass, access_token="OLD_AT")
+
+    result = await entry.start_reauth_flow(hass)
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "reauth_confirm"
+
+    with patch.object(
+        hass.config_entries, "async_reload", new=AsyncMock(return_value=True)
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "FRESH_AT"}}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert entry.data[CONF_ACCESS_TOKEN] == "FRESH_AT"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1
+
+
+async def test_reauth_keeps_go2rtc_settings(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Настройки go2rtc переживают повторный вход.
+
+    Их в форме не спрашивают, и потерять их — значит молча выключить видео.
+    """
+    entry = _existing_entry(
+        hass,
+        access_token="OLD_AT",
+        use_go2rtc=True,
+        go2rtc_base_url="http://10.0.0.5:1984",
+        go2rtc_rtsp_host="10.0.0.5",
+    )
+
+    result = await entry.start_reauth_flow(hass)
+    with patch.object(
+        hass.config_entries, "async_reload", new=AsyncMock(return_value=True)
+    ):
+        await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "FRESH_AT"}}
+        )
+        await hass.async_block_till_done()
+
+    assert entry.data[CONF_USE_GO2RTC] is True
+    assert entry.data[CONF_GO2RTC_BASE_URL] == "http://10.0.0.5:1984"
+    assert entry.data[CONF_GO2RTC_RTSP_HOST] == "10.0.0.5"
+
+
+async def test_reauth_step_is_translated() -> None:
+    """У шага повторного входа есть текст во всех трёх файлах переводов."""
+    import json
+    import pathlib
+
+    base = pathlib.Path("custom_components/elektronny_gorod")
+    for name in ("strings.json", "translations/ru.json", "translations/en.json"):
+        data = json.loads((base / name).read_text(encoding="utf-8"))
+        step = data["config"]["step"].get("reauth_confirm")
+        assert step, f"{name}: нет шага reauth_confirm"
+        assert step.get("title") and step.get("description")
+        assert "{account}" in step["description"], "не подставляется имя записи"
+        assert step.get("sections", {}).get("advanced"), f"{name}: секция без перевода"
+
+
+async def test_reauth_fixes_entry_even_if_operator_renamed_account(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """Повторный вход чинит ту запись, которую чинят, а не похожую.
+
+    До нативного шага запись искали сравнением имени, номера счёта и
+    абонента. Стоило оператору сменить отображаемое имя — совпадения не было,
+    и вместо починки заводилась вторая запись, а первая оставалась сломанной.
+    Home Assistant же знает, какую именно запись он послал чинить.
+    """
+    entry = _existing_entry(hass, access_token="OLD_AT")
+    mock_api.query_profile = AsyncMock(
+        return_value={
+            "subscriber": {"name": "Иван Петров", "accountId": "1131686", "id": 2104659}
+        }
+    )
+
+    result = await entry.start_reauth_flow(hass)
+    with patch.object(
+        hass.config_entries, "async_reload", new=AsyncMock(return_value=True)
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "FRESH_AT"}}
+        )
+        await hass.async_block_till_done()
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    assert len(hass.config_entries.async_entries(DOMAIN)) == 1, "завелась вторая запись"
+    assert entry.data[CONF_ACCESS_TOKEN] == "FRESH_AT"
+    assert entry.data[CONF_NAME] == "Иван Петров (1131686)"
+

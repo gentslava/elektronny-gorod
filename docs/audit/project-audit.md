@@ -1014,6 +1014,17 @@ Quality gates:
 - **Follow-up:** `permissions` не заданы в `hacs.yaml`, `hassfest.yaml`, `python-tests.yaml` — при `default_workflow_permissions: write` они получают write-токен и запускают сторонние экшены с mutable-ref (`hacs/action@main`, `hassfest@master`). Отдельно стоит завести `.github/dependabot.yml` для экосистемы `github-actions`: остальные workflow всё ещё сидят на `actions/checkout@v4` и `actions/upload-artifact@v4` при актуальных `v7`, а `hacs/action@main` и `hassfest@master` вообще не версионированы.
 - **Acceptance:** первый fork-PR после merge проверяется вручную — `workflow_run` и `pull_request_target` читаются GitHub только из default-ветки, поэтому до merge схема непроверяема.
 
+### A-108. Отзыв токена не приводил к предложению войти заново
+
+- **Status:** 🟢 **resolved-in-branch** (pending merge `feat/config-flow-coverage-silver`).
+- **Severity:** **P2** — интеграция замолкала без объяснения причины.
+- **Area:** `coordinator.py`, `config_flow.py`, `http.py`.
+- **Evidence (2026-09-06):** при 401 от `/rest/v3/subscriber-places` координатор поднимал `UpdateFailed`. Нативного шага переавторизации во флоу не было вовсе — правило Silver `reauthentication-flow` числилось «работает, но без `async_step_reauth_confirm`».
+- **Root cause:** отозванный токен обрабатывался как временная ошибка. Повтором это не лечится: сколько ни ждать, ответ тот же. Home Assistant предлагает войти заново только по `ConfigEntryAuthFailed`, поэтому запись просто уходила в «недоступна», и пользователю оставалось догадываться. Единственный обходной путь — добавить интеграцию заново и надеяться, что она узнает старую запись по совпадению имени, номера счёта и абонента.
+- **Fix:** при 401 поднимается `ConfigEntryAuthFailed`; добавлены `async_step_reauth` и `async_step_reauth_confirm` с формой входа и переводами. Распаковка ответа из исключения вынесена в `is_unauthorized` рядом с местом создания этого исключения — до того она была размазана по шести местам `api.py`.
+- **Смежный дефект:** поиск записи по совпадению полей ломался, если оператор менял отображаемое имя: вместо починки заводилась вторая запись, а первая оставалась сломанной. Нативный путь берёт запись у ядра и от полей не зависит. Тест `test_reauth_fixes_entry_even_if_operator_renamed_account` закрепляет именно это отличие — без него мутация, отключающая нативную ветку, проходила молча.
+- **Tests:** `tests/test_reauth_trigger.py` (7) — 401 запускает флоу, `500`/`531`/таймаут не запускают; `tests/test_config_flow.py` — обновление записи, сохранение настроек go2rtc, переименование у оператора, переводы шага. Шесть мутаций, все ловятся.
+
 ### A-107. Config flow опирался на свойство ядра, удаляемое в 2027.6
 
 - **Status:** 🟢 **resolved-in-branch** (pending merge `feat/config-flow-coverage-silver`).
