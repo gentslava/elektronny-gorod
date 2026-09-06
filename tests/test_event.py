@@ -622,7 +622,9 @@ async def test_real_ended_cancels_auto_end(hass: HomeAssistant, mock_api):
 async def test_apartment_fallback_keeps_push_value(hass: HomeAssistant, mock_api):
     """Нет канонической квартиры (place.address не dict) → остаётся номер из пуша."""
     entity_id = await _setup(hass)
-    coordinator = next(iter(hass.data[DOMAIN].values()))
+    coordinator = next(
+        e.runtime_data for e in hass.config_entries.async_loaded_entries(DOMAIN)
+    )
     coordinator.data["places"][0]["place"]["address"] = "addr-string"
     async_dispatcher_send(hass, SIGNAL_DOORBELL, {
         "event_type": "ring", "place_id": "P1", "access_control_id": "AC1",

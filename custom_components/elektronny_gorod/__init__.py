@@ -53,7 +53,8 @@ from .user_agent import UserAgent
 _FCM_DATA: Final = f"{DOMAIN}_fcm_listeners"
 
 # Реестр SIP-контроллеров per-entry (`SIP_DATA` из const.py) — отдельный top-level
-# key, чтобы не ломать `hass.data[DOMAIN][entry_id] = coordinator` (event/camera/lock).
+# key: координатор с тех пор переехал в `entry.runtime_data`, а под этим ключом
+# остаются только вспомогательные реестры.
 SERVICE_ANSWER = "answer"
 SERVICE_HANGUP = "hangup"
 
@@ -102,11 +103,9 @@ async def _async_register_fcm_listener(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Elektronny Gorod from a config entry."""
-    hass.data.setdefault(DOMAIN, {})
-
     coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
     await coordinator.async_config_entry_first_refresh()
-    hass.data[DOMAIN][entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
 
     stream_manager: CameraStreamManager | None = None
     use_go2rtc = entry.options.get(
@@ -614,7 +613,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 hass.services.async_remove(DOMAIN, service)
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        hass.data[DOMAIN].pop(entry.entry_id, None)
         hass.data.get(_FCM_DATA, {}).pop(entry.entry_id, None)
         hass.data.get(STREAM_MANAGER_DATA, {}).pop(entry.entry_id, None)
 

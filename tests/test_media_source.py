@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from homeassistant.config_entries import ConfigEntryState
+
 from homeassistant.components.media_player import BrowseError
 from homeassistant.components.media_source.error import Unresolvable
 from homeassistant.components.media_source.models import MediaSourceItem
@@ -81,7 +83,8 @@ def _coordinator(
 def _entry(hass, coordinator, *, title: str = "Test Account") -> MockConfigEntry:
     entry = MockConfigEntry(domain=DOMAIN, title=title)
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     return entry
 
 

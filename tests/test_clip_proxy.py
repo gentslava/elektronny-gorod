@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from homeassistant.config_entries import ConfigEntryState
+
 from homeassistant.setup import async_setup_component
 
 
@@ -92,7 +94,8 @@ def test_clip_proxy_url_shape(hass) -> None:
 async def test_view_streams_clip(hass, clip_client) -> None:
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     upstream = _fake_upstream()
     session = _fake_session(upstream)
 
@@ -123,7 +126,8 @@ async def test_view_serves_range_itself(hass, clip_client) -> None:
     """
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     upstream = _fake_upstream()
     session = _fake_session(upstream)
 
@@ -148,7 +152,8 @@ async def test_view_serves_range_itself(hass, clip_client) -> None:
 async def test_view_range_suffix_and_unsatisfiable(hass, clip_client) -> None:
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     with patch(
         "custom_components.elektronny_gorod.clip_proxy.async_get_clientsession",
@@ -169,7 +174,8 @@ async def test_view_range_suffix_and_unsatisfiable(hass, clip_client) -> None:
 async def test_view_rejects_bad_token_and_unknown_entry(hass, clip_client) -> None:
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     client = clip_client
 
@@ -189,7 +195,8 @@ async def test_view_maps_download_errors(hass, clip_client) -> None:
     client_coordinator = _coordinator(
         download_error=ForpostDownloadError("102")
     )
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = client_coordinator
+    entry.runtime_data = client_coordinator
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     client = clip_client
 
@@ -223,7 +230,8 @@ async def test_view_upstream_failure_is_502(hass, clip_client) -> None:
 
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     session = MagicMock()
     session.get = AsyncMock(side_effect=ClientError("boom"))
 
@@ -243,7 +251,8 @@ async def test_view_rejects_non_ascii_token_without_500(
     """Security I-1: non-ASCII digest must 403, not TypeError-500."""
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     client = clip_client
     resp = await client.get(
@@ -257,7 +266,8 @@ async def test_view_clamps_bad_upstream_status(hass, clip_client) -> None:
     """M-5: non-2xx upstream (e.g. expired link) maps to 502, not passthrough."""
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     upstream = _fake_upstream(status=403, chunks=(b"",))
     session = _fake_session(upstream)
@@ -291,7 +301,8 @@ async def test_view_polls_storage_until_clip_ready(hass, clip_client) -> None:
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
     coordinator = _coordinator()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     ready = _fake_upstream(chunks=(b"mp4", b"data"))
     session = MagicMock()
@@ -323,7 +334,8 @@ async def test_clip_is_fetched_once_and_reused(hass, clip_client) -> None:
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
     coordinator = _coordinator()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     session = _fake_session(_fake_upstream())
 
     with patch(
@@ -345,7 +357,8 @@ async def test_clip_is_fetched_once_and_reused(hass, clip_client) -> None:
 async def test_view_storage_prepare_timeout_is_503(hass, clip_client) -> None:
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     session = MagicMock()
     session.get = AsyncMock(return_value=_fake_locked_upstream())
@@ -441,7 +454,8 @@ def test_parse_range_follows_rfc9110() -> None:
 async def test_view_ignores_malformed_range(hass, clip_client) -> None:
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     with patch(
         "custom_components.elektronny_gorod.clip_proxy.async_get_clientsession",
@@ -461,7 +475,8 @@ async def test_view_refuses_empty_body(hass, clip_client) -> None:
     """Пустое тело нельзя закешировать: оно отравило бы клип на весь TTL."""
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     with patch(
         "custom_components.elektronny_gorod.clip_proxy.async_get_clientsession",
@@ -479,7 +494,8 @@ async def test_view_refuses_empty_body(hass, clip_client) -> None:
 async def test_view_refuses_oversized_clip(hass, clip_client) -> None:
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     upstream = _fake_upstream(headers={"Content-Length": "999999999"})
 
     with patch(
@@ -498,7 +514,8 @@ async def test_view_aborts_oversized_stream(hass, clip_client) -> None:
 
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _coordinator()
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     upstream = _fake_upstream(chunks=(b"aaaa", b"bbbb"), headers={})
 
     with patch(
@@ -524,7 +541,8 @@ async def test_parallel_requests_mint_once(hass, clip_client) -> None:
     entry = MockConfigEntry(domain=DOMAIN, title="Test")
     entry.add_to_hass(hass)
     coordinator = _coordinator()
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     entered = asyncio.Event()
     gate = asyncio.Event()

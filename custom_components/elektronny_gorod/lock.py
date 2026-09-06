@@ -24,7 +24,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import AREA_INTERCOM, DOMAIN, LOGGER
 from .device import linked_to_place, place_device_id
-from .coordinator import ElektronnyGorodUpdateCoordinator
+from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 from .entity_migration import lock_unique_id
 
 # Сущности не опрашивают оператора поодиночке: данные приходят из
@@ -40,11 +40,11 @@ LOCK_JAMMED_DELAY = 2
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ElektronnyGorodConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Elektronny Gorod Lock based on a config entry."""
-    coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     locks = (coordinator.data or {}).get("locks") or []
     async_add_entities(
         ElektronnyGorodLock(

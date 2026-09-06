@@ -37,7 +37,7 @@ from .const import (
     LOGGER,
     SIGNAL_DOORBELL,
 )
-from .coordinator import ElektronnyGorodUpdateCoordinator
+from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 from .device import linked_to_place, place_device_id, place_identifier
 from .history import (
     camera_history_unique_id,
@@ -135,11 +135,11 @@ def _migrate_single_place_account_history_entity(
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ElektronnyGorodConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Elektronny Gorod doorbell call events based on a config entry."""
-    coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     locks = (coordinator.data or {}).get("locks") or []
 
     # Дедуп по (place_id, access_control_id) — одна event-сущность на домофон

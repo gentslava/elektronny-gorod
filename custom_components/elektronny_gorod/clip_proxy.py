@@ -26,6 +26,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from .api import ForpostDownloadError
+from .coordinator import async_get_coordinator
 from .const import DOMAIN, LOGGER
 
 _SECRET_KEY = f"{DOMAIN}_clip_signing_secret"
@@ -259,7 +260,7 @@ class ClipProxyView(HomeAssistantView):
             hass, request.query.get("t", ""), entry_id, event_id
         ):
             return self.json_message("Invalid or expired clip link", 403)
-        coordinator: Any = (hass.data.get(DOMAIN) or {}).get(entry_id)
+        coordinator: Any = async_get_coordinator(hass, entry_id)
         if coordinator is None:
             return self.json_message("Unknown media item", 404)
 

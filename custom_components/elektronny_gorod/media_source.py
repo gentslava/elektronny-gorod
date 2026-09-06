@@ -29,6 +29,7 @@ from homeassistant.helpers import translation
 from homeassistant.util import dt as dt_util
 
 from .clip_proxy import async_register_clip_view, clip_proxy_url
+from .coordinator import async_get_coordinator
 from .const import DOMAIN, LOGGER
 from .history import place_display_name
 
@@ -91,7 +92,7 @@ class ElektronnyGorodMediaSource(MediaSource):
         self._hass = hass
 
     def _coordinator(self, entry_id: str) -> Any | None:
-        return (self._hass.data.get(DOMAIN) or {}).get(entry_id)
+        return async_get_coordinator(self._hass, entry_id)
 
     # Возвращаем `BrowseMedia`, тогда как база объявляет `BrowseMediaSource`.
     # Ядро читает только поля `BrowseMedia`, поэтому рантайм корректен, но
@@ -170,9 +171,10 @@ class ElektronnyGorodMediaSource(MediaSource):
 
     def _browse_root(self) -> BrowseMedia:
         children: list[BrowseMedia] = []
-        for entry_id, coordinator in (self._hass.data.get(DOMAIN) or {}).items():
-            entry = self._hass.config_entries.async_get_entry(entry_id)
-            if entry is None or not self._place_ids(coordinator):
+        for entry in self._hass.config_entries.async_loaded_entries(DOMAIN):
+            entry_id = entry.entry_id
+            coordinator = entry.runtime_data
+            if not self._place_ids(coordinator):
                 continue
             children.append(
                 self._folder(_uri(entry_id), entry.title)

@@ -87,10 +87,9 @@ async def _platform_sensor(
     hass: HomeAssistant,
     manager: _ManagerStub | None,
 ):
-    entry = SimpleNamespace(entry_id="entry-1")
     coordinator = MagicMock()
     coordinator.data = {"balances": [], "locks": []}
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry = SimpleNamespace(entry_id="entry-1", runtime_data=coordinator)
     if manager is not None:
         hass.data.setdefault(STREAM_MANAGER_DATA, {})[
             entry.entry_id
@@ -240,7 +239,7 @@ async def test_sensor_attributes_never_contain_operator_url_or_token(
 async def test_sensor_is_absent_when_go2rtc_is_disabled(
     hass: HomeAssistant,
 ) -> None:
-    entry = SimpleNamespace(entry_id="entry-disabled")
+    entry = SimpleNamespace(entry_id="entry-disabled", runtime_data=MagicMock())
     coordinator = MagicMock()
     coordinator.data = {"balances": [], "locks": []}
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator

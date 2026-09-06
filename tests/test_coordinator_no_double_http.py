@@ -149,7 +149,7 @@ async def test_data_still_correct_after_dedup(
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
 
-    coordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
     data = coordinator.data
 
     # 1 intercom camera (от entrance.externalCameraId=100) + 1 public.

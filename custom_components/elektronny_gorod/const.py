@@ -46,7 +46,7 @@ DEFAULT_GO2RTC_KEEP_WARM_HIDDEN: Final = False
 GO2RTC_RTSP_PORT = 8554
 
 # Per-config-entry CameraStreamManager registry. Kept separate from
-# hass.data[DOMAIN][entry_id], whose public shape remains the coordinator.
+# entry.runtime_data, whose public shape remains the coordinator.
 STREAM_MANAGER_DATA: Final = f"{DOMAIN}_stream_managers"
 
 CONF_OPERATOR_ID: Final = "operator_id"

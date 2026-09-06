@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 
 import pytest
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.redact import REDACTED
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -114,7 +115,8 @@ async def test_diagnostics_coordinator_snapshot_is_counts_only(
             "dnd": {"root": True},
         }
 
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = _FakeCoordinator()
+    entry.runtime_data = _FakeCoordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     snap = diag["coordinator"]

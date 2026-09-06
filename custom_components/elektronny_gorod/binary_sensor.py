@@ -21,7 +21,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, LOGGER
 from .device import place_identifier
-from .coordinator import ElektronnyGorodUpdateCoordinator
+from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 
 # Сущности не опрашивают оператора поодиночке: данные приходят из
 # координатора одним циклом на всю запись, поэтому ограничивать параллельные
@@ -33,11 +33,11 @@ PARALLEL_UPDATES = 0
 
 async def async_setup_entry(
     hass: HomeAssistant,
-    entry: ConfigEntry,
+    entry: ElektronnyGorodConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up Elektronny Gorod Binary Sensors."""
-    coordinator: ElektronnyGorodUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
+    coordinator = entry.runtime_data
 
     balances = (coordinator.data or {}).get("balances") or []
     async_add_entities(

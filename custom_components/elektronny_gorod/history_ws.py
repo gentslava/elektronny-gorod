@@ -14,6 +14,7 @@ from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers import entity_registry as er
 
+from .coordinator import async_get_coordinator
 from .const import CONF_ACCOUNT_ID, CONF_SUBSCRIBER_ID, DOMAIN, LOGGER
 from .history import map_general_event_type, place_display_name
 
@@ -63,7 +64,7 @@ def _resolve_target(
         or not registry_entry.config_entry_id
     ):
         return None
-    coordinator = hass.data.get(DOMAIN, {}).get(registry_entry.config_entry_id)
+    coordinator = async_get_coordinator(hass, registry_entry.config_entry_id)
     if coordinator is None:
         return None
     source_locks = _access_control_sources(coordinator)

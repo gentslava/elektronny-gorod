@@ -9,6 +9,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from homeassistant.config_entries import ConfigEntryState
+
 from homeassistant.exceptions import Unauthorized
 from homeassistant.helpers import entity_registry as er
 
@@ -100,7 +102,8 @@ def _setup_target(hass) -> tuple[MockConfigEntry, SimpleNamespace]:
             ]
         },
     )
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     return entry, coordinator
 
 
@@ -170,7 +173,8 @@ def _setup_account_target(hass) -> tuple[MockConfigEntry, SimpleNamespace]:
             ]
         },
     )
-    hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
+    entry.runtime_data = coordinator
+    entry.mock_state(hass, ConfigEntryState.LOADED)
     return entry, coordinator
 
 
