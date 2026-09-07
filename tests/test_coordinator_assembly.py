@@ -134,7 +134,7 @@ async def test_broken_lock_data_does_not_take_the_cameras_down(
     assert [
         r for r in caplog.records if "Замки: данные снова приходят" in r.getMessage()
     ], "возвращение замков должно быть видно"
-    assert data["locks"], "замки вернулись в снимок"
+    assert [lock["openable"] for lock in data["locks"]] == [True], "замки вернулись"
 
 
 async def test_failing_camera_source_is_reported_once_and_on_recovery(
@@ -289,7 +289,13 @@ async def test_unexpected_screens_shape_does_not_break_the_cycle(
     assert drift, "о вытянутой через силу форме надо сказать хотя бы на debug"
     # Что именно не так — иначе разные дрейфы неразличимы, и строка не
     # помогает тому, ради кого написана.
-    assert any(reason in r.getMessage() for r in drift), [r.getMessage() for r in drift]
+    messages = [r.getMessage() for r in drift]
+    assert all(reason in m for m in messages), messages
+    # Раздел в префиксе: при дрейфе корня строк две, и без него они
+    # побайтно одинаковы — не понять, вернулись ли камеры или подъезды.
+    assert all(
+        "PUBLIC_CAMERAS" in m or "ACCESS_CONTROLS" in m for m in messages
+    ), messages
     # Но без тела, и во ВСЕХ записях: их по одной на запрошенный раздел, а
     # проверка первой пропустила бы утечку, сделанную по-разному для разных.
     assert "ПОЛЕЗНАЯ-НАГРУЗКА" not in caplog.text
@@ -550,6 +556,9 @@ async def test_partial_settings_keep_what_parsed(hass: HomeAssistant, caplog) ->
     hidden = {c["id"]: c["hidden"] for c in data["cameras"]}
     assert hidden == {"CAM-PUB": True, "CAM-OTHER": False}, hidden
     assert [r for r in caplog.records if "Настройки видимости" in r.getMessage()]
+    # Ни мусор, ни разобранное: до сих пор проверялось только первое, а во
+    # всех остальных случаях разобранное пусто, и проверка была пустой сама.
+    assert "CAM-PUB" not in caplog.text and "мусор" not in caplog.text
 
 
 async def test_zero_is_a_valid_hidden_id(hass: HomeAssistant, caplog) -> None:

@@ -440,7 +440,7 @@ class ElektronnyGorodAPI:
     async def query_screens_settings(self, place_id: str) -> Any:
         """Пользовательские настройки видимости из приложения оператора.
 
-        Возвращает dict вида:
+        Оператор присылает:
             {"screens": [
                 {"type": "ACCESS_CONTROLS",
                  "entities": [{"id", "type", "order"}, ...],  # видимые
