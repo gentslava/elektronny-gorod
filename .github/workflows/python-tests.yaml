@@ -28,14 +28,18 @@ on:
 env:
   PHC_CURRENT: '0.13.362'
 
+# На уровне workflow, а не одного job: тесты и pyright одинаково делают
+# checkout и ставят зависимости с PyPI, и обоим нужен только read. Умолчание
+# в настройках репозитория стоит на запись, а на `push: master` и
+# `workflow_dispatch` read-only токен ничем не форсируется — то есть пакет,
+# исполнившийся на установке, получил бы право писать в репозиторий.
+permissions:
+  contents: read
+
 jobs:
   pytest:
     name: pytest (py${{ matrix.python-version }}, HA ${{ matrix.ha-label }})
     runs-on: ubuntu-latest
-    # Остальные workflow репозитория объявляют права явно; этот полагался на
-    # умолчание, а оно в настройках репозитория стоит на запись.
-    permissions:
-      contents: read
     strategy:
       fail-fast: false
       matrix:
