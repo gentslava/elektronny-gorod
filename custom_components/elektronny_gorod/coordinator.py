@@ -458,7 +458,16 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # 2. Place-cameras (личные подписочные камеры).
         # Идут ВТОРЫМИ чтобы dedupe_by_id отдал приоритет intercom > place > public.
-        place_cameras = await self._api.query_cameras(place_id)
+        # Каждый источник — под своим фронтом: отказ одного не должен уносить
+        # камеры остальных. Домофонные уже собраны выше и от этого запроса не
+        # зависят.
+        try:
+            place_cameras = await self._api.query_cameras(place_id)
+        except Exception as ex:  # noqa: BLE001
+            self._note_failure("Камеры места", place_id, ex)
+            place_cameras = []
+        else:
+            self._note_success("Камеры места", place_id)
         for cam in place_cameras:
             cid = cam.get("externalCameraId") or cam.get("id")
             cameras.append({
@@ -472,7 +481,13 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # 3. Public cameras (общедомовые + городские, API не разделяет).
         # Видимость берётся из /settings/screens — user в приложении сам решает
         # какие camera ему интересны, какие скрыть.
-        public_cameras = await self._api.query_public_cameras(place_id)
+        try:
+            public_cameras = await self._api.query_public_cameras(place_id)
+        except Exception as ex:  # noqa: BLE001
+            self._note_failure("Общедомовые камеры", place_id, ex)
+            public_cameras = []
+        else:
+            self._note_success("Общедомовые камеры", place_id)
         for cam in public_cameras:
             cid = cam.get("externalCameraId") or cam.get("id")
             cameras.append({

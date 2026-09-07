@@ -390,33 +390,37 @@ class ElektronnyGorodAPI:
 
     async def query_cameras(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of cameras for the current access token."""
+        # Отказ наружу, а не пустой список: пустота от оператора и его
+        # молчание — разные вещи, и различить их может только вызывающий.
+        # Проглоченный здесь отказ доходил до координатора как «данных
+        # нет», тот считал это успехом, и пропавшие камеры исчезали из
+        # интерфейса без единой строки в журнале.
         api_url = f"/rest/v1/places/{place_id}/cameras"
 
-        try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-            cameras = await response.json()
-            data = cameras.get("data") if cameras else []
-            return data
-        except Exception:
-            return []
+        cameras = await response.json()
+        data = cameras.get("data") if cameras else []
+        return data
 
     async def query_public_cameras(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of public cameras for a place."""
+        # Отказ наружу, а не пустой список: пустота от оператора и его
+        # молчание — разные вещи, и различить их может только вызывающий.
+        # Проглоченный здесь отказ доходил до координатора как «данных
+        # нет», тот считал это успехом, и пропавшие камеры исчезали из
+        # интерфейса без единой строки в журнале.
         api_url = f"/rest/v2/places/{place_id}/public/cameras"
 
-        try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-            cameras = await response.json()
-            data = cameras.get("data") if cameras else []
-            return data
-        except Exception:
-            return []
+        cameras = await response.json()
+        data = cameras.get("data") if cameras else []
+        return data
 
     async def query_sections(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of cameras for the current access token."""
@@ -454,17 +458,19 @@ class ElektronnyGorodAPI:
 
         Если ответ `{}` — пользователь ничего не настраивал, всё видимо.
         """
+        # Отказ наружу, а не пустой список: пустота от оператора и его
+        # молчание — разные вещи, и различить их может только вызывающий.
+        # Проглоченный здесь отказ доходил до координатора как «данных
+        # нет», тот считал это успехом, и пропавшие камеры исчезали из
+        # интерфейса без единой строки в журнале.
         api_url = (
             f"/api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens"
         )
-        try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
-            data = await response.json()
-            return data or {}
-        except Exception:
-            return {}
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        data = await response.json()
+        return data or {}
 
     async def query_dnd_settings(self, place_id: str) -> list[dict[str, Any]]:
         """Get Do Not Disturb settings for a place.
@@ -478,17 +484,19 @@ class ElektronnyGorodAPI:
 
         Returns plain list (внутренности `do_not_disturb`), либо `[]` на ошибку.
         """
+        # Отказ наружу, а не пустой список: пустота от оператора и его
+        # молчание — разные вещи, и различить их может только вызывающий.
+        # Проглоченный здесь отказ доходил до координатора как «данных
+        # нет», тот считал это успехом, и пропавшие камеры исчезали из
+        # интерфейса без единой строки в журнале.
         api_url = (
             f"/api/mh-customer/mobile/v1/customers/places/{place_id}/settings/do_not_disturb"
         )
-        try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
-            data = await response.json()
-            return (data or {}).get("do_not_disturb") or []
-        except Exception:
-            return []
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        data = await response.json()
+        return (data or {}).get("do_not_disturb") or []
 
     async def post_dnd_settings(
         self,

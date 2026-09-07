@@ -308,19 +308,7 @@ async def test_persistent_rest_failure_is_not_shouted_on_every_response(
         if r.name.startswith("custom_components.elektronny_gorod")
         and "API request failed" in r.msg
     ]
-    shouted = [r for r in ours if r.levelno >= logging.WARNING]
-    assert len(shouted) == 1, "об отказе говорим один раз, а не на каждом ответе"
-    assert len(ours) == 12, "остальные попытки видны на debug — иначе нечего смотреть"
-
-    # Возвращение данных снимает отметку: следующая пропажа снова заметна.
-    fake_session.get = AsyncMock(side_effect=_responder(200))
-    await http_client.get("/rest/v1/subscriber-places")
-    fake_session.get = AsyncMock(side_effect=_responder(503))
-    caplog.clear()
-    with caplog.at_level(logging.DEBUG):
-        with pytest.raises(ClientError):
-            await http_client.get("/rest/v1/subscriber-places")
-
-    assert [r for r in caplog.records if r.levelno >= logging.WARNING], (
-        "после возвращения данных о новой пропаже надо сказать заново"
+    assert [r for r in ours if r.levelno >= logging.WARNING] == [], (
+        "об отказе решает вызывающий, а не транспорт"
     )
+    assert len(ours) == 12, "на debug отказ виден — иначе диагностировать нечем"

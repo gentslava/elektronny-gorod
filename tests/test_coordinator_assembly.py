@@ -9,6 +9,8 @@ Assistant.
 from __future__ import annotations
 
 import logging
+
+from aiohttp import ClientError
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from homeassistant.core import HomeAssistant
@@ -119,3 +121,63 @@ async def test_broken_lock_data_does_not_take_the_cameras_down(
     assert data["locks"] == []
     complaints = [r for r in caplog.records if r.getMessage().startswith("Замки:")]
     assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
+
+
+async def test_failing_camera_source_is_reported_once_and_on_recovery(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Пропажа камер видна в журнале — один раз, и один раз возвращение.
+
+    Раньше отказ проглатывался в слое API и доходил до координатора как
+    «камер нет». Тот считал это успехом: камеры исчезали из интерфейса, а в
+    журнале не оставалось ни строки ни на одном уровне. Правило Silver
+    `log-when-unavailable` просит ровно две строки — на пропажу и на
+    возвращение.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api(query_cameras=[{"id": "internal", "externalCameraId": "CAM-YARD"}])
+    coordinator = _coordinator(hass, entry, api)
+
+    with caplog.at_level(logging.INFO):
+        api.query_cameras = AsyncMock(side_effect=ClientError("оператор молчит"))
+        for _ in range(3):
+            await coordinator._async_update_data()
+
+        complaints = [
+            r for r in caplog.records if "Камеры места" in r.getMessage()
+        ]
+        assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
+
+        caplog.clear()
+        api.query_cameras = AsyncMock(
+            return_value=[{"id": "internal", "externalCameraId": "CAM-YARD"}]
+        )
+        data = await coordinator._async_update_data()
+
+    assert [r for r in caplog.records if "данные снова приходят" in r.getMessage()], (
+        "возвращение камер должно быть видно"
+    )
+    assert "CAM-YARD" in [c["id"] for c in data["cameras"]]
+
+
+async def test_one_broken_camera_source_does_not_take_the_others_down(
+    hass: HomeAssistant,
+) -> None:
+    """Отказ одного источника камер не уносит остальные.
+
+    Домофонные, личные и общедомовые камеры приходят тремя разными
+    запросами. Общий `except` на все три означал бы, что молчание оператора
+    про общедомовые гасит и камеру домофона у двери.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api(
+        query_access_controls=[{"id": "2000", "externalCameraId": "CAM-GATE"}],
+        query_cameras=[{"id": "i", "externalCameraId": "CAM-YARD"}],
+    )
+    api.query_public_cameras = AsyncMock(side_effect=ClientError("нет общедомовых"))
+
+    data = await _coordinator(hass, entry, api)._async_update_data()
+
+    assert sorted(c["id"] for c in data["cameras"]) == ["CAM-GATE", "CAM-YARD"]

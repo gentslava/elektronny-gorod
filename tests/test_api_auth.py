@@ -337,18 +337,16 @@ async def test_screens_settings_return_user_preferences(hass) -> None:
     )
 
 
-@pytest.mark.parametrize("outcome", [None, _refusal(500)])
-async def test_screens_settings_degrade_to_everything_visible(hass, outcome) -> None:
-    """Нет настроек или отказ — считаем, что скрытого нет.
+async def test_screens_settings_degrade_to_everything_visible(hass) -> None:
+    """Пустой ответ — считаем, что скрытого нет.
 
-    Иначе сбой этого необязательного запроса прятал бы у пользователя камеры,
-    которые он не прятал.
+    Иначе отсутствие настроек прятало бы у пользователя камеры, которые он не
+    прятал. А вот отказ оператора пустотой не притворяется: их различает
+    только вызывающий, и координатор на отказе сохраняет прежнюю видимость,
+    сказав об этом одной строкой.
     """
     api = _api(hass)
-    if isinstance(outcome, Exception):
-        api.http.get = AsyncMock(side_effect=outcome)
-    else:
-        api.http.get = AsyncMock(return_value=_response(200, outcome))
+    api.http.get = AsyncMock(return_value=_response(200, None))
 
     assert await api.query_screens_settings("PLACE") == {}
 
@@ -461,11 +459,7 @@ class _LooksLikeAResponse:
     ("method", "args", "kwargs", "verb", "fallback"),
     [
         ("query_old_cameras", (), {}, "get", []),
-        ("query_cameras", ("PLACE",), {}, "get", []),
-        ("query_public_cameras", ("PLACE",), {}, "get", []),
         ("query_sections", ("PLACE",), {}, "get", []),
-        ("query_screens_settings", ("PLACE",), {}, "get", {}),
-        ("query_dnd_settings", ("PLACE",), {}, "get", []),
         ("query_camera_stream", ("CAM",), {}, "get", None),
     ],
 )
@@ -511,6 +505,31 @@ async def test_lookalike_response_yields_the_safe_fallback(
             TypeError,
             "Unexpected response type",
         ),
+        ("query_cameras", ("PLACE",), {}, "get", TypeError, "Unexpected response type"),
+        (
+            "query_public_cameras",
+            ("PLACE",),
+            {},
+            "get",
+            TypeError,
+            "Unexpected response type",
+        ),
+        (
+            "query_screens_settings",
+            ("PLACE",),
+            {},
+            "get",
+            TypeError,
+            "Unexpected response type",
+        ),
+        (
+            "query_dnd_settings",
+            ("PLACE",),
+            {},
+            "get",
+            TypeError,
+            "Unexpected response type",
+        ),
         ("query_events", ([1],), {}, "post", TypeError, "Unexpected response type"),
         ("mint_sip_device", ("PLACE", "AC"), {}, "post", TypeError, "Unexpected response type"),
     ],
@@ -540,3 +559,29 @@ async def test_snapshot_refuses_anything_that_is_not_a_frame(hass) -> None:
 
     with pytest.raises(TypeError):
         await api.query_camera_snapshot("CAM", 640, 480)
+
+
+@pytest.mark.parametrize(
+    ("method", "args"),
+    [
+        ("query_cameras", ("PLACE",)),
+        ("query_public_cameras", ("PLACE",)),
+        ("query_screens_settings", ("PLACE",)),
+        ("query_dnd_settings", ("PLACE",)),
+    ],
+)
+async def test_collector_methods_do_not_disguise_refusal_as_emptiness(
+    hass, method, args
+) -> None:
+    """Отказ оператора не притворяется пустым ответом.
+
+    Эти четыре метода кормят координатор, а он один умеет отличить «данных
+    нет» от «оператор молчит» и сказать об этом один раз. Пока отказ
+    глотался здесь, координатор считал молчание успехом: камеры пропадали из
+    интерфейса без единой строки в журнале ни на одном уровне.
+    """
+    api = _api(hass)
+    api.http.get = AsyncMock(side_effect=ClientError(_response(500)))
+
+    with pytest.raises(ClientError):
+        await getattr(api, method)(*args)
