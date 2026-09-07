@@ -246,12 +246,12 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # collector делал свой fetch — двойной HTTP. Теперь один раз per
             # place, передаём в collectors как параметры.
             # Разбор — под тем же фронтом, что и запрос: настройки видимости
-            # приходят от оператора, и неразбираемая форма должна садиться на
-            # этот фронт (одна строка по фронту), а не улетать наружу —
-            # обработчик неожиданных исключений в ядре пишет трейсбек
-            # безусловно, без ограничения по фронту. Частично годную форму
-            # `_extract_hidden_ids` вытягивает сам, отмечая это на `debug` —
-            # по строке на запрошенный раздел, дедупа там нет.
+            # приходят от оператора, и форма, на которой разбор бросает,
+            # должна садиться на этот фронт, а не улетать наружу — обработчик
+            # неожиданных исключений в ядре пишет трейсбек безусловно, без
+            # ограничения по фронту. Остальные отклонения формы
+            # `_extract_hidden_ids` вытягивает сам, отмечая на `debug`: по
+            # строке на запрошенный раздел на каждый цикл, дедупа там нет.
             try:
                 screens = await self._api.query_screens_settings(place_id)
                 hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
@@ -422,8 +422,10 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
           API не различает, оба идут одним списком).
 
         Пользовательская видимость из `/settings/screens` прокидывается флагом
-        `hidden`: entity получит `_attr_entity_registry_enabled_default = False`
-        (uses user app preference как дефолт для новых установок).
+        `hidden`; скрытие выставляет `_sync_visibility` через
+        `hidden_by=INTEGRATION` в реестре, а не `entity_registry_enabled_default`
+        — тот механизм отменён (сущность должна существовать и работать,
+        скрыт только показ).
         """
         cameras: list[dict[str, Any]] = []
 
@@ -513,38 +515,50 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Из ответа `/settings/screens` достать id-шки скрытых entities.
 
         Возвращает set строковых id. Если screen-тип не найден — пустой set
-        (значит ничего не скрыто).
+        (значит ничего не скрыто). Отклонения формы не роняют разбор: берём
+        то, что разобралось, а о непонятом говорим на `debug` — молчание
+        сделало бы дрейф схемы неотличимым от «пользователь ничего не
+        прятал», и скрытые сущности молча вернулись бы в панель.
 
         `screens` намеренно `Any`, а не `dict`: это разобранный JSON от
         оператора, и обещать его форму в аннотации значит выдать желаемое за
         действительное — проверка формы ниже стала бы «недостижимым кодом».
         """
         result: set[str] = set()
-        usable = True
+        # Что именно не так, а не «тип контейнера»: на вложенных уровнях
+        # контейнер всегда `dict`, и такой токен ничего не различал бы. Пусто
+        # — форма штатная: `{}` означает «пользователь ничего не настраивал».
+        drift: set[str] = set()
         if not isinstance(screens, dict):
-            usable, screens = False, {}
+            drift.add(f"корень {type(screens).__name__}")
+            screens = {}
         for screen in screens.get("screens") or []:
             if not isinstance(screen, dict):
-                usable = False
+                drift.add("запись раздела не словарь")
                 continue
             if screen.get("type") != screen_type:
                 continue
             for item in screen.get("hidden") or []:
                 if not isinstance(item, dict):
-                    usable = False
+                    drift.add("элемент списка не словарь")
                     continue
                 iid = item.get("id")
-                if iid is not None:
-                    result.add(str(iid))
-        if not usable:
-            # Молчать нельзя ни на одном уровне: дрейф схемы оператора иначе
-            # неотличим от «пользователь ничего не прятал», а последствие
-            # видимое — скрытые сущности вернутся в панель. Тип и раздел, без
-            # тела: там бывают идентификаторы.
+                if iid is None:
+                    # `id` — обязательный ключ каждого элемента. Его пропажа
+                    # это переименование поля, самый вероятный дрейф, и
+                    # последствие у него то же: скрытое вернётся в панель.
+                    drift.add("элемент без id")
+                    continue
+                result.add(str(iid))
+        if drift:
+            # Молчать нельзя: иначе дрейф схемы оператора неотличим от
+            # «пользователь ничего не прятал», а последствие видимое —
+            # скрытые сущности вернутся в панель. Что не так и в каком
+            # разделе, без тела: в теле идентификаторы и раскладка видимости.
             LOGGER.debug(
-                "Настройки видимости (%s) пришли как %s — учли, что смогли",
+                "Настройки видимости (%s): непонятная форма (%s) — учли, что смогли",
                 screen_type,
-                type(screens).__name__,
+                ", ".join(sorted(drift)),
             )
         return result
 

@@ -452,9 +452,9 @@ class ElektronnyGorodAPI:
 
         `hidden` — НЕ категория («городские» или «лифт»), а user preference
         (юзер нажал «скрыть» в приложении). Интеграция уважает это: entity
-        для hidden получает `_attr_entity_registry_enabled_default = False`
-        (только для НОВЫХ registry-записей; existing сохраняют выбор юзера
-        в HA).
+        для hidden скрывается через `hidden_by=INTEGRATION` в реестре
+        (`_sync_visibility`); скрытие, выставленное человеком вручную, не
+        трогаем — снимаем только своё.
 
         Если ответ `{}` — пользователь ничего не настраивал, всё видимо.
         """

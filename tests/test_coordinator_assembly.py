@@ -102,19 +102,19 @@ async def test_broken_lock_data_does_not_take_the_cameras_down(
     Частичные данные лучше пустых: камеры продолжают работать, а о пропаже
     замков сказано один раз.
     """
+    marker = "форма ответа изменилась"
     entry = _make_config_entry()
     entry.add_to_hass(hass)
     api = _api(query_access_controls=[{
         "id": "2000",
         "name": "Калитка",
         "externalCameraId": "CAM-GATE",
+        "allowOpen": True,
     }])
     coordinator = _coordinator(hass, entry, api)
 
     with patch.object(
-        coordinator,
-        "_collect_locks_for_place",
-        side_effect=ValueError("форма ответа изменилась"),
+        coordinator, "_collect_locks_for_place", side_effect=ValueError(marker)
     ), caplog.at_level(logging.INFO):
         data = await coordinator._async_update_data()
         await coordinator._async_update_data()
@@ -123,6 +123,18 @@ async def test_broken_lock_data_does_not_take_the_cameras_down(
     assert data["locks"] == []
     complaints = [r for r in caplog.records if r.getMessage().startswith("Замки:")]
     assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
+    assert marker not in complaints[0].getMessage(), "текст исключения в журнале"
+
+    # Возвращение: без него ключ остаётся в отметках навсегда, и следующая
+    # пропажа замков дедуплицируется в тишину.
+    caplog.clear()
+    with caplog.at_level(logging.INFO):
+        data = await coordinator._async_update_data()
+
+    assert [
+        r for r in caplog.records if "Замки: данные снова приходят" in r.getMessage()
+    ], "возвращение замков должно быть видно"
+    assert data["locks"], "замки вернулись в снимок"
 
 
 async def test_failing_camera_source_is_reported_once_and_on_recovery(
@@ -216,15 +228,26 @@ async def test_one_broken_camera_source_does_not_take_the_others_down(
 
 
 @pytest.mark.parametrize(
-    "screens",
+    ("screens", "reason"),
     [
-        ["не объект"],
-        {"screens": ["не объект"]},
-        {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": ["не объект"]}]},
+        (["ПОЛЕЗНАЯ-НАГРУЗКА"], "корень list"),
+        ({"screens": ["ПОЛЕЗНАЯ-НАГРУЗКА"]}, "запись раздела не словарь"),
+        (
+            {"screens": [
+                {"type": "PUBLIC_CAMERAS", "hidden": ["ПОЛЕЗНАЯ-НАГРУЗКА"]}
+            ]},
+            "элемент списка не словарь",
+        ),
+        (
+            {"screens": [
+                {"type": "PUBLIC_CAMERAS", "hidden": [{"eid": "ПОЛЕЗНАЯ-НАГРУЗКА"}]}
+            ]},
+            "элемент без id",
+        ),
     ],
 )
 async def test_unexpected_screens_shape_does_not_break_the_cycle(
-    hass: HomeAssistant, caplog, screens
+    hass: HomeAssistant, caplog, screens, reason
 ) -> None:
     """Частично годная форма настроек разбирается, а не сваливается на фронт.
 
@@ -238,13 +261,17 @@ async def test_unexpected_screens_shape_does_not_break_the_cycle(
     api = _api(
         query_screens_settings=screens,
         query_access_controls=[{"id": "2000", "externalCameraId": "CAM-GATE"}],
+        query_public_cameras=[{"id": "p", "externalCameraId": "CAM-PUB"}],
     )
 
     with caplog.at_level(logging.DEBUG):
         data = await _coordinator(hass, entry, api)._async_update_data()
 
-    assert [c["id"] for c in data["cameras"]] == ["CAM-GATE"]
-    assert data["cameras"][0]["hidden"] is False, "ничего не скрыто — умолчание"
+    hidden = {c["id"]: c["hidden"] for c in data["cameras"]}
+    # Именно на общедомовой: её `hidden` читается из разобранных настроек, а
+    # у камеры домофона без подъездов это литерал — проверка на ней держала
+    # бы что угодно, включая переворот умолчания в «скрыть всё».
+    assert hidden == {"CAM-GATE": False, "CAM-PUB": False}, hidden
     # Разбор справился сам — на фронт не свалились: иначе проверки формы
     # можно было бы снять, и тест бы этого не заметил.
     assert not [
@@ -252,10 +279,18 @@ async def test_unexpected_screens_shape_does_not_break_the_cycle(
     ]
     # Но и не молча: без этой строки дрейф схемы оператора неотличим от
     # «пользователь ничего не прятал», а скрытые сущности вернутся в панель.
-    assert [
+    drift = [
         r for r in caplog.records
         if "Настройки видимости" in r.getMessage()
-    ], "о вытянутой через силу форме надо сказать хотя бы на debug"
+    ]
+    assert drift, "о вытянутой через силу форме надо сказать хотя бы на debug"
+    message = drift[0].getMessage()
+    # Что именно не так — иначе четыре разных дрейфа неразличимы, и строка
+    # не помогает тому, ради кого написана.
+    assert reason in message, message
+    # Но без тела: в нём идентификаторы камер и раскладка видимости, которую
+    # человек настраивал в приложении.
+    assert "ПОЛЕЗНАЯ-НАГРУЗКА" not in message, message
 
 
 async def test_broken_access_controls_payload_keeps_the_rest_of_the_place(
@@ -308,6 +343,8 @@ async def test_broken_access_controls_payload_keeps_the_rest_of_the_place(
     [
         ("query_screens_settings", "Настройки экранов"),
         ("query_dnd_settings", "Режим «не беспокоить»"),
+        ("query_access_controls", "Домофоны"),
+        ("query_balance", "Баланс"),
     ],
 )
 async def test_every_front_says_it_once_and_says_it_back(
@@ -361,6 +398,7 @@ async def test_screens_payload_that_cannot_be_parsed_lands_on_its_front(
     api = _api(
         query_screens_settings={"screens": 5},
         query_access_controls=[{"id": "2000", "externalCameraId": "CAM-GATE"}],
+        query_public_cameras=[{"id": "p", "externalCameraId": "CAM-PUB"}],
     )
     coordinator = _coordinator(hass, entry, api)
 
@@ -372,7 +410,11 @@ async def test_screens_payload_that_cannot_be_parsed_lands_on_its_front(
         r for r in caplog.records if r.getMessage().startswith("Настройки экранов:")
     ]
     assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
-    assert [c["id"] for c in data["cameras"]] == ["CAM-GATE"], "камеры выжили"
+    # Умолчание на отказе — «ничего не скрыто». Проверяем на общедомовой:
+    # её `hidden` читается из настроек, а у камеры домофона это литерал, и
+    # переворот умолчания в «скрыть всё» на ней был бы не виден.
+    hidden = {c["id"]: c["hidden"] for c in data["cameras"]}
+    assert hidden == {"CAM-GATE": False, "CAM-PUB": False}, hidden
 
 
 async def test_no_front_lets_the_operator_text_into_the_journal(
