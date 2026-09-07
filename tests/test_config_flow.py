@@ -574,8 +574,9 @@ async def test_config_flow_avoids_deprecated_core_api() -> None:
     """
     import pathlib
 
-    source = pathlib.Path(
-        "custom_components/elektronny_gorod/config_flow.py"
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "custom_components/elektronny_gorod/config_flow.py"
     ).read_text(encoding="utf-8")
     # Ищем обращение, а не упоминание: объясняющий комментарий остаётся.
     assert "self.show_advanced_options" not in source

@@ -184,3 +184,31 @@ async def test_actions_survive_the_unload_of_the_last_entry(
     controller.async_hangup.assert_awaited_once()
     assert hass.services.has_service(DOMAIN, SERVICE_ANSWER)
     assert hass.services.has_service(DOMAIN, SERVICE_HANGUP)
+
+
+async def test_yaml_configuration_is_rejected_rather_than_ignored(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Блок `elektronny_gorod:` в `configuration.yaml` не проходит молча.
+
+    Интеграция настраивается только через интерфейс. Без схемы такой блок
+    игнорировался бы без единого слова, и человек ждал бы от него эффекта.
+    Ядро на такой блок не бросает, а пишет в журнал и заводит проблему в
+    «Ремонте» — проверяем именно это, а не отказ схемы.
+    """
+    import logging
+
+    from homeassistant.helpers import issue_registry as ir
+
+    from custom_components.elektronny_gorod import CONFIG_SCHEMA
+
+    assert CONFIG_SCHEMA({}) == {}
+
+    with caplog.at_level(logging.ERROR):
+        CONFIG_SCHEMA({DOMAIN: {"phone": "+70000000000"}})
+
+    assert "does not support YAML setup" in caplog.text
+    assert any(
+        issue.issue_id.endswith(DOMAIN)
+        for issue in ir.async_get(hass).issues.values()
+    ), "проблема в «Ремонте» не заведена"

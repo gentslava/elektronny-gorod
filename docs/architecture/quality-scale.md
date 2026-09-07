@@ -76,7 +76,7 @@ External reference:
 | `log-when-unavailable` | ✅ по фронту, одна строка на пропажу и одна на возвращение — и для подзапроса, и для пустого списка адресов. О полной недоступности пишет ядро (`Error fetching … data` / `… recovered`), своего лога рядом нет | `coordinator.py:_note_failure`, `_note_success` |
 | `parallel-updates` | ✅ задано во всех шести платформах: `1` у `lock`/`switch` (координатор централизует входящие данные, но не ограничивает исходящие вызовы действий), `0` у остальных — у `camera` осознанно, потому что превью идёт мимо семафора и наплыв держат кэш снимка и `_snapshot_retry_after` | платформы |
 | `reauthentication-flow` | ✅ `async_step_reauth` / `async_step_reauth_confirm`; 401 поднимает `ConfigEntryAuthFailed` | `config_flow.py`, `coordinator.py` |
-| `test-coverage` | ✅ «above 95% for all integration modules»: **все 42 модуля выше 95%**, общий **97.40%** | замер 2026-09-07; помодульный порог держит шаг CI «Enforce the per-module coverage floor» |
+| `test-coverage` | ✅ «above 95% for all integration modules»: **все 42 модуля выше 95%**, общий **97.41%** | замер 2026-09-07; помодульный порог держит шаг CI «Enforce the per-module coverage floor» |
 
 **Silver blockers:** нет.
 

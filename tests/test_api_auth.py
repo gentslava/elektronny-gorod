@@ -531,3 +531,28 @@ async def test_lookalike_response_is_refused(
         await getattr(api, method)(*args, **kwargs)
 
     assert message in str(err.value)
+
+
+async def test_snapshot_accepts_a_streamed_response(hass) -> None:
+    """Снимок отдаётся и когда транспорт вернул поток, а не готовые байты.
+
+    Бинарная ветка `http` отдаёт `bytes`, но при не-`ok` ответе возвращает
+    сам ответ; читать его — единственный способ не потерять кадр. Ветка
+    исполнялась на каждом снимке, а проверялась только на пути с байтами.
+    """
+    api = _api(hass)
+    response = MagicMock(spec=ClientResponse)
+    response.read = AsyncMock(return_value=b"jpeg")
+    api.http.get = AsyncMock(return_value=response)
+
+    assert await api.query_camera_snapshot("CAM", 640, 480) == b"jpeg"
+    response.read.assert_awaited_once()
+
+
+async def test_snapshot_refuses_anything_that_is_not_a_frame(hass) -> None:
+    """Ни байты, ни ответ — отказ, а не разбор мусора."""
+    api = _api(hass)
+    api.http.get = AsyncMock(return_value=_LooksLikeAResponse())
+
+    with pytest.raises(TypeError):
+        await api.query_camera_snapshot("CAM", 640, 480)
