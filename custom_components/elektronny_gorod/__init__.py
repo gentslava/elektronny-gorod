@@ -715,8 +715,8 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
             operator=str(entry.data.get(CONF_OPERATOR_ID)),
         )
         if not await api.unregister_push_device():
-            # Единственный сигнал: сам метод отказ глотает, а транспорт с
-            # понижением своего лога до `debug` больше о нём не сообщает.
+            # Единственный сигнал: сам метод отказ глотает и возвращает
+            # False, а транспорт об отказах говорит только на `debug`.
             # Оставшийся у оператора токен — это push-и на устройство,
             # которое интеграцию уже удалило.
             LOGGER.warning("Оператор не принял отвязку push-токена при удалении записи")

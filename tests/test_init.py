@@ -441,3 +441,31 @@ async def test_failed_push_unregister_is_reported(
     # Именно про отказ оператора, а не про исключение рядом: общая подстрока
     # ловила обе ветки, и снятие сигнала тест переживал.
     assert "Оператор не принял отвязку push-токена" in caplog.text
+
+
+async def test_broken_cleanup_at_removal_is_reported(
+    hass: HomeAssistant, mock_remove_entry_api, caplog
+) -> None:
+    """Сорванная уборка при удалении записи слышна, а не тонет в `except`.
+
+    Широкий `except` тут намеренный — удаление не должно падать из-за
+    оператора. Но молчать он тоже не должен: человек удаляет интеграцию
+    именно тогда, когда что-то уже не так.
+    """
+    import logging
+
+    mock_remove_entry_api.side_effect = RuntimeError("нечем построить клиента")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_ACCESS_TOKEN: "AT",
+            CONF_OPERATOR_ID: "1",
+            CONF_USER_AGENT: json.dumps(UserAgent().json()),
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with caplog.at_level(logging.WARNING):
+        await async_remove_entry(hass, entry)
+
+    assert "Push-токен не отвязан при удалении записи" in caplog.text

@@ -83,3 +83,17 @@ async def test_unregister_sends_delete_with_body_no_token(api, fake_session):
     assert "pushToken" not in body
     assert body["deviceType"] == "MOBILE_APPLICATION"
     assert "installationId" in body and "deviceId" in body
+
+
+async def test_unregister_reports_failure_instead_of_raising(api, fake_session) -> None:
+    """Отказ отвязки возвращается флагом, а не исключением.
+
+    На этом стоит сигнал при удалении записи: вызывающий смотрит именно
+    возврат. Пробрось метод исключение — предупреждение не появилось бы,
+    потому что удаление ловит всё широким `except`.
+    """
+    from aiohttp import ClientError
+
+    fake_session.delete = AsyncMock(side_effect=ClientError("оператор недоступен"))
+
+    assert await api.unregister_push_device() is False
