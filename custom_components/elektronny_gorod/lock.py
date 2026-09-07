@@ -205,7 +205,7 @@ class ElektronnyGorodLock(
             await self.coordinator.open_lock(
                 self._place_id, self._access_control_id, self._entrance_id
             )
-        except ClientError as err:
+        except (ClientError, TimeoutError) as err:
             self._state = LockState.JAMMED
             self._schedule_reset(LOCK_JAMMED_DELAY)
             self.async_write_ha_state()

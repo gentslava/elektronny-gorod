@@ -271,3 +271,27 @@ async def test_lock_returns_to_locked_after_the_door_closes(
     await hass.async_block_till_done()
 
     assert hass.states.get(eid).state == "locked"
+
+
+async def test_unlock_timeout_also_refuses_and_does_not_stick(
+    hass: HomeAssistant, mock_api
+):
+    """Оператор молчит дольше бюджета — отказ такой же внятный, как при 5xx.
+
+    Таймаут полного запроса приходит не `ClientError`, а голым
+    `TimeoutError`, и мимо обработки уходили сразу две вещи: вызывающий
+    получал пустую «неизвестную ошибку», а замок навсегда оставался в
+    «отпирается» — возврат в «заперто» планируется только в обработанных
+    ветках. В отличие от «заело», это состояние само не проходило.
+    """
+    eid = await _setup_lock(hass)
+    mock_api.open_lock = AsyncMock(side_effect=TimeoutError())
+
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            "lock", "unlock", {"entity_id": eid}, blocking=True
+        )
+    await hass.async_block_till_done()
+
+    assert err.value.translation_key == "cannot_unlock"
+    assert hass.states.get(eid).state == "jammed", "состояние не должно залипнуть"
