@@ -224,7 +224,7 @@ async def test_one_broken_camera_source_does_not_take_the_others_down(
     ],
 )
 async def test_unexpected_screens_shape_does_not_break_the_cycle(
-    hass: HomeAssistant, screens
+    hass: HomeAssistant, caplog, screens
 ) -> None:
     """Неожиданная форма настроек видимости не роняет обновление.
 
@@ -239,10 +239,16 @@ async def test_unexpected_screens_shape_does_not_break_the_cycle(
         query_access_controls=[{"id": "2000", "externalCameraId": "CAM-GATE"}],
     )
 
-    data = await _coordinator(hass, entry, api)._async_update_data()
+    with caplog.at_level(logging.INFO):
+        data = await _coordinator(hass, entry, api)._async_update_data()
 
     assert [c["id"] for c in data["cameras"]] == ["CAM-GATE"]
     assert data["cameras"][0]["hidden"] is False, "ничего не скрыто — умолчание"
+    # Разбор справился сам — на фронт не свалились: иначе проверки формы
+    # можно было бы снять, и тест бы этого не заметил.
+    assert not [
+        r for r in caplog.records if r.getMessage().startswith("Настройки экранов:")
+    ]
 
 
 async def test_broken_access_controls_payload_keeps_the_rest_of_the_place(
@@ -263,13 +269,31 @@ async def test_broken_access_controls_payload_keeps_the_rest_of_the_place(
         query_balance={"balance": 100},
     )
 
+    coordinator = _coordinator(hass, entry, api)
     with caplog.at_level(logging.INFO):
-        data = await _coordinator(hass, entry, api)._async_update_data()
+        data = await coordinator._async_update_data()
 
-    complaints = [r for r in caplog.records if r.getMessage().startswith("Камеры:")]
+    complaints = [r for r in caplog.records if r.getMessage().startswith("Сборка камер:")]
     assert len(complaints) == 1, "о сорванной сборке камер сказано ровно один раз"
+    assert "строка вместо объекта" not in complaints[0].getMessage()
     assert data["cameras"] == []
     assert data["balances"], "баланс места пережил отказ по камерам"
+
+    # Возвращение — вторая половина правила, и её легко забыть: без неё ключ
+    # остаётся в отметках навсегда, и следующая пропажа дедуплицируется в
+    # тишину.
+    caplog.clear()
+    api.query_access_controls = AsyncMock(
+        return_value=[{"id": "2000", "externalCameraId": "CAM-GATE"}]
+    )
+    with caplog.at_level(logging.INFO):
+        data = await coordinator._async_update_data()
+
+    assert [
+        r for r in caplog.records
+        if "Сборка камер: данные снова приходят" in r.getMessage()
+    ], "возвращение сборки камер должно быть видно"
+    assert [c["id"] for c in data["cameras"]] == ["CAM-GATE"]
 
 
 @pytest.mark.parametrize(
@@ -313,3 +337,73 @@ async def test_every_front_says_it_once_and_says_it_back(
         r for r in caplog.records
         if f"{front}: данные снова приходят" in r.getMessage()
     ], "возвращение данных должно быть видно"
+
+
+async def test_screens_payload_that_cannot_be_parsed_lands_on_its_front(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Совсем неразбираемая форма становится жалобой, а не трейсбеком.
+
+    Проверки формы вытягивают то, что вытягивается; скаляр вместо списка не
+    вытягивается ничем. Такой разбор обязан свалиться на фронт настроек
+    экранов — он и владеет этим ответом, — а не улететь наружу: обработчик
+    неожиданных исключений в ядре пишет трейсбек безусловно, на каждом цикле.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api(
+        query_screens_settings={"screens": 5},
+        query_access_controls=[{"id": "2000", "externalCameraId": "CAM-GATE"}],
+    )
+    coordinator = _coordinator(hass, entry, api)
+
+    with caplog.at_level(logging.INFO):
+        data = await coordinator._async_update_data()
+        await coordinator._async_update_data()
+
+    complaints = [
+        r for r in caplog.records if r.getMessage().startswith("Настройки экранов:")
+    ]
+    assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
+    assert [c["id"] for c in data["cameras"]] == ["CAM-GATE"], "камеры выжили"
+
+
+async def test_no_front_lets_the_operator_text_into_the_journal(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Ни один фронт не выпускает в журнал текст исключения оператора.
+
+    Жалоба пишет тип исключения, а не его текст, — но передать
+    отформатированный текст фронту может и вызывающий, а таких мест восемь.
+    В проде это `ClientError(ClientResponse)`, чей `repr` печатает полный
+    URL и весь блок заголовков ответа: то самое, что соседняя строка
+    транспорта нарочно прогоняет через редакцию.
+
+    Проверка идёт по всем фронтам сразу: точечные ассерты закрывали четыре
+    из восьми, и подстановка текста в остальных проходила незамеченной.
+    """
+    marker = "СЕКРЕТ-В-ТЕКСТЕ-ИСКЛЮЧЕНИЯ"
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api()
+    for method in (
+        "query_balance",
+        "query_screens_settings",
+        "query_access_controls",
+        "query_cameras",
+        "query_public_cameras",
+        "query_dnd_settings",
+    ):
+        setattr(api, method, AsyncMock(side_effect=ClientError(marker)))
+
+    with caplog.at_level(logging.DEBUG):
+        await _coordinator(hass, entry, api)._async_update_data()
+
+    ours = [
+        r for r in caplog.records
+        if r.name.startswith("custom_components.elektronny_gorod")
+    ]
+    complaints = [r for r in ours if "нет данных" in r.getMessage()]
+    assert len(complaints) >= 5, [r.getMessage() for r in ours]
+    leaked = [r.getMessage() for r in ours if marker in r.getMessage()]
+    assert leaked == [], leaked

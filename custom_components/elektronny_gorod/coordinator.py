@@ -245,11 +245,21 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # нужны и для cameras (для hidden), и для locks. Раньше каждый
             # collector делал свой fetch — двойной HTTP. Теперь один раз per
             # place, передаём в collectors как параметры.
+            # Разбор — под тем же фронтом, что и запрос: настройки видимости
+            # приходят от оператора, и любая неожиданная форма (скаляр вместо
+            # списка) должна становиться «ничего не скрыто» с одной строкой в
+            # журнале, а не улетать наружу. Наружу отсюда нельзя: обработчик
+            # неожиданных исключений в ядре трейсбек пишет безусловно, без
+            # ограничения по фронту.
             try:
                 screens = await self._api.query_screens_settings(place_id)
+                hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
+                hidden_entrance_ids = self._extract_hidden_ids(
+                    screens, "ACCESS_CONTROLS"
+                )
             except Exception as ex:  # noqa: BLE001
                 self._note_failure("Настройки экранов", place_id, ex)
-                screens = {}
+                hidden_cam_ids = hidden_entrance_ids = set()
             else:
                 self._note_success("Настройки экранов", place_id)
             try:
@@ -260,17 +270,14 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 self._note_success("Домофоны", place_id)
 
-            hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
-            hidden_entrance_ids = self._extract_hidden_ids(screens, "ACCESS_CONTROLS")
-
             try:
                 cameras.extend(await self._collect_cameras_for_place(
                     place_id, access_controls, hidden_cam_ids, hidden_entrance_ids
                 ))
             except Exception as ex:  # noqa: BLE001
-                self._note_failure("Камеры", place_id, ex)
+                self._note_failure("Сборка камер", place_id, ex)
             else:
-                self._note_success("Камеры", place_id)
+                self._note_success("Сборка камер", place_id)
 
             try:
                 locks.extend(self._collect_locks_for_place(
@@ -517,7 +524,14 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # обновления: массив вместо объекта ронял бы `AttributeError`
             # наружу, и ядро писало бы трейсбек на КАЖДОМ цикле — этот его
             # обработчик не ограничен фронтом. Нет настроек — ничего не
-            # скрыто, это и есть безопасное умолчание.
+            # скрыто, это и есть безопасное умолчание. На `debug` — тип, без
+            # тела: молчать совсем нельзя, иначе дрейф схемы оператора
+            # неотличим от «пользователь ничего не прятал», а последствие
+            # видимое — скрытые сущности вернутся в панель.
+            LOGGER.debug(
+                "Настройки видимости пришли как %s — считаем, что ничего не скрыто",
+                type(screens).__name__,
+            )
             return result
         for screen in screens.get("screens") or []:
             if not isinstance(screen, dict) or screen.get("type") != screen_type:
