@@ -246,11 +246,12 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # collector делал свой fetch — двойной HTTP. Теперь один раз per
             # place, передаём в collectors как параметры.
             # Разбор — под тем же фронтом, что и запрос: настройки видимости
-            # приходят от оператора, и любая неожиданная форма (скаляр вместо
-            # списка) должна становиться «ничего не скрыто» с одной строкой в
-            # журнале, а не улетать наружу. Наружу отсюда нельзя: обработчик
-            # неожиданных исключений в ядре трейсбек пишет безусловно, без
-            # ограничения по фронту.
+            # приходят от оператора, и неразбираемая форма должна садиться на
+            # этот фронт (одна строка по фронту), а не улетать наружу —
+            # обработчик неожиданных исключений в ядре пишет трейсбек
+            # безусловно, без ограничения по фронту. Частично годную форму
+            # `_extract_hidden_ids` вытягивает сам, отмечая это на `debug` —
+            # по строке на запрошенный раздел, дедупа там нет.
             try:
                 screens = await self._api.query_screens_settings(place_id)
                 hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
@@ -259,7 +260,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             except Exception as ex:  # noqa: BLE001
                 self._note_failure("Настройки экранов", place_id, ex)
-                hidden_cam_ids = hidden_entrance_ids = set()
+                hidden_cam_ids, hidden_entrance_ids = set(), set()
             else:
                 self._note_success("Настройки экранов", place_id)
             try:
@@ -519,27 +520,32 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         действительное — проверка формы ниже стала бы «недостижимым кодом».
         """
         result: set[str] = set()
+        usable = True
         if not isinstance(screens, dict):
-            # Форму ответа задаёт оператор, а разбор идёт вне `try` цикла
-            # обновления: массив вместо объекта ронял бы `AttributeError`
-            # наружу, и ядро писало бы трейсбек на КАЖДОМ цикле — этот его
-            # обработчик не ограничен фронтом. Нет настроек — ничего не
-            # скрыто, это и есть безопасное умолчание. На `debug` — тип, без
-            # тела: молчать совсем нельзя, иначе дрейф схемы оператора
-            # неотличим от «пользователь ничего не прятал», а последствие
-            # видимое — скрытые сущности вернутся в панель.
-            LOGGER.debug(
-                "Настройки видимости пришли как %s — считаем, что ничего не скрыто",
-                type(screens).__name__,
-            )
-            return result
+            usable, screens = False, {}
         for screen in screens.get("screens") or []:
-            if not isinstance(screen, dict) or screen.get("type") != screen_type:
+            if not isinstance(screen, dict):
+                usable = False
+                continue
+            if screen.get("type") != screen_type:
                 continue
             for item in screen.get("hidden") or []:
-                iid = item.get("id") if isinstance(item, dict) else None
+                if not isinstance(item, dict):
+                    usable = False
+                    continue
+                iid = item.get("id")
                 if iid is not None:
                     result.add(str(iid))
+        if not usable:
+            # Молчать нельзя ни на одном уровне: дрейф схемы оператора иначе
+            # неотличим от «пользователь ничего не прятал», а последствие
+            # видимое — скрытые сущности вернутся в панель. Тип и раздел, без
+            # тела: там бывают идентификаторы.
+            LOGGER.debug(
+                "Настройки видимости (%s) пришли как %s — учли, что смогли",
+                screen_type,
+                type(screens).__name__,
+            )
         return result
 
     def _collect_locks_for_place(

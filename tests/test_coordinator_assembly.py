@@ -226,11 +226,12 @@ async def test_one_broken_camera_source_does_not_take_the_others_down(
 async def test_unexpected_screens_shape_does_not_break_the_cycle(
     hass: HomeAssistant, caplog, screens
 ) -> None:
-    """Неожиданная форма настроек видимости не роняет обновление.
+    """Частично годная форма настроек разбирается, а не сваливается на фронт.
 
-    Разбор идёт вне `try` цикла, а обработчик неожиданных исключений в ядре
-    не ограничен фронтом: он пишет трейсбек на каждом цикле — под три сотни
-    в сутки. Форму ответа задаёт оператор, поэтому полагаться на неё нельзя.
+    Форму задаёт оператор, полагаться на неё нельзя. Упасть можно — вызов
+    под фронтом «Настройки экранов», — но тогда непонятный кусок обнулил бы
+    всю видимость места. Поэтому вытягиваем что вытягивается, и на фронт не
+    сваливаемся: иначе проверки формы можно было бы снять незаметно.
     """
     entry = _make_config_entry()
     entry.add_to_hass(hass)
@@ -239,7 +240,7 @@ async def test_unexpected_screens_shape_does_not_break_the_cycle(
         query_access_controls=[{"id": "2000", "externalCameraId": "CAM-GATE"}],
     )
 
-    with caplog.at_level(logging.INFO):
+    with caplog.at_level(logging.DEBUG):
         data = await _coordinator(hass, entry, api)._async_update_data()
 
     assert [c["id"] for c in data["cameras"]] == ["CAM-GATE"]
@@ -249,6 +250,12 @@ async def test_unexpected_screens_shape_does_not_break_the_cycle(
     assert not [
         r for r in caplog.records if r.getMessage().startswith("Настройки экранов:")
     ]
+    # Но и не молча: без этой строки дрейф схемы оператора неотличим от
+    # «пользователь ничего не прятал», а скрытые сущности вернутся в панель.
+    assert [
+        r for r in caplog.records
+        if "Настройки видимости" in r.getMessage()
+    ], "о вытянутой через силу форме надо сказать хотя бы на debug"
 
 
 async def test_broken_access_controls_payload_keeps_the_rest_of_the_place(
@@ -275,7 +282,7 @@ async def test_broken_access_controls_payload_keeps_the_rest_of_the_place(
 
     complaints = [r for r in caplog.records if r.getMessage().startswith("Сборка камер:")]
     assert len(complaints) == 1, "о сорванной сборке камер сказано ровно один раз"
-    assert "строка вместо объекта" not in complaints[0].getMessage()
+    assert "AttributeError" in complaints[0].getMessage(), "нужен тип, а не текст"
     assert data["cameras"] == []
     assert data["balances"], "баланс места пережил отказ по камерам"
 
@@ -396,14 +403,44 @@ async def test_no_front_lets_the_operator_text_into_the_journal(
     ):
         setattr(api, method, AsyncMock(side_effect=ClientError(marker)))
 
+    coordinator = _coordinator(hass, entry, api)
+    # Двумя циклами, потому что фронты сборки и фронты источников взаимно
+    # исключают друг друга: пока сборщик падает, его внутренние источники не
+    # выполняются, а пока они падают — сборщик отрабатывает успешно. За один
+    # цикл проверка обошла бы два места из восьми.
     with caplog.at_level(logging.DEBUG):
-        await _coordinator(hass, entry, api)._async_update_data()
+        await coordinator._async_update_data()
+        with (
+            patch.object(
+                coordinator,
+                "_collect_cameras_for_place",
+                side_effect=ValueError(marker),
+            ),
+            patch.object(
+                coordinator,
+                "_collect_locks_for_place",
+                side_effect=ValueError(marker),
+            ),
+        ):
+            await coordinator._async_update_data()
 
     ours = [
         r for r in caplog.records
         if r.name.startswith("custom_components.elektronny_gorod")
     ]
     complaints = [r for r in ours if "нет данных" in r.getMessage()]
-    assert len(complaints) >= 5, [r.getMessage() for r in ours]
+    fronts = {r.getMessage().split(":", 1)[0] for r in complaints}
+    # Ровно восемь, а не «хотя бы»: замолчавший фронт делает проверку утечки
+    # для него пустой, и на «>= N» это прошло бы незамеченным.
+    assert fronts == {
+        "Баланс",
+        "Настройки экранов",
+        "Домофоны",
+        "Камеры места",
+        "Общедомовые камеры",
+        "Сборка камер",
+        "Замки",
+        "Режим «не беспокоить»",
+    }, fronts
     leaked = [r.getMessage() for r in ours if marker in r.getMessage()]
     assert leaked == [], leaked
