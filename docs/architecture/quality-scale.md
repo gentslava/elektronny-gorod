@@ -49,7 +49,7 @@ External reference:
 | `docs-high-level-description` | ✅ README | — |
 | `docs-installation-instructions` | ✅ README | — |
 | `docs-removal-instructions` | ✅ раздел «Удаление»: что удаляется, что остаётся в go2rtc | README (ru/en) |
-| `entity-event-setup` | ✅ платформы forward-нуты | `__init__.py` |
+| `entity-event-setup` | ✅ подписки заводятся в `async_added_to_hass` и снимаются парно через `async_on_remove` | `camera.py`, `event.py`, `sensor.py`, `lock.py`, `call_camera.py` |
 | `entity-unique-id` | ✅ стабильные UID + registry migration | `entity_migration.py` |
 | `has-entity-name` | ✅ HA entity naming pattern | entity platforms |
 | `runtime-data` | ✅ координатор в `entry.runtime_data` с типизированным алиасом; реестры FCM, SIP и stream-manager остаются в `hass.data` (FCM — намеренно, см. ниже) | `coordinator.py`, `__init__.py` |
@@ -74,9 +74,9 @@ External reference:
 | `entity-unavailable` | ✅ через `CoordinatorEntity.available` + data presence | — |
 | `integration-owner` | ✅ `codeowners` | — |
 | `log-when-unavailable` | ✅ по фронту, одна строка на пропажу и одна на возвращение — и для подзапроса, и для пустого списка адресов. О полной недоступности пишет ядро (`Error fetching … data` / `… recovered`), своего лога рядом нет | `coordinator.py:_note_failure`, `_note_success` |
-| `parallel-updates` | ✅ задано во всех шести платформах: `0` там, где есть только чтение из координатора, и `1` у `lock`/`switch` — координатор централизует входящие данные, но не ограничивает исходящие вызовы действий | платформы |
+| `parallel-updates` | ✅ задано во всех шести платформах: `1` у `lock`/`switch` (координатор централизует входящие данные, но не ограничивает исходящие вызовы действий), `0` у остальных — у `camera` осознанно, потому что превью идёт мимо семафора и наплыв держат кэш снимка и `_snapshot_retry_after` | платформы |
 | `reauthentication-flow` | ✅ `async_step_reauth` / `async_step_reauth_confirm`; 401 поднимает `ConfigEntryAuthFailed` | `config_flow.py`, `coordinator.py` |
-| `test-coverage` | ✅ «above 95% for all integration modules»: **все 42 модуля выше 95%**, общий **97.37%** | замер 2026-09-07, 1153 теста; помодульный порог держит шаг CI «Enforce the per-module coverage floor» |
+| `test-coverage` | ✅ «above 95% for all integration modules»: **все 42 модуля выше 95%**, общий **97.40%** | замер 2026-09-07; помодульный порог держит шаг CI «Enforce the per-module coverage floor» |
 
 **Silver blockers:** нет.
 
