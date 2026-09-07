@@ -118,6 +118,10 @@ class HTTP:
             self._headers["operator"] = operator
         self.access_token: str | None = access_token
         self._refresh_token: str | None = refresh_token
+        # Отказавшие endpoint-ы: ключ — (редактированный путь без query,
+        # статус). Нужен, чтобы сказать об отказе один раз, а не на каждом
+        # ответе. Размер ограничен числом endpoint-ов и мест абонента.
+        self._failing_endpoints: set[tuple[str, int]] = set()
 
     async def __request(
         self,
@@ -193,19 +197,28 @@ class HTTP:
             return await response.read()
 
         await _log_response(response)
+        path = redact_path(endpoint).split("?", 1)[0]
         if response.ok:
+            self._failing_endpoints = {
+                key for key in self._failing_endpoints if key[0] != path
+            }
             return response
         else:
-            # `debug`, как и у бинарной ветки выше, и по той же причине:
-            # транспорт не знает, значим ли отказ. Решает вызывающий —
-            # координатор ограничивает жалобу по фронту, а config flow
-            # показывает причину в форме. На `error` эта строка сводила на нет
-            # всю дедупликацию: при устойчивом отказе оператора набегало 288
-            # одинаковых записей в сутки на каждый endpoint, против правила
-            # Silver `log-when-unavailable`.
-            LOGGER.debug(
-                "API request failed: %s [%s]", redact_path(endpoint), response.status
-            )
+            # По фронту, а не на каждом ответе: на `error` здесь набегало 288
+            # одинаковых записей в сутки на один endpoint при устойчивом
+            # отказе оператора — против правила Silver `log-when-unavailable`,
+            # которое просит одну строку на пропажу и одну на возвращение.
+            #
+            # И не `debug` целиком: часть вызывающих отказ глотает
+            # (`query_cameras` и соседи возвращают пустой список), поэтому
+            # молчание транспорта оставило бы исчезнувшие камеры вообще без
+            # следа в журнале.
+            key = (path, response.status)
+            if key in self._failing_endpoints:
+                LOGGER.debug("API request failed: %s [%s]", path, response.status)
+            else:
+                self._failing_endpoints.add(key)
+                LOGGER.warning("API request failed: %s [%s]", path, response.status)
             raise ClientError(response)
 
     async def get(self, endpoint: str, binary: bool = False) -> ClientResponse | bytes:

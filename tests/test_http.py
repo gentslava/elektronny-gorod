@@ -14,23 +14,43 @@ from custom_components.elektronny_gorod.http import HTTP
 
 
 class _FakeResponse:
-    """Минимальный stub aiohttp ClientResponse для тестов."""
+    """Минимальный stub aiohttp ClientResponse для тестов.
 
-    def __init__(self, status: int) -> None:
+    `url` — зеркало запрошенного, а не константа: иначе ветка auth-пути в
+    `_log_response` не исполняется ни разу, и редакция телефона в ней не
+    держится ничем. Именно эта строка пишется на КАЖДОМ auth-запросе,
+    включая успешный вход, — в отличие от строки отказа.
+    """
+
+    def __init__(self, status: int, url: str = "https://example/") -> None:
         self.status = status
         self.ok = 200 <= status < 300
         self.reason = "OK" if self.ok else "Error"
         self.headers: dict = {}
         self.method = "GET"
-        self.url = "https://example/"
+        self.url = url
+
+
+def _responder(status: int):
+    """Ответчик, чей `url` — зеркало запрошенного.
+
+    Константный URL в дублёре прятал от тестов ветку auth-пути в
+    `_log_response`: она не исполнялась ни разу, и редакция телефона в ней
+    не держалась ничем.
+    """
+
+    async def _call(url, **_kwargs):
+        return _FakeResponse(status, url)
+
+    return _call
 
 
 @pytest.fixture
 def fake_session() -> MagicMock:
     """Подмена aiohttp session — захватывает headers для assert'ов."""
     session = MagicMock()
-    session.get = AsyncMock(return_value=_FakeResponse(200))
-    session.post = AsyncMock(return_value=_FakeResponse(200))
+    session.get = AsyncMock(side_effect=_responder(200))
+    session.post = AsyncMock(side_effect=_responder(200))
     return session
 
 
@@ -113,7 +133,7 @@ async def test_error_log_redacts_phone_in_auth_path(http_client, fake_session, c
     устойчивый отказ ниже). Редакция телефона от уровня не зависит и нужна
     тем более: именно debug-логи люди прикладывают к issue.
     """
-    fake_session.get = AsyncMock(return_value=_FakeResponse(401))
+    fake_session.get = AsyncMock(side_effect=_responder(401))
 
     with caplog.at_level(logging.DEBUG, logger="custom_components.elektronny_gorod.const"):
         with pytest.raises(Exception):
@@ -125,7 +145,7 @@ async def test_error_log_redacts_phone_in_auth_path(http_client, fake_session, c
 
 async def test_error_log_passes_through_non_auth_path(http_client, fake_session, caplog):
     """Для не-auth endpoint path логируется как есть (place_id и т.д. — не PII)."""
-    fake_session.get = AsyncMock(return_value=_FakeResponse(500))
+    fake_session.get = AsyncMock(side_effect=_responder(500))
 
     with caplog.at_level(logging.DEBUG, logger="custom_components.elektronny_gorod.const"):
         with pytest.raises(Exception):
@@ -276,7 +296,7 @@ async def test_persistent_rest_failure_is_not_shouted_on_every_response(
     """
     import logging
 
-    fake_session.get = AsyncMock(return_value=_FakeResponse(503))
+    fake_session.get = AsyncMock(side_effect=_responder(503))
 
     with caplog.at_level(logging.DEBUG):
         for _ in range(12):
@@ -286,10 +306,21 @@ async def test_persistent_rest_failure_is_not_shouted_on_every_response(
     ours = [
         r for r in caplog.records
         if r.name.startswith("custom_components.elektronny_gorod")
+        and "API request failed" in r.msg
     ]
-    assert [r for r in ours if r.levelno >= logging.WARNING] == [], (
-        "об отказе решает вызывающий, а не транспорт"
-    )
-    assert [r for r in ours if "API request failed" in r.msg], (
-        "на debug отказ всё-таки виден — иначе диагностировать нечем"
+    shouted = [r for r in ours if r.levelno >= logging.WARNING]
+    assert len(shouted) == 1, "об отказе говорим один раз, а не на каждом ответе"
+    assert len(ours) == 12, "остальные попытки видны на debug — иначе нечего смотреть"
+
+    # Возвращение данных снимает отметку: следующая пропажа снова заметна.
+    fake_session.get = AsyncMock(side_effect=_responder(200))
+    await http_client.get("/rest/v1/subscriber-places")
+    fake_session.get = AsyncMock(side_effect=_responder(503))
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(ClientError):
+            await http_client.get("/rest/v1/subscriber-places")
+
+    assert [r for r in caplog.records if r.levelno >= logging.WARNING], (
+        "после возвращения данных о новой пропаже надо сказать заново"
     )
