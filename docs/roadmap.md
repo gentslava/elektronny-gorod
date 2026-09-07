@@ -86,7 +86,7 @@ Quality gates:
 - [x] **A-16** ✅ slice 3a — `coordinator.async_unsubscribe()` зарегистрирован через `entry.async_on_unload` в `async_setup_entry`.
 - [x] **A-17** ✅ Извлечены `_collect_cameras_for_place` / `_collect_locks_for_place`.
 - [x] **A-18** ✅ Неиспользуемый `query_sections` удалён из coordinator.
-- [ ] **A-19** Сузить `except Exception` в `api.py` до `ClientResponseError`/`ClientError`/`asyncio.TimeoutError`; не использовать `e.args[0]`.
+- [ ] **A-19** (остаток) Сузить `except Exception` в `api.py` до `ClientResponseError`/`ClientError`/`asyncio.TimeoutError`. Небезопасная распаковка `e.args[0]` убрана — статус ответа читается через `http.error_status()`, оставшиеся два обращения защищены `isinstance` (PR #96).
 - [ ] **A-20** Заменить `raise ClientError(response)` на корректное `ClientResponseError`.
 - [ ] **A-21** 🟡 Timeout закрыт (REST 30с / binary 60с / connect 10с); остаётся retry/backoff только для идемпотентных GET.
 - [x] **A-23 + A-45** ✅ `diagnostics.py` redacts secrets/PII; `TO_REDACT` покрывает `SENSITIVE_KEYS`, включая go2rtc credentials.
@@ -117,10 +117,10 @@ Quality gates:
 
 - [x] **A-15** Решить судьбу `fake_timer_lock` в `lock.py` — либо удалить, либо переписать `lock` → `button`. Требует ADR-0005. **WON'T FIX** (решение владельца 2026-09-05): `lock` точнее отражает суть замка домофона, чем `button`.
 - [ ] **A-22** (остаток) Поведение при 401: pre-auth Bearer-omission уже сделан (PR #35); осталось — собрать HAR со сценарием истечения access_token, затем реализовать `/auth/.../refresh` **точно как в приложении** (см. [ADR-0006](decisions/0006-mirror-app-behavior.md)). До получения HAR — текущее graceful поведение (UpdateFailed → reauth через UI).
-- [ ] **A-25** Native reauth flow (`async_step_reauth_confirm`).
+- [x] **A-25** Native reauth flow (`async_step_reauth_confirm`) — сделано в [A-108](audit/project-audit.md), PR #93.
 - [ ] **A-26** Reconfigure flow (`async_step_reconfigure`).
-- [ ] **A-37** `parallel_updates = 1` (или другое значение) на entity-классах.
-- [ ] **A-38** Обработка unavailable / log-when-unavailable.
+- [x] **A-37** `PARALLEL_UPDATES` задан во всех шести платформах: `1` у `lock`/`switch` (там есть действия), `0` у остальных — PR #96.
+- [x] **A-38** `log-when-unavailable` — жалоба по фронту с гранулярностью «вид данных + место», девять фронтов; PR #96, [A-112](audit/project-audit.md).
 - [ ] Repairs flow для edge-cases (заблокированный аккаунт, истёкший договор).
 
 #### Silver feature gaps (HAR-research findings)
@@ -173,8 +173,8 @@ Quality gates:
 
 #### Code quality
 
-- [ ] **A-30** `extra_state_attributes` — snake_case ключи.
-- [ ] **A-31** UTC в `time.py`.
+- [x] **A-30** `extra_state_attributes` — snake_case ключи с переводами; PR #95.
+- [x] **A-31** UTC в `time.py` — метка входа была локальным временем с приписанным `Z` (у новосибирского абонента +7 часов к настоящему UTC). Приложение шлёт UTC, проверено по трём HAR-снимкам с устройств в разных зонах.
 - [x] **A-32** Заменить f-string в `LOGGER.*` на `%`-форматирование во всех местах.
 - [ ] **A-33** Magic strings → const.
 - [ ] **A-39** Избавиться от reinvented `find/contains/append_unique` в helpers.
