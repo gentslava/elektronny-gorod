@@ -544,9 +544,9 @@ class ElektronnyGorodAPI:
         if isinstance(result, (bytes, bytearray)):
             return bytes(result)
 
-        if isinstance(result, ClientResponse):
-            return await result.read()
-
+        # Ответом бинарная ветка `http` не отдаёт никогда: она либо возвращает
+        # байты, либо бросает. Поэтому «прочитать ответ» здесь было мёртвым
+        # кодом — оставляем отказ на всё, что кадром не является.
         raise TypeError(f"Unexpected response type: {type(result)!r}")
 
     async def open_lock(self, place_id: str, access_control_id: str, entrance_id: str | None) -> None:

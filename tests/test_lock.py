@@ -294,4 +294,21 @@ async def test_unlock_timeout_also_refuses_and_does_not_stick(
     await hass.async_block_till_done()
 
     assert err.value.translation_key == "cannot_unlock"
-    assert hass.states.get(eid).state == "jammed", "состояние не должно залипнуть"
+    assert hass.states.get(eid).state == "jammed"
+
+    # Само утверждение теста — про «не залипает», поэтому время надо
+    # двинуть: мгновенный снимок состояния пропускал бы снятый возврат в
+    # «заперто», а именно он и отличает эту ветку от прежнего залипания.
+    from datetime import timedelta
+
+    from homeassistant.util import dt as dt_util
+    from pytest_homeassistant_custom_component.common import async_fire_time_changed
+
+    from custom_components.elektronny_gorod.lock import LOCK_JAMMED_DELAY
+
+    async_fire_time_changed(
+        hass, dt_util.utcnow() + timedelta(seconds=LOCK_JAMMED_DELAY + 1)
+    )
+    await hass.async_block_till_done()
+
+    assert hass.states.get(eid).state == "locked", "замок остался «заело» навсегда"
