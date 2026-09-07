@@ -164,7 +164,7 @@ async def test_persistent_failure_logs_once_not_every_cycle(
             for _ in range(5):
                 await coordinator._async_update_data()
 
-            complaints = [r for r in caplog.records if "нет данных" in r.msg]
+            complaints = [r for r in caplog.records if "нет данных" in r.getMessage()]
             assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
 
             # Данные вернулись — об этом должно быть сказано ровно один раз.
@@ -172,7 +172,7 @@ async def test_persistent_failure_logs_once_not_every_cycle(
             for _ in range(3):
                 await coordinator._async_update_data()
 
-        recovered = [r for r in caplog.records if "данные снова приходят" in r.msg]
+        recovered = [r for r in caplog.records if "данные снова приходят" in r.getMessage()]
         assert len(recovered) == 1
 
 
@@ -483,7 +483,11 @@ async def test_empty_place_list_complains_once_and_notices_recovery(
             for _ in range(3):
                 await coordinator._async_update_data()
 
-            assert len([r for r in caplog.records if "нет данных" in r.msg]) == 1
+            complaints = [r for r in caplog.records if "нет данных" in r.getMessage()]
+            assert len(complaints) == 1
+            # Причина в подставленном виде, а не шаблон: пустой список — не
+            # исключение, и лог не должен утверждать поломку.
+            assert "оператор вернул пустой список" in complaints[0].getMessage()
 
             caplog.clear()
             api.query_places = AsyncMock(return_value=[{
@@ -492,6 +496,6 @@ async def test_empty_place_list_complains_once_and_notices_recovery(
             }])
             await coordinator._async_update_data()
 
-            assert [r for r in caplog.records if "данные снова приходят" in r.msg], (
+            assert [r for r in caplog.records if "данные снова приходят" in r.getMessage()], (
                 "возвращение данных должно быть видно"
             )

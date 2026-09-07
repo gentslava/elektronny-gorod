@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -348,3 +349,81 @@ async def test_rejected_dnd_payload_does_not_touch_the_snapshot(
     ) is False
 
     assert coordinator.data["dnd"][PLACE_ID] == before
+
+
+async def test_snapshot_write_reaches_the_state_machine(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Переключённое видно сразу, а не через отложенное обновление.
+
+    Записать снимок мало: без уведомления подписчиков состояние в Home
+    Assistant остаётся прежним до следующего обновления координатора.
+    Человек видит, как тумблер отскакивает назад, а сценарий, читающий
+    соседний переключатель сразу после переключения, получает старое.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    switch_id = next(
+        state.entity_id
+        for state in hass.states.async_all("switch")
+        if state.entity_id.endswith("_do_not_disturb")
+    )
+    assert hass.states.get(switch_id).state == "off"
+
+    await coordinator.async_set_dnd(PLACE_ID, _dnd_items(root=True))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(switch_id).state == "on"
+
+
+async def test_turning_on_every_switch_of_a_place_keeps_all_three(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Включение всех трёх переключателей адреса доходит целиком.
+
+    Тот самый сценарий A-113, на уровне действия, а не координатора: каждый
+    переключатель шлёт полный набор из трёх пунктов, построенный из снимка.
+    Держат его две вещи сразу — сериализация действий (`PARALLEL_UPDATES`) и
+    запись принятого набора в снимок. Снятие любой из них теряет
+    переключения, поэтому проверка должна падать в обоих случаях, а не
+    только в одном.
+
+    Оператор здесь с памятью и задержкой: без задержки параллельные вызовы не
+    успевают наложиться, и тест перестал бы отличать сериализацию от её
+    отсутствия.
+    """
+    api = mock_api_with_dnd.return_value
+    stored = _dnd_items(root=True, intercom=False, mgmt=False)
+
+    async def _accept(_place_id, items):
+        await asyncio.sleep(0.02)
+        nonlocal stored
+        stored = [dict(item) for item in items]
+        return True
+
+    api.query_dnd_settings = AsyncMock(side_effect=lambda _p: [dict(i) for i in stored])
+    api.post_dnd_settings = AsyncMock(side_effect=_accept)
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    switches = [state.entity_id for state in hass.states.async_all("switch")]
+    assert len(switches) == 3, switches
+
+    await hass.services.async_call(
+        "switch", "turn_on", {"entity_id": switches}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    statuses = {item["type"]: item["status"] for item in stored}
+    assert statuses == {
+        "DO_NOT_DISTURB_ROOT": True,
+        "INTERCOM_CALLS": True,
+        "MANAGEMENT_COMPANY_CALLS": True,
+    }, "часть переключений потеряна"
