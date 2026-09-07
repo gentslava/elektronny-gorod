@@ -941,3 +941,27 @@ async def test_downlink_counts_the_first_packet(controller) -> None:
     controller._on_downlink(b"\xff" * 160)
 
     assert controller.downlink_packets == 1
+
+
+async def test_hangup_ends_a_ringing_call_that_never_got_a_sip_leg(controller):
+    """Отклонение гасит звонок и тогда, когда SIP-плечо не поднялось.
+
+    Ветка degrade штатная: не готов FCM-токен или не удался REGISTER/hold —
+    экран вызова живёт от FCM, а SIP-менеджера нет вовсе. Раньше `ended` и
+    `EVENT_SIP_CALL(active=false)` стояли под «есть менеджер», поэтому отбой
+    отчитывался успехом, ничего не погасив: карточка продолжала звонить с
+    обратным отсчётом до ring-таймаута, а второе нажатие отвечало «нет
+    вызова» — на экране, где вызов виден.
+    """
+    controller.handle_signal(_ring())
+    assert controller._manager is None, "ветка degrade: SIP-плеча нет"
+    controller._hass.bus.async_fire.reset_mock()
+
+    assert await controller.async_hangup() is True
+
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+    assert any(
+        call.args[0] == EVENT_SIP_CALL and call.args[1] == {"active": False}
+        for call in controller._hass.bus.async_fire.call_args_list
+    ), "экран вызова не погашен"
+    assert await controller.async_hangup() is False, "снимать больше нечего"

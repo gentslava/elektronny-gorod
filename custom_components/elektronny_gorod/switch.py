@@ -20,16 +20,17 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LOGGER
+from .const import DOMAIN
 from .device import place_identifier
 from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 
-# Сущности не опрашивают оператора поодиночке: данные приходят из
-# координатора одним циклом на всю запись, поэтому ограничивать параллельные
-# обновления нечем и незачем. Константа объявлена явно — правило Silver
-# `parallel-updates` требует не полагаться на умолчание ядра, которое зависит
-# от того, синхронный ли `update` у сущности.
-PARALLEL_UPDATES = 0
+# Опрос идёт через координатор, но правило Silver `parallel-updates` про
+# другое: координатор централизует только входящие данные и не ограничивает
+# исходящие вызовы действий. Здесь это не теория — три переключателя «не
+# беспокоить» одного адреса строят payload из общего `coordinator.data`, и
+# параллельное переключение потеряло бы два из трёх: побеждает последний
+# ответ. Поэтому действия сериализуются.
+PARALLEL_UPDATES = 1
 
 DND_ROOT = "DO_NOT_DISTURB_ROOT"
 DND_INTERCOM = "INTERCOM_CALLS"

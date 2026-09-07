@@ -7,7 +7,7 @@
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -115,7 +115,9 @@ async def test_refusal_message_is_translated() -> None:
     base = pathlib.Path(__file__).resolve().parent.parent / "custom_components/elektronny_gorod"
     for name in ("strings.json", "translations/ru.json", "translations/en.json"):
         data = json.loads((base / name).read_text(encoding="utf-8"))
-        assert "no_active_call" in data.get("exceptions", {}), name
+        exceptions = data.get("exceptions", {})
+        for key in ("no_active_call", "integration_not_loaded"):
+            assert exceptions.get(key, {}).get("message"), f"{name}: {key}"
 
 
 async def test_services_exist_before_any_entry_is_loaded(hass: HomeAssistant) -> None:
@@ -133,13 +135,52 @@ async def test_services_exist_before_any_entry_is_loaded(hass: HomeAssistant) ->
     assert hass.services.has_service(DOMAIN, SERVICE_HANGUP)
 
 
-async def test_service_without_any_entry_refuses_clearly(hass: HomeAssistant) -> None:
-    """Без загруженных записей действие отказывает по существу, а не падает."""
+@pytest.mark.parametrize("service", [SERVICE_ANSWER, SERVICE_HANGUP])
+async def test_service_without_any_entry_names_the_real_reason(
+    hass: HomeAssistant, service: str
+) -> None:
+    """Без загруженных записей причина названа своя, а не «нет вызова».
+
+    Раз действие существует всегда, отказ «сейчас нет входящего вызова»
+    отправил бы человека искать пропущенный звонок вместо выгруженной
+    интеграции.
+    """
     from custom_components.elektronny_gorod import async_setup
 
     await async_setup(hass, {})
 
     with pytest.raises(ServiceValidationError) as err:
-        await hass.services.async_call(DOMAIN, SERVICE_ANSWER, {}, blocking=True)
+        await hass.services.async_call(DOMAIN, service, {}, blocking=True)
 
-    assert err.value.translation_key == "no_active_call"
+    assert err.value.translation_key == "integration_not_loaded"
+
+
+async def test_actions_survive_the_unload_of_the_last_entry(
+    hass: HomeAssistant,
+) -> None:
+    """Действия переживают выгрузку последней записи.
+
+    Регистрация живёт в `async_setup`, а его Home Assistant зовёт один раз за
+    запуск: домен уже в `hass.config.components`, и при повторной загрузке
+    записи туда не возвращается. Снимать сервисы на выгрузке последней записи
+    означало бы, что после смены опций, переавторизации или «Перезагрузить»
+    кнопки экрана вызова отвечают «сервис не найден» до перезапуска HA.
+    """
+    from custom_components.elektronny_gorod import async_setup, async_unload_entry
+
+    await async_setup(hass, {})
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    controller = _controller(ringing=True)
+    hass.data[_SIP_DATA] = {entry.entry_id: controller}
+
+    with patch.object(
+        hass.config_entries,
+        "async_unload_platforms",
+        new=AsyncMock(return_value=True),
+    ):
+        assert await async_unload_entry(hass, entry) is True
+
+    controller.async_hangup.assert_awaited_once()
+    assert hass.services.has_service(DOMAIN, SERVICE_ANSWER)
+    assert hass.services.has_service(DOMAIN, SERVICE_HANGUP)

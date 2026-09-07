@@ -179,25 +179,33 @@ async def test_attributes_are_snake_case_and_typed(hass: HomeAssistant, mock_api
         translated = data["entity"]["lock"]["lock"].get("state_attributes", {})
         missing = sorted(ours - set(translated))
         assert not missing, f"{name}: нет перевода имени для {missing}"
-        assert "cannot_lock" in data.get("exceptions", {}), f"{name}: нет текста отказа"
+        exceptions = data.get("exceptions", {})
+        for key in ("cannot_lock", "cannot_unlock"):
+            assert exceptions.get(key, {}).get("message"), f"{name}: нет текста {key}"
 
 
-async def test_unlock_failure_shows_jammed(hass: HomeAssistant, mock_api):
-    """Оператор не открыл — замок честно показывает заедание.
+async def test_unlock_failure_shows_jammed_and_says_so(
+    hass: HomeAssistant, mock_api
+):
+    """Оператор не открыл — замок показывает заедание И сообщает об отказе.
 
-    Молчаливый возврат в «заперто» выглядел бы как успешное открытие двери,
-    которая на самом деле не открылась.
+    Одного состояния мало: `jammed` держится две секунды и возвращается в
+    «заперто», а вызывающий получал успех. Автоматизация «открыть и
+    впустить» не отличала открытую дверь от закрытой, и через две секунды
+    исчезал даже визуальный след (правило Silver `action-exceptions`).
     """
     from aiohttp import ClientError
 
     eid = await _setup_lock(hass)
     mock_api.open_lock = AsyncMock(side_effect=ClientError("531"))
 
-    await hass.services.async_call(
-        "lock", "unlock", {"entity_id": eid}, blocking=True
-    )
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            "lock", "unlock", {"entity_id": eid}, blocking=True
+        )
     await hass.async_block_till_done()
 
+    assert err.value.translation_key == "cannot_unlock"
     assert hass.states.get(eid).state == "jammed"
 
 

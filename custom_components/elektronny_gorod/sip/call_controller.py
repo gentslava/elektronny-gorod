@@ -373,6 +373,13 @@ class DoorbellCallController:
             self._clear_uplink_sink()
             if manager is not None:
                 await manager.async_hangup()
+            if had_call:
+                # Гасим экран всегда, когда было что снимать. Под `manager is
+                # not None` это не работало на штатной ветке degrade (нет
+                # FCM-токена, не удался REGISTER/hold): отбой отчитывался
+                # успехом, не погасив вызов, — карточка звонила до
+                # ring-таймаута, а второе нажатие отвечало «нет вызова».
+                # До сброса `_active`: `_emit_call_state` читает из него ids.
                 self._emit_call_state(CALL_STATE_ENDED)
                 self._fire_call_state(False)
             self._active = None  # вызов окончен — не оставляем висеть до idle-reset

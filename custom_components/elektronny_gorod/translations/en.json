@@ -270,6 +270,9 @@
     "cannot_lock": {
       "message": "The intercom cannot be locked: the latch is released by the hardware and locks itself after a few seconds."
     },
+    "cannot_unlock": {
+      "message": "The intercom did not open: the operator rejected the request or is unreachable."
+    },
     "no_active_call": {
       "message": "No incoming intercom call right now — there is nothing to answer or hang up."
     },
@@ -278,6 +281,9 @@
     },
     "dnd_rejected": {
       "message": "The operator did not accept the Do Not Disturb change."
+    },
+    "integration_not_loaded": {
+      "message": "The Elektronny Gorod integration is not loaded right now."
     }
   }
 }

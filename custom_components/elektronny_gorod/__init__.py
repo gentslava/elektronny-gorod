@@ -5,7 +5,11 @@ import json
 from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -100,6 +104,12 @@ async def _async_register_fcm_listener(
 
     entry.async_on_unload(stop_and_release)
     return True
+
+
+# Интеграция настраивается только через UI. Без этой схемы блок
+# `elektronny_gorod:` в `configuration.yaml` молча игнорировался бы: теперь
+# HA скажет человеку, что YAML тут не читается.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -299,8 +309,22 @@ def _async_register_sip_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_ANSWER):
         return
 
+    def _loaded_controllers() -> list:
+        """Контроллеры загруженных записей — либо внятный отказ.
+
+        Действие существует всегда (правило Bronze `action-setup`), поэтому
+        «интеграция не загружена» надо отличать от «сейчас никто не звонит»:
+        иначе человек ищет пропущенный вызов вместо выгруженной записи.
+        """
+        controllers = list(hass.data.get(_SIP_DATA, {}).values())
+        if not controllers:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="integration_not_loaded"
+            )
+        return controllers
+
     async def _answer(_call: ServiceCall) -> None:
-        for controller in list(hass.data.get(_SIP_DATA, {}).values()):
+        for controller in _loaded_controllers():
             if controller.current_call() is not None:
                 await controller.async_answer()
                 return
@@ -318,7 +342,7 @@ def _async_register_sip_services(hass: HomeAssistant) -> None:
         # дальше. Отбой по этому признаку отказывался завершать живой
         # разговор с открытым микрофоном — он держался до страховки.
         torn_down = False
-        for controller in list(hass.data.get(_SIP_DATA, {}).values()):
+        for controller in _loaded_controllers():
             if await controller.async_hangup():
                 torn_down = True
         if not torn_down:
@@ -636,14 +660,14 @@ async def async_unload_entry(
         await stream_manager.async_stop()
 
     # Two-way audio: завершить активный разговор (BYE) и снять контроллер.
-    # Сервисы answer/hangup — глобальные: убираем, когда выгружен последний entry.
+    # Сами действия НЕ снимаем: они живут в `async_setup`, который HA зовёт
+    # один раз за запуск — домен остаётся в `hass.config.components`, и при
+    # повторной загрузке записи регистрация не повторится. Снятие здесь
+    # означало бы, что после смены опций, переавторизации или «Перезагрузить»
+    # действий нет до перезапуска HA (правило Bronze `action-setup`).
     sip_controller = hass.data.get(_SIP_DATA, {}).pop(entry.entry_id, None)
     if sip_controller is not None:
         await sip_controller.async_hangup()
-    if not hass.data.get(_SIP_DATA):
-        for service in (SERVICE_ANSWER, SERVICE_HANGUP):
-            if hass.services.has_service(DOMAIN, service):
-                hass.services.async_remove(DOMAIN, service)
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data.get(_FCM_DATA, {}).pop(entry.entry_id, None)
