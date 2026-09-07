@@ -833,3 +833,21 @@ async def test_hidden_camera_without_registry_entry_stays_hidden(hass) -> None:
 
     assert [child.title for child in result.children] == ["Подъезд"]
     assert source._camera(entry.entry_id, _PLACE_ID, _PUBLIC_ID) is None
+
+
+async def test_root_skips_entry_that_is_not_loaded(hass) -> None:
+    """Незагруженная запись не роняет корень медиабраузера.
+
+    Корень читает `runtime_data` напрямую, полагаясь на то, что перебираются
+    только загруженные записи. Если это перестанет быть правдой, вторая
+    учётная запись в состоянии повторной попытки — обычное дело при
+    протухшей авторизации — уронит браузер целиком, вместе с архивом
+    здорового аккаунта.
+    """
+    _entry(hass, _coordinator(), title="Loaded Account")
+    MockConfigEntry(domain=DOMAIN, title="Not Loaded Account").add_to_hass(hass)
+
+    result = await _source(hass).async_browse_media(_item(hass, ""))
+
+    assert [child.title for child in result.children] == ["Loaded Account"]
+

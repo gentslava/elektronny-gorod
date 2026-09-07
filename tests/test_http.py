@@ -14,23 +14,43 @@ from custom_components.elektronny_gorod.http import HTTP
 
 
 class _FakeResponse:
-    """Минимальный stub aiohttp ClientResponse для тестов."""
+    """Минимальный stub aiohttp ClientResponse для тестов.
 
-    def __init__(self, status: int) -> None:
+    `url` — зеркало запрошенного, а не константа: иначе ветка auth-пути в
+    `_log_response` не исполняется ни разу, и редакция телефона в ней не
+    держится ничем. Именно эта строка пишется на КАЖДОМ auth-запросе,
+    включая успешный вход, — в отличие от строки отказа.
+    """
+
+    def __init__(self, status: int, url: str = "https://example/") -> None:
         self.status = status
         self.ok = 200 <= status < 300
         self.reason = "OK" if self.ok else "Error"
         self.headers: dict = {}
         self.method = "GET"
-        self.url = "https://example/"
+        self.url = url
+
+
+def _responder(status: int):
+    """Ответчик, чей `url` — зеркало запрошенного.
+
+    Константный URL в дублёре прятал от тестов ветку auth-пути в
+    `_log_response`: она не исполнялась ни разу, и редакция телефона в ней
+    не держалась ничем.
+    """
+
+    async def _call(url, **_kwargs):
+        return _FakeResponse(status, url)
+
+    return _call
 
 
 @pytest.fixture
 def fake_session() -> MagicMock:
     """Подмена aiohttp session — захватывает headers для assert'ов."""
     session = MagicMock()
-    session.get = AsyncMock(return_value=_FakeResponse(200))
-    session.post = AsyncMock(return_value=_FakeResponse(200))
+    session.get = AsyncMock(side_effect=_responder(200))
+    session.post = AsyncMock(side_effect=_responder(200))
     return session
 
 
@@ -107,10 +127,15 @@ async def test_bearer_does_not_leak_across_requests(http_client, fake_session):
 
 
 async def test_error_log_redacts_phone_in_auth_path(http_client, fake_session, caplog):
-    """API request failed log не должен содержать PII из auth URL."""
-    fake_session.get = AsyncMock(return_value=_FakeResponse(401))
+    """Лог отказа не должен содержать PII из auth URL.
 
-    with caplog.at_level(logging.ERROR, logger="custom_components.elektronny_gorod.const"):
+    Уровень — `debug`: транспорт не решает, значим ли отказ (см. тест про
+    устойчивый отказ ниже). Редакция телефона от уровня не зависит и нужна
+    тем более: именно debug-логи люди прикладывают к issue.
+    """
+    fake_session.get = AsyncMock(side_effect=_responder(401))
+
+    with caplog.at_level(logging.DEBUG, logger="custom_components.elektronny_gorod.const"):
         with pytest.raises(Exception):
             await http_client.get("/auth/v2/login/1131686")
 
@@ -120,9 +145,9 @@ async def test_error_log_redacts_phone_in_auth_path(http_client, fake_session, c
 
 async def test_error_log_passes_through_non_auth_path(http_client, fake_session, caplog):
     """Для не-auth endpoint path логируется как есть (place_id и т.д. — не PII)."""
-    fake_session.get = AsyncMock(return_value=_FakeResponse(500))
+    fake_session.get = AsyncMock(side_effect=_responder(500))
 
-    with caplog.at_level(logging.ERROR, logger="custom_components.elektronny_gorod.const"):
+    with caplog.at_level(logging.DEBUG, logger="custom_components.elektronny_gorod.const"):
         with pytest.raises(Exception):
             await http_client.get("/rest/v1/places/12345/accesscontrols")
 
@@ -191,3 +216,99 @@ async def test_binary_get_uses_binary_timeout(http_client, fake_session):
     timeout = fake_session.get.await_args.kwargs["timeout"]
     assert timeout is _BINARY_TIMEOUT
     assert timeout.total == 60
+
+
+async def test_non_auth_response_is_logged_with_its_status(
+    http_client, fake_session, caplog
+) -> None:
+    """Обычный ответ логируется статусом, без тела и заголовков."""
+    import logging
+
+    fake_session.get = AsyncMock(return_value=_FakeResponse(200))
+
+    with caplog.at_level(logging.DEBUG):
+        await http_client.get("/rest/v1/places")
+
+    assert any("Response" in r.msg for r in caplog.records)
+
+
+async def test_post_body_size_is_logged_not_the_body(
+    http_client, fake_session, caplog
+) -> None:
+    """В журнал уходит размер тела, а не само тело.
+
+    В теле лежат пароль и код из SMS — писать его нельзя даже на отладке.
+    """
+    import logging
+
+    fake_session.post = AsyncMock(return_value=_FakeResponse(200))
+
+    with caplog.at_level(logging.DEBUG):
+        await http_client.post("/auth/v2/auth/x/password", '{"hash1": "СЕКРЕТ"}')
+
+    assert not any("СЕКРЕТ" in str(r.msg) % (r.args or ()) for r in caplog.records)
+
+
+async def test_auth_response_is_logged_without_its_size(
+    http_client, fake_session, caplog
+) -> None:
+    """У ответа на вход не логируется даже размер.
+
+    По размеру видно, чем кончилась попытка входа: успех и отказ различаются
+    длиной тела.
+    """
+    import logging
+
+    fake_session.post = AsyncMock(return_value=_FakeResponse(200))
+
+    with caplog.at_level(logging.DEBUG):
+        await http_client.post("/auth/v2/auth/x/password", "{}")
+
+    responses = [r for r in caplog.records if "Response" in str(r.msg)]
+    assert responses, "ответ должен попасть в журнал"
+    assert not any("Content-Length" in str(r.msg) for r in responses)
+
+
+async def test_binary_body_size_is_measured_without_decoding(
+    http_client, fake_session, caplog
+) -> None:
+    """Двоичное тело измеряется как есть, без попытки его прочитать текстом."""
+    import logging
+
+    fake_session.post = AsyncMock(return_value=_FakeResponse(200))
+
+    with caplog.at_level(logging.DEBUG):
+        await http_client.post("/rest/v1/upload", b"\xff\xd8\x00\x01")
+
+    assert any("Request" in str(r.msg) for r in caplog.records)
+
+
+async def test_persistent_rest_failure_is_not_shouted_on_every_response(
+    http_client, fake_session, caplog
+) -> None:
+    """Устойчивый отказ REST не даёт по громкой строке на каждый ответ.
+
+    Транспорт не знает, значим ли отказ: решает вызывающий — координатор
+    ограничивает жалобу по фронту, config flow показывает причину в форме.
+    На `error` эта строка сводила дедупликацию на нет: при отказе оператора
+    набегало под три сотни одинаковых записей в сутки на каждый endpoint,
+    против правила Silver `log-when-unavailable`.
+    """
+    import logging
+
+    fake_session.get = AsyncMock(side_effect=_responder(503))
+
+    with caplog.at_level(logging.DEBUG):
+        for _ in range(12):
+            with pytest.raises(ClientError):
+                await http_client.get("/rest/v1/subscriber-places")
+
+    ours = [
+        r for r in caplog.records
+        if r.name.startswith("custom_components.elektronny_gorod")
+        and "API request failed" in r.msg
+    ]
+    assert [r for r in ours if r.levelno >= logging.WARNING] == [], (
+        "об отказе решает вызывающий, а не транспорт"
+    )
+    assert len(ours) == 12, "на debug отказ виден — иначе диагностировать нечем"

@@ -1,5 +1,7 @@
 # tests/test_call_camera.py
 import asyncio
+
+import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from custom_components.elektronny_gorod.call_camera import ElektronnyGorodCallCamera
 from custom_components.elektronny_gorod.const import (
@@ -371,3 +373,129 @@ async def test_stream_source_uses_shared_go2rtc_rtsp_not_operator_pull():
     srcs = upsert.await_args.args[2]
     assert srcs[0] == "rtsp://127.0.0.1:8554/eg_1013#video=copy"
     assert url == "rtsp://127.0.0.1:8554/eg_intercom_call"
+
+
+# ─── Прогрев и снятие стрима вызова ─────────────────────────────────────────
+
+
+async def _bridge_ready(cam, url: str = "rtsp://127.0.0.1:8554/eg_intercom_call"):
+    """Подменить сборку стрима готовым адресом."""
+    cam.stream_source = AsyncMock(return_value=url)
+
+
+async def test_warm_up_nudges_go2rtc_before_the_card_opens(hass) -> None:
+    """Стрим собирается и прогревается заранее, до открытия карточки.
+
+    Иначе видео вызова поднимается с задержкой в несколько секунд — ровно
+    тогда, когда человек смотрит, кто пришёл.
+    """
+    cam = _cam(MagicMock(), lambda cid: None)
+    cam.hass = hass
+    await _bridge_ready(cam)
+    session = MagicMock()
+    response = MagicMock()
+    response.read = AsyncMock(return_value=b"jpeg")
+    session.get.return_value.__aenter__ = AsyncMock(return_value=response)
+    session.get.return_value.__aexit__ = AsyncMock(return_value=False)
+
+    with patch(f"{_CC}.async_get_clientsession", return_value=session):
+        await cam._warm_up()
+
+    probe_url = session.get.call_args.args[0]
+    assert "frame.jpeg" in probe_url and "eg_intercom_call" in probe_url
+
+
+async def test_warm_up_without_a_stream_does_nothing(hass) -> None:
+    cam = _cam(MagicMock(), lambda cid: None)
+    cam.hass = hass
+    cam.stream_source = AsyncMock(return_value=None)
+    with patch(f"{_CC}.async_get_clientsession") as session:
+        await cam._warm_up()
+    session.assert_not_called()
+
+
+async def test_warm_up_failure_does_not_break_the_call(hass) -> None:
+    """Прогрев — необязательный шаг: его отказ не должен рушить приём вызова."""
+    cam = _cam(MagicMock(), lambda cid: None)
+    cam.hass = hass
+    cam.stream_source = AsyncMock(side_effect=RuntimeError("go2rtc недоступен"))
+
+    await cam._warm_up()  # не должно бросить
+
+
+async def test_teardown_removes_the_call_stream(hass) -> None:
+    """После звонка стрим снимается — иначе HA бесконечно ретраит мёртвый."""
+    cam = _cam(MagicMock(), lambda cid: None)
+    cam.hass = hass
+    cam._call_stream_cache = ("bridge", "rtsp://x")
+
+    with (
+        patch(f"{_CC}.async_get_clientsession", return_value=MagicMock()),
+        patch(f"{_CC}.remove_audio_stream", new=AsyncMock()) as remove,
+    ):
+        await cam._teardown_call_stream()
+
+    remove.assert_awaited_once()
+    assert cam._call_stream_cache is None
+
+
+async def test_teardown_failure_is_swallowed(hass) -> None:
+    """Снятие стрима — best-effort: его отказ не должен всплывать наверх."""
+    cam = _cam(MagicMock(), lambda cid: None)
+    cam.hass = hass
+
+    with (
+        patch(f"{_CC}.async_get_clientsession", return_value=MagicMock()),
+        patch(f"{_CC}.remove_audio_stream", new=AsyncMock(side_effect=RuntimeError)),
+    ):
+        await cam._teardown_call_stream()
+
+
+async def test_teardown_without_go2rtc_is_a_noop(hass) -> None:
+    cam = ElektronnyGorodCallCamera(
+        controller_getter=lambda: None,
+        go2rtc_base_url="",
+        go2rtc_headers={}, rtsp_host="127.0.0.1",
+        doorbell_lookup=lambda cid: None,
+        entry_id="e1",
+    )
+    cam.hass = hass
+    cam._call_stream_cache = ("bridge", "rtsp://x")
+
+    await cam._teardown_call_stream()
+
+    assert cam._call_stream_cache is None
+
+
+async def test_stream_build_failure_reaches_every_waiter(hass) -> None:
+    """Сбой сборки стрима доезжает до всех, кто её ждал.
+
+    Прогрев и открытие карточки идут одновременно и делят одну сборку.
+    Проглотить исключение значило бы, что второй ждущий завис бы навсегда.
+    """
+    controller = MagicMock()
+    bridge = MagicMock(go2rtc_src="ffmpeg:http://x")
+    controller.active_call_media.return_value = ("100", bridge)
+    cam = _cam(controller, lambda cid: MagicMock())
+    cam.hass = hass
+    cam._build_call_stream = AsyncMock(side_effect=RuntimeError("go2rtc упал"))
+
+    with pytest.raises(RuntimeError):
+        await cam.stream_source()
+
+    assert cam._inflight_stream_future is None, "сборка не должна залипнуть"
+
+
+async def test_answered_call_warms_the_stream_up(hass) -> None:
+    """На ответе стрим начинает собираться заранее, не дожидаясь карточки."""
+    from custom_components.elektronny_gorod.const import CALL_STATE_ACTIVE
+
+    cam = _cam(MagicMock(), lambda cid: None)
+    cam.hass = hass
+    cam.async_write_ha_state = MagicMock()
+    cam._warm_up = AsyncMock()
+
+    cam._on_call_state(MagicMock(data={"state": CALL_STATE_ACTIVE}))
+    await hass.async_block_till_done()
+
+    cam._warm_up.assert_awaited_once()

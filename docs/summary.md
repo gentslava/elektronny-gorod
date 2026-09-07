@@ -42,7 +42,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 | HACS validation CI | ✅ зелёный |
 | pytest CI | ✅ есть; точная matrix задаётся [`python-tests.yaml`](../.github/workflows/python-tests.yaml) |
 | Реальные тесты | ✅ pytest CI и локальный gate настроены; актуальные команды, состав и последний baseline — в [`testing/strategy.md`](testing/strategy.md) |
-| Integration Quality Scale | ✅ Bronze заявлен; к Silver закрыто пять правил из семи, остаются `test-coverage` (85% против 95%) и `action-exceptions` |
+| Integration Quality Scale | ✅ Silver заявлен: все 42 модуля выше 95% покрытия, нативная переавторизация, внятный отказ действий, `parallel-updates`, документация параметров и удаления |
 | Безопасность (token redaction) | ✅ P0-утечки S-01..S-06 закрыты (verified по коду) |
 | Документация для пользователя | ✅ RU/EN README, HACS info и опубликованные release notes 4.0.1 дают обязательную информацию по FCM hotfix; обзор 4.0.0 сохраняет экран вызова, durable history и opt-in внешний RTSP |
 | AIDD документация для агентов | ✅ process/source-of-truth контракты синхронизированы; candidate-bound review lifecycle подтверждён release PR #80 и A-97 закрыт; актуальные findings — в [`project-audit.md`](audit/project-audit.md) |
@@ -88,7 +88,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - FCM остаётся на приватных Google API и неофициальном operator push-контракте. Зафиксированный production-дефект исправлен локальной нормализацией и bounded recovery, но долгосрочная совместимость внешней зависимости не гарантируется (A-80).
 - go2rtc persistent-config bloat частично mitigated PATCH-only path, но требует live persistence check (A-84).
 - `api.py` — `e.args[0]` antipattern + широкий `except Exception` (A-19/A-20).
-- HTML service-pipe/VPN block пока превращается в generic `ClientError` и может выглядеть как пустой список камер (A-92; нужен воспроизводимый HAR).
+- HTML service-pipe/VPN block пока превращается в generic `ClientError` (A-92; нужен воспроизводимый HAR). Пустым списком камер он больше не притворяется — отказ доходит до координатора и виден в журнале.
 - Cold-start go2rtc warmup (A-67), lock fake-state cosmetic-cycle (A-15 — `asyncio.sleep` уже убран).
 
 ### Mobile-app parity backlog

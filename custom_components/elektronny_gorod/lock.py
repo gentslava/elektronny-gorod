@@ -26,12 +26,11 @@ from .device import linked_to_place, place_device_id
 from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 from .entity_migration import lock_unique_id
 
-# Сущности не опрашивают оператора поодиночке: данные приходят из
-# координатора одним циклом на всю запись, поэтому ограничивать параллельные
-# обновления нечем и незачем. Константа объявлена явно — правило Silver
-# `parallel-updates` требует не полагаться на умолчание ядра, которое зависит
-# от того, синхронный ли `update` у сущности.
-PARALLEL_UPDATES = 0
+# Опрос идёт через координатор, но правило Silver `parallel-updates` про
+# другое: координатор централизует только входящие данные и не ограничивает
+# исходящие вызовы действий. Открытие двери — как раз действие, и слать их
+# оператору пачкой незачем; сериализуем.
+PARALLEL_UPDATES = 1
 
 LOCK_UNLOCK_DELAY = 5  # секунды cosmetic-UX «открыто»
 LOCK_JAMMED_DELAY = 2
@@ -206,12 +205,19 @@ class ElektronnyGorodLock(
             await self.coordinator.open_lock(
                 self._place_id, self._access_control_id, self._entrance_id
             )
-        except ClientError:
+        except (ClientError, TimeoutError) as err:
             self._state = LockState.JAMMED
             self._schedule_reset(LOCK_JAMMED_DELAY)
-        else:
-            self._state = LockState.UNLOCKED
-            self._schedule_reset(LOCK_UNLOCK_DELAY)
+            self.async_write_ha_state()
+            # Отказ оператора видно на карточке две секунды, а вызывающему
+            # возвращался успех: автоматизация «открыть и впустить» не
+            # отличала открытую дверь от закрытой, и через две секунды
+            # исчезал даже визуальный след (правило Silver `action-exceptions`).
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="cannot_unlock"
+            ) from err
+        self._state = LockState.UNLOCKED
+        self._schedule_reset(LOCK_UNLOCK_DELAY)
         self.async_write_ha_state()
 
     def _schedule_reset(self, delay: int) -> None:

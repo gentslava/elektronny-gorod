@@ -74,7 +74,7 @@ UA-поле `brand-code` (4-е по счёту) — `ntk` для «Мой Дом
 - Оба используют **user-side preferences** для UX-фильтрации:
   - «Мой Дом» — `/settings/screens` (`entities` vs `hidden`)
   - «Электронный город» — `PUT /rest/v1/devices/{id}` с `isMain: bool`
-- Оба show «only domovaya cameras» решают через юзерский выбор в приложении, не через server categorization. Это значит интеграция не должна изобретать heuristic-категории — только уважать user preferences (что мы делаем через `_attr_entity_registry_enabled_default`).
+- Оба show «only domovaya cameras» решают через юзерский выбор в приложении, не через server categorization. Это значит интеграция не должна изобретать heuristic-категории — только уважать user preferences (что мы делаем через `hidden_by=INTEGRATION` в реестре сущностей).
 
 ## Общие свойства
 
@@ -541,7 +541,7 @@ Response shape:
 
 Если пользователь не настраивал — возвращается `{}` (пустой объект).
 
-**Использование в интеграции:** `hidden` IDs прокидываются в camera/lock dicts через флаг `hidden`. Entity для них получает `_attr_entity_registry_enabled_default = False` — новые установки уважают пользовательский выбор. Existing entities сохраняют выбор юзера в HA.
+**Использование в интеграции:** `hidden` IDs прокидываются в camera/lock dicts через флаг `hidden`. Скрытие выставляет `_sync_visibility` через `hidden_by=INTEGRATION`: сущность существует и работает, скрыт только показ. Скрытие, выставленное человеком вручную (`hidden_by=USER`), не трогаем — снимаем только своё.
 
 ### `POST /api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens`
 
@@ -598,7 +598,7 @@ Request body shape:
 
 Response: пустое тело (HTTP 200).
 
-🔵 **Применение для нашей integration:** **не используем для записи** (HA имеет свой entity registry — дублировать UI оператора анти-паттерн). GET-вариант (см. выше) используется для **чтения `hidden` IDs** → `_attr_entity_registry_enabled_default = False`. Также: FAVORITES-секция из GET (если присутствует) могла бы быть мапнута на HA labels/areas как hint от пользователя — но это далеко не приоритет.
+🔵 **Применение для нашей integration:** **не используем для записи** (HA имеет свой entity registry — дублировать UI оператора анти-паттерн). GET-вариант (см. выше) используется для **чтения `hidden` IDs** → `hidden_by=INTEGRATION`. Также: FAVORITES-секция из GET (если присутствует) могла бы быть мапнута на HA labels/areas как hint от пользователя — но это далеко не приоритет.
 
 ### `GET|POST /api/mh-customer/mobile/v1/customers/places/{place_id}/settings/do_not_disturb`
 

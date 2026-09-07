@@ -574,8 +574,9 @@ async def test_config_flow_avoids_deprecated_core_api() -> None:
     """
     import pathlib
 
-    source = pathlib.Path(
-        "custom_components/elektronny_gorod/config_flow.py"
+    source = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "custom_components/elektronny_gorod/config_flow.py"
     ).read_text(encoding="utf-8")
     # Ищем обращение, а не упоминание: объясняющий комментарий остаётся.
     assert "self.show_advanced_options" not in source
@@ -645,7 +646,7 @@ async def test_flow_messages_are_translated() -> None:
     import pathlib
     import re
 
-    base = pathlib.Path("custom_components/elektronny_gorod")
+    base = pathlib.Path(__file__).resolve().parent.parent / "custom_components/elektronny_gorod"
     source = (base / "config_flow.py").read_text(encoding="utf-8")
 
     aborts = set(re.findall(r'async_abort\(reason="([a-z_]+)"', source))
@@ -743,7 +744,7 @@ async def test_reauth_step_is_translated() -> None:
     import json
     import pathlib
 
-    base = pathlib.Path("custom_components/elektronny_gorod")
+    base = pathlib.Path(__file__).resolve().parent.parent / "custom_components/elektronny_gorod"
     for name in ("strings.json", "translations/ru.json", "translations/en.json"):
         data = json.loads((base / name).read_text(encoding="utf-8"))
         step = data["config"]["step"].get("reauth_confirm")

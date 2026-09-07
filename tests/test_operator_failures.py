@@ -164,7 +164,7 @@ async def test_persistent_failure_logs_once_not_every_cycle(
             for _ in range(5):
                 await coordinator._async_update_data()
 
-            complaints = [r for r in caplog.records if "недоступны" in r.msg]
+            complaints = [r for r in caplog.records if "нет данных" in r.getMessage()]
             assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
 
             # Данные вернулись — об этом должно быть сказано ровно один раз.
@@ -172,7 +172,7 @@ async def test_persistent_failure_logs_once_not_every_cycle(
             for _ in range(3):
                 await coordinator._async_update_data()
 
-        recovered = [r for r in caplog.records if "снова отвечают" in r.msg]
+        recovered = [r for r in caplog.records if "данные снова приходят" in r.getMessage()]
         assert len(recovered) == 1
 
 
@@ -209,3 +209,307 @@ async def test_unloaded_entry_is_not_resolved(hass: HomeAssistant) -> None:
     entry.mock_state(hass, ConfigEntryState.NOT_LOADED)
 
     assert async_get_coordinator(hass, entry.entry_id) is None
+
+
+async def test_no_places_is_not_a_failure(hass: HomeAssistant) -> None:
+    """Учётная запись без адресов — пустой набор данных, а не ошибка.
+
+    Так бывает у только что оформленного договора: интеграция должна
+    загрузиться и ждать, а не уходить в повторные попытки.
+    """
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[])
+
+        data = await ElektronnyGorodUpdateCoordinator(hass, entry=entry)._async_update_data()
+
+    assert data == {"places": [], "balances": [], "cameras": [], "locks": [], "dnd": {}}
+
+
+async def test_one_broken_kind_of_data_does_not_sink_the_rest(
+    hass: HomeAssistant,
+) -> None:
+    """Отказ по одному виду данных не уносит остальные.
+
+    Оператор регулярно молчит про что-то одно; терять из-за этого камеры и
+    замки было бы несоразмерно.
+    """
+    from aiohttp import ClientError
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[{
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "1000000", "address": "addr"},
+        }])
+        api.query_balance = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_screens_settings = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_access_controls = AsyncMock(return_value=[{
+            "id": "AC1",
+            "name": "Intercom",
+            "entrances": [{"id": "E1", "name": "Подъезд 1", "allowOpen": True}],
+        }])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(side_effect=ClientError(_response(500)))
+
+        data = await ElektronnyGorodUpdateCoordinator(hass, entry=entry)._async_update_data()
+
+    assert data["balances"] == [] and data["dnd"] == {}
+    assert len(data["locks"]) == 1, "замки должны пережить отказ по балансу"
+
+
+async def test_every_kind_of_data_degrades_on_its_own(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Отказ по домофонам, камерам и замкам не уносит соседей, и каждый слышен.
+
+    Оператор отказывает по одному виду данных, а не по всем сразу — терять
+    из-за этого весь набор было бы несоразмерно. Все три отказа здесь
+    настоящие и каждый должен дать свою строку: пока источники камер не были
+    разведены по фронтам, отказы по ним поглощались одним общим, и подмены в
+    этом тесте работали вхолостую.
+    """
+    import logging
+
+    from aiohttp import ClientError
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[{
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "1000000", "address": "addr"},
+        }])
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_cameras = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_public_cameras = AsyncMock(side_effect=ClientError(_response(500)))
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(return_value={"balance": 1.0})
+
+        coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
+        with caplog.at_level(logging.INFO):
+            data = await coordinator._async_update_data()
+
+    assert data["cameras"] == [] and data["locks"] == []
+    assert len(data["balances"]) == 1, "баланс должен пережить отказ по камерам"
+    fronts = {
+        r.getMessage().split(":", 1)[0]
+        for r in caplog.records
+        if "нет данных" in r.getMessage()
+    }
+    assert fronts == {"Домофоны", "Камеры места", "Общедомовые камеры"}
+
+
+async def test_place_without_identifier_is_skipped(hass: HomeAssistant) -> None:
+    """Место без идентификатора пропускается, а не роняет обновление."""
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[
+            {"subscriber": {"id": "S1"}, "place": {}},
+            {"subscriber": {"id": "S1"}},
+        ])
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(return_value=[])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(return_value=None)
+
+        data = await ElektronnyGorodUpdateCoordinator(hass, entry=entry)._async_update_data()
+
+    assert data["cameras"] == []
+
+
+async def test_intercom_camera_is_taken_from_the_entrance(hass: HomeAssistant) -> None:
+    """Камера домофона берётся из подъезда — там связь точнее.
+
+    На уровне домофона идентификатор камеры у оператора бывает
+    рассогласован, поэтому первично поле подъезда.
+    """
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[{
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "1000000", "address": "addr"},
+        }])
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(return_value=[{
+            "id": "AC1",
+            "name": "Домофон",
+            "externalCameraId": "CAM_AC",
+            "entrances": [
+                {"id": "E1", "name": "Подъезд 1", "allowOpen": True,
+                 "externalCameraId": "CAM_ENTRANCE"},
+            ],
+        }])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(return_value=None)
+
+        data = await ElektronnyGorodUpdateCoordinator(hass, entry=entry)._async_update_data()
+
+    ids = {c["id"] for c in data["cameras"]}
+    assert "CAM_ENTRANCE" in ids
+    assert len(data["locks"]) == 1
+
+
+async def test_total_outage_is_not_logged_by_us_at_all(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Полное молчание оператора не пишем сами — это делает ядро, и один раз.
+
+    Ядро логирует отказ обновления на переходе и возвращение данных
+    (`Error fetching … data` / `Fetching … data recovered`). Свой
+    `LOGGER.exception` рядом с ним давал полный трейсбек на КАЖДОМ цикле:
+    под три сотни за сутки недоступности, против правила Silver
+    `log-when-unavailable`. Заодно проверяем, что наружу уходит тип
+    исключения, а не текст оператора: в тексте бывает адрес или id.
+    """
+    import logging
+
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(
+            side_effect=ClientError("сервер по адресу Ленина 1 недоступен")
+        )
+
+        coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
+
+        with caplog.at_level(logging.DEBUG):
+            for _ in range(5):
+                with pytest.raises(UpdateFailed) as err:
+                    await coordinator._async_update_data()
+
+        assert "ClientError" in str(err.value)
+        assert "Ленина" not in str(err.value), "текст оператора наружу не выпускаем"
+        ours = [
+            r for r in caplog.records
+            if r.name.startswith("custom_components.elektronny_gorod")
+            and (r.exc_info is not None or "недоступ" in r.msg or "places" in r.msg)
+        ]
+        assert ours == [], "об отказе обновления сообщает ядро, а не мы"
+
+
+async def test_empty_place_list_complains_once_and_notices_recovery(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Пустой список адресов — одна жалоба, и одна строка о возвращении.
+
+    У заблокированного аккаунта список пуст сутками; жалоба на каждом цикле
+    была бы тем же спамом, что и по подзапросам.
+    """
+    import logging
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[])
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(return_value=[])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(return_value={})
+
+        coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
+
+        with caplog.at_level(logging.INFO):
+            for _ in range(3):
+                await coordinator._async_update_data()
+
+            complaints = [r for r in caplog.records if "нет данных" in r.getMessage()]
+            assert len(complaints) == 1
+            # Причина в подставленном виде, а не шаблон: пустой список — не
+            # исключение, и лог не должен утверждать поломку.
+            assert "оператор вернул пустой список" in complaints[0].getMessage()
+
+            caplog.clear()
+            api.query_places = AsyncMock(return_value=[{
+                "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+                "place": {"id": "1000000", "address": "addr"},
+            }])
+            await coordinator._async_update_data()
+
+            assert [r for r in caplog.records if "данные снова приходят" in r.getMessage()], (
+                "возвращение данных должно быть видно"
+            )

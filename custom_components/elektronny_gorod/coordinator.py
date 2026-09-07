@@ -150,7 +150,27 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Returns True если backend принял.
         """
         self._api.http.user_agent.place_id = place_id
-        return await self._api.post_dnd_settings(place_id, items)
+        if not await self._api.post_dnd_settings(place_id, items):
+            return False
+        # Принятый payload — и есть новое состояние. Без записи в снимок
+        # следующий переключатель того же адреса построит свой payload из
+        # старых данных и вернёт назад только что включённое.
+        #
+        # Дебаунсер `async_request_refresh` первый вызов в окне выполняет
+        # немедленно (`REQUEST_REFRESH_DEFAULT_IMMEDIATE`), поэтому после
+        # первого переключения снимок и так перечитывается у оператора — эта
+        # запись нужна для всех последующих, которые дебаунсер уже отложил на
+        # десять секунд. Вторая половина защиты — сериализация действий
+        # (`PARALLEL_UPDATES = 1` в `switch.py`): без неё переключатели
+        # строят payload одновременно, и записывать в снимок уже поздно.
+        if isinstance(self.data, dict):
+            self.data.setdefault("dnd", {})[str(place_id)] = [dict(i) for i in items]
+            # Без этого снимок и состояние в Home Assistant расходятся до
+            # следующего отложенного обновления: тумблер на глазах
+            # отскакивает назад, а сценарий, читающий соседний переключатель
+            # сразу после переключения, видит доизменённое значение.
+            self.async_update_listeners()
+        return True
 
     # ------------------------------------------------------------------ #
     # Periodic refresh (`_async_update_data`)                            #
@@ -186,12 +206,21 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if is_unauthorized(ex):
                 LOGGER.warning("Оператор отверг токен — нужна повторная авторизация")
                 raise ConfigEntryAuthFailed("token rejected by operator") from ex
-            LOGGER.exception("Failed to load subscriber places")
-            raise UpdateFailed(f"places: {ex}") from ex
+            # Своего лога здесь быть не должно: ядро само пишет об отказе
+            # один раз на переходе и о возвращении данных
+            # (`Error fetching … data` / `Fetching … data recovered` в
+            # `update_coordinator.py`). Прежний `LOGGER.exception` дублировал
+            # его трейсбеком на КАЖДОМ цикле — под три сотни за сутки молчания
+            # оператора, ровно против правила Silver `log-when-unavailable`.
+            # Тип, а не текст: в тексте оператора может быть адрес или id.
+            raise UpdateFailed(f"places: {type(ex).__name__}") from ex
 
         if not places:
-            LOGGER.warning("No subscriber places returned by API")
+            # Тоже один раз: у заблокированного аккаунта список пуст сутками.
+            self._note_failure("Список адресов", None, "оператор вернул пустой список")
             return {"places": [], "balances": [], "cameras": [], "locks": [], "dnd": {}}
+
+        self._note_success("Список адресов", None)
 
         balances: list[dict[str, Any]] = []
         cameras: list[dict[str, Any]] = []
@@ -216,11 +245,22 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # нужны и для cameras (для hidden), и для locks. Раньше каждый
             # collector делал свой fetch — двойной HTTP. Теперь один раз per
             # place, передаём в collectors как параметры.
+            # Разбор — под тем же фронтом, что и запрос: настройки видимости
+            # приходят от оператора, и форма, на которой разбор бросает,
+            # должна садиться на этот фронт, а не улетать наружу — обработчик
+            # неожиданных исключений в ядре пишет трейсбек безусловно, без
+            # ограничения по фронту. Остальные отклонения формы
+            # `_extract_hidden_ids` вытягивает сам, отмечая на `debug`: по
+            # строке на запрошенный раздел на каждый цикл, дедупа там нет.
             try:
                 screens = await self._api.query_screens_settings(place_id)
+                hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
+                hidden_entrance_ids = self._extract_hidden_ids(
+                    screens, "ACCESS_CONTROLS"
+                )
             except Exception as ex:  # noqa: BLE001
                 self._note_failure("Настройки экранов", place_id, ex)
-                screens = {}
+                hidden_cam_ids, hidden_entrance_ids = set(), set()
             else:
                 self._note_success("Настройки экранов", place_id)
             try:
@@ -231,17 +271,14 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             else:
                 self._note_success("Домофоны", place_id)
 
-            hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
-            hidden_entrance_ids = self._extract_hidden_ids(screens, "ACCESS_CONTROLS")
-
             try:
                 cameras.extend(await self._collect_cameras_for_place(
                     place_id, access_controls, hidden_cam_ids, hidden_entrance_ids
                 ))
             except Exception as ex:  # noqa: BLE001
-                self._note_failure("Камеры", place_id, ex)
+                self._note_failure("Сборка камер", place_id, ex)
             else:
-                self._note_success("Камеры", place_id)
+                self._note_success("Сборка камер", place_id)
 
             try:
                 locks.extend(self._collect_locks_for_place(
@@ -277,7 +314,9 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
     @callback
-    def _note_failure(self, what: str, place_id: str, err: Exception) -> None:
+    def _note_failure(
+        self, what: str, place_id: str | None, err: Exception | str
+    ) -> None:
         """Сообщить об отказе один раз, а не на каждом цикле обновления.
 
         Отказ отдельного подзапроса устойчив: оператор молчит про баланс или
@@ -287,22 +326,30 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         один раз и один раз о возвращении. Пишем тип исключения, а не текст:
         в тексте оператора может оказаться адрес или идентификатор.
         """
-        key = (what, str(place_id))
+        key = (what, str(place_id or ""))
         if key in self._failing:
             return
         self._failing.add(key)
-        LOGGER.warning(
-            "%s недоступны для place_id=%s (%s)", what, place_id, type(err).__name__
-        )
+        # Строкой — когда причина не исключение: иначе пришлось бы сочинять
+        # его, и лог утверждал бы поломку там, где оператор просто ничего не
+        # прислал.
+        reason = err if isinstance(err, str) else type(err).__name__
+        if place_id is None:
+            LOGGER.warning("%s: нет данных (%s)", what, reason)
+            return
+        LOGGER.warning("%s: нет данных для place_id=%s (%s)", what, place_id, reason)
 
     @callback
-    def _note_success(self, what: str, place_id: str) -> None:
+    def _note_success(self, what: str, place_id: str | None) -> None:
         """Сообщить о возвращении данных, если до этого был отказ."""
-        key = (what, str(place_id))
+        key = (what, str(place_id or ""))
         if key not in self._failing:
             return
         self._failing.discard(key)
-        LOGGER.info("%s снова отвечают для place_id=%s", what, place_id)
+        if place_id is None:
+            LOGGER.info("%s: данные снова приходят", what)
+            return
+        LOGGER.info("%s: данные снова приходят для place_id=%s", what, place_id)
 
     @staticmethod
     def _iter_place_ids(
@@ -375,15 +422,17 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
           API не различает, оба идут одним списком).
 
         Пользовательская видимость из `/settings/screens` прокидывается флагом
-        `hidden`: entity получит `_attr_entity_registry_enabled_default = False`
-        (uses user app preference как дефолт для новых установок).
+        `hidden`; скрытие выставляет `_sync_visibility` через
+        `hidden_by=INTEGRATION` в реестре, а не `entity_registry_enabled_default`
+        — тот механизм отменён (сущность должна существовать и работать,
+        скрыт только показ).
         """
         cameras: list[dict[str, Any]] = []
 
         # 1. Access controls (домофоны).
         # hidden для intercom-камеры берётся из ACCESS_CONTROLS.hidden — если
         # user скрыл entrance в приложении, и lock и camera этого entrance
-        # получат `enabled_default=False`.
+        # будут скрыты через `hidden_by=INTEGRATION`.
         for ac in access_controls:
             ac_id = ac.get("id")
             entrances = ac.get("entrances") or []
@@ -419,7 +468,16 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         # 2. Place-cameras (личные подписочные камеры).
         # Идут ВТОРЫМИ чтобы dedupe_by_id отдал приоритет intercom > place > public.
-        place_cameras = await self._api.query_cameras(place_id)
+        # Каждый источник — под своим фронтом: отказ одного не должен уносить
+        # камеры остальных. Домофонные уже собраны выше и от этого запроса не
+        # зависят.
+        try:
+            place_cameras = await self._api.query_cameras(place_id)
+        except Exception as ex:  # noqa: BLE001
+            self._note_failure("Камеры места", place_id, ex)
+            place_cameras = []
+        else:
+            self._note_success("Камеры места", place_id)
         for cam in place_cameras:
             cid = cam.get("externalCameraId") or cam.get("id")
             cameras.append({
@@ -433,7 +491,13 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # 3. Public cameras (общедомовые + городские, API не разделяет).
         # Видимость берётся из /settings/screens — user в приложении сам решает
         # какие camera ему интересны, какие скрыть.
-        public_cameras = await self._api.query_public_cameras(place_id)
+        try:
+            public_cameras = await self._api.query_public_cameras(place_id)
+        except Exception as ex:  # noqa: BLE001
+            self._note_failure("Общедомовые камеры", place_id, ex)
+            public_cameras = []
+        else:
+            self._note_success("Общедомовые камеры", place_id)
         for cam in public_cameras:
             cid = cam.get("externalCameraId") or cam.get("id")
             cameras.append({
@@ -447,20 +511,64 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return cameras
 
     @staticmethod
-    def _extract_hidden_ids(screens: dict[str, Any], screen_type: str) -> set[str]:
+    def _extract_hidden_ids(screens: Any, screen_type: str) -> set[str]:
         """Из ответа `/settings/screens` достать id-шки скрытых entities.
 
         Возвращает set строковых id. Если screen-тип не найден — пустой set
-        (значит ничего не скрыто).
+        (значит ничего не скрыто). Берём то, что разобралось, а о непонятом
+        говорим на `debug`: молчание сделало бы дрейф схемы неотличимым от
+        «пользователь ничего не прятал», и скрытые сущности молча вернулись
+        бы в панель.
+
+        Неитерируемое вместо списка бросает — и это намеренно: такой ответ
+        разобрать нечем, и садиться он должен на фронт «Настройки экранов»,
+        который этим ответом владеет. Вызов стоит под его `try`.
+
+        `screens` намеренно `Any`, а не `dict`: это разобранный JSON от
+        оператора, и обещать его форму в аннотации значит выдать желаемое за
+        действительное — проверка формы ниже стала бы «недостижимым кодом».
         """
         result: set[str] = set()
+        # Что именно не так, а не «тип контейнера»: на вложенных уровнях
+        # контейнер всегда `dict`, и такой токен ничего не различал бы. Пусто
+        # — форма штатная: `{}` означает «пользователь ничего не настраивал».
+        drift: set[str] = set()
+        if not isinstance(screens, dict):
+            drift.add(f"корень {type(screens).__name__}")
+            screens = {}
+        elif screens and "screens" not in screens:
+            # Непустой ответ без ключа `screens` — то же переименование поля,
+            # что и элемент без `id`, и последствие то же. Пустой словарь при
+            # этом штатен: он значит «пользователь ничего не настраивал».
+            drift.add("нет ключа screens")
         for screen in screens.get("screens") or []:
+            if not isinstance(screen, dict):
+                drift.add("запись раздела не словарь")
+                continue
             if screen.get("type") != screen_type:
                 continue
             for item in screen.get("hidden") or []:
+                if not isinstance(item, dict):
+                    drift.add("скрытый элемент не словарь")
+                    continue
                 iid = item.get("id")
-                if iid is not None:
-                    result.add(str(iid))
+                if iid is None:
+                    # `id` — обязательный ключ каждого элемента. Его пропажа
+                    # это переименование поля, самый вероятный дрейф, и
+                    # последствие у него то же: скрытое вернётся в панель.
+                    drift.add("элемент без id")
+                    continue
+                result.add(str(iid))
+        if drift:
+            # Молчать нельзя: иначе дрейф схемы оператора неотличим от
+            # «пользователь ничего не прятал», а последствие видимое —
+            # скрытые сущности вернутся в панель. Что не так и в каком
+            # разделе, без тела: в теле идентификаторы и раскладка видимости.
+            LOGGER.debug(
+                "Настройки видимости (%s): непонятная форма (%s) — учли, что смогли",
+                screen_type,
+                ", ".join(sorted(drift)),
+            )
         return result
 
     def _collect_locks_for_place(
@@ -483,7 +591,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         "Калитка 2"). `ac_name` — имя access_control (физического домофона),
         используется как `device_info.name` — общее для всех entrances + camera
         этого домофона. `hidden` — из ACCESS_CONTROLS.hidden в `/settings/screens`
-        (user в приложении скрыл entrance) → entity получит enabled_default=False.
+        (user в приложении скрыл entrance) → entity скрывается через `hidden_by`.
         """
         locks: list[dict[str, Any]] = []
         for ac in access_controls:

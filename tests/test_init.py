@@ -337,3 +337,135 @@ async def test_remove_entry_deletes_fcm_repair_issue(
 
     assert ir.async_get(hass).async_get_issue(DOMAIN, issue_id) is None
     mock_remove_entry_api.return_value.unregister_push_device.assert_awaited_once()
+
+
+async def test_unload_blocked_when_fcm_stop_raises(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Исключение при остановке приёмника блокирует выгрузку так же, как отказ.
+
+    Иначе второй приёмник наложился бы на первый, и звонки начали бы
+    приходить дважды или не приходить вовсе. Текст исключения наружу не
+    выпускаем — HA положил бы его в причину записи и показал пользователю.
+    """
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    listener = MagicMock()
+    listener.async_stop = AsyncMock(side_effect=RuntimeError("СЕКРЕТНЫЙ_ТОКЕН"))
+    hass.data[f"{DOMAIN}_fcm_listeners"] = {entry.entry_id: listener}
+
+    import logging
+
+    with (
+        caplog.at_level(logging.WARNING),
+        patch.object(
+            hass.config_entries,
+            "async_unload_platforms",
+            new=AsyncMock(return_value=True),
+        ) as unload_platforms,
+    ):
+        assert await async_unload_entry(hass, entry) is False
+
+    unload_platforms.assert_not_awaited()
+    assert hass.data[f"{DOMAIN}_fcm_listeners"][entry.entry_id] is listener
+    logged = " ".join(str(r.msg) % (r.args or ()) for r in caplog.records)
+    assert "СЕКРЕТНЫЙ_ТОКЕН" not in logged, "текст исключения ушёл в журнал"
+    assert "RuntimeError" in logged, "тип исключения нужен для диагностики"
+
+
+async def test_removal_keeps_ownership_when_stop_is_unconfirmed(
+    hass: HomeAssistant,
+) -> None:
+    """Неподтверждённая остановка приёмника оставляет владение за нами.
+
+    Отпустить его значило бы бросить приёмник, про который неизвестно,
+    остановился ли он.
+    """
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {}
+    listener = MagicMock()
+    listener.async_stop = AsyncMock(side_effect=RuntimeError("сломался"))
+    hass.data[f"{DOMAIN}_fcm_listeners"] = {entry.entry_id: listener}
+
+    await async_remove_entry(hass, entry)
+
+    assert hass.data[f"{DOMAIN}_fcm_listeners"][entry.entry_id] is listener
+
+
+async def test_removal_releases_ownership_after_a_confirmed_stop(
+    hass: HomeAssistant,
+) -> None:
+    entry = MagicMock()
+    entry.entry_id = "entry-1"
+    entry.data = {}
+    listener = MagicMock()
+    listener.async_stop = AsyncMock(return_value=True)
+    hass.data[f"{DOMAIN}_fcm_listeners"] = {entry.entry_id: listener}
+
+    await async_remove_entry(hass, entry)
+
+    assert entry.entry_id not in hass.data[f"{DOMAIN}_fcm_listeners"]
+
+
+async def test_failed_push_unregister_is_reported(
+    hass: HomeAssistant, mock_remove_entry_api, caplog
+) -> None:
+    """Неотвязанный push-токен виден в журнале, а не только на debug.
+
+    Метод отказ глотает и возвращает False, вызывающий его игнорировал, а
+    транспорт после понижения своего лога до `debug` об этом больше не
+    сообщает. Токен, оставшийся у оператора, — это push-и на устройство,
+    которое интеграцию уже удалило.
+    """
+    import logging
+
+    mock_remove_entry_api.return_value.unregister_push_device = AsyncMock(
+        return_value=False
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_ACCESS_TOKEN: "AT",
+            CONF_REFRESH_TOKEN: "RT",
+            CONF_OPERATOR_ID: "1",
+            CONF_USER_AGENT: json.dumps(UserAgent().json()),
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with caplog.at_level(logging.WARNING):
+        await async_remove_entry(hass, entry)
+
+    mock_remove_entry_api.return_value.unregister_push_device.assert_awaited_once()
+    # Именно про отказ оператора, а не про исключение рядом: общая подстрока
+    # ловила обе ветки, и снятие сигнала тест переживал.
+    assert "Оператор не принял отвязку push-токена" in caplog.text
+
+
+async def test_broken_cleanup_at_removal_is_reported(
+    hass: HomeAssistant, mock_remove_entry_api, caplog
+) -> None:
+    """Сорванная уборка при удалении записи слышна, а не тонет в `except`.
+
+    Широкий `except` тут намеренный — удаление не должно падать из-за
+    оператора. Но молчать он тоже не должен: человек удаляет интеграцию
+    именно тогда, когда что-то уже не так.
+    """
+    import logging
+
+    mock_remove_entry_api.side_effect = RuntimeError("нечем построить клиента")
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_ACCESS_TOKEN: "AT",
+            CONF_OPERATOR_ID: "1",
+            CONF_USER_AGENT: json.dumps(UserAgent().json()),
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with caplog.at_level(logging.WARNING):
+        await async_remove_entry(hass, entry)
+
+    assert "Push-токен не отвязан при удалении записи" in caplog.text

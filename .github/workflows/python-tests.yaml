@@ -28,6 +28,14 @@ on:
 env:
   PHC_CURRENT: '0.13.362'
 
+# На уровне workflow, а не одного job: тесты и pyright одинаково делают
+# checkout и ставят зависимости с PyPI, и обоим нужен только read. Умолчание
+# в настройках репозитория стоит на запись, а на `push: master` и
+# `workflow_dispatch` read-only токен ничем не форсируется — то есть пакет,
+# исполнившийся на установке, получил бы право писать в репозиторий.
+permissions:
+  contents: read
+
 jobs:
   pytest:
     name: pytest (py${{ matrix.python-version }}, HA ${{ matrix.ha-label }})
@@ -64,6 +72,45 @@ jobs:
             --cov=custom_components.elektronny_gorod \
             --cov-report=term-missing \
             --cov-report=xml
+
+      # Правило Silver `test-coverage` читается помодульно: «above 95% for all
+      # integration modules». Агрегатного порога для него мало — модуль, упавший
+      # до нуля, прячется за общей цифрой, и заявка в манифесте становится
+      # ложной молча. ADR-0010 D-05 требует не заявлять уровень выше
+      # подтверждённого гейтами, поэтому гейт проверяет ровно то, что заявлено.
+      - name: Enforce the per-module coverage floor
+        run: |
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+
+          FLOOR = 95.0  # «above 95%»: ровно 95.00 правилу не удовлетворяет
+          MIN_MODULES = 40  # сейчас их 42; страховка от пустого отчёта
+          PKG = "custom_components/elektronny_gorod"
+
+          modules = [
+              (c.get("filename"), float(c.get("line-rate")) * 100)
+              for c in ET.parse("coverage.xml").getroot().iter("class")
+          ]
+          if len(modules) < MIN_MODULES:
+              # Отчёт без модулей разобрался бы как «нарушений нет»: гейт,
+              # заведённый против молчаливо ложной заявки, молча бы её и
+              # пропустил.
+              print(f"::error::в coverage.xml {len(modules)} модулей при "
+                    f"ожидаемых хотя бы {MIN_MODULES} — отчёт неполон")
+              sys.exit(1)
+
+          low = sorted((rate, name) for name, rate in modules if rate <= FLOOR)
+          for rate, name in low:
+              # `filename` бывает и от корня репозитория (`--cov=пакет.через.точки`),
+              # и от корня пакета — приставку добавляем только если её нет,
+              # иначе аннотация укажет на несуществующий путь и не прицепится.
+              # Перевод строки в имени раннер разобрал бы как вторую команду.
+              path = (name if name.startswith(PKG) else f"{PKG}/{name}").replace("\n", " ")
+              print(f"::error file={path}::"
+                    f"покрытие {rate:.2f}% — правило требует выше {FLOOR}%")
+          print(f"модулей: {len(modules)}, ниже порога: {len(low)}")
+          sys.exit(1 if low else 0)
+          PY
 
       - name: Upload coverage artifact
         if: always()

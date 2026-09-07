@@ -380,3 +380,61 @@ def test_history_ws_registration_is_idempotent() -> None:
         history_ws.async_register_history_ws_command(hass)
 
     reg.assert_called_once_with(hass, history_ws.ws_history)
+
+
+@pytest.mark.asyncio
+async def test_history_ws_reports_a_missing_entity(hass) -> None:
+    """Карточка просит историю у сущности, которой нет — внятный отказ.
+
+    Без него карточка получила бы «неизвестную ошибку», а в журнал упала бы
+    трассировка. Такое случается, когда запись перезагружают при открытой
+    странице.
+    """
+    history_ws = _history_module()
+    connection = _connection()
+
+    await history_ws.async_handle_history(
+        hass, connection, {"id": 3, "entity_id": "event.нет_такой", "page": 0}
+    )
+
+    connection.send_error.assert_called_once()
+    assert connection.send_error.call_args.args[1] == "history_entity_not_found"
+
+
+@pytest.mark.parametrize(
+    ("place_ids", "expected_text"),
+    [
+        (("не число",), "invalid place identifier"),
+        ((), "no places"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_history_ws_rejects_an_unusable_target(
+    hass, place_ids, expected_text
+) -> None:
+    """Негодная цель — внятный отказ, а не падение в разборе.
+
+    Состав мест приходит от оператора и меняется; карточка должна получить
+    объяснимую ошибку, а не «неизвестную» с трассировкой в журнале.
+    """
+    history_ws = _history_module()
+    _entry, coordinator = _setup_target(hass)
+    connection = _connection()
+    target = SimpleNamespace(
+        place_ids=place_ids,
+        coordinator=coordinator,
+        source_name="Подъезд 1",
+        source_key=None,
+        kind="access_control",
+    )
+
+    with patch.object(history_ws, "_resolve_target", return_value=target):
+        await history_ws.async_handle_history(
+            hass, connection, {"id": 4, "entity_id": _ENTITY_ID, "page": 0}
+        )
+
+    connection.send_error.assert_called_once()
+    code, message = connection.send_error.call_args.args[1:3]
+    assert code == "history_entity_invalid"
+    # Текст различает причины — иначе по журналу не понять, что чинить.
+    assert expected_text in message

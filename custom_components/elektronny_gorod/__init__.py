@@ -5,12 +5,17 @@ import json
 from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import (
+    config_validation as cv,
+    device_registry as dr,
+    entity_registry as er,
+)
 from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.const import Platform
+from homeassistant.exceptions import ServiceValidationError
 from homeassistant.core import HomeAssistant, ServiceCall
 
 from .api import ElektronnyGorodAPI
@@ -98,6 +103,25 @@ async def _async_register_fcm_listener(
             registry.pop(entry.entry_id)
 
     entry.async_on_unload(stop_and_release)
+    return True
+
+
+# Интеграция настраивается только через UI. Без этой схемы блок
+# `elektronny_gorod:` в `configuration.yaml` молча игнорировался бы: теперь
+# HA скажет человеку, что YAML тут не читается.
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Зарегистрировать действия интеграции один раз, до загрузки записей.
+
+    Правило Bronze `action-setup`: действие должно существовать даже когда
+    запись не загружена — иначе автоматизация, ссылающаяся на него, падает
+    при проверке с «сервис не найден», и человек не понимает, что дело в
+    недоступной интеграции, а не в его сценарии. Проверка живого вызова
+    живёт в самом хендлере и отвечает понятной ошибкой.
+    """
+    _async_register_sip_services(hass)
     return True
 
 
@@ -197,7 +221,6 @@ async def async_setup_entry(
         async_dispatcher_connect(hass, SIGNAL_DOORBELL, sip_controller.handle_signal)
     )
     hass.data.setdefault(_SIP_DATA, {})[entry.entry_id] = sip_controller
-    _async_register_sip_services(hass)
     async_register_history_ws_command(hass)
     # Phase C (ADR-0013): WS-команда uplink-микрофона (браузер → HA-WS → SIP)
     # + раздача Lovelace-карты микрофона статикой.
@@ -286,16 +309,46 @@ def _async_register_sip_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_ANSWER):
         return
 
+    def _loaded_controllers() -> list:
+        """Контроллеры загруженных записей — либо внятный отказ.
+
+        Действие существует всегда (правило Bronze `action-setup`), поэтому
+        «интеграция не загружена» надо отличать от «сейчас никто не звонит»:
+        иначе человек ищет пропущенный вызов вместо выгруженной записи.
+        """
+        controllers = list(hass.data.get(_SIP_DATA, {}).values())
+        if not controllers:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="integration_not_loaded"
+            )
+        return controllers
+
     async def _answer(_call: ServiceCall) -> None:
-        for controller in list(hass.data.get(_SIP_DATA, {}).values()):
+        for controller in _loaded_controllers():
             if controller.current_call() is not None:
                 await controller.async_answer()
                 return
-        LOGGER.warning("Сервис answer: нет активного вызова домофона — нечего отвечать")
+        # Успешно завершиться, ничего не сделав, — значит соврать вызывающему.
+        # Автоматизация не отличит ответ на звонок от промаха по времени, а
+        # человек в интерфейсе не поймёт, почему кнопка молчит. Тот же случай,
+        # что кнопка «Закрыть» у замка (правило Silver `action-exceptions`).
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="no_active_call"
+        )
 
     async def _hangup(_call: ServiceCall) -> None:
-        for controller in list(hass.data.get(_SIP_DATA, {}).values()):
-            await controller.async_hangup()
+        # Спрашиваем контроллер, было ли что снимать, а не «идёт ли вызов»:
+        # `current_call()` гаснет по истечении окна ответа, а разговор живёт
+        # дальше. Отбой по этому признаку отказывался завершать живой
+        # разговор с открытым микрофоном — он держался до страховки.
+        torn_down = False
+        for controller in _loaded_controllers():
+            if await controller.async_hangup():
+                torn_down = True
+        if not torn_down:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="no_active_call"
+            )
 
     hass.services.async_register(DOMAIN, SERVICE_ANSWER, _answer)
     hass.services.async_register(DOMAIN, SERVICE_HANGUP, _hangup)
@@ -607,14 +660,14 @@ async def async_unload_entry(
         await stream_manager.async_stop()
 
     # Two-way audio: завершить активный разговор (BYE) и снять контроллер.
-    # Сервисы answer/hangup — глобальные: убираем, когда выгружен последний entry.
+    # Сами действия НЕ снимаем: они живут в `async_setup`, который HA зовёт
+    # один раз за запуск — домен остаётся в `hass.config.components`, и при
+    # повторной загрузке записи регистрация не повторится. Снятие здесь
+    # означало бы, что после смены опций, переавторизации или «Перезагрузить»
+    # действий нет до перезапуска HA (правило Bronze `action-setup`).
     sip_controller = hass.data.get(_SIP_DATA, {}).pop(entry.entry_id, None)
     if sip_controller is not None:
         await sip_controller.async_hangup()
-    if not hass.data.get(_SIP_DATA):
-        for service in (SERVICE_ANSWER, SERVICE_HANGUP):
-            if hass.services.has_service(DOMAIN, service):
-                hass.services.async_remove(DOMAIN, service)
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data.get(_FCM_DATA, {}).pop(entry.entry_id, None)
@@ -661,6 +714,11 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
             refresh_token=entry.data.get(CONF_REFRESH_TOKEN),
             operator=str(entry.data.get(CONF_OPERATOR_ID)),
         )
-        await api.unregister_push_device()
+        if not await api.unregister_push_device():
+            # Единственный сигнал: сам метод отказ глотает и возвращает
+            # False, а транспорт об отказах говорит только на `debug`.
+            # Оставшийся у оператора токен — это push-и на устройство,
+            # которое интеграцию уже удалило.
+            LOGGER.warning("Оператор не принял отвязку push-токена при удалении записи")
     except Exception:  # noqa: BLE001
-        LOGGER.debug("Push-токен не отвязан при удалении entry (best-effort)")
+        LOGGER.warning("Push-токен не отвязан при удалении записи (best-effort)")

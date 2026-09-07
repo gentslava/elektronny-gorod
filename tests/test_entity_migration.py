@@ -137,3 +137,87 @@ def test_lock_unique_id_golden(pid, ac, eid, expected):
     установок (даже после миграции). Этот тест ловит случайные правки.
     """
     assert lock_unique_id(pid, ac, eid) == expected
+
+
+# ---------------------------------------------------------------------------- #
+# перенос идентификаторов в реестре                                            #
+# ---------------------------------------------------------------------------- #
+
+
+async def _registry_with(hass, entries: list[tuple[str, str, str]]):
+    """Создать записи реестра: (домен, unique_id, suggested_object_id)."""
+    from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+    from homeassistant.helpers import entity_registry as er
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Test")
+    entry.add_to_hass(hass)
+    registry = er.async_get(hass)
+    for domain, uid, object_id in entries:
+        registry.async_get_or_create(
+            domain, DOMAIN, uid, suggested_object_id=object_id, config_entry=entry
+        )
+    return entry, registry
+
+
+async def test_legacy_identifier_is_renamed_in_place(hass) -> None:
+    """Старый идентификатор переезжает на стабильный, сущность остаётся своей.
+
+    Без переноса пользователь получил бы новую сущность вместо своей — с
+    потерей истории, автоматизаций и места на дашборде.
+    """
+    from custom_components.elektronny_gorod.entity_migration import (
+        async_migrate_entity_unique_ids,
+    )
+
+    entry, registry = await _registry_with(hass, [("camera", "111_Подъезд 1", "cam")])
+
+    await async_migrate_entity_unique_ids(hass, entry, {"cameras": CAMERAS, "locks": []})
+
+    assert registry.async_get_entity_id("camera", DOMAIN, f"{DOMAIN}_camera_111")
+    assert registry.async_get_entity_id("camera", DOMAIN, "111_Подъезд 1") is None
+
+
+async def test_collision_leaves_the_duplicate_alone(hass) -> None:
+    """Две старые записи на один новый идентификатор — переезжает первая.
+
+    Так бывает у переименованной камеры: остаётся сирота со старым именем.
+    Уронить весь запуск из-за неё нельзя — Home Assistant просто сообщит про
+    неё «сущность не предоставляется интеграцией», и человек удалит её сам.
+    """
+    from custom_components.elektronny_gorod.entity_migration import (
+        async_migrate_entity_unique_ids,
+    )
+
+    entry, registry = await _registry_with(
+        hass,
+        [
+            ("camera", f"{DOMAIN}_camera_111", "cam_new"),
+            ("camera", "111_Подъезд 1", "cam_legacy"),
+        ],
+    )
+
+    await async_migrate_entity_unique_ids(hass, entry, {"cameras": CAMERAS, "locks": []})
+
+    assert registry.async_get_entity_id("camera", DOMAIN, "111_Подъезд 1") is not None
+    assert registry.async_get_entity_id("camera", DOMAIN, f"{DOMAIN}_camera_111")
+
+
+async def test_foreign_and_current_entities_are_left_alone(hass) -> None:
+    """Чужие сущности и уже переехавшие не трогаются."""
+    from custom_components.elektronny_gorod.entity_migration import (
+        async_migrate_entity_unique_ids,
+    )
+
+    entry, registry = await _registry_with(
+        hass,
+        [
+            ("camera", f"{DOMAIN}_camera_333", "cam_ok"),
+            ("sensor", "111_Подъезд 1", "sensor_other"),
+        ],
+    )
+
+    await async_migrate_entity_unique_ids(hass, entry, {"cameras": CAMERAS, "locks": []})
+
+    assert registry.async_get_entity_id("camera", DOMAIN, f"{DOMAIN}_camera_333")
+    assert registry.async_get_entity_id("sensor", DOMAIN, "111_Подъезд 1")

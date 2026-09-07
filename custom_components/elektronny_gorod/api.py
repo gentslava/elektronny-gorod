@@ -12,7 +12,7 @@ from aiohttp import ClientError, ClientResponse
 
 from homeassistant.core import HomeAssistant
 
-from .http import HTTP
+from .http import error_status, HTTP
 from .user_agent import UserAgent
 
 # Эндпоинты привязки push-токена (зеркало приложения, см. FINDINGS §FCM).
@@ -132,7 +132,7 @@ class ElektronnyGorodAPI:
             raise ValueError("unknown_status")
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 400:
+            if error_status(e) == 400:
                 raise ValueError("invalid_login")
             if isinstance(e, ValueError):
                 raise
@@ -159,7 +159,7 @@ class ElektronnyGorodAPI:
             return await response.json()
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 400:
+            if error_status(e) == 400:
                 raise ValueError("invalid_password")
             raise ValueError("unknown_status")
 
@@ -185,7 +185,7 @@ class ElektronnyGorodAPI:
             return
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 429:
+            if error_status(e) == 429:
                 raise ValueError("limit_exceeded")
             raise ValueError("unknown_status")
 
@@ -212,7 +212,7 @@ class ElektronnyGorodAPI:
             return await response.json()
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 406:
+            if error_status(e) == 406:
                 raise ValueError("invalid_format")
             raise ValueError("unknown_status")
 
@@ -230,7 +230,7 @@ class ElektronnyGorodAPI:
             return profile.get("data") if profile else {}
 
         except Exception as e:
-            if isinstance(e.args[0], ClientResponse) and e.args[0].status == 401:
+            if error_status(e) == 401:
                 raise ValueError("unauthorized")
             raise ValueError("unknown_status")
 
@@ -390,33 +390,37 @@ class ElektronnyGorodAPI:
 
     async def query_cameras(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of cameras for the current access token."""
+        # Отказ наружу, а не пустой список: пустота от оператора и его
+        # молчание — разные вещи, и различить их может только вызывающий.
+        # Проглоченный здесь отказ доходил до координатора как «камер нет»,
+        # тот считал это успехом, и камеры исчезали из интерфейса без единой
+        # строки в журнале.
         api_url = f"/rest/v1/places/{place_id}/cameras"
 
-        try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-            cameras = await response.json()
-            data = cameras.get("data") if cameras else []
-            return data
-        except Exception:
-            return []
+        cameras = await response.json()
+        data = cameras.get("data") if cameras else []
+        return data
 
     async def query_public_cameras(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of public cameras for a place."""
+        # Отказ наружу, а не пустой список: пустота от оператора и его
+        # молчание — разные вещи, и различить их может только вызывающий.
+        # Проглоченный здесь отказ доходил до координатора как «камер нет»,
+        # тот считал это успехом, и камеры исчезали из интерфейса без единой
+        # строки в журнале.
         api_url = f"/rest/v2/places/{place_id}/public/cameras"
 
-        try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
-            cameras = await response.json()
-            data = cameras.get("data") if cameras else []
-            return data
-        except Exception:
-            return []
+        cameras = await response.json()
+        data = cameras.get("data") if cameras else []
+        return data
 
     async def query_sections(self, place_id: str) -> list[dict[str, Any]]:
         """Query the list of cameras for the current access token."""
@@ -433,10 +437,10 @@ class ElektronnyGorodAPI:
         except Exception:
             return []
 
-    async def query_screens_settings(self, place_id: str) -> dict[str, Any]:
+    async def query_screens_settings(self, place_id: str) -> Any:
         """Пользовательские настройки видимости из приложения оператора.
 
-        Возвращает dict вида:
+        Оператор присылает:
             {"screens": [
                 {"type": "ACCESS_CONTROLS",
                  "entities": [{"id", "type", "order"}, ...],  # видимые
@@ -448,23 +452,27 @@ class ElektronnyGorodAPI:
 
         `hidden` — НЕ категория («городские» или «лифт»), а user preference
         (юзер нажал «скрыть» в приложении). Интеграция уважает это: entity
-        для hidden получает `_attr_entity_registry_enabled_default = False`
-        (только для НОВЫХ registry-записей; existing сохраняют выбор юзера
-        в HA).
+        для hidden скрывается через `hidden_by=INTEGRATION` в реестре
+        (`_sync_visibility`); скрытие, выставленное человеком вручную, не
+        трогаем — снимаем только своё.
 
         Если ответ `{}` — пользователь ничего не настраивал, всё видимо.
+
+        Возврат намеренно `Any`: это разобранный JSON от оператора, форму его
+        мы не проверяем и обещать в аннотации не должны — разбор на стороне
+        вызывающего сам решает, что делать с неожиданной формой.
         """
+        # Отказ наружу, а не пустой результат: пустота от оператора и его
+        # молчание — разные вещи, и различить их может только вызывающий,
+        # который один и умеет сказать о пропаже один раз.
         api_url = (
             f"/api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens"
         )
-        try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
-            data = await response.json()
-            return data or {}
-        except Exception:
-            return {}
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        data = await response.json()
+        return data or {}
 
     async def query_dnd_settings(self, place_id: str) -> list[dict[str, Any]]:
         """Get Do Not Disturb settings for a place.
@@ -476,19 +484,20 @@ class ElektronnyGorodAPI:
                 {"type": "MANAGEMENT_COMPANY_CALLS",  "name": ..., "status": bool, ...}
             ]}
 
-        Returns plain list (внутренности `do_not_disturb`), либо `[]` на ошибку.
+        Returns plain list (внутренности `do_not_disturb`). Отказ оператора
+        пробрасывается: пустой список означает пустой список.
         """
+        # Отказ наружу, а не пустой результат: пустота от оператора и его
+        # молчание — разные вещи, и различить их может только вызывающий,
+        # который один и умеет сказать о пропаже один раз.
         api_url = (
             f"/api/mh-customer/mobile/v1/customers/places/{place_id}/settings/do_not_disturb"
         )
-        try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
-            data = await response.json()
-            return (data or {}).get("do_not_disturb") or []
-        except Exception:
-            return []
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        data = await response.json()
+        return (data or {}).get("do_not_disturb") or []
 
     async def post_dnd_settings(
         self,
@@ -544,9 +553,9 @@ class ElektronnyGorodAPI:
         if isinstance(result, (bytes, bytearray)):
             return bytes(result)
 
-        if isinstance(result, ClientResponse):
-            return await result.read()
-
+        # Ответом бинарная ветка `http` не отдаёт никогда: она либо возвращает
+        # байты, либо бросает. Поэтому «прочитать ответ» здесь было мёртвым
+        # кодом — оставляем отказ на всё, что кадром не является.
         raise TypeError(f"Unexpected response type: {type(result)!r}")
 
     async def open_lock(self, place_id: str, access_control_id: str, entrance_id: str | None) -> None:

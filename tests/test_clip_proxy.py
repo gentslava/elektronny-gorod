@@ -577,3 +577,48 @@ async def test_parallel_requests_mint_once(hass, clip_client) -> None:
     assert {resp.status for resp in responses} == {200, 206}
     assert coordinator.api.query_event_download.await_count == 1
     assert session.get.await_count == 1
+
+
+# ─── Разбор диапазона байтов ────────────────────────────────────────────────
+
+
+def _parse_range(header: str, total: int = 1000):
+    from custom_components.elektronny_gorod.clip_proxy import _parse_range
+
+    return _parse_range(header, total)
+
+
+def test_range_suffix_returns_the_tail() -> None:
+    """`bytes=-200` — последние 200 байт. Так плеер перематывает к концу."""
+    assert _parse_range(" bytes=-200") == (800, 999)
+
+
+def test_range_suffix_beyond_the_file_is_clamped() -> None:
+    assert _parse_range("bytes=-5000") == (0, 999)
+
+
+@pytest.mark.parametrize(
+    "header",
+    [
+        "bytes=abc-",
+        "bytes=0-xyz",
+        "bytes=-",
+        "bytes=100",
+    ],
+)
+def test_unparsable_range_is_ignored(header: str) -> None:
+    """Непонятный диапазон — отдаём файл целиком, а не ошибку.
+
+    Плееры присылают всякое; отказ здесь означал бы, что запись не
+    воспроизведётся вовсе.
+    """
+    from custom_components.elektronny_gorod.clip_proxy import _RANGE_IGNORE
+
+    assert _parse_range(header) == _RANGE_IGNORE
+
+
+def test_zero_suffix_is_unsatisfiable() -> None:
+    """`bytes=-0` — запрос нуля байт с конца, ответить нечем."""
+    from custom_components.elektronny_gorod.clip_proxy import _RANGE_UNSATISFIABLE
+
+    assert _parse_range("bytes=-0") == _RANGE_UNSATISFIABLE

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from aiohttp import ClientError
+
 import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -410,3 +412,91 @@ async def test_requests_include_basic_auth_without_exposing_it() -> None:
 
     headers = session.patch.call_args.kwargs["headers"]
     assert headers == {"Authorization": "Basic dXNlcjpwYXNz"}
+
+
+# ─── Отказы go2rtc приводятся к одному виду ─────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("failure", "category"),
+    [
+        (asyncio.TimeoutError(), "timeout"),
+        (ClientError("сеть"), "client_error"),
+    ],
+)
+async def test_patch_failures_are_classified(failure, category) -> None:
+    """Причина отказа доходит до вызывающего в разобранном виде.
+
+    По ней менеджер потоков решает, повторять или снимать поток; сырое
+    исключение транспорта здесь ничего бы не сказало.
+    """
+    client = _client(_session(patch=failure))
+
+    with pytest.raises(Go2RtcRequestError) as err:
+        await client.async_patch_stream("eg_100", ["src"])
+
+    assert err.value.category == category
+    assert "сеть" not in str(err.value), "текст транспорта наружу не идёт"
+
+
+@pytest.mark.parametrize(
+    ("failure", "category"),
+    [
+        (asyncio.TimeoutError(), "timeout"),
+        (ClientError("сеть"), "client_error"),
+    ],
+)
+async def test_delete_failures_are_classified(failure, category) -> None:
+    client = _client(_session(delete=failure))
+
+    with pytest.raises(Go2RtcRequestError) as err:
+        await client.async_delete_stream("eg_100")
+
+    assert err.value.category == category
+
+
+async def test_delete_reports_an_unexpected_status() -> None:
+    """Неожиданный ответ на удаление — тоже разобранный отказ."""
+    client = _client(_session(delete=_response(500)))
+
+    with pytest.raises(Go2RtcRequestError) as err:
+        await client.async_delete_stream("eg_100")
+
+    assert err.value.category == "http_500"
+
+
+@pytest.mark.parametrize(
+    ("failure", "category"),
+    [
+        (asyncio.TimeoutError(), "timeout"),
+        (ClientError("сеть"), "client_error"),
+    ],
+)
+async def test_read_failures_are_classified(failure, category) -> None:
+    client = _client(_session(get=failure))
+
+    with pytest.raises(Go2RtcRequestError) as err:
+        await client.async_list_streams()
+
+    assert err.value.category == category
+
+
+async def test_list_rejects_a_non_dictionary_answer() -> None:
+    """Не словарь вместо списка потоков — отказ, а не разбор чего попало."""
+    client = _client(_session(get=_response(200, payload=["не", "словарь"])))
+
+    with pytest.raises(Go2RtcRequestError) as err:
+        await client.async_list_streams()
+
+    assert err.value.category == "invalid_response"
+
+
+async def test_list_skips_entries_with_a_non_string_name() -> None:
+    """Мусорный ключ в ответе пропускается, остальные потоки читаются."""
+    client = _client(
+        _session(get=_response(200, payload={1: {}, "eg_100": {"producers": []}}))
+    )
+
+    streams = await client.async_list_streams()
+
+    assert "eg_100" in streams and 1 not in streams

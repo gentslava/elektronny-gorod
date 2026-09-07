@@ -49,7 +49,7 @@ Quality gates:
 | `iot_class` | `cloud_polling` | соответствие реальности | ✅ coordinator polling каждые 5 минут |
 | `config_flow` | `true` | если есть UI flow | ✅ |
 | `integration_type` | `hub` | одна entry → несколько устройств | ✅ |
-| `quality_scale` | `bronze` | не выше подтверждённого gate | ✅ — config-flow/migration tests существуют |
+| `quality_scale` | `silver` | не выше подтверждённого gate | ✅ — все 42 модуля выше 95% покрытия, порог закреплён в CI |
 | `after_dependencies` | `["media_source"]` | при необходимости | ✅ — интеграция предоставляет integration platform `media_source` (`media_source.py`) |
 
 ## HACS / hacs.json
@@ -190,7 +190,7 @@ PLATFORMS: `[BINARY_SENSOR, CAMERA, EVENT, LOCK, SENSOR, SWITCH]` (`__init__.py:
 
 ## Brand assets
 
-- `README.md` ссылается на `https://brands.home-assistant.io/elektronny_gorod/icon.png` — нужно проверить, добавлен ли brand в [home-assistant/brands](https://github.com/home-assistant/brands) репозиторий.
+- `README.md` ссылается на `https://brands.home-assistant.io/elektronny_gorod/icon.png` — brand опубликован в `home-assistant/brands` (проверено 2026-09-07) в [home-assistant/brands](https://github.com/home-assistant/brands) репозиторий.
 
 ## Сводный план соответствия
 

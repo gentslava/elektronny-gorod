@@ -14,21 +14,26 @@ from __future__ import annotations
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, LOGGER
+from .const import DOMAIN
 from .device import place_identifier
 from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 
-# Сущности не опрашивают оператора поодиночке: данные приходят из
-# координатора одним циклом на всю запись, поэтому ограничивать параллельные
-# обновления нечем и незачем. Константа объявлена явно — правило Silver
-# `parallel-updates` требует не полагаться на умолчание ядра, которое зависит
-# от того, синхронный ли `update` у сущности.
-PARALLEL_UPDATES = 0
+# Опрос идёт через координатор, но правило Silver `parallel-updates` про
+# другое: координатор централизует только входящие данные и не ограничивает
+# исходящие вызовы действий. Здесь это половина защиты от A-113, а не
+# формальность: каждый переключатель шлёт полный набор из трёх пунктов,
+# построенный из снимка, и без сериализации все три строят его из одного и
+# того же снимка одновременно — теряются два переключения из трёх. Вторая
+# половина — запись принятого набора в снимок (`async_set_dnd`). Снятие любой
+# из двух половин теряет переключения; обе закреплены тестом
+# `test_turning_on_every_switch_of_a_place_keeps_all_three`.
+PARALLEL_UPDATES = 1
 
 DND_ROOT = "DO_NOT_DISTURB_ROOT"
 DND_INTERCOM = "INTERCOM_CALLS"
@@ -171,11 +176,11 @@ class ElektronnyGorodDNDSwitch(
         """Send POST с обновлённым нашим item.status, refresh coordinator."""
         items = self._dnd_items
         if not items:
-            LOGGER.warning(
-                "DND %s for place=%s: no items in coordinator, skipping toggle",
-                self._dnd_type, self._place_id,
+            # Успешно завершиться, не переключив, — значит соврать: человек
+            # видит, что тумблер вернулся, и не понимает почему.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="dnd_unavailable"
             )
-            return
 
         payload: list[dict[str, Any]] = []
         for item in items:
@@ -186,11 +191,10 @@ class ElektronnyGorodDNDSwitch(
 
         ok = await self.coordinator.async_set_dnd(self._place_id, payload)
         if not ok:
-            LOGGER.warning(
-                "DND POST failed for place=%s type=%s status=%s",
-                self._place_id, self._dnd_type, status,
+            # Оператор отказал — сообщаем, а не делаем вид, что переключили.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="dnd_rejected"
             )
-            return
 
         # Refresh coordinator чтобы entity увидела новый state.
         await self.coordinator.async_request_refresh()

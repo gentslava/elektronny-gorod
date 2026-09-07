@@ -44,10 +44,13 @@ def _log_request(url: str, method: str, headers: dict, body_size: int) -> None:
         body_marker = f"<{body_size} bytes>"
     else:
         body_marker = "<none>"
+    # URL — через ту же редакцию, что и лог отказа: телефон стоит прямо в
+    # пути auth-запроса. Функция уже прятала заголовки и признак тела, но
+    # оставляла его на виду, а именно debug-логи люди прикладывают к issue.
     LOGGER.debug(
         "Request %s %s headers=%s body=%s",
         method,
-        url,
+        redact_path(url),
         redact(headers),
         body_marker,
     )
@@ -60,7 +63,9 @@ async def _log_response(response: ClientResponse) -> None:
     url = str(response.url)
     if is_auth_path(url):
         # Полностью пропускаем — даже размер ответа может намекать на исход (success vs error).
-        LOGGER.debug("Response %s %s [%s]", response.method, url, response.status)
+        LOGGER.debug(
+            "Response %s %s [%s]", response.method, redact_path(url), response.status
+        )
         return
     # Не читаем body здесь — иначе streaming-ответы будут consumed.
     # Размер берём из Content-Length, если есть.
@@ -75,16 +80,23 @@ async def _log_response(response: ClientResponse) -> None:
     )
 
 
-def is_unauthorized(err: BaseException) -> bool:
-    """Оператор отверг токен: нужна новая авторизация, а не повтор запроса.
+def error_status(err: BaseException) -> int | None:
+    """Статус ответа оператора, если исключение его несёт.
 
     Ответ лежит в аргументе исключения — так его кладёт `ClientError(response)`
-    здесь же, и так его разбирают вызывающие в `api.py`. Проверка вынесена,
-    чтобы распаковка `args[0]` жила в одном месте, а не расползалась.
+    здесь же. Прямая распаковка `err.args[0]` роняла `IndexError` на
+    исключениях без аргументов: таймаут или сетевая ошибка при входе
+    превращались не в понятное сообщение формы, а в «неизвестную ошибку» с
+    трассировкой, потому что config flow ловит только `ValueError`.
     """
     args = getattr(err, "args", ())
     response = args[0] if args else None
-    return isinstance(response, ClientResponse) and response.status == 401
+    return response.status if isinstance(response, ClientResponse) else None
+
+
+def is_unauthorized(err: BaseException) -> bool:
+    """Оператор отверг токен: нужна новая авторизация, а не повтор запроса."""
+    return error_status(err) == 401
 
 
 class HTTP:
@@ -184,7 +196,19 @@ class HTTP:
         if response.ok:
             return response
         else:
-            LOGGER.error("API request failed: %s [%s]", redact_path(endpoint), response.status)
+            # `debug`, как и у бинарной ветки выше, и по той же причине:
+            # транспорт не знает, значим ли отказ. Решает вызывающий —
+            # координатор ограничивает жалобу по фронту с гранулярностью
+            # «вид данных + место», а config flow показывает причину в форме.
+            #
+            # Пробовал и промежуточное — жалобу по фронту прямо здесь. Не
+            # работает: ключ по пути схлопывает места, различающиеся
+            # query-строкой (`finance?placeId=`), и наоборот размножается на
+            # endpoint-ах с идентификатором в пути (архивная запись), где
+            # «отказ» — это штатное «клип старше срока хранения».
+            LOGGER.debug(
+                "API request failed: %s [%s]", redact_path(endpoint), response.status
+            )
             raise ClientError(response)
 
     async def get(self, endpoint: str, binary: bool = False) -> ClientResponse | bytes:

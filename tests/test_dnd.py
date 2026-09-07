@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any
 from unittest.mock import AsyncMock, patch
@@ -196,3 +197,233 @@ async def test_turn_on_sends_post_with_updated_status(
     # Прочие items сохраняют свой status (False по дефолту).
     intercom_item = next(i for i in payload if i["type"] == "INTERCOM_CALLS")
     assert intercom_item["status"] is False
+
+
+# ─── Отказ оператора не выдаётся за успех ───────────────────────────────────
+
+
+async def _root_switch(hass: HomeAssistant) -> str:
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    registry = er.async_get(hass)
+    eid = registry.async_get_entity_id(
+        "switch", DOMAIN, f"{DOMAIN}_dnd_{PLACE_ID}_dnd_root"
+    )
+    assert eid is not None
+    return eid
+
+
+@pytest.mark.parametrize("service", ["turn_on", "turn_off"])
+async def test_rejected_toggle_is_reported(
+    hass: HomeAssistant, mock_api_with_dnd, service: str
+) -> None:
+    """Оператор не принял переключение — человек об этом узнаёт.
+
+    Молчаливый успех выглядел бы так: тумблер щёлкнул и вернулся обратно, а
+    почему — нигде. Правило Silver `action-exceptions` требует ошибки.
+    """
+    from homeassistant.exceptions import HomeAssistantError
+
+    eid = await _root_switch(hass)
+    mock_api_with_dnd.return_value.post_dnd_settings = AsyncMock(return_value=False)
+
+    with pytest.raises(HomeAssistantError) as err:
+        await hass.services.async_call(
+            "switch", service, {"entity_id": eid}, blocking=True
+        )
+
+    assert err.value.translation_key == "dnd_rejected"
+
+
+async def test_toggle_after_settings_vanish_is_reported(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Настройки пропали между проверкой доступности и вызовом — отказ.
+
+    Через сервис сюда не прийти: без настроек сущность недоступна, и Home
+    Assistant вызов не пропустит. Но между этой проверкой и самим
+    переключением координатор успевает обновиться, поэтому защита нужна — и
+    проверяется прямым вызовом, иначе её нельзя ни покрыть, ни доказать, что
+    отказ переводится.
+    """
+    from homeassistant.exceptions import HomeAssistantError
+
+    await _root_switch(hass)
+    entity = hass.data["switch"].get_entity(
+        er.async_get(hass).async_get_entity_id(
+            "switch", DOMAIN, f"{DOMAIN}_dnd_{PLACE_ID}_dnd_root"
+        )
+    )
+    entity.coordinator.data = {**entity.coordinator.data, "dnd": {}}
+
+    with pytest.raises(HomeAssistantError) as err:
+        await entity.async_turn_on()
+
+    assert err.value.translation_key == "dnd_unavailable"
+
+
+async def test_dnd_refusals_are_translated() -> None:
+    """У обоих отказов есть текст во всех трёх файлах переводов."""
+    import json
+    import pathlib
+
+    base = pathlib.Path(__file__).resolve().parent.parent / "custom_components/elektronny_gorod"
+    for name in ("strings.json", "translations/ru.json", "translations/en.json"):
+        data = json.loads((base / name).read_text(encoding="utf-8"))
+        exceptions = data.get("exceptions", {})
+        assert "dnd_rejected" in exceptions, name
+        assert "dnd_unavailable" in exceptions, name
+
+
+async def test_switch_without_its_item_is_unavailable(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Если оператор перестал отдавать наш пункт — переключатель недоступен.
+
+    Показывать тумблер, за которым ничего нет, значит обещать управление,
+    которого не будет: нажатие ушло бы в пустоту.
+    """
+    await _root_switch(hass)
+    entity = hass.data["switch"].get_entity(
+        er.async_get(hass).async_get_entity_id(
+            "switch", DOMAIN, f"{DOMAIN}_dnd_{PLACE_ID}_dnd_root"
+        )
+    )
+
+    entity.coordinator.data = {**entity.coordinator.data, "dnd": {PLACE_ID: []}}
+    assert entity._own_item is None
+    assert entity.available is False
+    assert entity.is_on is None
+
+    # Пункт есть, но чужого типа — наш всё равно не найден.
+    entity.coordinator.data = {
+        **entity.coordinator.data,
+        "dnd": {PLACE_ID: [{"type": "ЧУЖОЙ_ТИП", "status": True}]},
+    }
+    assert entity._own_item is None
+
+
+async def test_accepted_dnd_payload_lands_in_the_snapshot(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Принятый оператором набор сразу становится снимком координатора.
+
+    Каждый переключатель шлёт полный набор из трёх пунктов, построенный из
+    снимка. Пока принятое туда не попадало, следующий переключатель того же
+    адреса читал прежние данные и возвращал назад то, что включил предыдущий:
+    человек включает два тумблера, у оператора включается один. Отложенный
+    refresh не помогает — он на то и отложен. Сериализация действий тоже:
+    расходятся данные, а не порядок.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    assert coordinator.data["dnd"][PLACE_ID] == _dnd_items()
+
+    accepted = _dnd_items(root=True, intercom=True, mgmt=False)
+    assert await coordinator.async_set_dnd(PLACE_ID, accepted) is True
+
+    assert coordinator.data["dnd"][PLACE_ID] == accepted
+
+
+async def test_rejected_dnd_payload_does_not_touch_the_snapshot(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Отказ оператора снимок не меняет — иначе интерфейс покажет несбывшееся."""
+    mock_api_with_dnd.return_value.post_dnd_settings = AsyncMock(return_value=False)
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    before = [dict(item) for item in coordinator.data["dnd"][PLACE_ID]]
+
+    assert await coordinator.async_set_dnd(
+        PLACE_ID, _dnd_items(root=True, intercom=True, mgmt=True)
+    ) is False
+
+    assert coordinator.data["dnd"][PLACE_ID] == before
+
+
+async def test_snapshot_write_reaches_the_state_machine(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Переключённое видно сразу, а не через отложенное обновление.
+
+    Записать снимок мало: без уведомления подписчиков состояние в Home
+    Assistant остаётся прежним до следующего обновления координатора.
+    Человек видит, как тумблер отскакивает назад, а сценарий, читающий
+    соседний переключатель сразу после переключения, получает старое.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    switch_id = next(
+        state.entity_id
+        for state in hass.states.async_all("switch")
+        if state.entity_id.endswith("_do_not_disturb")
+    )
+    assert hass.states.get(switch_id).state == "off"
+
+    await coordinator.async_set_dnd(PLACE_ID, _dnd_items(root=True))
+    await hass.async_block_till_done()
+
+    assert hass.states.get(switch_id).state == "on"
+
+
+async def test_turning_on_every_switch_of_a_place_keeps_all_three(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Включение всех трёх переключателей адреса доходит целиком.
+
+    Тот самый сценарий A-113, на уровне действия, а не координатора: каждый
+    переключатель шлёт полный набор из трёх пунктов, построенный из снимка.
+    Держат его две вещи сразу — сериализация действий (`PARALLEL_UPDATES`) и
+    запись принятого набора в снимок. Снятие любой из них теряет
+    переключения, поэтому проверка должна падать в обоих случаях, а не
+    только в одном.
+
+    Оператор здесь с памятью и задержкой: без задержки параллельные вызовы не
+    успевают наложиться, и тест перестал бы отличать сериализацию от её
+    отсутствия.
+    """
+    api = mock_api_with_dnd.return_value
+    stored = _dnd_items(root=True, intercom=False, mgmt=False)
+
+    async def _accept(_place_id, items):
+        await asyncio.sleep(0.02)
+        nonlocal stored
+        stored = [dict(item) for item in items]
+        return True
+
+    api.query_dnd_settings = AsyncMock(side_effect=lambda _p: [dict(i) for i in stored])
+    api.post_dnd_settings = AsyncMock(side_effect=_accept)
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    switches = [state.entity_id for state in hass.states.async_all("switch")]
+    assert len(switches) == 3, switches
+
+    await hass.services.async_call(
+        "switch", "turn_on", {"entity_id": switches}, blocking=True
+    )
+    await hass.async_block_till_done()
+
+    statuses = {item["type"]: item["status"] for item in stored}
+    assert statuses == {
+        "DO_NOT_DISTURB_ROOT": True,
+        "INTERCOM_CALLS": True,
+        "MANAGEMENT_COMPANY_CALLS": True,
+    }, "часть переключений потеряна"

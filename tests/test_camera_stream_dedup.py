@@ -243,8 +243,14 @@ async def test_concurrent_callers_receive_exception_from_first(
 async def test_first_caller_cancelled_does_not_hang_waiters(
     hass: HomeAssistant, mock_api_with_delayed_stream
 ):
-    """A-68 safety: если первый caller (owner future) cancelled — waiters
-    не должны висеть навсегда. Future cancel-ится в `finally` блоке."""
+    """A-68: отмена первого запросившего не оставляет остальных ждать вечно.
+
+    Владелец future отменён — разрешить future больше некому, поэтому в
+    `finally` стоит страховка `fut.cancel()`. Прежняя версия этого теста
+    принимала таймаут ожидания как допустимый исход, то есть считала
+    зависание нормой: снятие страховки она переживала, а вместе с ней и весь
+    набор. Зависший waiter — это корутина HA Stream, ждущая вечно.
+    """
     entry = _make_config_entry(use_go2rtc=False)
     entry.add_to_hass(hass)
     assert await hass.config_entries.async_setup(entry.entry_id)
@@ -258,17 +264,17 @@ async def test_first_caller_cancelled_does_not_hang_waiters(
     await asyncio.sleep(0.01)
     task1.cancel()
 
-    # task2 НЕ должен висеть. Должен либо complete с результатом
-    # (если первый успел set_result), либо получить CancelledError.
+    # Ждущий обязан завершиться — результатом или отменой следом за
+    # владельцем. Таймаут здесь означает ровно тот дефект, ради которого
+    # тест написан, поэтому он проваливает тест, а не принимается.
     try:
-        result2 = await asyncio.wait_for(task2, timeout=1.0)
-        # Acceptable: task1 успел complete до cancel.
-        assert result2 is not None or result2 is None
-    except (asyncio.CancelledError, TimeoutError):
-        # Acceptable: task2 получил CancelledError (waiter watch future).
-        pass
-    # task1 cancelled — собрать исключение.
-    with pytest.raises((asyncio.CancelledError, Exception)):
+        await asyncio.wait_for(task2, timeout=1.0)
+    except asyncio.CancelledError:
+        pass  # владелец отменён — ждущий вправе отмениться следом
+    except TimeoutError:
+        pytest.fail("ждущий завис: future владельца никто не разрешил")
+
+    with pytest.raises(asyncio.CancelledError):
         await task1
 
 

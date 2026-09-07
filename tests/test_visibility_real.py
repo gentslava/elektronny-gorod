@@ -197,7 +197,9 @@ async def test_migration_resets_legacy_disabled_by_markers(
             f"Migration не сбросил disabled_by для {cam_id}: {e.disabled_by!r}"
         )
 
-    for device in dr.async_entries_for_config_entry(dev_registry, entry.entry_id):
+    devices = dr.async_entries_for_config_entry(dev_registry, entry.entry_id)
+    assert devices, "устройств нет — проверка была бы холостой"
+    for device in devices:
         assert device.disabled_by is None, (
             f"Migration не сбросил device.disabled_by для {device.id}: {device.disabled_by!r}"
         )

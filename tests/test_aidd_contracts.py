@@ -224,7 +224,9 @@ def test_claude_imports_repository_contract() -> None:
 
 def test_hook_launchers_delegate_to_canonical_implementations() -> None:
     for tool_name in (".claude", ".codex"):
-        for adapter in (REPO_ROOT / tool_name / "hooks").glob("*.sh"):
+        adapters = sorted((REPO_ROOT / tool_name / "hooks").glob("*.sh"))
+        assert adapters, f"{tool_name}/hooks пуст — проверка была бы холостой"
+        for adapter in adapters:
             text = adapter.read_text()
             canonical_path = f".agents/hooks/{adapter.name}"
             assert (REPO_ROOT / canonical_path).is_file()
@@ -237,7 +239,9 @@ def test_hook_launchers_delegate_to_canonical_implementations() -> None:
 
 
 def test_plans_are_tool_independent() -> None:
-    for plan in (REPO_ROOT / "docs/plans").glob("*.md"):
+    plans = sorted((REPO_ROOT / "docs/plans").glob("*.md"))
+    assert plans, "docs/plans пуст — проверка была бы холостой"
+    for plan in plans:
         if plan.name == "README.md":
             continue
         assert "superpowers:" not in plan.read_text(), plan
