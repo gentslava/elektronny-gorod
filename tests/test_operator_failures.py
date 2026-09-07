@@ -394,3 +394,104 @@ async def test_intercom_camera_is_taken_from_the_entrance(hass: HomeAssistant) -
     ids = {c["id"] for c in data["cameras"]}
     assert "CAM_ENTRANCE" in ids
     assert len(data["locks"]) == 1
+
+
+async def test_total_outage_is_not_logged_by_us_at_all(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Полное молчание оператора не пишем сами — это делает ядро, и один раз.
+
+    Ядро логирует отказ обновления на переходе и возвращение данных
+    (`Error fetching … data` / `Fetching … data recovered`). Свой
+    `LOGGER.exception` рядом с ним давал полный трейсбек на КАЖДОМ цикле:
+    под три сотни за сутки недоступности, против правила Silver
+    `log-when-unavailable`. Заодно проверяем, что наружу уходит тип
+    исключения, а не текст оператора: в тексте бывает адрес или id.
+    """
+    import logging
+
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(
+            side_effect=ClientError("сервер по адресу Ленина 1 недоступен")
+        )
+
+        coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
+
+        with caplog.at_level(logging.DEBUG):
+            for _ in range(5):
+                with pytest.raises(UpdateFailed) as err:
+                    await coordinator._async_update_data()
+
+        assert "ClientError" in str(err.value)
+        assert "Ленина" not in str(err.value), "текст оператора наружу не выпускаем"
+        ours = [
+            r for r in caplog.records
+            if r.name.startswith("custom_components.elektronny_gorod")
+            and (r.exc_info is not None or "недоступ" in r.msg or "places" in r.msg)
+        ]
+        assert ours == [], "об отказе обновления сообщает ядро, а не мы"
+
+
+async def test_empty_place_list_complains_once_and_notices_recovery(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Пустой список адресов — одна жалоба, и одна строка о возвращении.
+
+    У заблокированного аккаунта список пуст сутками; жалоба на каждом цикле
+    была бы тем же спамом, что и по подзапросам.
+    """
+    import logging
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[])
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(return_value=[])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(return_value={})
+
+        coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
+
+        with caplog.at_level(logging.INFO):
+            for _ in range(3):
+                await coordinator._async_update_data()
+
+            assert len([r for r in caplog.records if "недоступен" in r.msg]) == 1
+
+            caplog.clear()
+            api.query_places = AsyncMock(return_value=[{
+                "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+                "place": {"id": "1000000", "address": "addr"},
+            }])
+            await coordinator._async_update_data()
+
+            assert [r for r in caplog.records if "снова получен" in r.msg], (
+                "возвращение данных должно быть видно"
+            )

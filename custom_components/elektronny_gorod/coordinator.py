@@ -186,12 +186,21 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             if is_unauthorized(ex):
                 LOGGER.warning("Оператор отверг токен — нужна повторная авторизация")
                 raise ConfigEntryAuthFailed("token rejected by operator") from ex
-            LOGGER.exception("Failed to load subscriber places")
-            raise UpdateFailed(f"places: {ex}") from ex
+            # Своего лога здесь быть не должно: ядро само пишет об отказе
+            # один раз на переходе и о возвращении данных
+            # (`Error fetching … data` / `Fetching … data recovered` в
+            # `update_coordinator.py`). Прежний `LOGGER.exception` дублировал
+            # его трейсбеком на КАЖДОМ цикле — под три сотни за сутки молчания
+            # оператора, ровно против правила Silver `log-when-unavailable`.
+            # Тип, а не текст: в тексте оператора может быть адрес или id.
+            raise UpdateFailed(f"places: {type(ex).__name__}") from ex
 
         if not places:
-            LOGGER.warning("No subscriber places returned by API")
+            # Тоже один раз: у заблокированного аккаунта список пуст сутками.
+            self._note_failure("Список адресов", None, ValueError("empty"))
             return {"places": [], "balances": [], "cameras": [], "locks": [], "dnd": {}}
+
+        self._note_success("Список адресов", None)
 
         balances: list[dict[str, Any]] = []
         cameras: list[dict[str, Any]] = []
@@ -277,7 +286,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
     @callback
-    def _note_failure(self, what: str, place_id: str, err: Exception) -> None:
+    def _note_failure(self, what: str, place_id: str | None, err: Exception) -> None:
         """Сообщить об отказе один раз, а не на каждом цикле обновления.
 
         Отказ отдельного подзапроса устойчив: оператор молчит про баланс или
@@ -287,21 +296,27 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         один раз и один раз о возвращении. Пишем тип исключения, а не текст:
         в тексте оператора может оказаться адрес или идентификатор.
         """
-        key = (what, str(place_id))
+        key = (what, str(place_id or ""))
         if key in self._failing:
             return
         self._failing.add(key)
+        if place_id is None:
+            LOGGER.warning("%s недоступен (%s)", what, type(err).__name__)
+            return
         LOGGER.warning(
             "%s недоступны для place_id=%s (%s)", what, place_id, type(err).__name__
         )
 
     @callback
-    def _note_success(self, what: str, place_id: str) -> None:
+    def _note_success(self, what: str, place_id: str | None) -> None:
         """Сообщить о возвращении данных, если до этого был отказ."""
-        key = (what, str(place_id))
+        key = (what, str(place_id or ""))
         if key not in self._failing:
             return
         self._failing.discard(key)
+        if place_id is None:
+            LOGGER.info("%s снова получен", what)
+            return
         LOGGER.info("%s снова отвечают для place_id=%s", what, place_id)
 
     @staticmethod
