@@ -58,16 +58,35 @@ jobs:
           pip install pytest-homeassistant-custom-component==${{ matrix.phc-version }}
           pip install -r requirements_test.txt
 
-      # Порог правила Silver `test-coverage`. Без него заявка в манифесте
-      # держалась бы на разовом ручном замере: ADR-0010 D-05 требует не
-      # поднимать уровень выше подтверждённого гейтами.
       - name: Run pytest
         run: |
           pytest tests/ -v \
             --cov=custom_components.elektronny_gorod \
             --cov-report=term-missing \
-            --cov-report=xml \
-            --cov-fail-under=95
+            --cov-report=xml
+
+      # Правило Silver `test-coverage` читается помодульно: «above 95% for all
+      # integration modules». Агрегатного порога для него мало — модуль, упавший
+      # до нуля, прячется за общей цифрой, и заявка в манифесте становится
+      # ложной молча. ADR-0010 D-05 требует не заявлять уровень выше
+      # подтверждённого гейтами, поэтому гейт проверяет ровно то, что заявлено.
+      - name: Enforce the per-module coverage floor
+        run: |
+          python - <<'PY'
+          import sys, xml.etree.ElementTree as ET
+
+          FLOOR = 95.0  # «above 95%»: ровно 95.00 правилу не удовлетворяет
+          modules = [
+              (c.get("filename"), float(c.get("line-rate")) * 100)
+              for c in ET.parse("coverage.xml").getroot().iter("class")
+          ]
+          low = sorted((rate, name) for name, rate in modules if rate <= FLOOR)
+          for rate, name in low:
+              print(f"::error file=custom_components/elektronny_gorod/{name}::"
+                    f"покрытие {rate:.2f}% — правило требует выше {FLOOR}%")
+          print(f"модулей: {len(modules)}, ниже порога: {len(low)}")
+          sys.exit(1 if low else 0)
+          PY
 
       - name: Upload coverage artifact
         if: always()

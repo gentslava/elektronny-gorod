@@ -1,4 +1,4 @@
-Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-09-07 (Silver заявлен: все правила уровня закрыты, все 42 модуля выше порога 95%)
+Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-09-07 (Silver заявлен: все правила уровня закрыты, все 42 модуля выше порога 95%, порог держит CI)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -28,7 +28,7 @@ External reference:
 
 ## Текущая оценка
 
-**Silver** — заявлен в `manifest.json` (2026-09-06). Первая попытка заявки в тот же день была отозвана: `test-coverage` и `action-exceptions` тогда не выполнялись, и оба закрыты уже после отзыва. Bronze подтверждается архитектурой: реальный polling, `CoordinatorEntity`, stable `unique_id`, diagnostics с redaction, координатор в `entry.runtime_data`. Silver: нативная переавторизация с автозапуском по 401, `parallel-updates` во всех платформах, сообщение о недоступности по фронту, документация параметров и инструкция по удалению, внятный отказ действий и покрытие выше 95% в каждом модуле.
+**Silver** — заявлен в `manifest.json` (2026-09-07). Первые две попытки были отозваны: в первый раз не выполнялись `test-coverage` и `action-exceptions`, во второй — `test-coverage` читался как средний, а не помодульный порог. Третья заявка пришла после того, как ревью нашло и закрыло регрессию `action-setup`. Bronze подтверждается архитектурой: реальный polling, `CoordinatorEntity`, stable `unique_id`, diagnostics с redaction, координатор в `entry.runtime_data`. Silver: нативная переавторизация с автозапуском по 401, `parallel-updates` во всех платформах, сообщение о недоступности по фронту, документация параметров и инструкция по удалению, внятный отказ действий и покрытие выше 95% в каждом модуле.
 
 Оговорка: Home Assistant поле `quality_scale` у кастомных интеграций не читает — `loader.py:854-859` возвращает для них `custom`, а `hassfest` выходит из IQS-валидатора для не-core. Заявка адресована людям и держится этим документом плюс порогом покрытия в CI.
 
@@ -38,7 +38,7 @@ External reference:
 
 | Правило | Статус | Файл |
 |---|---|---|
-| `action-setup` | ✅ действия регистрируются в `async_setup`, до загрузки записей; проверка живого вызова — в хендлере | `__init__.py:async_setup` |
+| `action-setup` | ✅ действия регистрируются в `async_setup`, до загрузки записей, и не снимаются на выгрузке: `async_setup` HA зовёт один раз за запуск, поэтому снятие означало бы пропажу действий после первого же reload | `__init__.py:async_setup`, `async_unload_entry` |
 | `appropriate-polling` | ✅ `update_interval=5 min` | `coordinator.py` |
 | `brands` | ✅ опубликован: `custom_integrations/elektronny_gorod` в home-assistant/brands (icon, icon@2x, logo, logo@2x) | — |
 | `common-modules` | ✅ структура соответствует | — |
@@ -67,16 +67,16 @@ External reference:
 
 | Правило | Статус | Что нужно |
 |---|---|---|
-| `action-exceptions` | ✅ отказывают внятно: `answer`/`hangup` без вызова, замок на «Закрыть», переключатели «не беспокоить» при отказе оператора | `__init__.py`, `lock.py`, `switch.py` |
+| `action-exceptions` | ✅ отказывают внятно: `answer`/`hangup` без вызова и при незагруженной записи, замок на «Закрыть» и на неудавшемся открытии, переключатели «не беспокоить» при отказе оператора | `__init__.py`, `lock.py`, `switch.py` |
 | `config-entry-unloading` | ✅ есть | — |
 | `docs-configuration-parameters` | ✅ таблица параметров go2rtc с умолчаниями и назначением | README (ru/en) |
 | `docs-installation-parameters` | ✅ что нужно до начала + таблица полей каждого шага настройки | README (ru/en) |
 | `entity-unavailable` | ✅ через `CoordinatorEntity.available` + data presence | — |
 | `integration-owner` | ✅ `codeowners` | — |
-| `log-when-unavailable` | ✅ отказ подзапроса логируется по фронту: одна строка на пропажу, одна на возвращение | `coordinator.py:_note_failure` |
-| `parallel-updates` | ✅ `PARALLEL_UPDATES = 0` во всех шести платформах (данные из координатора) | платформы |
+| `log-when-unavailable` | ✅ по фронту, одна строка на пропажу и одна на возвращение — и для подзапроса, и для пустого списка адресов. О полной недоступности пишет ядро (`Error fetching … data` / `… recovered`), своего лога рядом нет | `coordinator.py:_note_failure`, `_note_success` |
+| `parallel-updates` | ✅ задано во всех шести платформах: `0` там, где есть только чтение из координатора, и `1` у `lock`/`switch` — координатор централизует входящие данные, но не ограничивает исходящие вызовы действий | платформы |
 | `reauthentication-flow` | ✅ `async_step_reauth` / `async_step_reauth_confirm`; 401 поднимает `ConfigEntryAuthFailed` | `config_flow.py`, `coordinator.py` |
-| `test-coverage` | ✅ «above 95% for all integration modules»: **все 42 модуля выше 95%**, общий **97.20%** | замер 2026-09-07, 1145 тестов; порог держит CI (`--cov-fail-under=95`) |
+| `test-coverage` | ✅ «above 95% for all integration modules»: **все 42 модуля выше 95%**, общий **97.37%** | замер 2026-09-07, 1153 теста; помодульный порог держит шаг CI «Enforce the per-module coverage floor» |
 
 **Silver blockers:** нет.
 
