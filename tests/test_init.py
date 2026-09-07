@@ -406,3 +406,38 @@ async def test_removal_releases_ownership_after_a_confirmed_stop(
     await async_remove_entry(hass, entry)
 
     assert entry.entry_id not in hass.data[f"{DOMAIN}_fcm_listeners"]
+
+
+async def test_failed_push_unregister_is_reported(
+    hass: HomeAssistant, mock_remove_entry_api, caplog
+) -> None:
+    """Неотвязанный push-токен виден в журнале, а не только на debug.
+
+    Метод отказ глотает и возвращает False, вызывающий его игнорировал, а
+    транспорт после понижения своего лога до `debug` об этом больше не
+    сообщает. Токен, оставшийся у оператора, — это push-и на устройство,
+    которое интеграцию уже удалило.
+    """
+    import logging
+
+    mock_remove_entry_api.return_value.unregister_push_device = AsyncMock(
+        return_value=False
+    )
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_ACCESS_TOKEN: "AT",
+            CONF_REFRESH_TOKEN: "RT",
+            CONF_OPERATOR_ID: "1",
+            CONF_USER_AGENT: json.dumps(UserAgent().json()),
+        },
+    )
+    entry.add_to_hass(hass)
+
+    with caplog.at_level(logging.WARNING):
+        await async_remove_entry(hass, entry)
+
+    mock_remove_entry_api.return_value.unregister_push_device.assert_awaited_once()
+    # Именно про отказ оператора, а не про исключение рядом: общая подстрока
+    # ловила обе ветки, и снятие сигнала тест переживал.
+    assert "Оператор не принял отвязку push-токена" in caplog.text

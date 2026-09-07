@@ -714,6 +714,11 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
             refresh_token=entry.data.get(CONF_REFRESH_TOKEN),
             operator=str(entry.data.get(CONF_OPERATOR_ID)),
         )
-        await api.unregister_push_device()
+        if not await api.unregister_push_device():
+            # Единственный сигнал: сам метод отказ глотает, а транспорт с
+            # понижением своего лога до `debug` больше о нём не сообщает.
+            # Оставшийся у оператора токен — это push-и на устройство,
+            # которое интеграцию уже удалило.
+            LOGGER.warning("Оператор не принял отвязку push-токена при удалении записи")
     except Exception:  # noqa: BLE001
-        LOGGER.debug("Push-токен не отвязан при удалении entry (best-effort)")
+        LOGGER.warning("Push-токен не отвязан при удалении записи (best-effort)")

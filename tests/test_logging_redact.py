@@ -171,3 +171,29 @@ def test_redact_path_passes_non_auth_unchanged(path):
     """Не-auth URLs не маскируются: place_id, camera_id и т.д. — internal
     references, не PII клиента."""
     assert redact_path(path) == path
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/auth/v2/login/79991234567",
+        "/auth/v2/login/8%20999%20123-45-67",
+        "/auth/v2/login/7-999-123-45-67",
+        "/auth/v2/login/+7(999)1234567",
+        "/auth/v2/auth/79991234567/password",
+        "/auth/v3/auth/8-999-123-45-67/confirmation",
+    ],
+)
+def test_redact_path_masks_the_whole_login_segment(path):
+    """Номер прячется целиком, в каком бы виде его ни ввели.
+
+    Поле подписано «номер телефона или договора», формат не навязан. На
+    маске «цифры до первого разделителя» номер с пробелами или дефисами
+    терял только первую цифру — оставшихся девяти при известном формате
+    достаточно, чтобы узнать номер.
+    """
+    redacted = redact_path(path)
+
+    assert "***" in redacted
+    for digits in ("999", "1234567", "123-45-67", "123", "45", "67"):
+        assert digits not in redacted, f"{path} → {redacted}"
