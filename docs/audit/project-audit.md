@@ -1030,7 +1030,7 @@ Quality gates:
 
 ### A-110. Сервисы ответа и отбоя молча ничего не делают
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `feat/silver-coverage`, pending merge.
+- **Status:** ✅ **RESOLVED** — `ac4d5b6`, `c69163d` (PR #96).
 - **Severity:** **P2** — элемент управления, который не работает и не объясняет почему.
 - **Area:** `__init__.py:289-298`, `services.yaml`.
 - **Evidence (2026-09-06):** `elektronny_gorod.answer` без активного вызова домофона проходит по всем контроллерам, не находит вызова и пишет `LOGGER.warning`, завершаясь успешно. `elektronny_gorod.hangup` не сигнализирует об отсутствии вызова вовсе.
@@ -1042,7 +1042,7 @@ Quality gates:
 
 ### A-111. Открытие двери отчитывалось успехом, когда дверь не открылась
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `feat/silver-coverage`, pending merge.
+- **Status:** ✅ **RESOLVED** — `ac4d5b6`, `c881729` (PR #96).
 - **Severity:** **P2** — действие, результат которого нельзя проверить.
 - **Area:** `lock.py:async_unlock`.
 - **Evidence (2026-09-07):** `ClientError` от оператора глотался, замок вставал в `JAMMED`, через две секунды возвращался в `LOCKED`, а вызов `lock.unlock` завершался успешно. Найдено `ha-expert` при сверке правила `action-exceptions` с первоисточником: правило прямо распространяется на действия платформ, а сетевой отказ — его пример для `HomeAssistantError`.
@@ -1051,7 +1051,7 @@ Quality gates:
 
 ### A-112. Недоступность оператора писала трейсбек на каждом цикле
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `feat/silver-coverage`, pending merge.
+- **Status:** ✅ **RESOLVED** — `e8bcf38`, `03cb952`, `89409e5`, `a9422fb` (PR #96).
 - **Severity:** **P3** — журнал, в котором не найти ничего другого.
 - **Area:** `coordinator.py:_async_update_data`.
 - **Evidence (2026-09-07):** `LOGGER.exception("Failed to load subscriber places")` стоял на главном пути недоступности без ограничения по фронту: при интервале в пять минут это 288 полных трейсбеков за сутки молчания оператора. Рядом `UpdateFailed(f"places: {ex}")` вклеивал сырой текст исключения — против собственного обоснования в `_note_failure`, где текст оператора не выпускается наружу, потому что в нём бывает адрес или идентификатор.
@@ -1063,7 +1063,7 @@ Quality gates:
 
 ### A-113. Переключатели «не беспокоить» теряли одно из двух переключений
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `feat/silver-coverage`, pending merge.
+- **Status:** ✅ **RESOLVED** — `03cb952`, `6ffecf2` (PR #96).
 - **Severity:** **P2** — действие, отменяющее соседнее.
 - **Area:** `switch.py:_set_status`, `coordinator.py:async_set_dnd`.
 - **Evidence (2026-09-07):** `code-reviewer` воспроизвёл на одном вызове `switch.turn_on`, нацеленном на два переключателя одного адреса: первый POST уходит с `INTERCOM_CALLS: True`, второй — с `INTERCOM_CALLS: False`. Человек включает два тумблера, у оператора включается один.
@@ -1072,7 +1072,7 @@ Quality gates:
 
 ### A-114. Страховка от зависшего просмотра проверялась тестом, который не мог упасть
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `feat/silver-coverage`, pending merge.
+- **Status:** ✅ **RESOLVED** — `f09df52` (PR #96).
 - **Severity:** **P3** — ложная уверенность в защите от [A-68](project-audit.md).
 - **Area:** `tests/test_camera_stream_dedup.py`.
 - **Evidence (2026-09-07):** `qa-engineer` показал, что `test_first_caller_cancelled_does_not_hang_waiters` принимал таймаут ожидания как «acceptable» — то есть считал допустимым ровно то зависание, ради которого написан. Единственное утверждение (`result2 is not None or result2 is None`) — тавтология, и при этом недостижимая строка.
@@ -1081,7 +1081,7 @@ Quality gates:
 
 ### A-115. Редакция телефона в журнале держалась не везде и не на всяком формате
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `feat/silver-coverage`, pending merge.
+- **Status:** ✅ **RESOLVED** — `ae4f83a` (PR #96).
 - **Severity:** **P2 privacy** — номер абонента в логе, который люди прикладывают к issue.
 - **Area:** `http.py:_log_response`, `_logging.py:_AUTH_PATH_ID_PATTERN`, `tests/test_http.py`.
 - **Evidence (2026-09-07):** `security-auditor` показал две вещи. Первая: из трёх строк, где применяется `redact_path`, одна — в `_log_response` — не исполнялась ни одним тестом, потому что дублёр ответа отдавал константный `url`; снятие редакции с неё переживало все 1161 тест. Именно эта строка пишется на **каждом** auth-запросе, включая успешный вход, тогда как строка отказа — только на неуспешном. Вторая: маска `\+?\d+` прекращала совпадение на первом разделителе, поэтому номер вида `8 999 123-45-67` терял ровно одну цифру — в логе оставалось девять из десяти.
