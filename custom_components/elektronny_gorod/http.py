@@ -44,10 +44,13 @@ def _log_request(url: str, method: str, headers: dict, body_size: int) -> None:
         body_marker = f"<{body_size} bytes>"
     else:
         body_marker = "<none>"
+    # URL — через ту же редакцию, что и лог отказа: телефон стоит прямо в
+    # пути auth-запроса. Функция уже прятала заголовки и признак тела, но
+    # оставляла его на виду, а именно debug-логи люди прикладывают к issue.
     LOGGER.debug(
         "Request %s %s headers=%s body=%s",
         method,
-        url,
+        redact_path(url),
         redact(headers),
         body_marker,
     )
@@ -60,7 +63,9 @@ async def _log_response(response: ClientResponse) -> None:
     url = str(response.url)
     if is_auth_path(url):
         # Полностью пропускаем — даже размер ответа может намекать на исход (success vs error).
-        LOGGER.debug("Response %s %s [%s]", response.method, url, response.status)
+        LOGGER.debug(
+            "Response %s %s [%s]", response.method, redact_path(url), response.status
+        )
         return
     # Не читаем body здесь — иначе streaming-ответы будут consumed.
     # Размер берём из Content-Length, если есть.
@@ -191,7 +196,16 @@ class HTTP:
         if response.ok:
             return response
         else:
-            LOGGER.error("API request failed: %s [%s]", redact_path(endpoint), response.status)
+            # `debug`, как и у бинарной ветки выше, и по той же причине:
+            # транспорт не знает, значим ли отказ. Решает вызывающий —
+            # координатор ограничивает жалобу по фронту, а config flow
+            # показывает причину в форме. На `error` эта строка сводила на нет
+            # всю дедупликацию: при устойчивом отказе оператора набегало 288
+            # одинаковых записей в сутки на каждый endpoint, против правила
+            # Silver `log-when-unavailable`.
+            LOGGER.debug(
+                "API request failed: %s [%s]", redact_path(endpoint), response.status
+            )
             raise ClientError(response)
 
     async def get(self, endpoint: str, binary: bool = False) -> ClientResponse | bytes:

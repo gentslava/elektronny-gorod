@@ -117,5 +117,5 @@ async def test_broken_lock_data_does_not_take_the_cameras_down(
 
     assert [c["id"] for c in data["cameras"]] == ["CAM-GATE"]
     assert data["locks"] == []
-    complaints = [r for r in caplog.records if "Замки недоступны" in r.getMessage()]
+    complaints = [r for r in caplog.records if r.getMessage().startswith("Замки:")]
     assert len(complaints) == 1, "жалоба повторяется на каждом цикле"

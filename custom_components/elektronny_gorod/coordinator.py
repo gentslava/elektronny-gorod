@@ -150,7 +150,17 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         Returns True если backend принял.
         """
         self._api.http.user_agent.place_id = place_id
-        return await self._api.post_dnd_settings(place_id, items)
+        if not await self._api.post_dnd_settings(place_id, items):
+            return False
+        # Принятый payload — и есть новое состояние. Без записи в снимок
+        # следующий переключатель того же адреса построит свой payload из
+        # старых данных и вернёт назад то, что мы только что включили:
+        # `async_request_refresh` отложен дебаунсером и к тому моменту
+        # `self.data` ещё не трогал. Сериализация действий этого не решает —
+        # разъезжаются данные, а не порядок.
+        if isinstance(self.data, dict):
+            self.data.setdefault("dnd", {})[str(place_id)] = [dict(i) for i in items]
+        return True
 
     # ------------------------------------------------------------------ #
     # Periodic refresh (`_async_update_data`)                            #
@@ -197,7 +207,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if not places:
             # Тоже один раз: у заблокированного аккаунта список пуст сутками.
-            self._note_failure("Список адресов", None, ValueError("empty"))
+            self._note_failure("Список адресов", None, "оператор вернул пустой список")
             return {"places": [], "balances": [], "cameras": [], "locks": [], "dnd": {}}
 
         self._note_success("Список адресов", None)
@@ -286,7 +296,9 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
     @callback
-    def _note_failure(self, what: str, place_id: str | None, err: Exception) -> None:
+    def _note_failure(
+        self, what: str, place_id: str | None, err: Exception | str
+    ) -> None:
         """Сообщить об отказе один раз, а не на каждом цикле обновления.
 
         Отказ отдельного подзапроса устойчив: оператор молчит про баланс или
@@ -300,12 +312,14 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if key in self._failing:
             return
         self._failing.add(key)
+        # Строкой — когда причина не исключение: иначе пришлось бы сочинять
+        # его, и лог утверждал бы поломку там, где оператор просто ничего не
+        # прислал.
+        reason = err if isinstance(err, str) else type(err).__name__
         if place_id is None:
-            LOGGER.warning("%s недоступен (%s)", what, type(err).__name__)
+            LOGGER.warning("%s: нет данных (%s)", what, reason)
             return
-        LOGGER.warning(
-            "%s недоступны для place_id=%s (%s)", what, place_id, type(err).__name__
-        )
+        LOGGER.warning("%s: нет данных для place_id=%s (%s)", what, place_id, reason)
 
     @callback
     def _note_success(self, what: str, place_id: str | None) -> None:
@@ -315,9 +329,9 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             return
         self._failing.discard(key)
         if place_id is None:
-            LOGGER.info("%s снова получен", what)
+            LOGGER.info("%s: данные снова приходят", what)
             return
-        LOGGER.info("%s снова отвечают для place_id=%s", what, place_id)
+        LOGGER.info("%s: данные снова приходят для place_id=%s", what, place_id)
 
     @staticmethod
     def _iter_place_ids(

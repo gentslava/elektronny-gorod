@@ -164,7 +164,7 @@ async def test_persistent_failure_logs_once_not_every_cycle(
             for _ in range(5):
                 await coordinator._async_update_data()
 
-            complaints = [r for r in caplog.records if "недоступны" in r.msg]
+            complaints = [r for r in caplog.records if "нет данных" in r.msg]
             assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
 
             # Данные вернулись — об этом должно быть сказано ровно один раз.
@@ -172,7 +172,7 @@ async def test_persistent_failure_logs_once_not_every_cycle(
             for _ in range(3):
                 await coordinator._async_update_data()
 
-        recovered = [r for r in caplog.records if "снова отвечают" in r.msg]
+        recovered = [r for r in caplog.records if "данные снова приходят" in r.msg]
         assert len(recovered) == 1
 
 
@@ -483,7 +483,7 @@ async def test_empty_place_list_complains_once_and_notices_recovery(
             for _ in range(3):
                 await coordinator._async_update_data()
 
-            assert len([r for r in caplog.records if "недоступен" in r.msg]) == 1
+            assert len([r for r in caplog.records if "нет данных" in r.msg]) == 1
 
             caplog.clear()
             api.query_places = AsyncMock(return_value=[{
@@ -492,6 +492,6 @@ async def test_empty_place_list_complains_once_and_notices_recovery(
             }])
             await coordinator._async_update_data()
 
-            assert [r for r in caplog.records if "снова получен" in r.msg], (
+            assert [r for r in caplog.records if "данные снова приходят" in r.msg], (
                 "возвращение данных должно быть видно"
             )

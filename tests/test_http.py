@@ -107,10 +107,15 @@ async def test_bearer_does_not_leak_across_requests(http_client, fake_session):
 
 
 async def test_error_log_redacts_phone_in_auth_path(http_client, fake_session, caplog):
-    """API request failed log не должен содержать PII из auth URL."""
+    """Лог отказа не должен содержать PII из auth URL.
+
+    Уровень — `debug`: транспорт не решает, значим ли отказ (см. тест про
+    устойчивый отказ ниже). Редакция телефона от уровня не зависит и нужна
+    тем более: именно debug-логи люди прикладывают к issue.
+    """
     fake_session.get = AsyncMock(return_value=_FakeResponse(401))
 
-    with caplog.at_level(logging.ERROR, logger="custom_components.elektronny_gorod.const"):
+    with caplog.at_level(logging.DEBUG, logger="custom_components.elektronny_gorod.const"):
         with pytest.raises(Exception):
             await http_client.get("/auth/v2/login/1131686")
 
@@ -122,7 +127,7 @@ async def test_error_log_passes_through_non_auth_path(http_client, fake_session,
     """Для не-auth endpoint path логируется как есть (place_id и т.д. — не PII)."""
     fake_session.get = AsyncMock(return_value=_FakeResponse(500))
 
-    with caplog.at_level(logging.ERROR, logger="custom_components.elektronny_gorod.const"):
+    with caplog.at_level(logging.DEBUG, logger="custom_components.elektronny_gorod.const"):
         with pytest.raises(Exception):
             await http_client.get("/rest/v1/places/12345/accesscontrols")
 
@@ -256,3 +261,35 @@ async def test_binary_body_size_is_measured_without_decoding(
         await http_client.post("/rest/v1/upload", b"\xff\xd8\x00\x01")
 
     assert any("Request" in str(r.msg) for r in caplog.records)
+
+
+async def test_persistent_rest_failure_is_not_shouted_on_every_response(
+    http_client, fake_session, caplog
+) -> None:
+    """Устойчивый отказ REST не даёт по громкой строке на каждый ответ.
+
+    Транспорт не знает, значим ли отказ: решает вызывающий — координатор
+    ограничивает жалобу по фронту, config flow показывает причину в форме.
+    На `error` эта строка сводила дедупликацию на нет: при отказе оператора
+    набегало под три сотни одинаковых записей в сутки на каждый endpoint,
+    против правила Silver `log-when-unavailable`.
+    """
+    import logging
+
+    fake_session.get = AsyncMock(return_value=_FakeResponse(503))
+
+    with caplog.at_level(logging.DEBUG):
+        for _ in range(12):
+            with pytest.raises(ClientError):
+                await http_client.get("/rest/v1/subscriber-places")
+
+    ours = [
+        r for r in caplog.records
+        if r.name.startswith("custom_components.elektronny_gorod")
+    ]
+    assert [r for r in ours if r.levelno >= logging.WARNING] == [], (
+        "об отказе решает вызывающий, а не транспорт"
+    )
+    assert [r for r in ours if "API request failed" in r.msg], (
+        "на debug отказ всё-таки виден — иначе диагностировать нечем"
+    )

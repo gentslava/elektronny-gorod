@@ -302,3 +302,49 @@ async def test_switch_without_its_item_is_unavailable(
         "dnd": {PLACE_ID: [{"type": "ЧУЖОЙ_ТИП", "status": True}]},
     }
     assert entity._own_item is None
+
+
+async def test_accepted_dnd_payload_lands_in_the_snapshot(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Принятый оператором набор сразу становится снимком координатора.
+
+    Каждый переключатель шлёт полный набор из трёх пунктов, построенный из
+    снимка. Пока принятое туда не попадало, следующий переключатель того же
+    адреса читал прежние данные и возвращал назад то, что включил предыдущий:
+    человек включает два тумблера, у оператора включается один. Отложенный
+    refresh не помогает — он на то и отложен. Сериализация действий тоже:
+    расходятся данные, а не порядок.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    assert coordinator.data["dnd"][PLACE_ID] == _dnd_items()
+
+    accepted = _dnd_items(root=True, intercom=True, mgmt=False)
+    assert await coordinator.async_set_dnd(PLACE_ID, accepted) is True
+
+    assert coordinator.data["dnd"][PLACE_ID] == accepted
+
+
+async def test_rejected_dnd_payload_does_not_touch_the_snapshot(
+    hass: HomeAssistant, mock_api_with_dnd
+) -> None:
+    """Отказ оператора снимок не меняет — иначе интерфейс покажет несбывшееся."""
+    mock_api_with_dnd.return_value.post_dnd_settings = AsyncMock(return_value=False)
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    before = [dict(item) for item in coordinator.data["dnd"][PLACE_ID]]
+
+    assert await coordinator.async_set_dnd(
+        PLACE_ID, _dnd_items(root=True, intercom=True, mgmt=True)
+    ) is False
+
+    assert coordinator.data["dnd"][PLACE_ID] == before
