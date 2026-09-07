@@ -63,7 +63,7 @@ External reference:
 
 ## Silver
 
-Заявлен в манифесте 2026-09-06.
+Заявлен в манифесте 2026-09-07 (PR #96); две предыдущие попытки 2026-09-06 отозваны.
 
 | Правило | Статус | Что нужно |
 |---|---|---|
@@ -120,7 +120,7 @@ External reference:
 | Уровень | Итерация | Главные блокеры |
 |---|---|---|
 | Bronze | Shipped | нет |
-| Silver | Заявлен 2026-09-06 | нет |
+| Silver | Заявлен 2026-09-07 | нет |
 | Silver → Gold | Будущее | entity_category audit beyond RTSP diagnostics, dynamic devices, расширение Repairs на остальные recovery edge-cases |
 | Gold → Platinum | Дальнее будущее | strict typing, 100% coverage |
 
