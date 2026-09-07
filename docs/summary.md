@@ -88,7 +88,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - FCM остаётся на приватных Google API и неофициальном operator push-контракте. Зафиксированный production-дефект исправлен локальной нормализацией и bounded recovery, но долгосрочная совместимость внешней зависимости не гарантируется (A-80).
 - go2rtc persistent-config bloat частично mitigated PATCH-only path, но требует live persistence check (A-84).
 - `api.py` — `e.args[0]` antipattern + широкий `except Exception` (A-19/A-20).
-- HTML service-pipe/VPN block пока превращается в generic `ClientError` и может выглядеть как пустой список камер (A-92; нужен воспроизводимый HAR).
+- HTML service-pipe/VPN block пока превращается в generic `ClientError` (A-92; нужен воспроизводимый HAR). Пустым списком камер он больше не притворяется — отказ доходит до координатора и виден в журнале.
 - Cold-start go2rtc warmup (A-67), lock fake-state cosmetic-cycle (A-15 — `asyncio.sleep` уже убран).
 
 ### Mobile-app parity backlog
