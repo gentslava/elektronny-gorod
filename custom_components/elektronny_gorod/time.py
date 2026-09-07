@@ -1,12 +1,30 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 class Time:
+    """Метки времени для входа — в том виде, в каком их шлёт приложение.
+
+    Обе метки описывают один момент и обязаны это делать: оператор проверяет
+    `hash2` — MD5 от компактной метки, — а вывести её он может только из
+    полученной ISO-метки. Раньше момент брался локальный (`datetime.now()`) и
+    подписывался `Z`, то есть выдавался за UTC: у новосибирского абонента —
+    на семь часов вперёд. Само по себе это не ломалось, потому что обе метки
+    врали одинаково и сходились между собой, но приложение шлёт настоящий UTC
+    (проверено по трём HAR-снимкам с устройств в разных зонах), а мы его
+    зеркалим — ADR-0006.
+    """
+
     def __init__(self) -> None:
-        self.time: datetime = datetime.now()
+        self.time: datetime = datetime.now(UTC)
 
     def get_timestamp(self) -> str:
-        return f"{self.time.isoformat()[:-3]}Z"
+        """ISO с миллисекундами и `Z` вместо смещения — формат приложения.
+
+        `timespec`, а не срез строки: при нулевых микросекундах `isoformat()`
+        доли секунды опускает, и срез покалечил бы саму метку.
+        """
+        naive = self.time.replace(tzinfo=None)
+        return f"{naive.isoformat(timespec='milliseconds')}Z"
 
     def get_simpletime(self) -> str:
-        return f"{self.time.strftime("%Y%m%d%H%M%S")}"
+        return self.time.strftime("%Y%m%d%H%M%S")
