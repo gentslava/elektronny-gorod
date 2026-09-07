@@ -432,7 +432,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # 1. Access controls (домофоны).
         # hidden для intercom-камеры берётся из ACCESS_CONTROLS.hidden — если
         # user скрыл entrance в приложении, и lock и camera этого entrance
-        # получат `enabled_default=False`.
+        # будут скрыты через `hidden_by=INTEGRATION`.
         for ac in access_controls:
             ac_id = ac.get("id")
             entrances = ac.get("entrances") or []
@@ -515,10 +515,14 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """Из ответа `/settings/screens` достать id-шки скрытых entities.
 
         Возвращает set строковых id. Если screen-тип не найден — пустой set
-        (значит ничего не скрыто). Отклонения формы не роняют разбор: берём
-        то, что разобралось, а о непонятом говорим на `debug` — молчание
-        сделало бы дрейф схемы неотличимым от «пользователь ничего не
-        прятал», и скрытые сущности молча вернулись бы в панель.
+        (значит ничего не скрыто). Берём то, что разобралось, а о непонятом
+        говорим на `debug`: молчание сделало бы дрейф схемы неотличимым от
+        «пользователь ничего не прятал», и скрытые сущности молча вернулись
+        бы в панель.
+
+        Неитерируемое вместо списка бросает — и это намеренно: такой ответ
+        разобрать нечем, и садиться он должен на фронт «Настройки экранов»,
+        который этим ответом владеет. Вызов стоит под его `try`.
 
         `screens` намеренно `Any`, а не `dict`: это разобранный JSON от
         оператора, и обещать его форму в аннотации значит выдать желаемое за
@@ -532,6 +536,11 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if not isinstance(screens, dict):
             drift.add(f"корень {type(screens).__name__}")
             screens = {}
+        elif screens and "screens" not in screens:
+            # Непустой ответ без ключа `screens` — то же переименование поля,
+            # что и элемент без `id`, и последствие то же. Пустой словарь при
+            # этом штатен: он значит «пользователь ничего не настраивал».
+            drift.add("нет ключа screens")
         for screen in screens.get("screens") or []:
             if not isinstance(screen, dict):
                 drift.add("запись раздела не словарь")
@@ -540,7 +549,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 continue
             for item in screen.get("hidden") or []:
                 if not isinstance(item, dict):
-                    drift.add("элемент списка не словарь")
+                    drift.add("скрытый элемент не словарь")
                     continue
                 iid = item.get("id")
                 if iid is None:
@@ -582,7 +591,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         "Калитка 2"). `ac_name` — имя access_control (физического домофона),
         используется как `device_info.name` — общее для всех entrances + camera
         этого домофона. `hidden` — из ACCESS_CONTROLS.hidden в `/settings/screens`
-        (user в приложении скрыл entrance) → entity получит enabled_default=False.
+        (user в приложении скрыл entrance) → entity скрывается через `hidden_by`.
         """
         locks: list[dict[str, Any]] = []
         for ac in access_controls:

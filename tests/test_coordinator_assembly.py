@@ -236,7 +236,7 @@ async def test_one_broken_camera_source_does_not_take_the_others_down(
             {"screens": [
                 {"type": "PUBLIC_CAMERAS", "hidden": ["ПОЛЕЗНАЯ-НАГРУЗКА"]}
             ]},
-            "элемент списка не словарь",
+            "скрытый элемент не словарь",
         ),
         (
             {"screens": [
@@ -244,6 +244,9 @@ async def test_one_broken_camera_source_does_not_take_the_others_down(
             ]},
             "элемент без id",
         ),
+        # Пропажа верхнего ключа — то же переименование поля с тем же
+        # последствием, и раньше она молчала.
+        ({"sections": ["ПОЛЕЗНАЯ-НАГРУЗКА"]}, "нет ключа screens"),
     ],
 )
 async def test_unexpected_screens_shape_does_not_break_the_cycle(
@@ -284,13 +287,14 @@ async def test_unexpected_screens_shape_does_not_break_the_cycle(
         if "Настройки видимости" in r.getMessage()
     ]
     assert drift, "о вытянутой через силу форме надо сказать хотя бы на debug"
-    message = drift[0].getMessage()
-    # Что именно не так — иначе четыре разных дрейфа неразличимы, и строка
-    # не помогает тому, ради кого написана.
-    assert reason in message, message
-    # Но без тела: в нём идентификаторы камер и раскладка видимости, которую
-    # человек настраивал в приложении.
-    assert "ПОЛЕЗНАЯ-НАГРУЗКА" not in message, message
+    # Что именно не так — иначе разные дрейфы неразличимы, и строка не
+    # помогает тому, ради кого написана.
+    assert any(reason in r.getMessage() for r in drift), [r.getMessage() for r in drift]
+    # Но без тела, и во ВСЕХ записях: их по одной на запрошенный раздел, а
+    # проверка первой пропустила бы утечку, сделанную по-разному для разных.
+    assert "ПОЛЕЗНАЯ-НАГРУЗКА" not in caplog.text
+    # Уровень: именно он делает приемлемым то, что строка не дедуплицируется.
+    assert {r.levelno for r in drift} == {logging.DEBUG}
 
 
 async def test_broken_access_controls_payload_keeps_the_rest_of_the_place(
@@ -486,3 +490,110 @@ async def test_no_front_lets_the_operator_text_into_the_journal(
     }, fronts
     leaked = [r.getMessage() for r in ours if marker in r.getMessage()]
     assert leaked == [], leaked
+
+
+@pytest.mark.parametrize(
+    "screens",
+    [
+        {},
+        {"screens": []},
+        {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": []}]},
+        {"screens": [{"type": "ACCESS_CONTROLS", "hidden": [{"id": "E1"}]}]},
+    ],
+)
+async def test_well_formed_screens_say_nothing(
+    hass: HomeAssistant, caplog, screens
+) -> None:
+    """Штатная форма не жалуется — в том числе пустая.
+
+    Молчание здесь и есть смысл сигнала: `{}` значит «пользователь ничего не
+    настраивал». Стоит появиться лишней причине — и каждая установка начнёт
+    писать по строке на раздел каждый цикл, а положительная проверка этого
+    не увидит.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api(query_screens_settings=screens)
+
+    with caplog.at_level(logging.DEBUG):
+        await _coordinator(hass, entry, api)._async_update_data()
+
+    assert not [
+        r for r in caplog.records if "Настройки видимости" in r.getMessage()
+    ], caplog.text
+
+
+async def test_partial_settings_keep_what_parsed(hass: HomeAssistant, caplog) -> None:
+    """Годное берём, даже если рядом мусор.
+
+    Обещание «учли, что смогли» ничем не держалось: ни один случай не
+    сочетал годную запись с испорченной, поэтому разбор мог бы выбрасывать
+    уже разобранное — и скрытые камеры вернулись бы в панель молча.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api(
+        query_screens_settings={"screens": [
+            {"type": "PUBLIC_CAMERAS", "hidden": [
+                {"id": "CAM-PUB"}, "мусор", {"eid": "нет id"},
+            ]},
+        ]},
+        query_public_cameras=[
+            {"id": "a", "externalCameraId": "CAM-PUB"},
+            {"id": "b", "externalCameraId": "CAM-OTHER"},
+        ],
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        data = await _coordinator(hass, entry, api)._async_update_data()
+
+    hidden = {c["id"]: c["hidden"] for c in data["cameras"]}
+    assert hidden == {"CAM-PUB": True, "CAM-OTHER": False}, hidden
+    assert [r for r in caplog.records if "Настройки видимости" in r.getMessage()]
+
+
+async def test_zero_is_a_valid_hidden_id(hass: HomeAssistant, caplog) -> None:
+    """Идентификатор `0` — настоящий id, а не «его нет».
+
+    Проверка на `None`, а не на ложность: с проверкой на ложность такая
+    сущность и не скрылась бы, и была бы объявлена дрейфом схемы — ложное
+    утверждение ровно того класса, ради которого сигнал и вводился.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api(
+        query_screens_settings={"screens": [
+            {"type": "PUBLIC_CAMERAS", "hidden": [{"id": 0}]},
+        ]},
+        query_public_cameras=[{"id": "a", "externalCameraId": "0"}],
+    )
+
+    with caplog.at_level(logging.DEBUG):
+        data = await _coordinator(hass, entry, api)._async_update_data()
+
+    assert [c["hidden"] for c in data["cameras"]] == [True]
+    assert not [
+        r for r in caplog.records if "Настройки видимости" in r.getMessage()
+    ], caplog.text
+
+
+async def test_hidden_ids_do_not_leak_between_sections(
+    hass: HomeAssistant,
+) -> None:
+    """Скрытое в одном разделе не прячет одноимённое в другом.
+
+    Идентификаторы камер и подъездов приходят из разных пространств и могут
+    совпасть. Без фильтра по разделу скрылась бы не та сущность.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api(
+        query_screens_settings={"screens": [
+            {"type": "ACCESS_CONTROLS", "hidden": [{"id": "7"}]},
+        ]},
+        query_public_cameras=[{"id": "a", "externalCameraId": "7"}],
+    )
+
+    data = await _coordinator(hass, entry, api)._async_update_data()
+
+    assert [c["hidden"] for c in data["cameras"]] == [False], "скрыли не ту камеру"

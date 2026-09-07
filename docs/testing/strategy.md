@@ -31,7 +31,7 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **1187 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-07; `.venv` собран под пин CI `PHC_CURRENT`: Python 3.14.7, HA 2026.9.0b6). На минимуме 2026.8.1 — **1185 passed, 2 skipped**, в отдельном окружении под минимальный пин матрицы CI (HA 2026.8.1, PHC 0.13.355 — задан в матрице, отдельной переменной под него нет), 2026-09-07. Команда та же, но `.venv` для этого не годится — он собран под пин CI и минимальные цифры воспроизвести не может. Два skip — тесты FCM, требующие `firebase-messaging`: на минимальном пине пакет не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
+| Локальный suite | **1195 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-07; `.venv` собран под пин CI `PHC_CURRENT`: Python 3.14.7, HA 2026.9.0b6). На минимуме 2026.8.1 — **1193 passed, 2 skipped**, в отдельном окружении под минимальный пин матрицы CI (HA 2026.8.1, PHC 0.13.355 — задан в матрице, отдельной переменной под него нет), 2026-09-07. Команда та же, но `.venv` для этого не годится — он собран под пин CI и минимальные цифры воспроизвести не может. Два skip — тесты FCM, требующие `firebase-messaging`: на минимальном пине пакет не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
 | Test modules | 70 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Product website | **73 passed**, `tsc --noEmit` и Vite production build (`website/`) |
@@ -247,7 +247,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 1187 passed (2026-09-07); на минимальном пине 1185 passed, 2 skipped.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 1195 passed (2026-09-07); на минимальном пине 1193 passed, 2 skipped.
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [x] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
