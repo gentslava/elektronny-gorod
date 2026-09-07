@@ -436,87 +436,97 @@ async def test_open_lock_without_entrance_targets_access_control(hass) -> None:
 # ─── Защита от неожиданного ответа ──────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    ("method", "args", "verb"),
-    [
-        ("query_contracts", (_PHONE,), "get"),
-        ("query_profile", (), "get"),
-        ("query_balance", ("PLACE",), "get"),
-        ("query_places", (), "get"),
-        ("query_access_controls", ("PLACE",), "get"),
-    ],
-)
-async def test_unexpected_response_type_is_refused(hass, method, args, verb) -> None:
-    """Не-ответ вместо ответа — отказ, а не разбор чего попало.
+class _LooksLikeAResponse:
+    """Утиный двойник ответа: без проверки типа его разобрали бы.
 
-    Проверка стоит на каждом методе: `http` объявлен возвращающим либо ответ,
-    либо байты, и без неё разбор пошёл бы по неизвестному объекту.
+    Подсовывать словарь бессмысленно: методы обёрнуты в `except Exception`,
+    и разбор словаря упал бы на `.json()`, дав ровно тот же отказ, что и
+    сработавшая проверка, — тест не отличил бы одно от другого. Двойник же
+    разбирается успешно, поэтому снятие проверки видно сразу.
     """
-    api = _api(hass)
-    setattr(api.http, verb, AsyncMock(return_value={"не": "ответ"}))
 
-    with pytest.raises((TypeError, ValueError)):
-        await getattr(api, method)(*args)
+    status = 200
 
-
-async def test_snapshot_accepts_a_response_object(hass) -> None:
-    """Снимок может прийти и ответом — тогда читаем тело."""
-    api = _api(hass)
-    response = _response(200)
-    response.read = AsyncMock(return_value=b"\xff\xd8jpeg")
-    api.http.get = AsyncMock(return_value=response)
-
-    assert await api.query_camera_snapshot("CAM", 80, 45) == b"\xff\xd8jpeg"
+    async def json(self) -> dict[str, Any]:
+        # Полезная нагрузка нарочно годится каждому вызывающему: если проверку
+        # снять, метод вернёт разобранное, и тест это увидит.
+        return {
+            "data": {"URL": "rtsp://х", "id": "X"},
+            "access_token": "AT",
+            "do_not_disturb": [{"type": "INTERCOM_CALLS", "status": True}],
+        }
 
 
 @pytest.mark.parametrize(
-    ("method", "args"),
+    ("method", "args", "kwargs", "verb", "fallback"),
     [
-        ("query_old_cameras", ()),
-        ("query_cameras", ("PLACE",)),
-        ("query_public_cameras", ("PLACE",)),
+        ("query_old_cameras", (), {}, "get", []),
+        ("query_cameras", ("PLACE",), {}, "get", []),
+        ("query_public_cameras", ("PLACE",), {}, "get", []),
+        ("query_sections", ("PLACE",), {}, "get", []),
+        ("query_screens_settings", ("PLACE",), {}, "get", {}),
+        ("query_dnd_settings", ("PLACE",), {}, "get", []),
+        ("query_camera_stream", ("CAM",), {}, "get", None),
     ],
 )
-async def test_camera_listings_degrade_instead_of_failing(hass, method, args) -> None:
-    """Списки камер отказ переживают: пустой список вместо исключения.
+async def test_lookalike_response_yields_the_safe_fallback(
+    hass, method, args, kwargs, verb, fallback
+) -> None:
+    """Ответом оказалось не то — метод отдаёт пустоту, а не разбирает мусор.
 
-    Обновление идёт по местам подряд, и отказ одного вида данных не должен
-    ронять остальные. Домофоны ведут себя иначе — там исключение уходит
-    наверх, и его ловит уже координатор, который отличает отказ по месту от
-    отказа целиком.
-    """
-    api = _api(hass)
-    api.http.get = AsyncMock(return_value={"не": "ответ"})
-
-    assert await getattr(api, method)(*args) == []
-
-
-@pytest.mark.parametrize(
-    ("method", "args", "verb"),
-    [
-        ("verify_password", ("TS", "H1", "H2"), "post"),
-        ("request_sms_code", (_CONTRACT,), "post"),
-        ("verify_sms_code", (_CONTRACT, "1234"), "post"),
-        ("query_camera_events", ("CAM",), "get"),
-        ("query_sections", ("PLACE",), "get"),
-        ("query_screens_settings", ("PLACE",), "get"),
-        ("query_dnd_settings", ("PLACE",), "get"),
-        ("query_camera_stream", ("CAM",), "get"),
-        ("mint_sip_device", ("PLACE", "AC"), "post"),
-    ],
-)
-async def test_every_method_guards_the_response_type(hass, method, args, verb) -> None:
-    """Ни один метод не разбирает то, что ответом не является.
-
-    `http` объявлен возвращающим ответ либо байты; проверка стоит на каждом
-    методе, и без неё разбор пошёл бы по неизвестному объекту. Часть методов
-    отказ переживает молча — им достаточно не упасть.
+    Эти методы кормят координатор: разобранный мусор доехал бы до сущностей
+    и до состояния в интерфейсе.
     """
     api = _api(hass)
     api._phone = _PHONE
-    setattr(api.http, verb, AsyncMock(return_value={"не": "ответ"}))
+    setattr(api.http, verb, AsyncMock(return_value=_LooksLikeAResponse()))
 
-    try:
-        await getattr(api, method)(*args)
-    except (TypeError, ValueError, KeyError):
-        pass  # отказ — тоже корректный исход, лишь бы не разбор мусора
+    assert await getattr(api, method)(*args, **kwargs) == fallback
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "kwargs", "verb", "raises", "message"),
+    [
+        ("query_contracts", (_PHONE,), {}, "get", ValueError, "unknown_status"),
+        ("query_profile", (), {}, "get", ValueError, "unknown_status"),
+        ("query_balance", ("PLACE",), {}, "get", TypeError, "Unexpected response type"),
+        ("query_places", (), {}, "get", TypeError, "Unexpected response type"),
+        ("query_event_download", ("EV",), {}, "get", TypeError, "Unexpected response type"),
+        (
+            "query_access_controls",
+            ("PLACE",),
+            {},
+            "get",
+            TypeError,
+            "Unexpected response type",
+        ),
+        ("verify_password", ("TS", "H1", "H2"), {}, "post", ValueError, "unknown_status"),
+        ("request_sms_code", (_CONTRACT,), {}, "post", ValueError, "unknown_status"),
+        ("verify_sms_code", (_CONTRACT, "1234"), {}, "post", ValueError, "unknown_status"),
+        (
+            "query_camera_events",
+            ("CAM",),
+            {"lower_date": "a", "upper_date": "b"},
+            "get",
+            TypeError,
+            "Unexpected response type",
+        ),
+        ("mint_sip_device", ("PLACE", "AC"), {}, "post", TypeError, "Unexpected response type"),
+    ],
+)
+async def test_lookalike_response_is_refused(
+    hass, method, args, kwargs, verb, raises, message
+) -> None:
+    """Ответом оказалось не то — метод отказывает, а не возвращает разобранное.
+
+    Вход и выдача SIP-устройства пустоту вернуть не могут: пустой результат
+    там неотличим от успеха с пустыми данными.
+    """
+    api = _api(hass)
+    api._phone = _PHONE
+    setattr(api.http, verb, AsyncMock(return_value=_LooksLikeAResponse()))
+
+    with pytest.raises(raises) as err:
+        await getattr(api, method)(*args, **kwargs)
+
+    assert message in str(err.value)
