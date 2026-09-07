@@ -281,12 +281,19 @@ async def test_one_broken_kind_of_data_does_not_sink_the_rest(
     assert len(data["locks"]) == 1, "замки должны пережить отказ по балансу"
 
 
-async def test_every_kind_of_data_degrades_on_its_own(hass: HomeAssistant) -> None:
-    """Отказ по домофонам, камерам и замкам не уносит соседей.
+async def test_every_kind_of_data_degrades_on_its_own(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Отказ по домофонам, камерам и замкам не уносит соседей, и каждый слышен.
 
     Оператор отказывает по одному виду данных, а не по всем сразу — терять
-    из-за этого весь набор было бы несоразмерно.
+    из-за этого весь набор было бы несоразмерно. Все три отказа здесь
+    настоящие и каждый должен дать свою строку: пока источники камер не были
+    разведены по фронтам, отказы по ним поглощались одним общим, и подмены в
+    этом тесте работали вхолостую.
     """
+    import logging
+
     from aiohttp import ClientError
 
     from custom_components.elektronny_gorod.coordinator import (
@@ -314,10 +321,17 @@ async def test_every_kind_of_data_degrades_on_its_own(hass: HomeAssistant) -> No
         api.query_balance = AsyncMock(return_value={"balance": 1.0})
 
         coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
-        data = await coordinator._async_update_data()
+        with caplog.at_level(logging.INFO):
+            data = await coordinator._async_update_data()
 
     assert data["cameras"] == [] and data["locks"] == []
     assert len(data["balances"]) == 1, "баланс должен пережить отказ по камерам"
+    fronts = {
+        r.getMessage().split(":", 1)[0]
+        for r in caplog.records
+        if "нет данных" in r.getMessage()
+    }
+    assert fronts == {"Домофоны", "Камеры места", "Общедомовые камеры"}
 
 
 async def test_place_without_identifier_is_skipped(hass: HomeAssistant) -> None:

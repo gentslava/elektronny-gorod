@@ -501,18 +501,29 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return cameras
 
     @staticmethod
-    def _extract_hidden_ids(screens: dict[str, Any], screen_type: str) -> set[str]:
+    def _extract_hidden_ids(screens: Any, screen_type: str) -> set[str]:
         """Из ответа `/settings/screens` достать id-шки скрытых entities.
 
         Возвращает set строковых id. Если screen-тип не найден — пустой set
         (значит ничего не скрыто).
+
+        `screens` намеренно `Any`, а не `dict`: это разобранный JSON от
+        оператора, и обещать его форму в аннотации значит выдать желаемое за
+        действительное — проверка формы ниже стала бы «недостижимым кодом».
         """
         result: set[str] = set()
+        if not isinstance(screens, dict):
+            # Форму ответа задаёт оператор, а разбор идёт вне `try` цикла
+            # обновления: массив вместо объекта ронял бы `AttributeError`
+            # наружу, и ядро писало бы трейсбек на КАЖДОМ цикле — этот его
+            # обработчик не ограничен фронтом. Нет настроек — ничего не
+            # скрыто, это и есть безопасное умолчание.
+            return result
         for screen in screens.get("screens") or []:
-            if screen.get("type") != screen_type:
+            if not isinstance(screen, dict) or screen.get("type") != screen_type:
                 continue
             for item in screen.get("hidden") or []:
-                iid = item.get("id")
+                iid = item.get("id") if isinstance(item, dict) else None
                 if iid is not None:
                     result.add(str(iid))
         return result

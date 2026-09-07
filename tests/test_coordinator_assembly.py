@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 
+import pytest
+
 from aiohttp import ClientError
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -148,6 +150,10 @@ async def test_failing_camera_source_is_reported_once_and_on_recovery(
             r for r in caplog.records if "Камеры места" in r.getMessage()
         ]
         assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
+        # Тип исключения, а не его текст: в тексте оператора бывает адрес, а
+        # `repr` ответа aiohttp — ещё и полный URL со всеми заголовками.
+        assert "оператор молчит" not in complaints[0].getMessage()
+        assert "ClientError" in complaints[0].getMessage()
 
         caplog.clear()
         api.query_cameras = AsyncMock(
@@ -155,20 +161,24 @@ async def test_failing_camera_source_is_reported_once_and_on_recovery(
         )
         data = await coordinator._async_update_data()
 
-    assert [r for r in caplog.records if "данные снова приходят" in r.getMessage()], (
-        "возвращение камер должно быть видно"
-    )
+    assert [
+        r for r in caplog.records
+        if "Камеры места: данные снова приходят" in r.getMessage()
+    ], "возвращение камер должно быть видно, и именно этого источника"
     assert "CAM-YARD" in [c["id"] for c in data["cameras"]]
 
 
 async def test_one_broken_camera_source_does_not_take_the_others_down(
-    hass: HomeAssistant,
+    hass: HomeAssistant, caplog
 ) -> None:
-    """Отказ одного источника камер не уносит остальные.
+    """Отказ одного источника камер не уносит остальные — и он слышен.
 
     Домофонные, личные и общедомовые камеры приходят тремя разными
     запросами. Общий `except` на все три означал бы, что молчание оператора
-    про общедомовые гасит и камеру домофона у двери.
+    про общедомовые гасит и камеру домофона у двери. Но выжившие соседи —
+    половина требования: общедомовых и городских камер у обычного абонента
+    больше всего, и их пропажа обязана быть видна одной строкой. Транспорт
+    об этом молчит по замыслу, так что фронт здесь — единственный источник.
     """
     entry = _make_config_entry()
     entry.add_to_hass(hass)
@@ -177,7 +187,129 @@ async def test_one_broken_camera_source_does_not_take_the_others_down(
         query_cameras=[{"id": "i", "externalCameraId": "CAM-YARD"}],
     )
     api.query_public_cameras = AsyncMock(side_effect=ClientError("нет общедомовых"))
+    coordinator = _coordinator(hass, entry, api)
+
+    with caplog.at_level(logging.INFO):
+        data = await coordinator._async_update_data()
+        await coordinator._async_update_data()
+
+        complaints = [
+            r for r in caplog.records
+            if r.getMessage().startswith("Общедомовые камеры:")
+        ]
+        assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
+        assert "нет общедомовых" not in complaints[0].getMessage()
+
+        caplog.clear()
+        api.query_public_cameras = AsyncMock(
+            return_value=[{"id": "p", "externalCameraId": "CAM-PUB"}]
+        )
+        data = await coordinator._async_update_data()
+
+    assert [
+        r for r in caplog.records
+        if "Общедомовые камеры: данные снова приходят" in r.getMessage()
+    ], "возвращение общедомовых камер должно быть видно"
+    assert sorted(c["id"] for c in data["cameras"]) == [
+        "CAM-GATE", "CAM-PUB", "CAM-YARD"
+    ]
+
+
+@pytest.mark.parametrize(
+    "screens",
+    [
+        ["не объект"],
+        {"screens": ["не объект"]},
+        {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": ["не объект"]}]},
+    ],
+)
+async def test_unexpected_screens_shape_does_not_break_the_cycle(
+    hass: HomeAssistant, screens
+) -> None:
+    """Неожиданная форма настроек видимости не роняет обновление.
+
+    Разбор идёт вне `try` цикла, а обработчик неожиданных исключений в ядре
+    не ограничен фронтом: он пишет трейсбек на каждом цикле — под три сотни
+    в сутки. Форму ответа задаёт оператор, поэтому полагаться на неё нельзя.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api(
+        query_screens_settings=screens,
+        query_access_controls=[{"id": "2000", "externalCameraId": "CAM-GATE"}],
+    )
 
     data = await _coordinator(hass, entry, api)._async_update_data()
 
-    assert sorted(c["id"] for c in data["cameras"]) == ["CAM-GATE", "CAM-YARD"]
+    assert [c["id"] for c in data["cameras"]] == ["CAM-GATE"]
+    assert data["cameras"][0]["hidden"] is False, "ничего не скрыто — умолчание"
+
+
+async def test_broken_access_controls_payload_keeps_the_rest_of_the_place(
+    hass: HomeAssistant, caplog
+) -> None:
+    """Испорченный ответ по домофонам не уносит баланс и остальные данные.
+
+    Внешний фронт сборки камер — единственное, что удерживает обновление
+    места от падения, когда оператор присылает не ту форму: `data` в ответе
+    по домофонам типом не проверяется. После разведения источников камер по
+    своим фронтам его перестали исполнять тесты — и сломать его можно было
+    бы, не уронив ни одного.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api(
+        query_access_controls=["строка вместо объекта"],
+        query_balance={"balance": 100},
+    )
+
+    with caplog.at_level(logging.INFO):
+        data = await _coordinator(hass, entry, api)._async_update_data()
+
+    complaints = [r for r in caplog.records if r.getMessage().startswith("Камеры:")]
+    assert len(complaints) == 1, "о сорванной сборке камер сказано ровно один раз"
+    assert data["cameras"] == []
+    assert data["balances"], "баланс места пережил отказ по камерам"
+
+
+@pytest.mark.parametrize(
+    ("method", "front"),
+    [
+        ("query_screens_settings", "Настройки экранов"),
+        ("query_dnd_settings", "Режим «не беспокоить»"),
+    ],
+)
+async def test_every_front_says_it_once_and_says_it_back(
+    hass: HomeAssistant, caplog, method, front
+) -> None:
+    """Каждый вид данных сообщает о пропаже и о возвращении сам за себя.
+
+    До снятия глотания в слое API эти фронты срабатывали только на
+    подставленных в тесте исключениях, а настоящий отказ оператора до них не
+    доходил. Теперь доходит — значит, и проверять их надо на настоящем.
+    """
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    api = _api()
+    working = getattr(api, method)
+    setattr(api, method, AsyncMock(side_effect=ClientError("оператор молчит")))
+    coordinator = _coordinator(hass, entry, api)
+
+    with caplog.at_level(logging.INFO):
+        await coordinator._async_update_data()
+        await coordinator._async_update_data()
+
+        complaints = [
+            r for r in caplog.records if r.getMessage().startswith(f"{front}:")
+        ]
+        assert len(complaints) == 1, "жалоба повторяется на каждом цикле"
+        assert "оператор молчит" not in complaints[0].getMessage()
+
+        caplog.clear()
+        setattr(api, method, working)
+        await coordinator._async_update_data()
+
+    assert [
+        r for r in caplog.records
+        if f"{front}: данные снова приходят" in r.getMessage()
+    ], "возвращение данных должно быть видно"
