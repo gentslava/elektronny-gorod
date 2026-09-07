@@ -511,6 +511,7 @@ async def test_lookalike_response_yields_the_safe_fallback(
             TypeError,
             "Unexpected response type",
         ),
+        ("query_events", ([1],), {}, "post", TypeError, "Unexpected response type"),
         ("mint_sip_device", ("PLACE", "AC"), {}, "post", TypeError, "Unexpected response type"),
     ],
 )

@@ -32,6 +32,10 @@ jobs:
   pytest:
     name: pytest (py${{ matrix.python-version }}, HA ${{ matrix.ha-label }})
     runs-on: ubuntu-latest
+    # Остальные workflow репозитория объявляют права явно; этот полагался на
+    # умолчание, а оно в настройках репозитория стоит на запись.
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -76,13 +80,29 @@ jobs:
           import sys, xml.etree.ElementTree as ET
 
           FLOOR = 95.0  # «above 95%»: ровно 95.00 правилу не удовлетворяет
+          MIN_MODULES = 40  # сейчас их 42; страховка от пустого отчёта
+          PKG = "custom_components/elektronny_gorod"
+
           modules = [
               (c.get("filename"), float(c.get("line-rate")) * 100)
               for c in ET.parse("coverage.xml").getroot().iter("class")
           ]
+          if len(modules) < MIN_MODULES:
+              # Отчёт без модулей разобрался бы как «нарушений нет»: гейт,
+              # заведённый против молчаливо ложной заявки, молча бы её и
+              # пропустил.
+              print(f"::error::в coverage.xml {len(modules)} модулей при "
+                    f"ожидаемых хотя бы {MIN_MODULES} — отчёт неполон")
+              sys.exit(1)
+
           low = sorted((rate, name) for name, rate in modules if rate <= FLOOR)
           for rate, name in low:
-              print(f"::error file=custom_components/elektronny_gorod/{name}::"
+              # `filename` бывает и от корня репозитория (`--cov=пакет.через.точки`),
+              # и от корня пакета — приставку добавляем только если её нет,
+              # иначе аннотация укажет на несуществующий путь и не прицепится.
+              # Перевод строки в имени раннер разобрал бы как вторую команду.
+              path = (name if name.startswith(PKG) else f"{PKG}/{name}").replace("\n", " ")
+              print(f"::error file={path}::"
                     f"покрытие {rate:.2f}% — правило требует выше {FLOOR}%")
           print(f"модулей: {len(modules)}, ниже порога: {len(low)}")
           sys.exit(1 if low else 0)
