@@ -5,3 +5,16 @@
 answer:
 
 hangup:
+
+# Приглашение в дом — члена семьи или гостя (A-93): принявший становится абонентом адреса.
+# Ответ — действующая ссылка, кто её открыл, тот и вошёл в дом. Поэтому только
+# response и только администратору.
+create_home_invite:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: elektronny_gorod
+              model: Place

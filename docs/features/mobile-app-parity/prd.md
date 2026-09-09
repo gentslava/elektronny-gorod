@@ -45,7 +45,7 @@ The 9.9.0 stock apps expose durable event history, archive clips, guest invitati
 
 ### 2. Guest invitation
 
-- [ ] An admin invokes `elektronny_gorod.create_guest_invite` for one place and receives JSON-serializable `{link, message}` response data.
+- [ ] An admin invokes `elektronny_gorod.create_home_invite` for one place and receives JSON-serializable `{link, message}` response data.
 - [ ] The action is `SupportsResponse.ONLY`; it creates no entity or notification and does not persist its response.
 - [ ] The NTK integration sends `app=2`; ERTH `app=4` remains documented for a future backend/client variant.
 - [ ] Missing place, non-owner/not-authorized backend response and transport failure raise user-safe HA exceptions with no response body or link in logs.

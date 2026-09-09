@@ -521,6 +521,40 @@ class ElektronnyGorodAPI:
         except Exception:
             return False
 
+    async def create_home_invite(
+        self,
+        place_id: str,
+        app_id: int,
+    ) -> dict[str, Any]:
+        """Создать приглашение в дом (`guests/link`) — члена семьи или гостя.
+
+        Тело пустое — приложение шлёт этот POST без тела, всё определяет
+        query. `app_id` — бренд приложения; выбирает его вызывающий по
+        известному оператору, а не этот метод.
+
+        Возвращает `data` ответа как есть. Отказ транспорта пробрасывается
+        (`ClientError`); проверку «200, но ссылки нет» делает вызывающий —
+        здесь нет языка, чтобы отличить отказ от пустоты.
+
+        🔴 Возвращённое — действующее приглашение в дом: принявший станет
+        абонентом адреса у оператора, и принять его может любой, кто увидел
+        ссылку. Не логировать, не сохранять, не класть в состояние
+        сущностей: отдать вызывающему и забыть.
+        """
+        query = urlencode({"placeId": place_id, "app": app_id})
+        api_url = f"/api/mh-auth/mobile/v1/guests/link?{query}"
+
+        response = await self.http.post(api_url, None)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+
+        payload = await response.json()
+        # Ответ-массив или скаляр на 200 иначе дал бы `AttributeError` —
+        # то есть «неизвестную ошибку» вместо внятного отказа. Тот же приём
+        # уже стоит на разборе ссылки записи выше.
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return data if isinstance(data, dict) else {}
+
     async def query_camera_stream(self, camera_id: str) -> str | None:
         """Query the stream URL for the given camera."""
         api_url = (

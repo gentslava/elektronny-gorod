@@ -31,16 +31,19 @@ No task below authorizes code changes by itself; implementation starts after the
 
 ## Slice 2 — archive
 
-- [ ] **T-030** Implement Media Source browse tree with opaque identifiers. _Acceptance:_ no signed URL in browse response. _Audit:_ A-50.
-- [ ] **T-031** Add typed archive playback/download methods and on-demand resolver, including retention errors. _Acceptance:_ exact fixtures cover 11005, HTTP-200 business error and unavailable event with user-readable mapping. _Audit:_ A-59.
-- [ ] **T-032** Decide/prove direct resolve vs HA proxy, including Range and cancellation. _Acceptance:_ security review + streaming test. _Audit:_ A-50.
-- [ ] **T-033** Run caplog/storage/state sentinel scan for signed URL. _Acceptance:_ sentinel appears only in mocked upstream/resolver result.
+Закрыт PR #81 (merged 2026-09-02): `media_source.py` + `clip_proxy.py`.
+
+
+- [x] **T-030** Implement Media Source browse tree with opaque identifiers. _Acceptance:_ no signed URL in browse response. _Audit:_ A-50.
+- [x] **T-031** Add typed archive playback/download methods and on-demand resolver, including retention errors. _Acceptance:_ exact fixtures cover 11005, HTTP-200 business error and unavailable event with user-readable mapping. _Audit:_ A-59.
+- [x] **T-032** Decide/prove direct resolve vs HA proxy, including Range and cancellation. _Acceptance:_ security review + streaming test. _Audit:_ A-50.
+- [x] **T-033** Run caplog/storage/state sentinel scan for signed URL. _Acceptance:_ sentinel appears only in mocked upstream/resolver result.
 
 ## Slice 3 — guests
 
-- [ ] **T-040** Implement owner-side `create_guest_invite` response action. _Acceptance:_ `app=2`, `SupportsResponse.ONLY`, `{link,message}`. _Audit:_ A-93.
-- [ ] **T-041** Enforce place/admin policy and safe exception mapping. _Acceptance:_ unauthorized caller never reaches API. _Audit:_ A-93.
-- [ ] **T-042** Add service schema, ru/en strings, docs and secret sentinel test. _Acceptance:_ no response persisted/logged by integration. _Audit:_ A-93.
+- [x] **T-040** Implement owner-side `create_home_invite` response action. _Acceptance:_ `app=2`, `SupportsResponse.ONLY`, `{link,message}` and nothing else from the operator payload. _Audit:_ A-93.
+- [x] **T-041** Enforce place/admin policy and safe exception mapping. _Acceptance:_ unauthorized caller never reaches API; the place is addressed by its device, so an id from another account cannot route the request; transport failures — refusal, timeout and a malformed body alike — and a 200 without a link all surface as translated refusals. _Audit:_ A-93.
+- [x] **T-042** Add service schema, ru/en strings, docs and secret sentinel test. _Acceptance:_ no response persisted/logged by integration, pinned at the transport layer as well as through the action. _Audit:_ A-93.
 
 ## Slices 4-5 — keys
 

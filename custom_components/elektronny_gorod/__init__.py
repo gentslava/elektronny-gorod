@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 import json
-from typing import Any, Final
+from typing import Any, Final, cast
 
-from homeassistant.config_entries import ConfigEntry
+import voluptuous as vol
+from aiohttp import ClientError
+
+from homeassistant.config_entries import ConfigEntry, ConfigEntryState
 from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
@@ -14,9 +17,9 @@ from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.typing import ConfigType
-from homeassistant.const import Platform
-from homeassistant.exceptions import ServiceValidationError
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.const import ATTR_DEVICE_ID, Platform
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
+from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 
 from .api import ElektronnyGorodAPI
 from .clip_proxy import async_release_clip_cache
@@ -25,6 +28,7 @@ from .const import (
     LOGGER,
     CONF_ACCESS_TOKEN,
     CONF_OPERATOR_ID,
+    HOME_INVITE_APP_BY_OPERATOR,
     CONF_REFRESH_TOKEN,
     CONF_USER_AGENT,
     CONF_USE_GO2RTC,
@@ -46,7 +50,7 @@ from .fcm import (
     async_delete_fcm_repair_issue,
 )
 from .go2rtc import Go2RtcClient, go2rtc_auth_headers
-from .device import async_register_place_devices
+from .device import async_register_place_devices, place_id_from_identifiers
 from .history import HistoryManager
 from .history_ws import async_register_history_ws_command
 from .sip.call_controller import DoorbellCallController, Go2RtcConfig
@@ -61,6 +65,7 @@ _FCM_DATA: Final = f"{DOMAIN}_fcm_listeners"
 # key: координатор с тех пор переехал в `entry.runtime_data`, а под этим ключом
 # остаются только вспомогательные реестры.
 SERVICE_ANSWER = "answer"
+SERVICE_CREATE_HOME_INVITE = "create_home_invite"
 SERVICE_HANGUP = "hangup"
 
 PLATFORMS: list[Platform] = [
@@ -121,7 +126,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     недоступной интеграции, а не в его сценарии. Проверка живого вызова
     живёт в самом хендлере и отвечает понятной ошибкой.
     """
-    _async_register_sip_services(hass)
+    _async_register_services(hass)
     return True
 
 
@@ -299,8 +304,8 @@ def _resolve_call_camera_id(coordinator: Any, access_control_id: str) -> str | N
     return None
 
 
-def _async_register_sip_services(hass: HomeAssistant) -> None:
-    """Зарегистрировать сервисы `answer`/`hangup` (один раз на интеграцию).
+def _async_register_services(hass: HomeAssistant) -> None:
+    """Зарегистрировать действия интеграции (один раз на интеграцию).
 
     Сервисы без target: действуют на текущий звонящий домофон — резолвят
     контроллер с активным вызовом (`current_call`). Это mirror UX приложения
@@ -350,8 +355,132 @@ def _async_register_sip_services(hass: HomeAssistant) -> None:
                 translation_domain=DOMAIN, translation_key="no_active_call"
             )
 
+    def _place_entry(device_id: str) -> tuple[ElektronnyGorodConfigEntry, str]:
+        """Найти загруженную запись и адрес по выбранному устройству.
+
+        Маршрутизация структурная, а не поисковая: устройство адреса создано
+        в реестре под конкретной записью, поэтому у двух аккаунтов их нельзя
+        перепутать. Искать адрес перебором записей было бы можно, но тогда
+        совпадение id в чужом аккаунте увело бы запрос под чужой токен.
+        """
+        device = dr.async_get(hass).async_get(device_id)
+        place_id = place_id_from_identifiers(device.identifiers if device else None)
+        if device is None or place_id is None:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="invite_not_a_place"
+            )
+
+        for entry_id in device.config_entries:
+            entry = hass.config_entries.async_get_entry(entry_id)
+            if (
+                entry is not None
+                and entry.domain == DOMAIN
+                and entry.state is ConfigEntryState.LOADED
+            ):
+                return cast("ElektronnyGorodConfigEntry", entry), place_id
+
+        # Устройство в реестре переживает выгрузку записи. Без этой ветки
+        # человек получил бы «нет такого адреса» и пошёл искать адрес,
+        # а не выключенную интеграцию.
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="integration_not_loaded"
+        )
+
+    async def _create_home_invite(call: ServiceCall) -> ServiceResponse:
+        """Выдать вызывающему ссылку-приглашение в дом.
+
+        Ответ — действующее приглашение: принять его может кто угодно, кто
+        увидел ссылку. Поэтому `SupportsResponse.ONLY` — оно уходит
+        вызывающему и не оседает ни в сущности, ни в состоянии, ни в наших
+        логах. Инвариантом это назвать нельзя: ядро пишет исходящий кадр
+        целиком при `websocket_api: debug`, а `response_variable` кладёт
+        ответ в трассировку скрипта. Расширяя состав ответа, помни про эти
+        два стока — они вне нашего контроля (S-26). Про срок: отдельного
+        поля с TTL в ответе нет, а про 30 минут говорит сам текст, который
+        оператор кладёт в `message`. Что приглашённый получает после принятия и
+        насколько — решает оператор, интеграция об этом не знает.
+
+        Это приглашение **в дом**, а не временный доступ к дверям:
+        принявший становится абонентом адреса у оператора
+        (`PUT /rest/v1/subscriberinvites`) — член семьи или гость с правами
+        пользователя. Временный доступ по ссылке к выбранным дверям —
+        отдельная функция приложения и отдельный контракт (A-118), будущее
+        действие `create_temporary_access`.
+
+        Поэтому и поле — устройство адреса (`model: Place`), родитель
+        домофонов и камер: запрос несёт только `placeId`, списка объектов
+        в нём нет. Выбирать адрес устройством, а не числовым id,
+        приходится потому, что id адреса в интерфейсе взять негде. Поле
+        одиночное, не `target`: ответ здесь один, а `target` разрешает
+        несколько устройств и целую область.
+        """
+        # Одной авторизации в HA мало: приглашение делает человека абонентом
+        # адреса у оператора, и раздавать его автоматизации нельзя.
+        # Ядерный `async_register_admin_service` тут не подходит намеренно:
+        # он пропускает вызов без пользователя, а автоматизация стирает
+        # `user_id` (`automation/__init__.py`, `Context(parent_id=...)`) —
+        # и любой домочадец, дёрнув `automation.trigger`, чеканил бы ключ
+        # от подъезда. Цена решения: из автоматизации действие недоступно,
+        # из скрипта от администратора — работает (скрипт контекст хранит).
+        user = (
+            await hass.auth.async_get_user(call.context.user_id)
+            if call.context.user_id
+            else None
+        )
+        if user is None or not user.is_admin:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="invite_requires_admin"
+            )
+
+        entry, place_id = _place_entry(str(call.data[ATTR_DEVICE_ID]))
+
+        operator_id = str(entry.data.get(CONF_OPERATOR_ID) or "")
+        app_id = HOME_INVITE_APP_BY_OPERATOR.get(operator_id)
+        if app_id is None:
+            # Код бренда для этого оператора живым запросом не подтверждён.
+            # Подставить его наугад значило бы сходить к оператору от имени
+            # человека с непроверенным запросом.
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="invite_operator_unsupported",
+            )
+
+        try:
+            invite = await entry.runtime_data.api.create_home_invite(place_id, app_id)
+        except (ClientError, TimeoutError, ValueError) as err:
+            # Сетевой отказ наружу нельзя отдавать сырым: HA показал бы
+            # «Unknown error», а текст aiohttp содержит URL с id адреса.
+            #
+            # `TimeoutError` здесь не для полноты: общий бюджет запроса
+            # (`_REST_TIMEOUT.total`) aiohttp выражает именно им, а не
+            # `ClientError`, — из подклассов `ClientError` растут только
+            # connect- и sock-таймауты. Эту пару ловит и `lock.py`, и ровно
+            # на ней уже спотыкались отпирание замка и вход.
+            # `ValueError` — это битое тело на 200: и `JSONDecodeError`, и
+            # `UnicodeDecodeError`, если тело не декодируется объявленной
+            # кодировкой. Оба — `ValueError` и оба не `ClientError`.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="invite_request_failed"
+            ) from err
+
+        link = invite.get("link")
+        if not link:
+            # 200 без ссылки — отказ, замаскированный под успех: человек
+            # отправил бы гостю пустоту, а узнал бы об этом у двери.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="invite_empty"
+            )
+        return {"link": link, "message": invite.get("message")}
+
     hass.services.async_register(DOMAIN, SERVICE_ANSWER, _answer)
     hass.services.async_register(DOMAIN, SERVICE_HANGUP, _hangup)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CREATE_HOME_INVITE,
+        _create_home_invite,
+        schema=vol.Schema({vol.Required(ATTR_DEVICE_ID): cv.string}),
+        supports_response=SupportsResponse.ONLY,
+    )
 
 
 _MIGRATION_FLAG_KEY = "visibility_migration_v2"

@@ -50,8 +50,10 @@ Quality gates:
 | S-17/S-18 | 🟡 OPEN P3 | сырое логирование body/err в go2rtc.py (не активная утечка) |
 | S-19 | 🟢 ACCEPTED-by-design | uplink AuthZ (любой auth HA-юзер) + AudioBridge `0.0.0.0:40020` LAN-exposure (ADR-0013/A-85) |
 | S-20 | ✅ RESOLVED | production credential-like literal удалён из audit evidence; текущие production credentials не совпадают |
-| S-21 | 🟡 DESIGN GATE | guest link, access-key code and signed archive URL for planned parity features |
+| S-21 | 🟡 DESIGN GATE | access-key code and private-camera writes; archive URL и guest link — контроли реализованы |
 | S-23 | 🟢 ACCEPTED P3 | persistent FCM Repairs дублирует config-entry title для идентификации проблемного аккаунта |
+| S-26 | 🟢 ACCEPTED P2 | ответ response-only действия уходит в `home-assistant.log` через `websocket_api` на debug — вне контроля интеграции |
+| S-27 | ✅ RESOLVED | заявление о редакции `link` было сильнее факта: соседнее `message` несёт ту же ссылку |
 
 ## P0 — критичные утечки (все RESOLVED)
 
@@ -161,9 +163,28 @@ Quality gates:
 - **Required controls:** guest link only as response-only action result; `accessKeyCode` discarded at parser boundary and never used as unique ID; signed media URL resolved on demand and preferably hidden behind an authenticated/short-lived HA proxy; sentinel propagation tests for all three.
 - **PII note:** resident names, nicknames and account IDs from place-scoped `subscriber-places` are excluded from entity attributes by default.
 - **History control implemented:** API dataclasses намеренно не содержат backend `message`; entity attrs заданы allowlist, а HA `Store` schema v1 сохраняет только максимум 200 opaque event IDs на stream. Camera response `Message` и general event `message` не доходят до dispatcher/state/storage. On-demand browse дополнительно проверяет `POLICY_READ` выбранной EventEntity, резолвит её config entry и exact place/access-control через registry, принимает только page `0..100` и возвращает allowlist `{event_id,event_type,occurred_at}`. Frontend повторно нормализует response и отклоняет cross-entity ответ.
-- **Merge gate:** the guest action has a sanitized runtime fixture but still needs security review and caplog/diagnostics/state sentinel scans before merge. Remaining static-only key/camera write paths additionally need a decrypted HAR before implementation.
+- **Guest control implemented (`feat/guest-invite`):** приглашение живёт только как response-only действие — ни сущности, ни состояния, ни `Store`, ни diagnostics. Отказ оператора не подменяется пустотой, а 200 без `link` отклоняется, чтобы ссылка-пустышка не выглядела выданной. Ключ `link` внесён в `SENSITIVE_KEYS` (ADR-0004) как upfront-защита, но заявлять по ней больше нельзя (S-27): маска закрывает одноимённый ключ, а не invite-payload — поле `message` несёт ту же ссылку дословно, и `redact()` над ответом оператора выдал бы рабочее приглашение. Вносить `message` в общий список нельзя (он есть в истории событий и в трансляциях исключений); отдельный набор заводится, если такой лог однажды появится (S-27). Sentinel-тесты идут двумя слоями — через настоящий `http.py` (там логируются запрос и ответ) и через действие целиком; маркер ASCII, потому что кириллический экранировался бы в `\uXXXX` и проверка «нет в тексте» прошла бы над самой утечкой.
+- **Guest residual — websocket_api на debug:** `homeassistant/components/websocket_api/http.py` пишет на DEBUG весь исходящий кадр целиком, а ответ действия лежит внутри кадра `call_service`. Человек, включивший `logger: default: debug` (или адресно `websocket_api: debug`) и создавший приглашение из «Инструментов разработчика», получает действующую ссылку в `home-assistant.log`. Интеграция на это повлиять не может: response-only действие обязано вернуть значение, а writer принадлежит ядру. Найдено `security-auditor`-ом при аттестации кандидата и воспроизведено через настоящий WS-клиент; наши sentinel-тесты этот сток увидеть не могут — они зовут `hass.services.async_call` и слой WS не проходят.
+- **Guest residual — трассировки HA:** ответ действия покидает интеграцию и попадает в трассировку скрипта, если вызывающий положил его в `response_variable`; трассировки HA хранит на диске. Интеграция на это повлиять не может, поэтому формулировка в `strings.json` ограничена интеграцией, а не HA целиком, и наружу отдаются только `link` и `message` — всё прочее, что прислал оператор (например `uuid` приглашения), отбрасывается до возврата.
+- **Merge gate:** остающиеся static-only key/camera write paths по-прежнему требуют decrypted HAR до реализации.
 
 ## P2 — желательно
+
+### S-26. Ответ response-only действия попадает в журнал через `websocket_api`
+
+- **Status:** 🟢 **ACCEPTED** — вне контроля интеграции.
+- **Что происходит:** `homeassistant/components/websocket_api/http.py` пишет на DEBUG весь исходящий кадр целиком, а ответ действия лежит внутри кадра `call_service`. Человек, включивший `logger: default: debug` (или адресно `websocket_api: debug`) и создавший приглашение из «Инструментов разработчика», получает действующую ссылку в `home-assistant.log`.
+- **Почему не чинится кодом:** response-only действие обязано вернуть значение, а writer принадлежит ядру.
+- **Что сделано:** сток назван в README (ru/en) рядом с оговоркой про трассировки скриптов, в докстринге обработчика и здесь. Заявление в `strings.json` ограничено интеграцией, а не HA целиком.
+- **Найдено:** `security-auditor` при аттестации кандидата `feat/guest-invite`; воспроизведено через настоящий WS-клиент. Наши sentinel-тесты этот сток не видят — они зовут `hass.services.async_call` и слой WS не проходят.
+
+### S-27. Редакция `link` закрывает ключ, а не invite-payload
+
+- **Status:** ✅ **RESOLVED** — исправлены утверждения, не код.
+- **Что было заявлено:** комментарий в `_logging.py`, ADR-0004 и запись S-21 говорили, что ключ `link` в `SENSITIVE_KEYS` не даст «первой же попытке залогировать ответ оператора» выдать действующее приглашение.
+- **Почему неверно:** соседнее поле `message` — готовый текст для пересылки, и та же ссылка лежит в нём дословно. `redact()` над ответом оператора маскирует `link` и оставляет `message`.
+- **Почему не расширили список:** `message` встречается в payload-ах истории событий и в трансляциях исключений; глобальная маска зарезала бы диагностику там, где она нужна, то есть породила бы новый дефект вместо закрытия старого. Отдельный набор ключей под invite-payload заводится тогда, когда такой лог появится.
+- **Найдено:** `security-auditor` при аттестации кандидата `feat/guest-invite`, воспроизведено прогоном `redact()` по закоммиченной фикстуре.
 
 ### S-22. Frontend dev-toolchain advisories
 
@@ -303,11 +324,11 @@ Quality gates:
 - [x] **S-08 — `diagnostics.py` с redaction** (RESOLVED в 3.3.0).
 - [x] **S-09 — `ClientTimeout` на основном API** (RESOLVED; retry отдельно S-10).
 - [x] **S-16 diagnostics mitigation** — go2rtc credentials входят в `TO_REDACT`; plaintext HA storage остаётся accepted backlog.
-- [ ] **S-21** — применить credential constraints и sentinel tests при реализации mobile-app-parity slices.
+- [ ] **S-21** — применить credential constraints и sentinel tests при реализации оставшихся mobile-app-parity slices (key, private camera); archive и guest закрыты.
 - [ ] S-07 (auto-refresh на 401) — Итерация 3 после HAR-сценария истечения.
 - [ ] S-17/S-18 (go2rtc.py raw logging) — P3, defense-in-depth, по мере touch.
 
-S-21 — gate будущего кода и не отменяет текущий `SECURITY_OK`: запрещённые credential surfaces пока не реализованы.
+S-21 — частично gate будущего кода: archive и guest реализованы вместе с контролями, key и private camera ещё нет. Текущий `SECURITY_OK` не отменяется, но остаточные риски guest-ссылки (websocket_api на debug, трассировки скриптов) названы выше и лежат вне контроля интеграции.
 
 ## Next reading
 

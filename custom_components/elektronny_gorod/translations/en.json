@@ -264,6 +264,16 @@
     "hangup": {
       "name": "Hang up doorbell call",
       "description": "End the active intercom call."
+    },
+    "create_home_invite": {
+      "name": "Invite to the home",
+      "description": "Create an invitation link to one address for a family member or a guest and return it to the caller. Whoever accepts the link becomes a user of that address in the operator's app; anyone who sees the link can accept it. The integration neither stores nor logs it, but the response ends up in a script trace if you capture it with response_variable.",
+      "fields": {
+        "device_id": {
+          "name": "Place",
+          "description": "The place device to invite the person to."
+        }
+      }
     }
   },
   "exceptions": {
@@ -273,17 +283,32 @@
     "cannot_unlock": {
       "message": "The intercom did not open: the operator rejected the request or is unreachable."
     },
-    "no_active_call": {
-      "message": "No incoming intercom call right now — there is nothing to answer or hang up."
+    "dnd_rejected": {
+      "message": "The operator did not accept the Do Not Disturb change."
     },
     "dnd_unavailable": {
       "message": "Do Not Disturb settings are not loaded yet — try again in a moment."
     },
-    "dnd_rejected": {
-      "message": "The operator did not accept the Do Not Disturb change."
-    },
     "integration_not_loaded": {
       "message": "The Elektronny Gorod integration is not loaded right now."
+    },
+    "invite_empty": {
+      "message": "The operator answered without a link, so there is nothing to send."
+    },
+    "invite_not_a_place": {
+      "message": "Pick a place device: a camera or an intercom is not an address the operator can invite someone to."
+    },
+    "invite_operator_unsupported": {
+      "message": "Home invitations are not confirmed for this operator yet, so the request was not sent."
+    },
+    "invite_request_failed": {
+      "message": "The operator did not issue the invitation. Check the connection and try again."
+    },
+    "invite_requires_admin": {
+      "message": "Only an administrator can create a home invitation: whoever accepts it becomes a user of the address. Automations cannot call it, because an automation drops the caller identity — run it manually or from a script."
+    },
+    "no_active_call": {
+      "message": "No incoming intercom call right now — there is nothing to answer or hang up."
     }
   }
 }

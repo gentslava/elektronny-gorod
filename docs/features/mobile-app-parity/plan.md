@@ -58,7 +58,7 @@ Add small typed API methods and feature-specific coordinators instead of expandi
 ### Slice 3: guest invitation action
 
 - **Files:** `api.py`, `__init__.py` or action module, `services.yaml`, strings and translations, tests and user documentation.
-- **Change:** `create_guest_invite(place_id)` calls NTK `app=2` and returns only `{link,message}`. Enforce admin/user policy before the operator request.
+- **Change:** `create_home_invite(place_id)` calls NTK `app=2` and returns only `{link,message}`. Enforce admin/user policy before the operator request.
 - **Acceptance:** response-only action, no entity, no log/diagnostic persistence; unauthorized/invalid place/operator errors are sanitized.
 - **Risk:** high security, low code volume.
 

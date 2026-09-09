@@ -459,7 +459,7 @@ Response shape:
 
 На AVD экран «Люди» показывал владельца и гостей. Интеграция уже умеет делать `query_places(place_id)`, поэтому нового transport-метода для чтения не требуется. Однако `name`, `nickName`, `accountId` и сам состав жильцов — PII: не переносить их в entity state/attributes, recorder, diagnostics или логи. Безопасный HA-MVP для guest-фичи — action создания приглашения, а не постоянная people entity.
 
-### Guest invitations (runtime UI + decrypted NTK contract)
+### Home invitations — `guests/link` (runtime UI + decrypted NTK contract)
 
 На AVD «Мой Дом» 9.9.0 кнопка добавления гостя открыла QR и share-link. Сам QR/link является действующим credential доступа; его значение не сохранялось и здесь заменено placeholder.
 
@@ -469,7 +469,7 @@ Response shape:
 POST /api/mh-auth/mobile/v1/guests/link?placeId=<place_id>&app=<app_id>
 ```
 
-Body отсутствует. Brand enum из APK:
+Body отсутствует, и `Content-Type` не объявляется: в HAR `Content-Length: 0` без типа — так Retrofit шлёт POST без `@Body`. Brand enum из APK:
 
 | App | `app_id` |
 |---|---:|
@@ -491,6 +491,8 @@ Runtime response (`Мой Дом` 9.9.0, `app=2`, HTTP 200):
 
 Для `Умный Дом.ру` значение `app=4` пока подтверждено APK DTO/enum; exact runtime POST на доступном аккаунте не получен. Поэтому первый HA slice должен быть NTK-only либо выбирать brand только по уже известному operator contract, не угадывая его из имени entry.
 
+Поле `message` — готовый текст для пересылки, и оно **содержит ту же ссылку дословно** (важно для redaction: маска по ключу `link` его не закрывает, см. S-27). В наблюдённом тексте оператор сам сообщает гостю, что приглашение действительно 30 минут; это единственный известный нам источник срока — отдельного поля с TTL в ответе нет, и подтверждения живым замером у нас тоже нет.
+
 Принимающая сторона открывает deep link `/guest-invite?invite=<secret_token>`. После auth приложение использует:
 
 ```http
@@ -500,7 +502,7 @@ Content-Type: application/json
 {"uuid": "<secret_invite_uuid>", "placeId": "<optional_place_id>"}
 ```
 
-Acceptance-flow относится к аккаунту гостя и не входит в HA-MVP. Для нашей интеграции нужен только owner-side action `create_guest_invite` с `SupportsResponse.ONLY`: вернуть `link`/`message` вызывающему клиенту, не создавая entity и не сохраняя ответ. Link/UUID должны войти в redaction и никогда не попадать в exception text, service logs или diagnostics. Capture gate для NTK закрыт; остаются admin permission и security review action-а.
+Acceptance-flow относится к аккаунту гостя и не входит в HA-MVP. Реализовано в `feat/guest-invite` (A-93): owner-side action `create_home_invite` с `SupportsResponse.ONLY`: вернуть `link`/`message` вызывающему клиенту, не создавая entity и не сохраняя ответ. Admin permission реализован; security review закрывается аттестацией кандидата. Про redaction есть оговорка: ключ `link` внесён в `SENSITIVE_KEYS`, но маска закрывает одноимённый ключ, а не весь payload — `message` несёт ту же ссылку (S-27). В exception text, наши логи и diagnostics ссылка не попадает; два стока вне контроля интеграции названы в S-26.
 
 ### `GET /api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens`
 

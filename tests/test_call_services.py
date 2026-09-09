@@ -17,7 +17,7 @@ from homeassistant.exceptions import ServiceValidationError
 from custom_components.elektronny_gorod import (
     SERVICE_ANSWER,
     SERVICE_HANGUP,
-    _async_register_sip_services,
+    _async_register_services,
 )
 from custom_components.elektronny_gorod.const import DOMAIN
 
@@ -43,7 +43,7 @@ def _controller(*, ringing: bool = False, live: bool | None = None) -> MagicMock
 
 def _register(hass: HomeAssistant, *controllers: MagicMock) -> None:
     hass.data[_SIP_DATA] = {f"entry-{i}": c for i, c in enumerate(controllers)}
-    _async_register_sip_services(hass)
+    _async_register_services(hass)
 
 
 @pytest.mark.parametrize("service", [SERVICE_ANSWER, SERVICE_HANGUP])
