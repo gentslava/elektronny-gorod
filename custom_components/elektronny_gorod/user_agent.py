@@ -34,7 +34,15 @@ class UserAgent:
         self.phone_manufacturer: str = value["phone_manufacturer"]
         self.phone_model: str = value["phone_model"]
         self.android_ver: str = value["android_ver"]
-        self.app_version: dict = value["app_version"]
+        # Версия приложения берётся из константы, а не из сохранённого
+        # значения: настоящее приложение обновляется, а телефон под ним
+        # остаётся прежним. Раньше здесь стояло `value["app_version"]`, и
+        # поднятая версия доезжала только до новых записей — у остальных
+        # интеграция навсегда представлялась той версией, при которой её
+        # настроили, вопреки ADR-0006. Всё, что определяет само устройство
+        # — модель, `uuid`, `account_id`, — сохраняется как было, иначе у
+        # оператора аккаунт выглядел бы переехавшим на новый телефон.
+        self.app_version: dict = APP_VERSION
         self.account_id: str = value["account_id"]
         self.operator_id: str = value["operator_id"]
         self.uuid: str = value["uuid"]

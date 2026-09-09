@@ -31,8 +31,8 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **1225 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-09; `.venv` собран под пин CI `PHC_CURRENT`: Python 3.14.7, HA 2026.9.0b6). На минимуме 2026.8.1 — **1223 passed, 2 skipped**, в отдельном окружении под минимальный пин матрицы CI (HA 2026.8.1, PHC 0.13.355 — задан в матрице, отдельной переменной под него нет), 2026-09-09. Команда та же, но `.venv` для этого не годится — он собран под пин CI и минимальные цифры воспроизвести не может. Два skip — тесты FCM, требующие `firebase-messaging`: на минимальном пине пакет не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
-| Test modules | 72 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **1231 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-09-09; `.venv` собран под пин CI `PHC_CURRENT`: Python 3.14.7, HA 2026.9.0b6). На минимуме 2026.8.1 — **1229 passed, 2 skipped**, в отдельном окружении под минимальный пин матрицы CI (HA 2026.8.1, PHC 0.13.355 — задан в матрице, отдельной переменной под него нет), 2026-09-09. Команда та же, но `.venv` для этого не годится — он собран под пин CI и минимальные цифры воспроизвести не может. Два skip — тесты FCM, требующие `firebase-messaging`: на минимальном пине пакет не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
+| Test modules | 73 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Product website | **73 passed**, `tsc --noEmit` и Vite production build (`website/`) |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
@@ -41,6 +41,7 @@ Quality gates:
 | Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
 | Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
+| Эмуляция клиента | `user_agent`: идентификаторы устройства переживают перезагрузку, версия приложения следует за константой (A-119) |
 | Guest invitation | приглашение на адрес: контракт запроса против приложения, экранирование query, отказ на 401 через настоящий `http.py` без разбора тела как JSON, admin-гейт и отказ вызову без пользователя, маршрут к записи-владельцу адреса, отказ не-адресу и выгруженной записи, `SupportsResponse.ONLY`, проекция `{link,message}`, sentinel по журналу на транспорте и на действии |
 | Media Source archive | browse hierarchy place → camera → day → event, opaque-ID navigation, signed-URL resolve без persistence, retention/playability errors, hidden-camera exclusion, event→camera binding на resolve (event_id из пути валиден только среди событий этой камеры/дня), transient-vs-no-recording mapping, boundary logging с opaque IDs, multi-entry root |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
@@ -248,7 +249,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 1225 passed (2026-09-09); на минимальном пине 1223 passed, 2 skipped.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 1231 passed (2026-09-09); на минимальном пине 1229 passed, 2 skipped.
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [x] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

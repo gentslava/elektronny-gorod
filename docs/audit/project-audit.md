@@ -949,6 +949,16 @@ Quality gates:
 - **Non-goal:** принимать invitation за гостя или публиковать people names/ account IDs в entity attributes.
 - **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
 
+### A-119. Поднятие `APP_VERSION` не доходило до уже настроенных записей
+
+- **Status:** 🟢 **resolved-in-branch** — ветка `feat/guest-invite`, pending merge.
+- **Severity:** P2; расхождение с ADR-0006 (mirror app behavior).
+- **Evidence:** `user_agent.py:from_json` восстанавливал `app_version` из `entry.data[CONF_USER_AGENT]`, а записывался этот ключ только при создании записи, reauth и миграции v1→v2. Пути «освежить версию у существующей записи» не было. Проба на записи v3 с сохранённым `9.9.0`: `str(user_agent)` давал `… | 9.9.0 (90900020) | …` при константе 9.10.0; то же значение уходило в `appVersion`/`appVersionCode` при регистрации push.
+- **Почему это класс, а не разовая ошибка:** так же не доехали все прошлые бампы — версия фиксировалась в момент настройки аккаунта и жила вечно.
+- **Fix:** `from_json` берёт `app_version` из константы. Всё, что описывает само устройство — модель, `uuid`, `account_id`, `operator_id`, `place_id`, версия Android, — по-прежнему восстанавливается из записи: настоящее приложение обновляется, а телефон под ним остаётся прежним, и смена идентификаторов выглядела бы у оператора как переезд аккаунта на новый телефон.
+- **Tests:** `tests/test_user_agent.py` — три теста: устойчивость идентификаторов устройства, следование версии за константой (с защитой от вырождения, если фикстура совпадёт с текущей версией), round-trip.
+- **Найдено:** `ha-expert` при аттестации кандидата `feat/guest-invite`.
+
 ### A-94. Access-key inventory/settings отсутствуют
 
 - **Severity:** P2 feature gap; account/tariff-dependent.
