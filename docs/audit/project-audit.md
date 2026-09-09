@@ -201,10 +201,10 @@ Quality gates:
 
 - **Status:** 🟡 **PARTIALLY RESOLVED**. Подзадача «pre-auth endpoints НЕ должны получать stale Bearer» закрыта — [`http.py`](../../custom_components/elektronny_gorod/http.py) (комментарий «Bearer НЕ шлём на pre-auth endpoints (/auth/*) — иначе backend видит expired Bearer и отдаёт 401 даже на login, блокируя reauth flow»). Покрыто `tests/test_http.py`. Это разблокировало возможность native reauth flow (см. A-25).
 - **Area:** UX / Reliability
-- **Что осталось:** собственно `/auth/.../refresh` endpoint и его триггер по 401 в hot path — **по-прежнему не реализован**. Native `async_step_reauth_confirm` не написан (см. A-25). Пользователь при истечении access_token увидит сначала UpdateFailed, затем должен переинициализировать config_entry.
+- **Что осталось:** собственно `/auth/.../refresh` endpoint и его триггер по 401 в hot path — **по-прежнему не реализован**. При 401 координатор поднимает `ConfigEntryAuthFailed`, и HA запускает native reauth flow (`async_step_reauth` → `async_step_reauth_confirm`).
 - **Note:** оригинальное приложение **в наблюдавшихся HAR-сессиях** не использует `/auth/.../refresh` endpoint. Это **не значит** что endpoint не существует — возможно, мы не поймали сценарий истечения access_token. См. [ADR-0006](../decisions/0006-mirror-app-behavior.md).
-- **Текущая рекомендация:** **не реализовывать** auto-refresh «по интуиции». Сначала — собрать HAR со сценарием истечения access_token (запуск приложения после долгого простоя / форсированный logout-on-server). Только после этого — реализовывать в точном соответствии с приложением.
-- **Fallback пока HAR нет:** при 401 — graceful UpdateFailed, пользователь проходит reauth через UI. Это сейчас и работает.
+- **Текущая рекомендация:** **не реализовывать** auto-refresh «по интуиции». Сначала — подтвердить, когда приложение вызывает refresh: HAR с истечением access_token (запуск приложения после долгого простоя / форсированный logout-on-server) или код приложения (static-only). Живая проба исследовательским аккаунтом уточняет контракт эндпоинта и ротирует пару токенов: старый refresh_token может перестать действовать, поэтому — аккаунтом без боевой записи HA, новые токены сразу в ignored-хранилище, не в вывод. Только после этого — реализовывать в точном соответствии с приложением.
+- **Fallback, пока сценарий не подтверждён:** при 401 — `ConfigEntryAuthFailed` и native reauth flow в UI. Это сейчас и работает.
 
 ### A-23. Отсутствует `diagnostics.py`
 
@@ -219,6 +219,7 @@ Quality gates:
 
 ### A-25. Native reauth flow отсутствует
 
+- **Status:** ✅ **RESOLVED** — `async_step_reauth` → `async_step_reauth_confirm` добавлены коммитом `718452e`, прямым в master после PR #93; переход 401 → `ConfigEntryAuthFailed` в координаторе пришёл в PR #93 (`fd268ae`). Запись ниже — исходная формулировка находки.
 - **Area:** HA-compat / IQS Silver
 - **Evidence:** reauth логика «зашита» в [`config_flow.py:get_account`](../../custom_components/elektronny_gorod/config_flow.py#L259), но нет `async_step_reauth_confirm`.
 - **Recommended fix:** добавить отдельный reauth-step.
@@ -343,7 +344,7 @@ Quality gates:
 - **Severity:** P1 (research-фаза), потенциально P0-feature после spec
 - **Evidence:** `wss://myhome.proptech.ru:443/events` + `Sec-WebSocket-Protocol: v12.stomp, v11.stomp, v10.stomp` зафиксированы в HAR. Также `GET /rest/v1/stomp/available-features` как probe.
 - **Impact:** возможно, через WebSocket приходят события домофона/камеры в real-time — это ключ к HA-автоматизациям «звонок в дверь → действие».
-- **Каверзы:** в HAR содержимое STOMP-фреймов **не зафиксировано**. WebSocket может нести **не все** события — часть может идти через SIP (см. A-49) или FCM. До получения HAR с активным сценарием (реальный звонок в домофон с записью WS-фреймов) — **не строить spec**.
+- **Каверзы:** в HAR содержимое STOMP-фреймов **не зафиксировано**. WebSocket может нести **не все** события — часть может идти через SIP (см. A-49) или FCM. До получения HAR или живой пробы с активным сценарием (реальный звонок в домофон с записью WS-фреймов) — **не строить spec**.
 - **Recommended first step:** записать HAR со сценарием звонка через альтернативный capture (mitmproxy с WebSocket-decode опциями, либо `mitmdump --mode reverse:` для расшифровки). Когда фреймы будут на руках — отдельный feature folder с PRD.
 - **НЕ делать:** не «угадывать» STOMP topics и схему сообщений (нарушение ADR-0006).
 
@@ -933,7 +934,7 @@ Quality gates:
 - **Area:** `http.py` + широкие fallback-ветки `api.py`.
 - **Evidence (static APK diff 9.9.0, 2026-07-15):** stock client распознаёт HTML block-page по `REQUEST-ID` либо блоку `id="info"` с `datetime:`/`ip:`, бросает отдельный `ServicePipeBlockException` и открывает `VpnWarningActivity`. Пользовательский текст явно связывает блокировку с работой вне РФ/VPN. В снятых HAR happy-path block page не встречался — формат подтверждён static, сам runtime-trigger пока не воспроизведён.
 - **Current behavior:** `HTTP.__request` превращает любой non-2xx в generic `ClientError`; часть методов ловит широкий `Exception` и возвращает пустые коллекции. **Частично снято** веткой `feat/silver-coverage` ([A-115](project-audit.md)): `query_cameras`, `query_public_cameras`, `query_screens_settings` и `query_dnd_settings` отказ пробрасывают. Остались `query_sections` и `query_old_cameras` — у них нет production-вызывающих, — а также typed-классификация block-page и request-id в diagnostics. Геоблок/WAF может выглядеть как «у аккаунта нет камер», а diagnostics не даст операторский request-id.
-- **Recommended fix:** отдельная безопасная классификация block-page без логирования IP/body; сохранять только redacted correlation/request-id и поднимать typed error в coordinator/diagnostics вместо empty-data fallback. Перед реализацией снять HAR с воспроизведённым VPN/block сценарием и закрепить HTML fixture без реальных идентификаторов.
+- **Recommended fix:** отдельная безопасная классификация block-page без логирования IP/body; сохранять только redacted correlation/request-id и поднимать typed error в coordinator/diagnostics вместо empty-data fallback. Формат block-page подтверждать HAR или живой пробой из-под VPN исследовательским аккаунтом; иначе static-only по ADR-0006 — формат уже виден в коде приложения. Наблюдённое закрепить HTML fixture без реальных идентификаторов.
 - **Не делать:** не логировать полный HTML, IP, headers или auth context.
 
 ### A-93. Guest invitation есть в приложении, но нет HA action
@@ -942,12 +943,33 @@ Quality gates:
 - **Severity:** P2 feature gap; **security-sensitive**.
 - **Evidence:** AVD «Мой Дом» 9.9.0: People → Add guest показывает QR и share-link. APK Retrofit/DTO: `POST /api/mh-auth/mobile/v1/guests/link` с query `placeId`, `app`; response `{data:{link,message}}`. NTK `app=2`, ERTH `app=4`. Decrypted runtime capture подтвердил NTK POST без body, HTTP 200 response и HTTP 401 non-JSON при отсутствующем Authorization. Runtime link не сохранён, потому что это access credential.
 - **Current behavior:** `query_places(place_id)` уже может получить people relations, но action создания приглашения отсутствует.
-- **Implemented (`feat/guest-invite`):** response-only действие `create_guest_invite`, admin policy, ни сущности, ни persistence. Наружу отдаются только `link` и `message`; всё прочее из ответа оператора отбрасывается, потому что ответ действия оседает в трассировке скрипта. Ключ `link` внесён в `SENSITIVE_KEYS` (ADR-0004), sentinel-тесты идут двумя слоями — через настоящий `http.py` и через действие. ERTH `app=4` остаётся static-only: неподтверждённый оператор получает отказ, а не запрос наугад.
-- **Что именно реализовано:** приглашение **в дом** — принявший становится абонентом адреса (`PUT /rest/v1/subscriberinvites` на стороне гостя). Временный гостевой доступ с выбором объектов — отдельный экран приложения и отдельный контракт; путать их нельзя, у реализованного запроса нет ни списка объектов, ни срока.
+- **Implemented (`feat/guest-invite`):** response-only действие `create_home_invite`, admin policy, ни сущности, ни persistence. Наружу отдаются только `link` и `message`; всё прочее из ответа оператора отбрасывается, потому что ответ действия оседает в трассировке скрипта. Ключ `link` внесён в `SENSITIVE_KEYS` (ADR-0004), sentinel-тесты идут двумя слоями — через настоящий `http.py` и через действие. ERTH `app=4` остаётся static-only: неподтверждённый оператор получает отказ, а не запрос наугад.
+- **Что именно реализовано:** приглашение **в дом** — принявший становится абонентом адреса (`PUT /rest/v1/subscriberinvites` на стороне гостя). Временный гостевой доступ с выбором объектов — отдельный экран приложения и отдельный контракт, см. A-118; путать их нельзя, у реализованного запроса нет ни списка объектов, ни срока.
 - **Адресация — устройство, а не идентификатор:** запрос несёт только `placeId`, а числовой `place_id` в интерфейсе взять негде. Поле — устройство `model: Place`, родитель домофонов и камер. Побочный эффект важнее удобства: маршрут к аккаунту становится структурным (устройство создано под конкретной записью), тогда как перебор записей по совпадению `place_id` увёл бы запрос под чужой токен при совпадении идентификаторов в двух аккаунтах.
 - **`WON'T FIX` — ядерный `async_register_admin_service`:** `ha-expert` предложил заменить им ручную проверку, отметив, что действие недоступно из автоматизаций. Факт верен: `automation/__init__.py` строит `Context(parent_id=...)` и стирает `user_id`, а `helpers/service.py:_async_admin_handler` проверяет права только `if call.context.user_id:`. Из этого следует обратный вывод: с ядерным помощником вызов из автоматизации проходит **без проверки**, а `automation.trigger` зарегистрирован обычным entity-сервисом — любой домочадец выпускал бы приглашения. Приглашение даёт третьему лицу устойчивый доступ на стороне оператора, вне контроля HA, — это сильнее, чем `lock.open`, который у домочадца и так есть. Цена решения названа в тексте отказа и в README; из скрипта, запущенного администратором, действие работает (скрипт передаёт `context` вызывающего).
 - **Non-goal:** принимать invitation за гостя или публиковать people names/ account IDs в entity attributes.
 - **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
+
+### A-118. Временный гостевой доступ по выбранным объектам не реализован
+
+- **Status:** 🔴 OPEN — реализация по static-only контракту (ADR-0006), значения уточняются пробами.
+- **Severity:** P2 feature gap; **security-sensitive** (выдача доступа к физическим точкам входа).
+- **Evidence — только «Мой Дом» 9.10.0:** сервис `mh-temp-pass` и его UI-строки появились в этом релизе; в 9.9.0 не было ни эндпоинтов, ни строк. Раздел называется «Временный доступ», пункт — «Ссылка для доступа», экраны `CreateTempPassActivity` и `TempPassSettingsActivity` лежат в модуле `accesskeys`, то есть в ключах, а не в «Людях».
+- **Доступность решает сервер по адресу — это главное ограничение фичи.** Вход в функцию оформлен как подключение: `"TEMP_PASS"` передаётся как `managed_service` в `ManagedServiceConnectActivity` / `ManagedServiceActiveActivity`, у промо-баннера состояния «Подключить» и «Выдать доступ». Показывается функция, только если синхронизация положила в Room-таблицу `feature {id, placeId, code, params}` запись с `code = "TEMP_PASS"`; без неё нет ни баннера, ни входа. Проверено на живом аккаунте: переустановка с чистой авторизацией баннер не вернула, то есть дело не в локально скрытом баннере. Само приложение называет функцию услугой, которую подключает владелец договора: строка `ms_temp_pass_restricted_guest_message` (9.11.0) — «У вас нет прав на подключение этой услуги… Только владелец договора может подключить услугу». Отсюда второе требование: создавать доступ может только владелец договора, не приглашённый в дом. Почему записи нет — услуга не подключена или функция ещё не раскатана, — по статике не отличить; платность ничем не подтверждена (платной известна только вторая managed-услуга, `KEY_NOTIFICATION`). Версия владельца — функция не доделана в «Мой Дом» и полностью реализована в приложении «Электронный город» — разбором ЭГ 3.7.2 ([`research/apk/eg-3.7.2-analysis.md`](../../research/apk/eg-3.7.2-analysis.md)) подтвердилась наполовину: в ЭГ гостевой доступ с выбором объектов реализован целиком и без признаков подключаемой услуги (виден только при подписке на договоре), но это другая функция за другим API-шлюзом — `my.2090000.ru/api/ntk-guests/` с Keycloak-входом владельца и отдельной учёткой гостя. Общих с «Мой Дом» путей и DTO нет, скрытого кода «гость с выбором объектов» в «Мой Дом» 9.11.0 тоже нет. Живая проверка 2026-10-05: ни один хост не отвечает на пути другого, токен «Мой Дом» на `ntk-guests` обрабатывается так же, как мусорный. Общий ли сервер за шлюзами (так считает владелец) — не опровергнуто, но интеграции с её токеном эта функция недоступна; ближайший аналог — этот `mh-temp-pass`.
+- **Требование к будущей реализации:** доступность определять по записи `TEMP_PASS` на конкретном адресе, а не по версии приложения. Эндпоинты `mh-temp-pass` присутствуют в клиенте у всех, но запись приходит не всем, и какой именно ответ оператора наполняет `feature`, ещё предстоит установить — это часть T-043.
+- **Скриншоты «Гостевой доступ» / «Выбор объектов» — из другого приложения.** Этих строк в ресурсах «Мой Дом» 9.10.0 нет вовсе; они принадлежат отдельному приложению «Электронный город» (`com.electronnijgorod.novosibirsk`), а оно ходит на другой API-шлюз (`my.2090000.ru` + Keycloak), с которым интеграция не работает. Продуктово это, вероятно, одна и та же функция, но утверждать это по имеющимся данным нельзя, и контракт брать надо из «Мой Дом». Со снимков в репозиторий не переносится ничего, кроме состава экрана: адрес, названия объектов и кадры камер остаются вне (S-25).
+- **Чем отличается от A-93:** реализованное `POST /api/mh-auth/mobile/v1/guests/link` несёт только `placeId` и код бренда, списка объектов и срока в нём нет, а принимающая сторона делает `PUT /rest/v1/subscriberinvites` — то есть это приглашение в дом (членство абонента), а не временный доступ. Смешивать их в одном действии нельзя: у них разный субъект, разный срок и разный радиус поражения при ошибке.
+- **Контракт снят статически** (APK 9.10.0, разбор — [`research/apk/9.10.0-analysis.md`](../../research/apk/9.10.0-analysis.md)). Сервис `mh-temp-pass` появился именно в этом релизе, в 9.9.0 его не было:
+  ```
+  GET    api/mh-temp-pass/mobile/v1/rest/v1/temp-passes?placeId=            → [TempPassRaw]
+  GET    api/mh-temp-pass/mobile/v1/rest/v1/temp-passes/access-controls?placeId=  → [{id, name}]
+  GET    api/mh-temp-pass/mobile/v1/rest/v1/temp-passes/time-to-life?placeId=     → [long]
+  POST   api/mh-temp-pass/mobile/v1/rest/v1/temp-passes   {placeId, ttl, accessControlIds[]}
+  DELETE api/mh-temp-pass/mobile/v1/rest/v1/temp-passes/{id}   {placeId}   (DELETE с телом)
+  ```
+  `TempPassRaw {id, sharedLinkMessage, status, expiredAt, availableAccessControl[]}`, элемент — `{id, name, roleName}`.
+- **Что ещё не известно:** допустимые `status`, единицы и диапазон `ttl` (сервер отдаёт их из `time-to-life`, константами их в клиенте нет), обязательность полей и коды отказов. По уточнённому ADR-0006 это не блокер реализации: контракт берётся из кода приложения с пометкой «static-only», значения уточняются живыми пробами исследовательским аккаунтом, приёмка — по первому живому подтверждению.
+- **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md), задача T-043. Владелец решил реализовывать (2026-10-05); действие будет называться `create_temporary_access` — «Временный доступ», рядом с `create_home_invite` — «Пригласить в дом».
 
 ### A-119. Поднятие `APP_VERSION` не доходило до уже настроенных записей
 
@@ -963,8 +985,8 @@ Quality gates:
 
 - **Severity:** P2 feature gap; account/tariff-dependent.
 - **Evidence:** одинаковые static Retrofit/DTO contracts в обеих APK 9.9.0: list by `placeId`, lookup, register, delete, rename, reactivate and new notification-status PUT under `mh-access-key`. Current AVD account did not expose the enabled screen, so runtime contract is missing.
-- **Security:** `accessKeyCode` is a physical credential. It must be discarded at the parser boundary and never become `unique_id`, state, attributes, log or diagnostics. Stable identity is server `key_service_id`.
-- **Recommended fix:** after enabled-account HAR, ship read-only inventory disabled by default; notification switch is a later non-optimistic slice. Register/delete/rename/reactivate require separate admin/security approval.
+- **Security:** `accessKeyCode` is a physical credential. It must be discarded at the parser boundary and never become `unique_id`, state, attributes, log or diagnostics. Stable identity is server `key_service_id`. A live probe of keys masks the code before printing.
+- **Recommended fix:** after an enabled-account HAR or live probe (otherwise static-only per ADR-0006), ship read-only inventory disabled by default; notification switch is a later non-optimistic slice. Register/delete/rename/reactivate require separate admin/security approval.
 - **Caveat:** APK labels key-use history “Coming soon”; do not claim support.
 - **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
 
@@ -973,7 +995,7 @@ Quality gates:
 - **Severity:** P2 feature gap; private hardware required.
 - **Evidence:** static 9.9.0 contracts for feature-info, motion parameters/ sensitivity, event/continuous record mode, microphone/speaker volume, mirror and PTZ. No matching private camera was available on the research account.
 - **Transport gap:** current `HTTP` wrapper has GET/POST/DELETE only; these settings require additive PUT support.
-- **Recommended fix:** hardware HAR first; feature-info gates every entity; response ranges drive `NumberEntity`; writes are non-optimistic and refresh authoritative state. Mirror/record/PTZ wait for exact enum/action capture.
+- **Recommended fix:** hardware HAR or live probe where hardware is available, otherwise static-only per ADR-0006 with ranges taken from the runtime `feature-info` response; feature-info gates every entity; response ranges drive `NumberEntity`; writes are non-optimistic and refresh authoritative state. Mirror/record/PTZ wait for exact enum/action capture.
 - **Non-goal:** Wi-Fi provisioning, tariff purchase and firmware update.
 - **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
 
@@ -1131,12 +1153,12 @@ Quality gates:
 
 ### A-108. Отзыв токена не приводил к предложению войти заново
 
-- **Status:** ✅ **RESOLVED** — `fd268ae` (PR #93).
+- **Status:** ✅ **RESOLVED** — `fd268ae` (PR #93) и `718452e` (прямой коммит в master после него).
 - **Severity:** **P2** — интеграция замолкала без объяснения причины.
 - **Area:** `coordinator.py`, `config_flow.py`, `http.py`.
 - **Evidence (2026-09-06):** при 401 от `/rest/v3/subscriber-places` координатор поднимал `UpdateFailed`. Нативного шага переавторизации во флоу не было вовсе — правило Silver `reauthentication-flow` числилось «работает, но без `async_step_reauth_confirm`».
 - **Root cause:** отозванный токен обрабатывался как временная ошибка. Повтором это не лечится: сколько ни ждать, ответ тот же. Home Assistant предлагает войти заново только по `ConfigEntryAuthFailed`, поэтому запись просто уходила в «недоступна», и пользователю оставалось догадываться. Единственный обходной путь — добавить интеграцию заново и надеяться, что она узнает старую запись по совпадению имени, номера счёта и абонента.
-- **Fix:** при 401 поднимается `ConfigEntryAuthFailed`; добавлены `async_step_reauth` и `async_step_reauth_confirm` с формой входа и переводами. Распаковка ответа из исключения вынесена в `is_unauthorized` рядом с местом создания этого исключения — до того она была размазана по шести местам `api.py`.
+- **Fix:** при 401 поднимается `ConfigEntryAuthFailed` (PR #93); `async_step_reauth` и `async_step_reauth_confirm` с формой входа и переводами добавлены коммитом `718452e`. Распаковка ответа из исключения вынесена в `is_unauthorized` рядом с местом создания этого исключения — до того она была размазана по шести местам `api.py`.
 - **Смежный дефект:** поиск записи по совпадению полей ломался, если оператор менял отображаемое имя: вместо починки заводилась вторая запись, а первая оставалась сломанной. Нативный путь берёт запись у ядра и от полей не зависит. Тест `test_reauth_fixes_entry_even_if_operator_renamed_account` закрепляет именно это отличие — без него мутация, отключающая нативную ветку, проходила молча.
 - **Tests:** `tests/test_reauth_trigger.py` (7) — 401 запускает флоу, `500`/`531`/таймаут не запускают; `tests/test_config_flow.py` — обновление записи, сохранение настроек go2rtc, переименование у оператора, переводы шага. Шесть мутаций, все ловятся.
 
@@ -1279,7 +1301,7 @@ Quality gates:
 | A-06, A-07 | Итерация 1-2 (test infra доехала с Bronze polish) |
 | A-08..A-14, A-16..A-21, A-23, A-24, A-44, A-55 | Итерация 2 (Bronze IQS — shipped в 3.1.0) |
 | A-60 | Итерация 2 (visibility migration v2 — shipped в 3.1.0) |
-| A-15, A-22 (остаток), A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
+| A-15, A-22 (остаток), ✅ A-25, A-26, A-37, A-38, A-48, A-51, A-52 | Итерация 3 |
 | ✅ A-56 + ✅ A-57 + ✅ A-61; A-59/A-62 + REST-history remainder A-58 | Итерация 3 (Silver feature gaps) |
 | 🟡 A-63 (Won't fix — incompatible с HA Stream lifecycle) + ✅ A-64 (PR #43) + ✅ A-65 (PR #49) + ✅ A-66 (PR #46) | Итерация 3 (Silver — runtime polish из реальных логов 2026-05-26) |
 | A-67 (P2 cold-start warmup, TBD) + ✅ A-68 (PR #51 — dedup concurrent stream_source) | Итерация 3 (новые findings из лога 2026-05-27, отдельные PR) |
@@ -1291,11 +1313,11 @@ Quality gates:
 | ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
 | ✅ A-87 (ring/idle watchdog, PR #68) + ✅ A-88 (video anti-churn) + ✅ A-90 (FCM-ended guard), merged PR #69 | Итерация 4 (UI + надёжность видео/жизненного цикла вызова) |
 | ✅ A-89 (смена звонящего домофона во время held) + ✅ A-91 (штатная pre-answer SIP-модель подтверждена PCAP), merged PR #69 | Итерация 4 (мульти-вызов + production diagnostics) |
-| A-92 (typed diagnostics для HTML service-pipe/VPN block; нужен runtime HAR) | backlog (P2 reliability; не блокирует happy path 9.9.0) |
+| A-92 (typed diagnostics для HTML service-pipe/VPN block; HAR или живая проба, иначе static-only) | backlog (P2 reliability; не блокирует happy path 9.9.0) |
 | A-50 + остаток A-58 + A-59 | mobile-app parity: durable history/archive + Media Source |
-| A-93 | mobile-app parity: guest invitation response action (HAR gate) |
-| A-94 | mobile-app parity: access keys (enabled-account HAR gate) |
-| A-95 | mobile-app parity: private-camera settings (hardware HAR gate) |
+| ✅ A-93 (home invitation response action, resolved-in-branch `feat/guest-invite`) | mobile-app parity |
+| A-94 | mobile-app parity: access keys (enabled-account evidence gate: HAR or live probe, else static-only) |
+| A-95 | mobile-app parity: private-camera settings (hardware evidence gate: HAR or live probe, else static-only; enums only observed) |
 | A-27..A-36, A-39..A-41, A-53 | по мере touch / документирование |
 | A-42, A-46 | информация (не задача) |
 

@@ -17,6 +17,12 @@
 
 ⚠️ **Важно про naming:** имя файла APK / xapk / apks никак не связано с реальным package — оператор может выпускать «Мой Дом.ру» как Дом.ру Агент (`com.ertelecom.agent`), а «Мой Дом» как `ru.inetra.intercom`. **Всегда проверяй package через aapt / jadx до patching.**
 
+## Разбор новой версии
+
+Процедура — [`.agents/commands/analyze-apk.md`](../../.agents/commands/analyze-apk.md), инструменты — [`research/scripts/apk/`](../scripts/apk/). Результаты разборов лежат рядом: [`9.9.0-analysis.md`](9.9.0-analysis.md), [`9.10.0-analysis.md`](9.10.0-analysis.md), [`9.11.0-analysis.md`](9.11.0-analysis.md); «Электронный город» — [`eg-3.7.2-analysis.md`](eg-3.7.2-analysis.md).
+
+Эталонный отпечаток подписанта «Мой Дом» — `42b32c89…de74a54`. Пакет с зеркала, у которого он другой, использовать нельзя.
+
 ## Форматы файлов
 
 APK скачивается в одном из трёх форматов:

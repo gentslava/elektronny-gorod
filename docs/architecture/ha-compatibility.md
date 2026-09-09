@@ -100,7 +100,7 @@ async_step_user
 | Защита от дубликатов | ✅ по `access_token`; ✅ по `account+subscriber+name` (reauth) | `config_flow.py:281-310` |
 | Обработка ошибок | ⚠️ есть `errors`-словарь, но широкие `except Exception` | `api.py:61-66` etc |
 | Translations всех steps | ✅ ru/en | `translations/*.json` |
-| **Native reauth step** (`async_step_reauth`) | ✅ — при 401 координатор поднимает `ConfigEntryAuthFailed`, HA запускает `async_step_reauth` → `async_step_reauth_confirm` | `coordinator.py`, `config_flow.py` |
+| **Native reauth step** (`async_step_reauth`) | ✅ — при 401 координатор поднимает `ConfigEntryAuthFailed`, HA запускает `async_step_reauth` → `async_step_reauth_confirm` | `coordinator.py`, `config_flow.py`; тесты `test_operator_failures.py`, `test_config_flow.py` |
 | **Reconfigure flow** | ❌ | требуется `async_step_reconfigure` |
 | Tests | ✅ реальные config-flow/migration tests | `tests/test_config_flow.py`, `tests/test_init.py` |
 | External RTSP options | ✅ default-off + dependency + initial/options tests | `tests/test_config_flow_keep_warm.py` |

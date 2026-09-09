@@ -19,7 +19,7 @@ The 9.9.0 stock apps expose durable event history, archive clips, guest invitati
 ## Goals
 
 1. Cover the useful 9.9.0 gaps with native HA primitives.
-2. Preserve evidence tiers: no static-only write endpoint ships without HAR.
+2. Preserve evidence tiers: a static-only write endpoint ships labelled as such, with a clear operator-refusal path and acceptance on the first live confirmation (ADR-0006).
 3. Keep credentials/PII out of states, recorder, logs and diagnostics.
 4. Degrade per feature: an unavailable tariff must not make the whole config entry unavailable.
 
@@ -57,7 +57,7 @@ The 9.9.0 stock apps expose durable event history, archive clips, guest invitati
 - [ ] Stable identity uses `key_service_id`; `accessKeyCode` is discarded after parsing and cannot reach state, attributes, unique ID or diagnostics.
 - [ ] MVP is read-only inventory with non-sensitive state/bind status; entities are disabled by default until real-account semantics are verified.
 - [ ] Default entity name is localized/generic and derived only from service ID; backend key name is treated as possible PII and is not copied automatically.
-- [ ] Key notification switch is a separate slice after HAR confirms the body-less toggle contract and authoritative refresh.
+- [ ] Key notification switch is a separate slice after HAR or a live probe confirms the body-less toggle contract and authoritative refresh.
 - [ ] Register/delete/rename/reactivate remain later admin actions with explicit confirmation and separate security review.
 
 ### 4. Private-camera settings
@@ -66,7 +66,7 @@ The 9.9.0 stock apps expose durable event history, archive clips, guest invitati
 - [ ] Sensitivity and volume entities derive allowed values from the response; no hardcoded range.
 - [ ] Writes are non-optimistic: refresh must confirm the new state.
 - [ ] Unsupported or tariff-gated endpoints make only their entity unavailable.
-- [ ] Mirror/PTZ/record-mode are not added until enum/action values are captured from runtime traffic.
+- [ ] Mirror/PTZ/record-mode are not added until enum/action values are captured from runtime traffic or a live probe.
 
 ## Affected modules
 

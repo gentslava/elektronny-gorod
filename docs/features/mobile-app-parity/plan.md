@@ -7,7 +7,9 @@
 
 ## High-level approach
 
-Add small typed API methods and feature-specific coordinators instead of expanding the five-minute main coordinator with high-volume history calls. FCM remains authoritative for realtime doorbell calls. Historical events use a baseline/watermark, and archive media is resolved only on demand. Guest/key/media credentials never become entity data. Static-only features are guarded by HAR fixtures and capability detection.
+Add small typed API methods and feature-specific coordinators instead of expanding the five-minute main coordinator with high-volume history calls. FCM remains authoritative for realtime doorbell calls. Historical events use a baseline/watermark, and archive media is resolved only on demand. Guest/key/media credentials never become entity data. Static-only features follow ADR-0006: labelled static-only, guarded by capability detection, confirmed by HAR or a live probe; observed responses become sanitized fixtures.
+
+«Capture» in this plan means HAR or a live probe with the research account (ADR-0006); where neither is possible, a static-only contract may ship labelled as such.
 
 ## Target HA model
 
@@ -71,7 +73,7 @@ Add small typed API methods and feature-specific coordinators instead of expandi
 
 ### Slice 5: key notification toggle
 
-- **Prerequisite:** HAR proves body-less PUT semantics and response shape.
+- **Before coding:** a live probe or HAR settles body-less PUT semantics and response shape where the research account allows it; otherwise the slice ships static-only per ADR-0006.
 - **Change:** non-optimistic notification switch, then coordinator refresh.
 - **Acceptance:** mutation failure leaves prior state and raises a safe error.
 - **Risk:** high until contract capture.
@@ -91,7 +93,7 @@ Add small typed API methods and feature-specific coordinators instead of expandi
 ## Dependencies
 
 ```text
-HAR fixtures ─► Slice 0 ─┬─► Slice 1 ─► Slice 1b ─► Slice 2
+Evidence     ─► Slice 0 ─┬─► Slice 1 ─► Slice 1b ─► Slice 2
                          ├─► Slice 3
                          ├─► Slice 4 ─► Slice 5
                          └─► Slice 6
@@ -135,7 +137,7 @@ No config-entry version bump for additive discovered entities/actions. Slice 1 u
 
 ## Open questions
 
-See [`prd.md`](prd.md#open-questions). A static-only slice is blocked until its matching task in [`tasklist.md`](tasklist.md) supplies a sanitized fixture.
+See [`prd.md`](prd.md#open-questions). A static-only slice follows ADR-0006: its matching task in [`tasklist.md`](tasklist.md) settles what live probes can settle, labels the rest, and keeps a sanitized fixture for whatever was observed.
 
 ## Quality gate
 

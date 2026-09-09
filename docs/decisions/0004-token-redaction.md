@@ -42,7 +42,7 @@ SENSITIVE_KEYS = frozenset({
     "fcm_credentials",
     "pushtoken",
     "realm",             # SIP realm несёт acId, парный к SIP password
-    "link",              # ссылка-приглашение гостя (A-93, S-21); см. оговорку ниже
+    "link",              # ссылка-приглашение в дом (A-93, S-21); см. оговорку ниже
 })
 ```
 

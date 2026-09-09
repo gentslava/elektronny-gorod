@@ -116,8 +116,8 @@ Quality gates:
 #### HA features
 
 - [x] **A-15** Решить судьбу `fake_timer_lock` в `lock.py` — либо удалить, либо переписать `lock` → `button`. Требует ADR-0005. **WON'T FIX** (решение владельца 2026-09-05): `lock` точнее отражает суть замка домофона, чем `button`.
-- [ ] **A-22** (остаток) Поведение при 401: pre-auth Bearer-omission уже сделан (PR #35); осталось — собрать HAR со сценарием истечения access_token, затем реализовать `/auth/.../refresh` **точно как в приложении** (см. [ADR-0006](decisions/0006-mirror-app-behavior.md)). До получения HAR — текущее graceful поведение (UpdateFailed → reauth через UI).
-- [x] **A-25** Native reauth flow (`async_step_reauth_confirm`) — сделано в [A-108](audit/project-audit.md), PR #93.
+- [ ] **A-22** (остаток) Поведение при 401: pre-auth Bearer-omission уже сделан (PR #35); осталось — подтвердить, когда приложение вызывает refresh (HAR со сценарием истечения или код приложения; живая проба уточняет контракт и ротирует токены), затем реализовать `/auth/.../refresh` **точно как в приложении** (см. [ADR-0006](decisions/0006-mirror-app-behavior.md)). До подтверждения — текущее поведение (`ConfigEntryAuthFailed` → native reauth в UI).
+- [x] **A-25** Native reauth flow (`async_step_reauth_confirm`) — сделано в [A-108](audit/project-audit.md): триггер 401 в PR #93, шаги reauth — коммитом `718452e`.
 - [ ] **A-26** Reconfigure flow (`async_step_reconfigure`).
 - [x] **A-37** `PARALLEL_UPDATES` задан во всех шести платформах: `1` у `lock`/`switch` (там есть действия), `0` у остальных — PR #96.
 - [x] **A-38** `log-when-unavailable` — жалоба по фронту с гранулярностью «вид данных + место», девять фронтов; PR #96, [A-112](audit/project-audit.md).
@@ -135,13 +135,13 @@ Quality gates:
 
 #### Mobile app parity 9.9.0
 
-Единый PRD/research/plan/tasklist: [`features/mobile-app-parity/`](features/mobile-app-parity/README.md). Static-only write paths не переходят в код без decrypted HAR (ADR-0006).
+Единый PRD/research/plan/tasklist: [`features/mobile-app-parity/`](features/mobile-app-parity/README.md). Static-only write paths реализуются с пометкой «static-only» и приёмкой по первому живому подтверждению (ADR-0006).
 
 - [x] **A-50 + A-58 remainder** ✅ Access-call и verified camera-motion events реализованы в `feat/durable-event-history` с baseline/dedup и PII-safe DTO; camera-motion polling начинается только после включения entity.
 - [x] **A-59 / Slice 2** Archive Media Source, retention mapping и on-demand signed URL resolution — выпущено в 4.1.0.
 - [x] **A-93** Guest invitation: NTK `app=2`, response-only admin action addressed by the place device; the link never persists in the integration. Admin gate is deliberate — an automation drops the caller, so the action is unavailable there by design.
-- [ ] **A-94** Access keys: read-only inventory first, notification switch only after enabled-account HAR; key code is never HA state/ID.
-- [ ] **A-95** Private-camera settings: feature-gated sensitivity/volume first; record/mirror/PTZ after hardware HAR confirms enums/actions.
+- [ ] **A-94** Access keys: read-only inventory first, notification switch only after an enabled-account HAR or live probe; key code is never HA state/ID.
+- [ ] **A-95** Private-camera settings: feature-gated sensitivity/volume first; record/mirror/PTZ after a hardware HAR or live probe confirms enums/actions.
 
 #### Production-log polish (A-63..A-66 — отдельные PR)
 

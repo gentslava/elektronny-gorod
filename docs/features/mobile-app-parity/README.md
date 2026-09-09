@@ -14,8 +14,8 @@ This folder is the implementation hand-off for features found while exercising t
 | Durable event history | decrypted HAR + AVD UI | polling baseline + EventEntity + on-demand Lovelace browse | A-58 / A-50 | implemented in feature branch |
 | Camera archive and clips | decrypted HAR + AVD UI | `media_source.py`, no URL attributes | A-50 / A-59 | playback/download fixtures |
 | Guest invitation | decrypted POST + AVD UI + APK DTO | response-only admin action | A-93 | captured; admin/security review |
-| Access keys | APK Retrofit/DTO | read-only inventory, then notification switch | A-94 | enabled-account HAR |
-| Private camera settings | APK Retrofit/DTO | capability-gated `number`/`switch`/`select` | A-95 | private-camera HAR + hardware |
+| Access keys | APK Retrofit/DTO | read-only inventory, then notification switch | A-94 | enabled-account HAR or live probe; else static-only (ADR-0006) |
+| Private camera settings | APK Retrofit/DTO | capability-gated `number`/`switch`/`select` | A-95 | private-camera HAR or live probe + hardware; else static-only (ADR-0006), enums only from observed values |
 
 ## Documents
 

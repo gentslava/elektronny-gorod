@@ -430,7 +430,7 @@ HA service call switch.turn_on / turn_off
 | `lock.async_unlock` | `except ClientError` → state = JAMMED + reset через `async_call_later` |
 | Внешние тайм-ауты | ✅ REST 30с / binary 60с, connect 10с (`http.py`, A-21/S-09); retry/backoff остаётся follow-up |
 | 429 rate limit | ловится в `request_sms_code` → `limit_exceeded`; в остальных местах не специально |
-| 401 unauthorized | `query_profile` → `ValueError("unauthorized")` → HA триггерит reauth flow через config_entry. Bearer на pre-auth endpoints больше не отправляется (см. `http.py`), поэтому reauth login проходит без коллизий. Auto-refresh access_token — отложен (см. A-22, [ADR-0006](../decisions/0006-mirror-app-behavior.md)) |
+| 401 unauthorized | `query_places` в координаторе → `is_unauthorized` → `ConfigEntryAuthFailed` → HA запускает `async_step_reauth` → `async_step_reauth_confirm`. Bearer на pre-auth endpoints больше не отправляется (см. `http.py`), поэтому reauth login проходит без коллизий. Auto-refresh access_token — отложен (см. A-22, [ADR-0006](../decisions/0006-mirror-app-behavior.md)) |
 
 ## Entity model
 
@@ -469,7 +469,7 @@ const + go2rtc ← config_flow
 
 ## Большие файлы / god objects
 
-- [`config_flow.py`](../../custom_components/elektronny_gorod/config_flow.py) — на грани, но допустимо (все steps в одном flow). Reauth/reconfigure native steps пока не выделены (A-25, A-26).
+- [`config_flow.py`](../../custom_components/elektronny_gorod/config_flow.py) — на грани, но допустимо (все steps в одном flow). Native reauth выделен (`async_step_reauth_confirm`, A-25); reconfigure — нет (A-26).
 - [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) — после slice 3a/3b чище: `_async_update_data` + per-place collectors + on-demand actions; legacy shim-методы удалены.
 - [`api.py`](../../custom_components/elektronny_gorod/api.py) — 11+ endpoints, продолжает расти (DND, screens). На грани readable; разделение по subscriber/intercom/payments/notifications — кандидат на slice (A-19 + общая модульность).
 
