@@ -29,15 +29,25 @@
 SENSITIVE_KEYS = frozenset({
     "access_token",
     "refresh_token",
-    "accessToken",       # camelCase из API
-    "refreshToken",
+    "accesstoken",       # camelCase из API; сравнение идёт по нормализованному ключу
+    "refreshtoken",
     "password",
     "go2rtc_password",
     "go2rtc_username",   # username тоже PII в этом контексте
     "user_agent",        # содержит account_id
     "authorization",     # header
+    "sms",               # код подтверждения входа
+    "confirm1", "confirm2",
+    "hash1", "hash2",    # производные пароля (SHA1+MD5)
+    "fcm_credentials",
+    "pushtoken",
+    "realm",             # SIP realm несёт acId, парный к SIP password
 })
 ```
+
+Список рос вместе с кодом: SIP-стек добавил `realm`, FCM — `pushtoken` и `fcm_credentials`, вход — `sms`/`confirm*`/`hash*`.
+Сравнение в `redact()` идёт по нормализованному ключу (lowercase, дефис → подчёркивание), поэтому `Authorization`, `User-Agent` и `accessToken`
+попадают под маску без отдельных вариантов написания.
 
 ### 2. Helper-функция
 
