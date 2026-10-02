@@ -151,6 +151,7 @@ Quality gates:
 - [x] **A-64** ✅ Reload cascade + user override (PR #43). Migration flag в `entry.data`, sync через `entity.options[DOMAIN]` track per-entity user_shown override.
 - [x] **A-66** ✅ Historical HA Stream stale-source recovery (PR #46), позже расширено A-71. В stream-manager ветке camera больше не владеет write boundary; recovery делегирует PATCH-only manager'у.
 - [x] **A-65** ✅ Log throttling от broken cameras (PR #49). Per-entity `_consecutive_empty_count` counter в `ElektronnyGorodCamera`. 1й fail → WARNING, 2й+ подряд → DEBUG. Counter сбрасывается на первый success.
+- [ ] **A-119** Позднее появление camera ID после setup: candidate `fix/97-late-camera-discovery`, независимый review и beta-проверка автора #97. До подтверждения issue остаётся открытым.
 
 #### Production-log polish (2026-05-27 — новые findings)
 

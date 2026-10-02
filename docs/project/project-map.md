@@ -251,6 +251,7 @@ elektronny-gorod/
 |---|---|
 | [`tests/conftest.py`](../../tests/conftest.py) | fixtures + `enable_custom_integrations` auto-applied |
 | [`tests/test_device_hierarchy.py`](../../tests/test_device_hierarchy.py) | адрес как родитель домофонов: привязка к своему месту при нескольких адресах, точка входа без камеры, перепривязка плоского устройства, entry-scoping и пропуск ключа при неизвестном адресе |
+| [`tests/test_camera_discovery.py`](../../tests/test_camera_discovery.py) | позднее появление camera ID: добавление без reload, привязка к Intercom, дедупликация обновлений, hidden/disabled policy и снятие listener при unload |
 | [`tests/test_entity_migration.py`](../../tests/test_entity_migration.py) | unit-тесты `_camera_new_uid`/`_lock_new_uid` + golden vector для `lock_unique_id` |
 | [`tests/test_logging_redact.py`](../../tests/test_logging_redact.py) | unit-тесты `_logging.redact()` + `redact_path()` |
 | [`tests/test_diagnostics.py`](../../tests/test_diagnostics.py) | redaction secrets/options, non-sensitive preserved, coordinator counts-only, TO_REDACT ⊇ SENSITIVE_KEYS |
