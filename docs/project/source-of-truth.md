@@ -36,7 +36,7 @@ Quality gates:
 | Codeowners | [`manifest.json:5`](../../custom_components/elektronny_gorod/manifest.json#L5) | разработчик | GitHub, HA QS |
 | Документация ссылка | [`manifest.json:9`](../../custom_components/elektronny_gorod/manifest.json#L9) | разработчик | пользователь, HA |
 | Issue tracker | [`manifest.json:11`](../../custom_components/elektronny_gorod/manifest.json#L11) | разработчик | пользователь, HA |
-| External Python requirements | [`manifest.json:requirements`](../../custom_components/elektronny_gorod/manifest.json) | разработчик | HA package installer |
+| External Python requirements | [`manifest.json:requirements`](../../custom_components/elektronny_gorod/manifest.json), только `firebase-messaging`; `audioop-lts` обеспечивает HA core | разработчик / HA core для своих dependencies | HA package installer |
 | Platforms | [`__init__.py:25-29`](../../custom_components/elektronny_gorod/__init__.py#L25-L29) | разработчик | `async_forward_entry_setups` |
 | Entry point | [`__init__.py:async_setup_entry`](../../custom_components/elektronny_gorod/__init__.py#L32) | разработчик | HA core |
 | Config entry VERSION | [`config_flow.py:46`](../../custom_components/elektronny_gorod/config_flow.py#L46) | разработчик | `async_migrate_entry` |
