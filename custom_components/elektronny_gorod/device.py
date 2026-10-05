@@ -11,6 +11,7 @@ HA 2026.8 объявил `via_device` устаревшим, а 2026.9 убрал
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -24,9 +25,32 @@ from .history import place_display_name
 MANUFACTURER = "Электронный город"
 
 
+_PLACE_PREFIX = "place_"
+
+
 def place_identifier(place_id: str) -> tuple[str, str]:
     """Стабильный identifier устройства адреса."""
-    return (DOMAIN, f"place_{place_id}")
+    return (DOMAIN, f"{_PLACE_PREFIX}{place_id}")
+
+
+def place_id_from_identifiers(
+    identifiers: Iterable[tuple[str, str]] | None,
+) -> str | None:
+    """Обратное к `place_identifier`: адрес, который представляет устройство.
+
+    `None` — устройство не наше или не адрес (камера, домофон, экран вызова).
+    Кодировка id живёт в одном модуле с прямой функцией: разъехавшись, они
+    молча вернули бы не тот адрес, а не ошибку.
+
+    Аргумент — сами `identifiers`, а не устройство: реестр отдаёт то
+    `DeviceEntry`, то `ChildDeviceEntry`, а общий базовый класс появился
+    только после минимальной поддерживаемой линии HA. Имя поля есть у обоих
+    и во всех версиях, класс — нет.
+    """
+    for domain, identifier in identifiers or ():
+        if domain == DOMAIN and identifier.startswith(_PLACE_PREFIX):
+            return identifier.removeprefix(_PLACE_PREFIX) or None
+    return None
 
 
 @callback

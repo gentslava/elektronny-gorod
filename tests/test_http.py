@@ -178,6 +178,47 @@ async def test_post_uses_rest_timeout(http_client, fake_session):
     assert fake_session.post.await_args.kwargs["timeout"] is _REST_TIMEOUT
 
 
+async def test_post_without_body_sends_no_content_type(http_client, fake_session):
+    """POST без тела уходит без `content-type`, как у приложения.
+
+    Retrofit для POST без `@Body` шлёт пустое тело и тип не объявляет — в
+    HAR у `guests/link` нет `Content-Type`, `Content-Length: 0`.
+    Объявлять JSON при пустом теле — заголовок, которого приложение не
+    шлёт (ADR-0006).
+    """
+    await http_client.post("/api/mh-auth/mobile/v1/guests/link?placeId=1&app=2", None)
+
+    sent = fake_session.post.await_args.kwargs
+    assert sent["data"] is None
+    assert "content-type" not in {k.lower() for k in sent["headers"]}
+
+
+async def test_post_with_body_declares_json(http_client, fake_session):
+    """POST с телом по-прежнему объявляет JSON — граница предыдущего теста."""
+    await http_client.post("/rest/v1/something", '{"x": 1}')
+
+    sent_headers = fake_session.post.await_args.kwargs["headers"]
+    assert sent_headers["content-type"] == "application/json; charset=UTF-8"
+
+
+async def test_delete_with_body_declares_json(http_client, fake_session):
+    """DELETE с телом объявляет JSON — мирроринг отписки push."""
+    fake_session.delete = AsyncMock(return_value=_FakeResponse(200))
+    await http_client.delete("/rest/v1/something", '{"x": 1}')
+
+    sent_headers = fake_session.delete.await_args.kwargs["headers"]
+    assert sent_headers["content-type"] == "application/json; charset=UTF-8"
+
+
+async def test_delete_without_body_sends_no_content_type(http_client, fake_session):
+    """DELETE без тела типа не объявляет — граница предыдущего теста."""
+    fake_session.delete = AsyncMock(return_value=_FakeResponse(200))
+    await http_client.delete("/rest/v1/something")
+
+    sent_headers = fake_session.delete.await_args.kwargs["headers"]
+    assert "content-type" not in {k.lower() for k in sent_headers}
+
+
 async def test_delete_uses_rest_timeout(http_client, fake_session):
     """DELETE получает REST-таймаут."""
     from custom_components.elektronny_gorod.http import _REST_TIMEOUT

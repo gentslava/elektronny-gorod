@@ -4,7 +4,7 @@
 - **Owner:** @gentslava
 - **Linked plan:** [`plan.md`](plan.md)
 
-No task below authorizes code changes by itself; implementation starts after the corresponding spec/capture gate is approved.
+No task below authorizes code changes by itself; implementation starts after the corresponding spec/capture gate is approved. «Capture» here means HAR or a live probe with the research account (ADR-0006); where neither is possible, a static-only contract may ship labelled as such.
 
 ## Capture prerequisites
 
@@ -31,16 +31,20 @@ No task below authorizes code changes by itself; implementation starts after the
 
 ## Slice 2 — archive
 
-- [ ] **T-030** Implement Media Source browse tree with opaque identifiers. _Acceptance:_ no signed URL in browse response. _Audit:_ A-50.
-- [ ] **T-031** Add typed archive playback/download methods and on-demand resolver, including retention errors. _Acceptance:_ exact fixtures cover 11005, HTTP-200 business error and unavailable event with user-readable mapping. _Audit:_ A-59.
-- [ ] **T-032** Decide/prove direct resolve vs HA proxy, including Range and cancellation. _Acceptance:_ security review + streaming test. _Audit:_ A-50.
-- [ ] **T-033** Run caplog/storage/state sentinel scan for signed URL. _Acceptance:_ sentinel appears only in mocked upstream/resolver result.
+Закрыт PR #81 (merged 2026-09-02): `media_source.py` + `clip_proxy.py`.
+
+
+- [x] **T-030** Implement Media Source browse tree with opaque identifiers. _Acceptance:_ no signed URL in browse response. _Audit:_ A-50.
+- [x] **T-031** Add typed archive playback/download methods and on-demand resolver, including retention errors. _Acceptance:_ exact fixtures cover 11005, HTTP-200 business error and unavailable event with user-readable mapping. _Audit:_ A-59.
+- [x] **T-032** Decide/prove direct resolve vs HA proxy, including Range and cancellation. _Acceptance:_ security review + streaming test. _Audit:_ A-50.
+- [x] **T-033** Run caplog/storage/state sentinel scan for signed URL. _Acceptance:_ sentinel appears only in mocked upstream/resolver result.
 
 ## Slice 3 — guests
 
-- [ ] **T-040** Implement owner-side `create_guest_invite` response action. _Acceptance:_ `app=2`, `SupportsResponse.ONLY`, `{link,message}`. _Audit:_ A-93.
-- [ ] **T-041** Enforce place/admin policy and safe exception mapping. _Acceptance:_ unauthorized caller never reaches API. _Audit:_ A-93.
-- [ ] **T-042** Add service schema, ru/en strings, docs and secret sentinel test. _Acceptance:_ no response persisted/logged by integration. _Audit:_ A-93.
+- [x] **T-040** Implement owner-side `create_home_invite` response action. _Acceptance:_ `app=2`, `SupportsResponse.ONLY`, `{link,message}` and nothing else from the operator payload. _Audit:_ A-93.
+- [x] **T-041** Enforce place/admin policy and safe exception mapping. _Acceptance:_ unauthorized caller never reaches API; the place is addressed by its device, so an id from another account cannot route the request; transport failures — refusal, timeout and a malformed body alike — and a 200 without a link all surface as translated refusals. _Audit:_ A-93.
+- [x] **T-042** Add service schema, ru/en strings, docs and secret sentinel test. _Acceptance:_ no response persisted/logged by integration, pinned at the transport layer as well as through the action. _Audit:_ A-93.
+- [ ] **T-043** Implement temporary guest access from the static `mh-temp-pass` contract (APK 9.10.0/9.11.0, ADR-0006 static-only). _Before coding:_ live probes with the research account settle what they can — `time-to-life` and `access-controls` shapes, `status` values, refusal codes; nothing is guessed, and what stays unknown is labelled. _Acceptance:_ first live confirmation of the create/delete calls — HAR, live probe or user report. Implementation target: `create_temporary_access` (owner decision 2026-10-05), only for the contract owner and only where the place carries a `TEMP_PASS` feature record. _Audit:_ A-118.
 
 ## Slices 4-5 — keys
 

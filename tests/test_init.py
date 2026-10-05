@@ -95,7 +95,7 @@ async def test_setup_with_surviving_fcm_owner_loads_without_replacement(
             "custom_components.elektronny_gorod.async_dispatcher_connect",
             return_value=unsubscribe,
         ),
-        patch("custom_components.elektronny_gorod._async_register_sip_services"),
+        patch("custom_components.elektronny_gorod._async_register_services"),
         patch("custom_components.elektronny_gorod.async_register_history_ws_command"),
         patch("custom_components.elektronny_gorod.async_register_uplink_ws_command"),
         patch(

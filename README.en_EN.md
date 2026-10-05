@@ -59,6 +59,7 @@ The integration mirrors the APIs of the official My Home and Umnyy Dom.ru apps: 
 - [📞 Call screen and two-way audio](#-call-screen-card)
 - [🕘 Event history](#-event-history)
 - [🎞 Camera archive in the media browser](#-camera-archive-in-the-media-browser)
+- [👤 Home invitation](#-home-invitation)
 - [Automation example: balance](#automation-example-balance)
 - [Issues and Contributions](#issues-and-contributions)
 - [License](#license)
@@ -184,6 +185,7 @@ To remove the integration itself rather than one account: open "Elektronny Gorod
 - **Two-way intercom audio** — answer/hang up, guest video and sound in one card, and talk through the browser microphone.
 - **Answered and missed call history** — one entity per place plus a combined Lovelace card with filters and pagination.
 - **Camera recordings archive in the media browser** — browse motion events by day and play clips with seeking (see [the section below](#-camera-archive-in-the-media-browser)).
+- **Home invitation** — the `create_home_invite` action returns a link that makes a family member or a guest a user of the address (see [below](#-home-invitation)).
 - Account health: balance, days until blocking and blocked status.
 - Do-not-disturb controls for intercom and management-company calls.
 
@@ -400,6 +402,31 @@ A clip opens on click and supports seeking. The operator renders the mp4 on dema
 Cameras hidden via the "Visible on dashboard" toggle are excluded from the archive entirely.
 
 **Current slice limitations:** motion-event clips only (no continuous timeline scrubbing), event thumbnails are not exposed, and personal cameras are not supported.
+
+## 👤 Home invitation
+
+This is how you invite a family member or a guest: whoever accepts the link becomes a user of the chosen address in the operator's app, with everything that follows from it there. In the app this is People → selected address → Add guest; an address can be used by the contract owner and up to four invited people.
+
+> **This is not temporary access.** The app has a separate feature that gives a guest access to selected doors and cameras. The integration does not implement it yet.
+
+The `elektronny_gorod.create_home_invite` action returns the link and a ready-made share message:
+
+```yaml
+action: elektronny_gorod.create_home_invite
+data:
+  device_id: <place device>
+response_variable: invite
+```
+
+`{{ invite.link }}` and `{{ invite.message }}` can then go to a messenger, a notification or a QR code.
+
+**What to know about access.**
+
+- The link is good for 30 minutes, and anyone who sees it can walk in. Send it to one person.
+- Only a Home Assistant **administrator** can issue it. Automations deliberately cannot call the action — otherwise any household member could mint an invitation. A script run by an administrator does work.
+- The integration neither stores nor logs the link. It does land in the script trace if you capture the response in `response_variable`, and in `home-assistant.log` if debug logging is on.
+- The integration cannot revoke an invitation once issued.
+- Only Electronic City is supported for now: the brand code for Dom.ru is known from the app but unconfirmed by a live request, and the integration does not guess it.
 
 ## Automation example: balance
 Here is an example of automation for low balance notification:

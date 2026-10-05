@@ -47,7 +47,7 @@ Evidence labels in this reference:
 
 - **HAR-confirmed** — method/path and payload were observed on the wire.
 - **Runtime UI** — the screen/behaviour was exercised on the AVD, but its request may not have been captured.
-- **Static-only** — Retrofit/DTO contract was extracted from the signed APK. It is implementation input, not a promise that the current account or backend enables the feature. A fixture from a decrypted HAR is required before merging support, per [ADR-0006](../decisions/0006-mirror-app-behavior.md).
+- **Static-only** — Retrofit/DTO contract was extracted from the signed APK. It is implementation input, not a promise that the current account or backend enables the feature. Implementing it is allowed per [ADR-0006](../decisions/0006-mirror-app-behavior.md): the label stays until a HAR or a live probe confirms the call, and whatever was observed becomes a sanitized fixture.
 
 ## Backends — separate ecosystems
 
@@ -195,7 +195,7 @@ Response shape:
 
 ### Refresh access_token
 
-**Status: unknown.** При `refreshToken == accessToken` поведении refresh-flow, вероятно, существует, но триггерится только по явному 401. См. [ADR-0006](../decisions/0006-mirror-app-behavior.md), [audit A-22](../audit/project-audit.md).
+**Status: unknown.** Существует ли refresh-flow и когда приложение его вызывает, не подтверждено (подтверждают HAR или код приложения). См. [ADR-0006](../decisions/0006-mirror-app-behavior.md), [audit A-22](../audit/project-audit.md).
 
 ### Альтернатива: Keycloak OAuth2 (брендинг Дом.ру)
 
@@ -459,7 +459,7 @@ Response shape:
 
 На AVD экран «Люди» показывал владельца и гостей. Интеграция уже умеет делать `query_places(place_id)`, поэтому нового transport-метода для чтения не требуется. Однако `name`, `nickName`, `accountId` и сам состав жильцов — PII: не переносить их в entity state/attributes, recorder, diagnostics или логи. Безопасный HA-MVP для guest-фичи — action создания приглашения, а не постоянная people entity.
 
-### Guest invitations (runtime UI + decrypted NTK contract)
+### Home invitations — `guests/link` (runtime UI + decrypted NTK contract)
 
 На AVD «Мой Дом» 9.9.0 кнопка добавления гостя открыла QR и share-link. Сам QR/link является действующим credential доступа; его значение не сохранялось и здесь заменено placeholder.
 
@@ -469,7 +469,7 @@ Response shape:
 POST /api/mh-auth/mobile/v1/guests/link?placeId=<place_id>&app=<app_id>
 ```
 
-Body отсутствует. Brand enum из APK:
+Body отсутствует, и `Content-Type` не объявляется: в HAR `Content-Length: 0` без типа — так Retrofit шлёт POST без `@Body`. Brand enum из APK:
 
 | App | `app_id` |
 |---|---:|
@@ -491,6 +491,8 @@ Runtime response (`Мой Дом` 9.9.0, `app=2`, HTTP 200):
 
 Для `Умный Дом.ру` значение `app=4` пока подтверждено APK DTO/enum; exact runtime POST на доступном аккаунте не получен. Поэтому первый HA slice должен быть NTK-only либо выбирать brand только по уже известному operator contract, не угадывая его из имени entry.
 
+Поле `message` — готовый текст для пересылки, и оно **содержит ту же ссылку дословно** (важно для redaction: маска по ключу `link` его не закрывает, см. S-27). В наблюдённом тексте оператор сам сообщает гостю, что приглашение действительно 30 минут; это единственный известный нам источник срока — отдельного поля с TTL в ответе нет, и подтверждения живым замером у нас тоже нет.
+
 Принимающая сторона открывает deep link `/guest-invite?invite=<secret_token>`. После auth приложение использует:
 
 ```http
@@ -500,7 +502,7 @@ Content-Type: application/json
 {"uuid": "<secret_invite_uuid>", "placeId": "<optional_place_id>"}
 ```
 
-Acceptance-flow относится к аккаунту гостя и не входит в HA-MVP. Для нашей интеграции нужен только owner-side action `create_guest_invite` с `SupportsResponse.ONLY`: вернуть `link`/`message` вызывающему клиенту, не создавая entity и не сохраняя ответ. Link/UUID должны войти в redaction и никогда не попадать в exception text, service logs или diagnostics. Capture gate для NTK закрыт; остаются admin permission и security review action-а.
+Acceptance-flow относится к аккаунту гостя и не входит в HA-MVP. Реализовано в `feat/guest-invite` (A-93): owner-side action `create_home_invite` с `SupportsResponse.ONLY`: вернуть `link`/`message` вызывающему клиенту, не создавая entity и не сохраняя ответ. Admin permission реализован; security review закрывается аттестацией кандидата. Про redaction есть оговорка: ключ `link` внесён в `SENSITIVE_KEYS`, но маска закрывает одноимённый ключ, а не весь payload — `message` несёт ту же ссылку (S-27). В exception text, наши логи и diagnostics ссылка не попадает; два стока вне контроля интеграции названы в S-26.
 
 ### `GET /api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens`
 
@@ -741,7 +743,7 @@ Query parameters:
 
 ## Access keys (static-only contracts)
 
-Обе APK 9.9.0 содержат одинаковый `mh-access-key` API и локальную sync-модель. На исследуемом аккаунте соответствующий экран/тариф был недоступен, поэтому все контракты раздела требуют decrypted HAR перед реализацией.
+Обе APK 9.9.0 содержат одинаковый `mh-access-key` API и локальную sync-модель. На исследуемом аккаунте соответствующий экран/тариф был недоступен, поэтому все контракты раздела — static-only: реализуются по ADR-0006 с подтверждением HAR или живой пробой.
 
 ### Inventory and lookup
 
@@ -802,7 +804,7 @@ Static request bodies:
 {"name": "<new_display_name>"}
 ```
 
-`notification-status` не имеет request body в Retrofit interface; response DTO содержит `{"accessKey":{"notificationStatus":<bool|null>}}`. Это нужно проверить HAR-ом: возможен toggle server-side без явного desired-state или обфускация скрыла interceptor/body.
+`notification-status` не имеет request body в Retrofit interface; response DTO содержит `{"accessKey":{"notificationStatus":<bool|null>}}`. Это нужно проверить HAR-ом или живой пробой: возможен toggle server-side без явного desired-state или обфускация скрыла interceptor/body.
 
 Дополнительные статические endpoints тарифной активации:
 
@@ -813,7 +815,7 @@ POST /rest/v1/places/<place_id>/accesscontrols/activations
 
 Они не входят в HA-MVP. APK-текст про «историю использования ключей» явно помечен «Скоро», поэтому текущую поддержку key-history заявлять нельзя.
 
-Рекомендуемый HA-порядок: после HAR сначала read-only inventory (disabled by default), затем отдельным slice notification switch. Register/delete/rename/ reactivate — admin-only actions с явным подтверждением и отдельным security review. См. [feature package](../features/mobile-app-parity/README.md) и [audit A-94](../audit/project-audit.md).
+Рекомендуемый HA-порядок: после HAR или живой пробы (иначе static-only по ADR-0006) сначала read-only inventory (disabled by default), затем отдельным slice notification switch. Register/delete/rename/ reactivate — admin-only actions с явным подтверждением и отдельным security review. См. [feature package](../features/mobile-app-parity/README.md) и [audit A-94](../audit/project-audit.md).
 
 ## Cameras (forpost — стандартные камеры)
 
@@ -942,7 +944,7 @@ Response:
 
 ### Private camera settings (static-only contracts)
 
-Эти endpoints присутствуют в обеих APK 9.9.0, но на исследуемом аккаунте не было подходящей личной камеры. До HAR/fixture нельзя считать enum values, диапазоны и availability стабильными. Первым запросом должен быть `cameras/features/info`; entity создаются только для объявленных backend capabilities.
+Эти endpoints присутствуют в обеих APK 9.9.0, но на исследуемом аккаунте не было подходящей личной камеры. До HAR или живой пробы нельзя считать enum values, диапазоны и availability стабильными. Первым запросом должен быть `cameras/features/info`; entity создаются только для объявленных backend capabilities.
 
 Personal-camera DTO in the existing place camera sync also carries `id`, `name`, `type`, `status`, `recording`, `recordType`, `eventRecordMode`, `motionDetectorMode`, `softwareCapabilities`, `capabilities`, `blocked`, `previewAvailable`, `videoDownloadAvailable`, `isSound` and `softwareUpdateAvailable`. It can provide authoritative state for `eventRecordMode`; `mac` and `serialNumber` are also present but are device identifiers and should not be exposed by default.
 
@@ -976,7 +978,7 @@ PUT /rest/v1/places/<place_id>/cameras/<camera_id>/recordmode/<record_mode>
 PUT /rest/v1/places/<place_id>/cameras/<camera_id>
 ```
 
-Последний endpoint принимает exact static DTO `{"name":"<new_name>"}`. `record_mode` — static string; current DTO exposes `recordType`/`recording`, but допустимые mutation enum values всё равно нужно закрепить runtime HAR.
+Последний endpoint принимает exact static DTO `{"name":"<new_name>"}`. `record_mode` — static string; current DTO exposes `recordType`/`recording`, but допустимые mutation enum values всё равно нужно закрепить runtime HAR или живой пробой.
 
 Audio volume:
 

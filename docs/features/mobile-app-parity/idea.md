@@ -37,5 +37,5 @@ The integration already covers live cameras, doors, finance, DND and realtime in
 
 - [x] Capture the idea and evidence.
 - [ ] Approve the MVP order in [`prd.md`](prd.md).
-- [ ] Collect the static-only HAR fixtures listed in [`tasklist.md`](tasklist.md).
+- [ ] Confirm the static-only contracts listed in [`tasklist.md`](tasklist.md) with HAR or live probes; keep sanitized fixtures of what was observed.
 

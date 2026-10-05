@@ -105,9 +105,15 @@ FCM_SENDER_ID: Final = "369367231553"
 FCM_API_KEY: Final = "AIzaSyB_26K8ZB7iu7qZBpBf5c4NLgvTC3Yrgpk"
 FCM_BUNDLE_ID: Final = "ru.inetra.intercom"
 
+# Код бренда для приглашения в дом. `2` — «Мой Дом» (NTK, operatorId 1),
+# подтверждён живым запросом. `4` — «Умный Дом.ру» (ERTH): известен только
+# из энума приложения, рантайма на нём никто не снимал, поэтому в запрос он
+# не подставляется — см. `HOME_INVITE_APP_BY_OPERATOR`.
+HOME_INVITE_APP_BY_OPERATOR: Final = {"1": 2}
+
 APP_VERSION: Final = {
-    "name": "9.9.0",
-    "code": "90900020"
+    "name": "9.11.0",
+    "code": "91100000"
 }
 
 ANDROID_OS_VER: Final = "16"

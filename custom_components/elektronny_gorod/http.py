@@ -138,9 +138,11 @@ class HTTP:
         # из прошлых запросов не утекал в pre-auth endpoints).
         headers: dict[str, str] = dict(self._headers)
         headers["user-agent"] = str(self.user_agent)
-        # content-type для тела (POST всегда; DELETE с телом — мирроринг
-        # subscriberNotifications-отписки, см. api.unregister_push_device).
-        if method == "POST" or (method == "DELETE" and data is not None):
+        # content-type — только когда есть тело (POST; DELETE с телом —
+        # мирроринг subscriberNotifications-отписки, см.
+        # api.unregister_push_device). POST без тела приложение шлёт без
+        # типа: Retrofit без `@Body` его не объявляет, HAR `guests/link`.
+        if method in ("POST", "DELETE") and data is not None:
             headers["content-type"] = "application/json; charset=UTF-8"
         # Bearer НЕ шлём на pre-auth endpoints — иначе backend может увидеть
         # expired Bearer и отклонить reauth/bootstrap. HAR 9.9.0 подтверждает,

@@ -112,7 +112,7 @@ logger:
 | FCM listener завершается и повторяет одну ошибку | внешний FCM-клиент и per-entry recovery — A-80/A-86 |
 | Тесты проходят локально, падают в CI | сверить Python/HA matrix, plugins и команды с `testing/strategy.md` и CI workflow |
 | Временный сбой operator GET не восстанавливается автоматически | retry/backoff ещё не реализован — остаток A-21 |
-| После 401 требуется переподключение аккаунта | auto-refresh и native reauth остаются открыты — A-22/A-25 |
+| После 401 HA просит войти заново | так задумано: auto-refresh нет (A-22), координатор поднимает `ConfigEntryAuthFailed` и запускает native reauth-flow |
 | VPN/WAF выглядит как пустой список камер | HTML service-pipe block маскируется generic API-ошибкой — A-92 |
 | API-ошибка превращается в другой exception или пустой результат | широкие fallback-ветки — A-19/A-20 |
 

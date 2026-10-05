@@ -45,7 +45,7 @@ External reference:
 | `config-flow` | ✅ есть | `config_flow.py` |
 | `config-flow-test-coverage` | ✅ password/SMS/token + reauth/abort | `tests/test_config_flow.py` |
 | `dependency-transparency` | ✅ runtime requirements объявлены | `manifest.json` |
-| `docs-actions` | ✅ сервисы документированы | `services.yaml`, release docs |
+| `docs-actions` | ✅ действия документированы: поля и селекторы в `services.yaml`, имена и описания в `strings.json` + обоих переводах, пользовательские разделы в README (ru/en) | `services.yaml`, `strings.json`, `README*.md` |
 | `docs-high-level-description` | ✅ README | — |
 | `docs-installation-instructions` | ✅ README | — |
 | `docs-removal-instructions` | ✅ раздел «Удаление»: что удаляется, что остаётся в go2rtc | README (ru/en) |
@@ -67,7 +67,7 @@ External reference:
 
 | Правило | Статус | Что нужно |
 |---|---|---|
-| `action-exceptions` | ✅ отказывают внятно: `answer`/`hangup` без вызова и при незагруженной записи, замок на «Закрыть» и на неудавшемся открытии, переключатели «не беспокоить» при отказе оператора | `__init__.py`, `lock.py`, `switch.py` |
+| `action-exceptions` | ✅ отказывают внятно: `answer`/`hangup` без вызова и при незагруженной записи, замок на «Закрыть» и на неудавшемся открытии, переключатели «не беспокоить» при отказе оператора, приглашение в дом — не-администратору, неподтверждённому оператору, не-адресу, выгруженной записи, сетевому отказу и ответу без ссылки | `__init__.py`, `lock.py`, `switch.py` |
 | `config-entry-unloading` | ✅ есть | — |
 | `docs-configuration-parameters` | ✅ таблица параметров go2rtc с умолчаниями и назначением | README (ru/en) |
 | `docs-installation-parameters` | ✅ что нужно до начала + таблица полей каждого шага настройки | README (ru/en) |
@@ -98,7 +98,7 @@ External reference:
 | `docs-supported-devices` | ⚠️ нечётко |
 | `dynamic-devices` | 🟡 частично в candidate A-119: новые camera IDs добавляются на обновлениях координатора; остальные платформы создают сущности при setup. Полное Gold-правило не закрыто |
 | `entity-disabled-by-default` | n/a |
-| `exception-translations` | 🟡 частично: отказы `lock.lock`, `answer` и `hangup` переведены через `translation_key`; остальные исключения — нет |
+| `exception-translations` | 🟡 частично: через `translation_key` переведены отказы замка (`cannot_lock`/`cannot_unlock`), вызова (`answer`/`hangup`), приглашения в дом (`invite_*`) и DND (`dnd_*`); без перевода — около 17 `BrowseError`/`Unresolvable` в `media_source.py` (их текст человек видит в медиабраузере, например «Archive is temporarily unavailable»), `ConfigEntryAuthFailed` и `UpdateFailed` в `coordinator.py`, голый `Unauthorized` в `history_ws.py` и исключения самого HA |
 | `icon-translations` | n/a |
 | `reconfiguration-flow` | 🔴 нет |
 | `repair-issues` | 🟡 есть для подтверждённого FCM-degraded; остальные recovery edge-cases не аудированы |

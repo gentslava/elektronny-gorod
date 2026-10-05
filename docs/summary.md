@@ -78,7 +78,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 1. 🟡 **`ClientTimeout` на operator API — timeout закрыт, retry остаётся.** `http.py` теперь шлёт явный `ClientTimeout` (REST 30с / binary 60с, connect 10с) — commit `3885bb0`. Осталось: retry/backoff для идемпотентных GET (follow-up, POST/login/open_lock не идемпотентны — ADR-0006). (A-21 / S-09)
 2. ✅ **config_flow + миграции v1→2→3 — покрыты тестами** (`3a60b15`): `test_config_flow.py` (3 ветки auth + go2rtc + abort/reauth) + `test_init.py` (миграции). Bronze config-flow gate закрыт. (A-73)
 3. ✅ **`helpers.py` crypto — golden vectors добавлены** (`362237b`, `test_helpers.py`): регрессия ловит тихий breakage формулы. (A-74)
-4. **Native reauth / reconfigure flow отсутствуют** (A-25/A-26 — Silver/Gold) — остаётся открытым.
+4. **Reconfigure flow отсутствует** (A-26 — Gold) — остаётся открытым. Native reauth (A-25) сделан: при 401 HA запускает reauth-flow.
 5. ✅ **External RTSP after idle (A-96)** — preload revision, regression suite и live acceptance завершены. После manual go2rtc restart обезличенный snapshot подтвердил `3/3` active producer/preload consumer и рост входящих данных; предыдущие toggle/startup/hidden/orphan-consumer сценарии также пройдены.
 
 ✅ Закрыто в 3.3.0: `diagnostics.py` с redaction (A-23 / S-08; S-16 mitigated) — SECURITY_OK разблокирован.
@@ -88,12 +88,12 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - FCM остаётся на приватных Google API и неофициальном operator push-контракте. Зафиксированный production-дефект исправлен локальной нормализацией и bounded recovery, но долгосрочная совместимость внешней зависимости не гарантируется (A-80).
 - go2rtc persistent-config bloat частично mitigated PATCH-only path, но требует live persistence check (A-84).
 - `api.py` — `e.args[0]` antipattern + широкий `except Exception` (A-19/A-20).
-- HTML service-pipe/VPN block пока превращается в generic `ClientError` (A-92; нужен воспроизводимый HAR или живая проба). Пустым списком камер он больше не притворяется — отказ доходит до координатора и виден в журнале.
+- HTML service-pipe/VPN block пока превращается в generic `ClientError` (A-92; подтверждается HAR или живой пробой, иначе static-only по ADR-0006). Пустым списком камер он больше не притворяется — отказ доходит до координатора и виден в журнале.
 - Cold-start go2rtc warmup (A-67), lock fake-state cosmetic-cycle (A-15 — `asyncio.sleep` уже убран).
 
 ### Mobile-app parity backlog
 
-AVD/HAR/APK analysis оформлен в отдельный [`feature package`](features/mobile-app-parity/README.md). Durable event history реализована в PR #70, archive/Media Source (A-50/A-59) — в PR #81 и выпуске 4.1.0; в backlog остаются response action гостевого приглашения (A-93), ключи доступа (A-94) и настройки личных камер (A-95). Guest/key/camera write paths сохраняют обязательный HAR/ hardware gate. Guest links, key codes and signed media URLs не допускаются в entity state, recorder, diagnostics или логи.
+AVD/HAR/APK analysis оформлен в отдельный [`feature package`](features/mobile-app-parity/README.md). Durable event history реализована в PR #70, archive/Media Source (A-50/A-59) — в PR #81 и выпуске 4.1.0; приглашение в дом (A-93) — response action `create_home_invite`; в backlog остаются ключи доступа (A-94), настройки личных камер (A-95) и временный доступ (A-118). Write paths подтверждаются HAR или живой пробой, иначе идут static-only по ADR-0006; enum — только из наблюдённых значений. Guest links, key codes and signed media URLs не допускаются в entity state, recorder, diagnostics или логи.
 
 Полный список — в [`audit/project-audit.md`](audit/project-audit.md).
 
@@ -103,7 +103,7 @@ AVD/HAR/APK analysis оформлен в отдельный [`feature package`](
 
 1. Retry/backoff helper для идемпотентных operator GET (5xx / connection errors) — остаток A-21.
 2. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
-3. Native reauth / reconfigure flow (A-25/A-26 — Silver).
+3. Reconfigure flow (A-26 — Gold).
 
 Feature backlog независим от reliability queue; порядок зафиксирован в [`mobile-app-parity/tasklist.md`](features/mobile-app-parity/tasklist.md): history/archive → guest invite → enabled-account keys → private-camera hardware.
 

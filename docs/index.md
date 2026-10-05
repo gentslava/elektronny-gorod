@@ -62,9 +62,10 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | Дебажить странное поведение | `aidd/runbooks/debugging.md` |
 | Помочь пользователю | `aidd/runbooks/troubleshooting.md` |
 | Собрать HAR-трафик приложения | `aidd/runbooks/har-collection.md` + `/capture-har <scenario>` |
+| Разобрать новую версию приложения | `/analyze-apk <версия>`; разборы — в `research/apk/<версия>-analysis.md` |
 | Понять принцип reverse engineering | `decisions/0006-mirror-app-behavior.md`, `decisions/0007-stateful-emulator-baseline.md` |
 | Разобрать API из HAR | `architecture/api-reference.md` (через subagent `reverse-engineer`) |
-| Спроектировать новую feature | `aidd/runbooks/har-collection.md` → HAR → `aidd/templates/idea.template.md` → `prd.template.md` → `plan.template.md` |
+| Спроектировать новую feature | доказательство (`aidd/runbooks/har-collection.md` → HAR, разбор APK `/analyze-apk` или живая проба) → `aidd/templates/idea.template.md` → `prd.template.md` → `plan.template.md` |
 | Зафиксировать согласованный технический дизайн | `specs/README.md` → подходящий `specs/*-design.md` |
 | Выполнить утверждённый implementation plan | `plans/README.md` → подходящий `plans/*.md` |
 | Реализовать найденные фичи 9.9.0 | `features/mobile-app-parity/README.md` → `research.md` → `plan.md` → `tasklist.md` |
@@ -125,6 +126,7 @@ Home Assistant custom integration `elektronny_gorod` (RU-операторы Эл
 | `research/api/README.md` | конвенция для HAR-снимков (сама папка — local-only) |
 | `research/apk/README.md` | конвенция для APK (сама папка — local-only) |
 | `research/scripts/README.md` | pipeline для сбора HAR |
+| `research/scripts/apk/README.md` | инструменты разбора APK: подпись, диф эндпоинтов, контракт |
 
 ## Next reading
 
