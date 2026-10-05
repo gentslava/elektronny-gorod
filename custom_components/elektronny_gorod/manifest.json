@@ -17,8 +17,7 @@
   "issue_tracker": "https://github.com/gentslava/HA-ElektronnyGorod/issues",
   "quality_scale": "silver",
   "requirements": [
-    "firebase-messaging>=0.4.5",
-    "audioop-lts>=0.2.1;python_version>='3.13'"
+    "firebase-messaging>=0.4.5"
   ],
   "version": "4.1.0"
 }

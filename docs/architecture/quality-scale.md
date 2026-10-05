@@ -96,7 +96,7 @@ External reference:
 | `docs-examples` | ✅ есть пример автоматизации в README |
 | `docs-known-limitations` | ⚠️ есть в feature/release docs; сверить canonical README |
 | `docs-supported-devices` | ⚠️ нечётко |
-| `dynamic-devices` | 🔴 нет (places загружаются 1 раз) |
+| `dynamic-devices` | 🟡 частично в candidate A-119: новые camera IDs добавляются на обновлениях координатора; остальные платформы создают сущности при setup. Полное Gold-правило не закрыто |
 | `entity-disabled-by-default` | n/a |
 | `exception-translations` | 🟡 частично: отказы `lock.lock`, `answer` и `hangup` переведены через `translation_key`; остальные исключения — нет |
 | `icon-translations` | n/a |

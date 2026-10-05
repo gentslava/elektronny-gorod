@@ -251,6 +251,7 @@ elektronny-gorod/
 |---|---|
 | [`tests/conftest.py`](../../tests/conftest.py) | fixtures + `enable_custom_integrations` auto-applied |
 | [`tests/test_device_hierarchy.py`](../../tests/test_device_hierarchy.py) | адрес как родитель домофонов: привязка к своему месту при нескольких адресах, точка входа без камеры, перепривязка плоского устройства, entry-scoping и пропуск ключа при неизвестном адресе |
+| [`tests/test_camera_discovery.py`](../../tests/test_camera_discovery.py) | позднее появление camera ID: добавление без reload, привязка к Intercom, дедупликация обновлений, hidden/disabled policy и снятие listener при unload |
 | [`tests/test_entity_migration.py`](../../tests/test_entity_migration.py) | unit-тесты `_camera_new_uid`/`_lock_new_uid` + golden vector для `lock_unique_id` |
 | [`tests/test_logging_redact.py`](../../tests/test_logging_redact.py) | unit-тесты `_logging.redact()` + `redact_path()` |
 | [`tests/test_diagnostics.py`](../../tests/test_diagnostics.py) | redaction secrets/options, non-sensitive preserved, coordinator counts-only, TO_REDACT ⊇ SENSITIVE_KEYS |
@@ -318,7 +319,7 @@ Backend, integration frontend и website checks настроены; актуал
 **Python-зависимости:**
 - из HA core (`aiohttp`, `voluptuous`, `yarl`);
 - `manifest.json:requirements` — `firebase-messaging>=0.4.5` (FCM-приём события вызова, ADR-0011; проверенный minimum для shared `aiohttp` session; новые версии разрешены при следующей установке или повторном разрешении зависимости, но существующая `0.4.5` проактивно не обновляется; тянет protobuf / http_ece / cryptography);
-- `audioop-lts>=0.2.1` (только Python 3.13+) — `audioop` удалён из stdlib в PEP 594; нужен для `sip/audio.py` (G.711 транскод, A-81).
+- HA core предоставляет `audioop-lts` уже в минимальной HA 2026.8.1; `sip/audio.py` использует его для G.711-транскода (A-81). В manifest интеграции он не повторяется: hassfest запрещает дублировать зависимости ядра (A-119).
 
 ## Maintenance rules
 

@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from homeassistant.components.camera import Camera, CameraEntityFeature
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_interval
@@ -168,25 +169,41 @@ async def async_setup_entry(
 ) -> None:
     """Set up Elektronny Gorod Camera based on a config entry."""
     coordinator = entry.runtime_data
-    cameras = (coordinator.data or {}).get("cameras") or []
     stream_manager: CameraStreamManager | None = hass.data.get(
         STREAM_MANAGER_DATA, {}
     ).get(entry.entry_id)
 
     use_go2rtc, base_url, rtsp_host, go2rtc_username, go2rtc_password = _get_go2rtc_cfg(entry)
 
-    async_add_entities(
-        ElektronnyGorodCamera(
-            coordinator,
-            camera_info,
-            entry=entry,
-            stream_manager=stream_manager,
-            via_device_id=place_device_id(
-                hass, entry.entry_id, str(camera_info.get("place_id") or "")
-            ),
-        )
-        for camera_info in cameras
-    )
+    known_camera_ids: set[str] = set()
+
+    @callback
+    def _async_discover_cameras() -> None:
+        """Add cameras first seen in a later (possibly partial) API snapshot."""
+        new_cameras: list[ElektronnyGorodCamera] = []
+        for camera_info in (coordinator.data or {}).get("cameras") or []:
+            camera_id = str(camera_info.get("id") or "")
+            if not camera_id or camera_id in known_camera_ids:
+                continue
+            # Reserve before scheduling HA additions: multiple refreshes can
+            # arrive before the platform finishes registering the first batch.
+            known_camera_ids.add(camera_id)
+            new_cameras.append(
+                ElektronnyGorodCamera(
+                    coordinator,
+                    camera_info,
+                    entry=entry,
+                    stream_manager=stream_manager,
+                    via_device_id=place_device_id(
+                        hass, entry.entry_id, str(camera_info.get("place_id") or "")
+                    ),
+                )
+            )
+        if new_cameras:
+            async_add_entities(new_cameras)
+
+    _async_discover_cameras()
+    entry.async_on_unload(coordinator.async_add_listener(_async_discover_cameras))
 
     # Two-way audio: камера-сущность экрана вызова (рефреш-на-открытии, ADR-0012 C).
     # Контроллер создаётся в __init__ ПОСЛЕ forward_entry_setups — резолвим лениво
@@ -269,9 +286,9 @@ class ElektronnyGorodCamera(
         source = camera_info.get("source") or "public"  # fallback
         is_intercom = source == "intercom" and bool(ac_id and place_id)
 
-        # Visibility управляется на DEVICE-уровне в __init__.py:_sync_visibility:
-        # если все entities device hidden в API → device.disabled_by=INTEGRATION,
-        # HA автоматически set entity.disabled_by=DEVICE (cascade).
+        # Apply API visibility before registry creation, including late discovery.
+        # HA uses this default only for new rows and preserves user overrides.
+        self._attr_entity_registry_visible_default = not camera_info.get("hidden", False)
         LOGGER.debug("Camera init id=%s source=%s hidden=%s",
                      self._id, source, camera_info.get("hidden"))
 
@@ -917,6 +934,19 @@ class ElektronnyGorodCamera(
         (напр. лифты) такого сигнала не дают — для них poll'им go2rtc producer.
         """
         await super().async_added_to_hass()
+        if (
+            not self.entity_registry_visible_default
+            and self.registry_entry is not None
+            and self.registry_entry.hidden_by is er.RegistryEntryHider.INTEGRATION
+        ):
+            # A-64: record who hid a newly discovered camera so a later startup
+            # sync can distinguish a deliberate user Show from a new default.
+            options = dict(self.registry_entry.options.get(DOMAIN) or {})
+            if not options.get("we_set_integration"):
+                options["we_set_integration"] = True
+                er.async_get(self.hass).async_update_entity_options(
+                    self.entity_id, DOMAIN, options
+                )
         if (
             self._stream_manager is not None
             and self._unsub_health_poll is None  # idempotent: не плодим таймеры

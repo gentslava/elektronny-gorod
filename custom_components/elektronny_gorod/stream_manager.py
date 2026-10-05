@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant
+from homeassistant.core import CALLBACK_TYPE, Event, HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
@@ -870,6 +870,7 @@ class CameraStreamManager:
         if not self._stopping:
             await self.async_reconcile()
 
+    @callback
     def _handle_registry_update(
         self, event: Event[er.EventEntityRegistryUpdatedData]
     ) -> None:
