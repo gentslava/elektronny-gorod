@@ -20,10 +20,10 @@ kind: canonical-agent-role
 - Обновление `Last reviewed:` в front-блоке каждого тронутого документа.
 - Никаких устаревших ссылок (file:line после рефакторинга).
 - Никаких номеров версий в текстах docs (см. conventions.md). SHA допустимы в `project-audit.md` как reconciliation-evidence и в review report/PR как immutable base/head/tree candidate evidence (ADR-0015), но не как live HEAD.
-- ADR — не редактировать после `accepted`. Новые ADR супердиктят старые.
+- ADR после `accepted` уточняется на месте — правкой текста и строкой `Revised` с датой и сутью (так правлены ADR-0006 и ADR-0015). Новый ADR с `Supersedes` — только когда решение отменяется, а не уточняется.
 - `docs/audit/project-audit.md` — все findings актуальны (status, evidence).
 - **Reconciliation (ADR-0010/0015):** `RESOLVED` ставить только если фикс в master. До финальных approvals — `REMEDIATION-IN-REVIEW`. `resolved-in-branch` допустим только внутри нового candidate, на который все обязательные reviewers переиздали tuple-bound verdict. Прогон — `bash .agents/hooks/check-audit-reconciliation.sh`.
-- **Анти-дублирование (D-03/ADR-0015):** findings/status живут в `project-audit.md`, точный live test baseline — только в `testing/strategy.md`, `summary.md` содержит качественную сводку без меняющегося count. Остальные документы дают ссылки, а не копии.
+- **Анти-дублирование (D-03/ADR-0015):** findings/status живут в `project-audit.md`, состав suite и инварианты тестов — только в `testing/strategy.md`, живых счётчиков нет ни в одном документе (их даёт CI), `summary.md` содержит качественную сводку. Остальные документы дают ссылки, а не копии.
 - **Контракты (D-01):** при правке кода, разрешающей known-антипаттерн, снять соответствующую метку в `AGENTS.md` `Project structure` и обновить self-описание (`стек`, `hooks`, `setup`) в `AGENTS.md`/`CLAUDE.md`.
 
 ## Triggers
@@ -48,7 +48,7 @@ Maintenance rules (`docs/project/project-map.md#maintenance-rules`):
 ## Чего НЕ делать
 
 - Не дублировать содержимое из `summary.md` в другие документы — ссылка.
-- Не редактировать `accepted` ADR (требуется новый ADR с supersedes).
+- Не переписывать `accepted` ADR молча: уточнение — на месте со строкой `Revised`, отмена решения — новым ADR с `Supersedes`.
 - Не писать `3.0.X` в текстах (за исключением changelog-style исторических разделов).
 - Не использовать backticks для имён без `.md` — это путает с inline code (`code` — это `code.py`).
 

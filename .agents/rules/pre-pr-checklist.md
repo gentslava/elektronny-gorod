@@ -59,7 +59,7 @@ Docs sync проверить по таблице:
 | `docs/project/project-map.md` | Новые/удалённые файлы в `custom_components/` или `tests/` |
 | `docs/architecture/api-reference.md` | Новые endpoint вызовы |
 | `docs/architecture/overview.md` | Архитектурные изменения flow / dependencies |
-| `docs/decisions/NNNN-*.md` | Архитектурное труднообратимое решение; accepted ADR не редактировать |
+| `docs/decisions/NNNN-*.md` | Архитектурное труднообратимое решение; accepted ADR уточняется на месте строкой `Revised`; новый ADR с `Supersedes` — только когда решение отменяется |
 | `docs/architecture/ha-compatibility.md` / `quality-scale.md` | Изменения min HA version, IQS уровня |
 
 `HISTORY_CLEAN` проверяет Git Historian по `.agents/roles/git-historian.md`; Claude и Codex используют свои адаптеры. Если отдельная роль недоступна — Validator/root. Требования — в `.agents/rules/git-history.md`:

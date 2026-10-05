@@ -30,7 +30,7 @@ Quality gates:
 | Skill | Когда применять | Почему |
 |---|---|---|
 | `security-and-hardening` | работа с `http.py`, `config_flow.py:logging`, `helpers.py`, `diagnostics.py`, `fcm.py`, credentials/tokens | P0 утечки и log-amplification — критический риск проекта |
-| `test-driven-development` | любое изменение поведения или bug-fix в config-flow / coordinator / api / FCM | regression сначала воспроизводится тестом; live baseline — в testing strategy |
+| `test-driven-development` | любое изменение поведения или bug-fix в config-flow / coordinator / api / FCM | regression сначала воспроизводится тестом; состав и инварианты — в testing strategy |
 | `code-review-and-quality` | независимым reviewer-ом clean committed candidate после tests/security prechecks/docs/history cleanup | пять осей review; self-review не закрывает gate; fixes создают новый candidate |
 | `debugging-and-error-recovery` | падающий тест, странное runtime-поведение | systematic debugging |
 | `incremental-implementation` | переход на `CoordinatorEntity` (3 платформы) | тонкие vertical slices |

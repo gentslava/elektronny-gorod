@@ -66,5 +66,5 @@ kind: canonical-agent-command
 ## Constraints
 
 - НЕ копировать большие куски между документами — ссылка.
-- НЕ редактировать `accepted` ADR.
+- НЕ переписывать `accepted` ADR молча: уточнение — на месте со строкой `Revised`, отмена решения — новым ADR с `Supersedes`.
 - НЕ удалять документы без отдельного approval.

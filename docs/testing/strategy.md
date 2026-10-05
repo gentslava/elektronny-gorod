@@ -1,7 +1,7 @@
-Status: Active Owner: QA / Testing Agent Last reviewed: 2026-10-05 (перемер на кандидате `feat/temporary-access`: пин CI и минимум)
+Status: Active Owner: QA / Testing Agent Last reviewed: 2026-10-05 (живые счётчики убраны: числа даёт CI, документ держит инварианты — ADR-0015 §7)
 
 Source files:
-- `tests/**` (75 test-модулей + `conftest.py`)
+- `tests/**` (test-модули + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
@@ -27,14 +27,16 @@ Quality gates:
 
 ## Текущее состояние
 
+Здесь нет счётчиков тестов и процентов покрытия: они меняются с каждым PR, и копия в документе устаревает раньше, чем её прочтут. Текущие числа даёт CI-прогон конкретного SHA — лог `python-tests.yaml` (итог pytest, отчёт coverage, строка «модулей: N, ниже порога: 0») и artifact `coverage-*`. Снимок чисел кандидата живёт в PR evidence и сообщении коммита, привязанный к SHA. Документ держит то, что меняется только решением: состав suite по областям, инварианты, которые проверяет CI, и известные gaps.
+
 ✅ **Suite реально выполняется и покрывает HA lifecycle, entities, FCM/SIP, camera/go2rtc и security regressions.**
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **1288 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-10-05; `.venv` собран под пин CI `PHC_CURRENT`: Python 3.14.8, HA 2026.9.0b6). На минимуме 2026.8.1 — **1286 passed, 2 skipped**, в отдельном окружении под минимальный пин матрицы CI (HA 2026.8.1, PHC 0.13.355 — задан в матрице, отдельной переменной под него нет), 2026-10-05. Команда та же, но `.venv` для этого не годится — он собран под пин CI и минимальные цифры воспроизвести не может. Два skip — тесты FCM, требующие `firebase-messaging`: на минимальном пине пакет не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
-| Test modules | 75 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
-| Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
-| Product website | **73 passed**, `tsc --noEmit` и Vite production build (`website/`) |
+| Локальный suite | Зелёный на обоих пинах матрицы CI: `PYTHONPATH=. .venv/bin/pytest tests/ -q`. `.venv` собран под пин CI `PHC_CURRENT`; минимальный пин (HA и PHC заданы в матрице `python-tests.yaml`, отдельной переменной под него нет) воспроизводится только в отдельном окружении — `.venv` для этого не годится. На минимальном пине пропускаются только тесты FCM, требующие `firebase-messaging`: пакет там не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
+| Test modules | `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Frontend | Vitest, `tsc --noEmit` и production bundle build |
+| Product website | Vitest, `tsc --noEmit` и Vite production build (`website/`) |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
 | Security / crypto | redaction including production-format config-entry title, diagnostics, HTTP no-leak, golden vectors helpers, deterministic secret-log scanner |
 | AIDD gates | Canonical secret/reconciliation hooks; Claude/Codex adapters; candidate-SHA CI, stacked target-ref, role/command/rule parity, thin adapters и path-fence contracts |
@@ -48,7 +50,7 @@ Quality gates:
 | Media Source archive | browse hierarchy place → camera → day → event, opaque-ID navigation, signed-URL resolve без persistence, retention/playability errors, hidden-camera exclusion, event→camera binding на resolve (event_id из пути валиден только среди событий этой камеры/дня), transient-vs-no-recording mapping, boundary logging с opaque IDs, multi-entry root |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Website CI | `website.yml`: typecheck + Vitest + production build перед GitHub Pages deploy |
-| Coverage | **97.65%** общий, все 42 модуля выше 95% (замер 2026-10-05; `api.py` 100%, `__init__.py` 98%, тоньше всех `history_ws.py` — 95%). Помодульный порог держит шаг CI «Enforce the per-module coverage floor»: агрегатного было бы мало — модуль, упавший до нуля, прячется за общей цифрой; каноническая команда приведена ниже |
+| Coverage | Каждый модуль пакета выше 95% — это держит шаг CI «Enforce the per-module coverage floor» (порог `FLOOR` в `python-tests.yaml`): агрегатного было бы мало — модуль, упавший до нуля, прячется за общей цифрой. Текущие проценты — в отчёте coverage последнего CI-прогона (лог шага и artifact `coverage-*`) или канонической командой ниже |
 
 Остающиеся gap-и: нет полностью автоматизированного live-теста против оператора и физического домофона; часть широкого REST API покрыта точечными контрактными тестами. Live/PCAP evidence хранится отдельно в `research/intercom-call-probe/`.
 
@@ -225,7 +227,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 Архитектурные решения, отличные от изначального дизайн-наброска:
 
-- **Matrix-стратегия через `include:`** (не product) — потому что Python и PHC-версии жёстко связаны: PHC 0.13.355 → HA 2026.8.1 → py3.14 (min), PHC 0.13.362 → HA 2026.9 → py3.14 (current). Простой `ha-version: [min, stable]` не выражает эту связку.
+- **Matrix-стратегия через `include:`** (не product) — потому что версии жёстко связаны: каждая строка матрицы задаёт PHC, а он тянет конкретную HA и Python — для минимальной и для текущей линии HA (сами пины — в `python-tests.yaml`). Простой `ha-version: [min, stable]` не выражает эту связку.
 - **PHC ставится отдельным `pip install` после `requirements_test.txt`** — версия PHC из matrix, не из файла. Собственных зависимостей у `requirements_test.txt` больше нет: PHC тянет pytest, pytest-cov и coverage сам.
 - **turbojpeg mock** в `tests/conftest.py` — `pytest-homeassistant-custom-component` не тянет optional HA-extras, нужно для `homeassistant.components.camera.img_util`.
 - **Path-filter на push и pull_request** — docs-only коммиты CI не запускают.
@@ -252,8 +254,8 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 1288 passed (2026-10-05); на минимальном пине 1286 passed, 2 skipped (2026-10-05).
-- [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально на обоих пинах; числа прогона — в выводе pytest и в PR evidence кандидата, не здесь.
+- [x] `frontend`: Vitest, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [x] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.
 - [x] Все миграции v1→2, v2→3, chained покрыты.

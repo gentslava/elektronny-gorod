@@ -16,7 +16,7 @@ kind: canonical-agent-role
 
 ## Контекст
 
-Актуальный live baseline и состав suite берутся только из `docs/testing/strategy.md`; `docs/audit/project-audit.md` хранит evidence/status конкретных findings. Не переносить live coverage или список отсутствующих тестов в этот профиль: они быстро устаревают (ADR-0015).
+Состав suite, инварианты и gaps берутся из `docs/testing/strategy.md`, текущие числа — из свежего прогона или CI, их не записывают в документы (снимок — только в PR evidence, привязанный к SHA); `docs/audit/project-audit.md` хранит evidence/status конкретных findings. Не переносить live coverage или список отсутствующих тестов в этот профиль: они быстро устаревают (ADR-0015).
 
 ## Твоя ответственность
 

@@ -4,6 +4,7 @@
 - **Date:** 2026-08-11
 - **Owner:** [@gentslava](https://github.com/gentslava) + Lead Architect Agent
 - **Supersedes:** ADR-0010 §2–4 в части branch-state, live gate state, review waiver и размещения test baseline
+- **Revised:** 2026-10-05 — §7: живые счётчики тестов и покрытия не хранятся ни в одном документе; `testing/strategy.md` держит состав, инварианты и gaps, числа даёт CI
 
 ## Context
 
@@ -100,11 +101,12 @@ plan approval
 
 До merge finding остаётся `OPEN`, `REMEDIATION-IN-REVIEW` либо после всех candidate approvals — `resolved-in-branch`. Только после merge разрешены `✅ RESOLVED`, release section вместо `[Unreleased]` и утверждения о доступности в `master`.
 
-Единственный источник текущего aggregate test baseline и состава suite — `docs/testing/strategy.md`.
+Состав suite, инварианты, которые проверяет CI, и известные gaps описывает один документ — `docs/testing/strategy.md`. Живых чисел (passed, skipped, проценты покрытия, количество модулей) нет ни в нём, ни где-либо ещё: их источник — CI-прогон конкретного SHA. Ручная копия такого числа устаревает с каждым PR, а два параллельных PR правят одну строку и конфликтуют.
 
-- `project-audit.md` хранит status и историческое evidence findings, но не второй live baseline;
-- `summary.md`, quality gates, project map и agent profiles ссылаются на testing strategy и не копируют меняющийся count;
-- изменение CI/test baseline обновляет testing strategy; остальные документы меняются только вместе со своим контрактом или finding.
+- снимок чисел допустим только привязанным к SHA или дате: PR evidence, сообщение коммита, audit evidence, release notes;
+- `project-audit.md` хранит status и историческое evidence findings, но не live baseline;
+- `summary.md`, quality gates, project map и agent profiles ссылаются на testing strategy и не копируют числа;
+- testing strategy меняется, когда меняется состав, инвариант CI или gap; новый тест в существующей области её не трогает.
 
 SHA допустимы в candidate-bound review report, PR evidence и audit reconciliation. Обзорные документы не используют их как копию «текущего HEAD».
 

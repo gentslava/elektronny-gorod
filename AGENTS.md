@@ -34,7 +34,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ -q
 PYTHONPATH=. .venv/bin/pytest tests/ --cov=custom_components/elektronny_gorod --cov-report=term-missing -q
 ```
 
-Актуальный aggregate test baseline и gaps ведутся только в [`testing/strategy.md`](docs/testing/strategy.md). [`project-audit.md`](docs/audit/project-audit.md) хранит findings и исторические evidence-snapshots, а исполняемые CI-определения находятся в [`.github/workflows/`](.github/workflows/).
+Состав suite, инварианты CI и gaps ведутся только в [`testing/strategy.md`](docs/testing/strategy.md); живые числа (passed, покрытие) в документах не хранятся — их даёт CI-прогон конкретного SHA (ADR-0015 §7). [`project-audit.md`](docs/audit/project-audit.md) хранит findings и исторические evidence-snapshots, а исполняемые CI-определения находятся в [`.github/workflows/`](.github/workflows/).
 
 ## Project structure
 

@@ -214,7 +214,7 @@ Quality gates:
 
 - [x] Production root cause подтверждён: `Crypto-Key` стал списком `dh=…; p256ecdsa=…`, который `firebase-messaging` 0.4.5 читает как один Base64URL-ключ.
 - [x] PR #78 merged: instance-scoped нормализация Web Push headers, конечный dependency fuse, per-entry circuit breaker и Repairs.
-- [x] Полный backend suite и production-вызов подтверждают восстановленную доставку; актуальный baseline принадлежит [`testing/strategy.md`](testing/strategy.md).
+- [x] Полный backend suite и production-вызов подтверждают восстановленную доставку; состав и инварианты тестов — в [`testing/strategy.md`](testing/strategy.md).
 - [x] Подготовлены CHANGELOG, RU/EN README, HACS info, сайт и [`releases/4.0.1.md`](releases/4.0.1.md).
 - [x] Release candidate прошёл обязательные review/CI gates; candidate-bound evidence опубликован в PR #80.
 - [x] Release PR #80 слит в `master`; A-97 переведён в `RESOLVED` с merge evidence.

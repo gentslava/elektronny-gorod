@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 import tomllib
 
@@ -326,3 +327,58 @@ def test_pyright_job_types_against_current_matrix_core() -> None:
     steps = workflow["jobs"]["pyright"]["steps"]
     installs = "\n".join(step.get("run", "") for step in steps)
     assert "pytest-homeassistant-custom-component==${{ env.PHC_CURRENT }}" in installs
+
+
+def test_testing_strategy_holds_no_live_counts() -> None:
+    """Живые числа даёт CI; копия в документе устаревает с каждым PR (ADR-0015 §7)."""
+    text = _read("docs/testing/strategy.md")
+    workflow = _read(".github/workflows/python-tests.yaml")
+    floor_match = re.search(r"^\s*FLOOR = (\d+(?:\.\d+)?)", workflow, re.MULTILINE)
+    assert floor_match, "порог покрытия пропал из python-tests.yaml"
+    floor = float(floor_match[1])
+
+    counts = re.findall(
+        r"\b\d[\d ]* (?:passed|skipped|failed)\b|\b\d+ (?:Vitest )?tests?\b"
+        r"|\b\d+ (?:test-)?модул|\b\d+ файл|\b\d+ (?:[\w-]+-)?тест|==\d+\.\d+\.\d+",
+        text,
+    )
+    assert not counts, f"в strategy.md снова счётчики или пины: {counts}"
+    percents = {float(p) for p in re.findall(r"(\d+(?:\.\d+)?)%", text)}
+    assert percents <= {floor}, f"в strategy.md проценты помимо порога CI: {percents - {floor}}"
+    assert f"выше {floor:g}%" in text, "порог покрытия в strategy.md разошёлся с FLOOR в CI"
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "docs/summary.md",
+        "docs/architecture/quality-scale.md",
+        "docs/architecture/ha-compatibility.md",
+        "docs/aidd/runbooks/testing.md",
+        "docs/aidd/runbooks/local-development.md",
+        "AGENTS.md",
+    ],
+)
+def test_live_docs_do_not_copy_ci_numbers(relative_path: str) -> None:
+    """Число модулей и пин PHC копировались в обзорные документы и тихо устаревали."""
+    text = _read(relative_path)
+    copies = re.findall(r"\b\d+ модул|pytest-homeassistant-custom-component==\d", text)
+    assert not copies, f"{relative_path} копирует живые числа CI: {copies}"
+
+
+def test_adr_revision_rule_is_stated_once_way() -> None:
+    """ADR уточняется на месте строкой Revised; запрет «не редактировать» противоречил бы этому."""
+    sources = [
+        *sorted((REPO_ROOT / ".agents").rglob("*.md")),
+        REPO_ROOT / "AGENTS.md",
+        REPO_ROOT / "docs/decisions/README.md",
+        REPO_ROOT / "docs/aidd/templates/adr.template.md",
+        REPO_ROOT / "docs/aidd/prompt-library.md",
+    ]
+    stale = [
+        str(path.relative_to(REPO_ROOT))
+        for path in sources
+        if re.search(r"ADR[^\n]{0,40}не редактир|не редактир[^\n]{0,30}ADR", path.read_text(), re.I)
+    ]
+    assert not stale, f"старый запрет на правку accepted ADR: {stale}"
+

@@ -288,7 +288,7 @@ Output:
 - обновление docs/decisions/README.md (index)
 
 Ограничения:
-- ADR не редактируется после accepted; для изменения — новый ADR с пометкой "supersedes NNNN"
+- после accepted ADR уточняется на месте строкой `Revised`; новый ADR с `Supersedes` — только когда решение отменяется (пометка "supersedes NNNN")
 - не делать ADR для тривиальных решений
 ```
 

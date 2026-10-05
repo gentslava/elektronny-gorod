@@ -89,7 +89,7 @@ Used by agents:
 | Purpose | Локальные тесты зелёные до candidate freeze и реально выполнялись |
 | Owner | QA Agent |
 | Required commands | `PYTHONPATH=. .venv/bin/pytest tests/ -q` |
-| Required evidence | свежий вывод pytest; актуальный baseline и состав suite — в [`testing/strategy.md`](../testing/strategy.md) |
+| Required evidence | свежий вывод pytest для candidate SHA; состав suite и инварианты — в [`testing/strategy.md`](../testing/strategy.md) |
 | Pass | все тесты зелёные; config_flow покрыт основными сценариями; новые external API contracts проверяют exact wire shape; background lifecycle имеет unload/backpressure regressions; нет тестов, маскирующих баги |
 | Fail | падающие тесты; pytest не запускался; тесты «исправлены» под сломанное поведение |
 | Stop | без TESTS_PASS не замораживать candidate; remote checks закрываются отдельным `CI_GREEN` после push |
@@ -220,7 +220,7 @@ Used by agents:
 > **«Реальное состояние сейчас» намеренно убрано из этой таблицы (ADR-0010,
 > D-03).** Live-состояние гниёт внутри методологического документа. Единый
 > источник findings/status — [`project-audit.md`](../audit/project-audit.md),
-> live test baseline — [`testing/strategy.md`](../testing/strategy.md), а
+> состав suite и инварианты тестов — [`testing/strategy.md`](../testing/strategy.md), а
 > [`summary.md`](../summary.md) содержит только качественную сводку без count.
 > Здесь — только **определения** гейтов, не их текущий цвет (ADR-0015).
 

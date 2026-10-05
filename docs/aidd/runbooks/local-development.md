@@ -1,4 +1,4 @@
-Status: Active Owner: Developer Experience / QA Agent Last reviewed: 2026-08-11 (current test baseline and redacted diagnostics)
+Status: Active Owner: Developer Experience / QA Agent Last reviewed: 2026-10-05 (без живых счётчиков тестов; пин PHC берётся из CI)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -76,12 +76,13 @@ hass -c "$HA_CONFIG_DIR" --debug
 
 ```bash
 python3.14 -m venv .venv
-.venv/bin/pip install pytest-homeassistant-custom-component==0.13.362
+# Пин PHC — тот же, что в CI (`PHC_CURRENT`); копии версии здесь нет, чтобы не разъехаться.
+.venv/bin/pip install "pytest-homeassistant-custom-component==$(sed -n "s/^  PHC_CURRENT: '\(.*\)'/\1/p" .github/workflows/python-tests.yaml)"
 .venv/bin/pip install -r requirements_test.txt
 PYTHONPATH=. .venv/bin/pytest tests/ -q
 ```
 
-Точный текущий baseline, состав suite и известные gaps находятся только в [`testing/strategy.md`](../../testing/strategy.md). Дополнительные команды и mock-стратегия — в [`testing.md`](testing.md).
+Состав suite, инварианты и известные gaps находятся только в [`testing/strategy.md`](../../testing/strategy.md). Дополнительные команды и mock-стратегия — в [`testing.md`](testing.md).
 
 ### 6. Перезагрузить интеграцию после правок
 

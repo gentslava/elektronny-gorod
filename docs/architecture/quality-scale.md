@@ -1,4 +1,4 @@
-Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-09-07 (Silver заявлен: все правила уровня закрыты, все 42 модуля выше порога 95%, порог держит CI)
+Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-10-05 (Silver заявлен: все правила уровня закрыты, каждый модуль выше порога 95%, порог держит CI)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -76,7 +76,7 @@ External reference:
 | `log-when-unavailable` | ✅ по фронту, одна строка на пропажу и одна на возвращение, с гранулярностью «вид данных + место»: баланс, домофоны, настройки экранов, камеры места, общедомовые камеры, сборка камер, замки, режим «не беспокоить» и пустой список адресов. О полной недоступности пишет ядро (`Error fetching … data` / `… recovered`), своего лога рядом нет; транспорт об отказах говорит только на `debug` — значимость определяет вызывающий | `coordinator.py:_note_failure`, `_note_success` |
 | `parallel-updates` | ✅ задано во всех шести платформах: `1` у `lock`/`switch` (координатор централизует входящие данные, но не ограничивает исходящие вызовы действий), `0` у остальных — у `camera` осознанно, потому что превью идёт мимо семафора и наплыв держат кэш снимка и `_snapshot_retry_after` | платформы |
 | `reauthentication-flow` | ✅ `async_step_reauth` / `async_step_reauth_confirm`; 401 поднимает `ConfigEntryAuthFailed` | `config_flow.py`, `coordinator.py` |
-| `test-coverage` | ✅ «above 95% for all integration modules»: **все 42 модуля выше 95%** | помодульный порог держит шаг CI «Enforce the per-module coverage floor»; живые цифры — в [`testing/strategy.md`](../testing/strategy.md) |
+| `test-coverage` | ✅ «above 95% for all integration modules»: **каждый модуль выше 95%** | помодульный порог держит шаг CI «Enforce the per-module coverage floor»; текущие проценты — в отчёте coverage последнего CI-прогона (ADR-0015 §7) |
 
 **Silver blockers:** нет.
 

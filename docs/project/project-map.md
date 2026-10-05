@@ -306,7 +306,7 @@ elektronny-gorod/
 | [`release.yaml`](../../.github/workflows/release.yaml) | release published | zip + GH release + автокоммит версии |
 | [`website.yml`](../../.github/workflows/website.yml) | push `master` с `website/**` / dispatch | typecheck + Vitest + Vite build → GitHub Pages |
 
-Backend, integration frontend и website checks настроены; актуальный локальный baseline и состав suite ведутся в [`testing/strategy.md`](../testing/strategy.md), без дублирования здесь.
+Backend, integration frontend и website checks настроены; состав suite и инварианты ведутся в [`testing/strategy.md`](../testing/strategy.md), текущие числа даёт CI.
 
 ## Внешние API и зависимости
 
@@ -352,11 +352,11 @@ Backend, integration frontend и website checks настроены; актуал
 | finding → `🟡 REMEDIATION-IN-REVIEW` | `project-audit.md`; candidate/review/CI ещё не дают merged-state |
 | новый finding (A-NN / S-NN) | `project-audit.md` (+ `security.md` если security), `summary.md` риски если P0/P1 |
 | разрешён known-антипаттерн в коде | `AGENTS.md` `Project structure` (снять метку), `summary.md` |
-| изменился aggregate test baseline | `testing/strategy.md`; audit может хранить только historical candidate evidence |
+| изменился состав suite, инвариант CI или gap | `testing/strategy.md`; живые числа не записываются никуда, audit может хранить только historical candidate evidence |
 | изменился CI-контракт | `contributing.md`, `quality-gates.md`; `summary.md` только при изменении capability/risk |
 | изменён `manifest:quality_scale` | сверить с гейтом (D-05); при несоответствии — finding в `project-audit.md` |
 
-🔴 **Запрет (ADR-0010/0015):** дублировать live-состояние. Findings/status принадлежат `project-audit.md`, aggregate test baseline — `testing/strategy.md`, а `summary.md` хранит только качественную сводку.
+🔴 **Запрет (ADR-0010/0015):** дублировать live-состояние. Findings/status принадлежат `project-audit.md`, состав suite и инварианты тестов — `testing/strategy.md` (без живых чисел), а `summary.md` хранит только качественную сводку.
 
 ## Next reading
 

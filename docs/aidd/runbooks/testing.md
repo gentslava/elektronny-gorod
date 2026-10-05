@@ -4,13 +4,14 @@
 
 ## Текущий статус
 
-Suite зелёный; config flow и миграции покрыты реальными PHC-тестами. Точный baseline, состав модулей и известные gaps ведутся в [`testing/strategy.md`](../../testing/strategy.md), а не дублируются здесь.
+Suite зелёный; config flow и миграции покрыты реальными PHC-тестами. Состав модулей, инварианты и известные gaps ведутся в [`testing/strategy.md`](../../testing/strategy.md), а не дублируются здесь.
 
 ## Установка
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install pytest-homeassistant-custom-component==0.13.362
+# Пин PHC — тот же, что в CI (`PHC_CURRENT`); копии версии здесь нет, чтобы не разъехаться.
+.venv/bin/pip install "pytest-homeassistant-custom-component==$(sed -n "s/^  PHC_CURRENT: '\(.*\)'/\1/p" .github/workflows/python-tests.yaml)"
 .venv/bin/pip install -r requirements_test.txt
 ```
 
