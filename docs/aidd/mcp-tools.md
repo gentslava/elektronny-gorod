@@ -123,6 +123,7 @@ Quality gates:
 - `.agents/hooks/check-secret-logs.py` + `.agents/hooks/check-secret-logs.sh` — канонический AST scanner для всего candidate.
 - `.agents/hooks/post-edit-redaction-check.sh` — канонический быстрый gate после правки.
 - `.agents/hooks/check-audit-reconciliation.sh` — каноническая сверка audit↔git.
+- `.agents/hooks/git-tidy.sh` — уборка worktree агентов и служебных веток; на старте сессии только печатает план (`--quiet`), удаляет с `--apply`.
 - `.claude/hooks/**` и `.codex/hooks/**` — launch adapters к тем же implementations.
 
 Новые hooks добавляются в `.agents/hooks/`; tool-specific каталог содержит только adapter, если формат события инструмента этого требует.

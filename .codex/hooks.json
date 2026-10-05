@@ -26,6 +26,10 @@
           {
             "type": "command",
             "command": ".codex/hooks/check-audit-reconciliation.sh"
+          },
+          {
+            "type": "command",
+            "command": ".codex/hooks/git-tidy.sh --quiet"
           }
         ]
       }

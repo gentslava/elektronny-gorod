@@ -64,7 +64,7 @@ tests/
 ├── test_event.py / test_history.py / test_history_ws.py / test_media_source.py / test_api_media.py / test_clip_proxy.py / test_history_translations.py / test_fcm.py / test_sensor_call_state.py
 ├── test_sip_*.py / test_uplink_ws.py
 ├── test_device_hierarchy.py
-├── test_secret_log_gate.py / test_audit_reconciliation_gate.py
+├── test_secret_log_gate.py / test_audit_reconciliation_gate.py / test_git_tidy.py
 ├── test_aidd_contracts.py
 └── entity, visibility, balance, DND, helpers и migration regressions
 

@@ -87,6 +87,10 @@
           {
             "type": "command",
             "command": ".claude/hooks/check-audit-reconciliation.sh"
+          },
+          {
+            "type": "command",
+            "command": ".claude/hooks/git-tidy.sh --quiet"
           }
         ]
       }
