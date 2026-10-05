@@ -22,6 +22,7 @@ from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, SupportsResponse
 
 from .api import ElektronnyGorodAPI
+from .http import error_status
 from .clip_proxy import async_release_clip_cache
 from .const import (
     DOMAIN,
@@ -66,7 +67,14 @@ _FCM_DATA: Final = f"{DOMAIN}_fcm_listeners"
 # остаются только вспомогательные реестры.
 SERVICE_ANSWER = "answer"
 SERVICE_CREATE_HOME_INVITE = "create_home_invite"
+SERVICE_CREATE_TEMPORARY_ACCESS = "create_temporary_access"
 SERVICE_HANGUP = "hangup"
+SERVICE_LIST_TEMPORARY_ACCESS = "list_temporary_access"
+SERVICE_REVOKE_TEMPORARY_ACCESS = "revoke_temporary_access"
+
+ATTR_TTL = "ttl"
+ATTR_ACCESS_CONTROL_IDS = "access_control_ids"
+ATTR_PASS_ID = "pass_id"
 
 PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
@@ -386,6 +394,28 @@ def _async_register_services(hass: HomeAssistant) -> None:
             translation_domain=DOMAIN, translation_key="integration_not_loaded"
         )
 
+    async def _require_admin(call: ServiceCall, translation_key: str) -> None:
+        """Пропустить только администратора HA с живым контекстом вызова.
+
+        Одной «авторизации» в HA мало: действие выдаёт доступ к дому или к
+        дверям у оператора, и раздавать его автоматизации нельзя. Ядерный
+        `async_register_admin_service` тут не подходит намеренно: он
+        пропускает вызов без пользователя, а автоматизация стирает `user_id`
+        (`automation/__init__.py`, `Context(parent_id=...)`) — и любой
+        домочадец, дёрнув `automation.trigger`, чеканил бы ключ от подъезда.
+        Цена решения: из автоматизации действие недоступно, из скрипта от
+        администратора — работает (скрипт контекст вызывающего хранит).
+        """
+        user = (
+            await hass.auth.async_get_user(call.context.user_id)
+            if call.context.user_id
+            else None
+        )
+        if user is None or not user.is_admin:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key=translation_key
+            )
+
     async def _create_home_invite(call: ServiceCall) -> ServiceResponse:
         """Выдать вызывающему ссылку-приглашение в дом.
 
@@ -414,24 +444,7 @@ def _async_register_services(hass: HomeAssistant) -> None:
         одиночное, не `target`: ответ здесь один, а `target` разрешает
         несколько устройств и целую область.
         """
-        # Одной авторизации в HA мало: приглашение делает человека абонентом
-        # адреса у оператора, и раздавать его автоматизации нельзя.
-        # Ядерный `async_register_admin_service` тут не подходит намеренно:
-        # он пропускает вызов без пользователя, а автоматизация стирает
-        # `user_id` (`automation/__init__.py`, `Context(parent_id=...)`) —
-        # и любой домочадец, дёрнув `automation.trigger`, чеканил бы ключ
-        # от подъезда. Цена решения: из автоматизации действие недоступно,
-        # из скрипта от администратора — работает (скрипт контекст хранит).
-        user = (
-            await hass.auth.async_get_user(call.context.user_id)
-            if call.context.user_id
-            else None
-        )
-        if user is None or not user.is_admin:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="invite_requires_admin"
-            )
-
+        await _require_admin(call, "invite_requires_admin")
         entry, place_id = _place_entry(str(call.data[ATTR_DEVICE_ID]))
 
         operator_id = str(entry.data.get(CONF_OPERATOR_ID) or "")
@@ -472,6 +485,162 @@ def _async_register_services(hass: HomeAssistant) -> None:
             )
         return {"link": link, "message": invite.get("message")}
 
+    def _temp_access_error(err: Exception) -> Exception:
+        """Перевести отказ `mh-temp-pass` во внятную ошибку.
+
+        404 — услуга `TEMP_PASS` на адресе не подключена оператором (A-118):
+        это не поломка, а ожидаемое состояние, пока услуги нет. Остальное —
+        сетевой отказ или битое тело на 200; сырой текст наружу нельзя, он
+        несёт URL с id адреса.
+        """
+        if error_status(err) == 404:
+            return ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="temp_access_not_connected"
+            )
+        return HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="temp_access_request_failed"
+        )
+
+    async def _create_temporary_access(call: ServiceCall) -> ServiceResponse:
+        """Выдать ссылку временного доступа к выбранным дверям (A-118).
+
+        В отличие от приглашения в дом (`create_home_invite`, членство
+        абонента), это разовый доступ к конкретным объектам со сроком:
+        принявший открывает выбранные двери, пока ссылка жива. Поэтому в
+        действии есть `ttl` и список объектов, а ответ — `SupportsResponse.ONLY`
+        с той же гигиеной, что у приглашения: ссылка уходит вызывающему и не
+        оседает в сущностях/логах (поле `sharedLinkMessage` под редакцией).
+
+        static-only (ADR-0006): форма запроса из кода «Мой Дом»; создание
+        вживую не подтверждено, пока оператор не подключит услугу на адрес —
+        до этого сервер отвечает 404, и действие даёт внятный отказ
+        «услуга не подключена», а не «неизвестную ошибку».
+        """
+        await _require_admin(call, "temp_access_requires_admin")
+        entry, place_id = _place_entry(str(call.data[ATTR_DEVICE_ID]))
+        api = entry.runtime_data.api
+        ttl = int(call.data[ATTR_TTL])
+
+        try:
+            allowed_ttls = await api.query_temp_access_ttls(place_id)
+            controls = await api.query_temp_access_controls(place_id)
+        except (ClientError, TimeoutError, ValueError) as err:
+            raise _temp_access_error(err) from err
+
+        if ttl not in allowed_ttls:
+            # Срок задаёт сервер (`time-to-life`), а не клиент: чужое значение
+            # оператор отверг бы, а человек не понял бы, какие сроки можно.
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="temp_access_bad_ttl",
+                translation_placeholders={
+                    "allowed": ", ".join(str(t) for t in allowed_ttls)
+                },
+            )
+
+        available_ids = [c["id"] for c in controls if isinstance(c.get("id"), int)]
+        requested = call.data.get(ATTR_ACCESS_CONTROL_IDS)
+        if requested:
+            ids = [int(x) for x in requested]
+            if any(i not in available_ids for i in ids):
+                raise ServiceValidationError(
+                    translation_domain=DOMAIN,
+                    translation_key="temp_access_bad_control",
+                )
+        else:
+            # Без явного списка — все объекты адреса, которым доступ можно
+            # выдать: самый частый сценарий «пусти гостя во все двери».
+            ids = available_ids
+        if not ids:
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="temp_access_no_controls"
+            )
+
+        try:
+            created = await api.create_temp_pass(place_id, ttl, ids)
+        except (ClientError, TimeoutError, ValueError) as err:
+            raise _temp_access_error(err) from err
+
+        message = created.get("sharedLinkMessage")
+        if not message:
+            # 200 без ссылки — отказ под видом успеха: человек отправил бы
+            # гостю пустоту, а узнал бы об этом у двери.
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="temp_access_empty"
+            )
+        return {
+            "message": message,
+            "expires_at": created.get("expiredAt"),
+            "status": created.get("status"),
+        }
+
+    async def _list_temporary_access(call: ServiceCall) -> ServiceResponse:
+        """Показать выданные ссылки адреса и объекты, доступные для выдачи (A-118).
+
+        🔴 Ссылку (`sharedLinkMessage`) наружу НЕ отдаём: список нужен, чтобы
+        отозвать доступ по `id`, а не чтобы переслать ссылку заново. Отдаём
+        только состав: id, статус, срок и объекты. Отдельно — объекты адреса
+        с их id: только отсюда человек узнаёт значения `access_control_ids`
+        для выдачи. Admin-only — список раскрывает, кому открыт дом.
+        """
+        await _require_admin(call, "temp_access_requires_admin")
+        entry, place_id = _place_entry(str(call.data[ATTR_DEVICE_ID]))
+        api = entry.runtime_data.api
+        try:
+            passes = await api.query_temp_passes(place_id)
+            controls = await api.query_temp_access_controls(place_id)
+        except (ClientError, TimeoutError, ValueError) as err:
+            raise _temp_access_error(err) from err
+        return {
+            "available_access_controls": [
+                {"id": obj.get("id"), "name": obj.get("name")} for obj in controls
+            ],
+            "passes": [
+                {
+                    "id": item.get("id"),
+                    "status": item.get("status"),
+                    "expires_at": item.get("expiredAt"),
+                    "access_controls": [
+                        {"id": obj.get("id"), "name": obj.get("name")}
+                        for obj in (item.get("availableAccessControl") or [])
+                        if isinstance(obj, dict)
+                    ],
+                }
+                for item in passes
+            ]
+        }
+
+    async def _revoke_temporary_access(call: ServiceCall) -> None:
+        """Отозвать выданную ссылку по `pass_id` (A-118).
+
+        Отзыв подтверждается повторным чтением списка, а не кодом ответа:
+        один HTTP 200 не доказывает, что доступ закрыт. Если пропуск остался
+        в списке — это ошибка, а не тихий успех. Admin-only.
+        """
+        await _require_admin(call, "temp_access_requires_admin")
+        entry, place_id = _place_entry(str(call.data[ATTR_DEVICE_ID]))
+        pass_id = int(call.data[ATTR_PASS_ID])
+        api = entry.runtime_data.api
+        try:
+            issued = await api.query_temp_passes(place_id)
+        except (ClientError, TimeoutError, ValueError) as err:
+            raise _temp_access_error(err) from err
+        if not any(item.get("id") == pass_id for item in issued):
+            # Неизвестный id сервер отвергает 500 «технической ошибкой» (живая
+            # проба), и человек пошёл бы проверять связь вместо своего ввода.
+            raise ServiceValidationError(
+                translation_domain=DOMAIN, translation_key="temp_access_unknown_pass"
+            )
+        try:
+            await api.delete_temp_pass(place_id, pass_id)
+            remaining = await api.query_temp_passes(place_id)
+        except (ClientError, TimeoutError, ValueError) as err:
+            raise _temp_access_error(err) from err
+        if any(item.get("id") == pass_id for item in remaining):
+            raise HomeAssistantError(
+                translation_domain=DOMAIN, translation_key="temp_access_revoke_failed"
+            )
+
     hass.services.async_register(DOMAIN, SERVICE_ANSWER, _answer)
     hass.services.async_register(DOMAIN, SERVICE_HANGUP, _hangup)
     hass.services.async_register(
@@ -480,6 +649,41 @@ def _async_register_services(hass: HomeAssistant) -> None:
         _create_home_invite,
         schema=vol.Schema({vol.Required(ATTR_DEVICE_ID): cv.string}),
         supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_CREATE_TEMPORARY_ACCESS,
+        _create_temporary_access,
+        schema=vol.Schema(
+            {
+                vol.Required(ATTR_DEVICE_ID): cv.string,
+                vol.Required(ATTR_TTL): vol.Coerce(int),
+                # Форма действия шлёт `null` для пустого поля и скаляр для
+                # одного объекта: ensure_list сводит оба к списку.
+                vol.Optional(ATTR_ACCESS_CONTROL_IDS): vol.All(
+                    cv.ensure_list, [vol.Coerce(int)]
+                ),
+            }
+        ),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_LIST_TEMPORARY_ACCESS,
+        _list_temporary_access,
+        schema=vol.Schema({vol.Required(ATTR_DEVICE_ID): cv.string}),
+        supports_response=SupportsResponse.ONLY,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_REVOKE_TEMPORARY_ACCESS,
+        _revoke_temporary_access,
+        schema=vol.Schema(
+            {
+                vol.Required(ATTR_DEVICE_ID): cv.string,
+                vol.Required(ATTR_PASS_ID): vol.Coerce(int),
+            }
+        ),
     )
 
 

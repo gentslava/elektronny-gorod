@@ -504,6 +504,27 @@ Content-Type: application/json
 
 Acceptance-flow относится к аккаунту гостя и не входит в HA-MVP. Реализовано в `feat/guest-invite` (A-93): owner-side action `create_home_invite` с `SupportsResponse.ONLY`: вернуть `link`/`message` вызывающему клиенту, не создавая entity и не сохраняя ответ. Admin permission реализован; security review закрывается аттестацией кандидата. Про redaction есть оговорка: ключ `link` внесён в `SENSITIVE_KEYS`, но маска закрывает одноимённый ключ, а не весь payload — `message` несёт ту же ссылку (S-27). В exception text, наши логи и diagnostics ссылка не попадает; два стока вне контроля интеграции названы в S-26.
 
+### Temporary access — `mh-temp-pass` (static-only + live-probed reads, A-118)
+
+Временный доступ по ссылке к выбранным дверям. Контракт снят из кода «Мой Дом» (static-only, ADR-0006); чтение и маршрут отзыва подтверждены живой пробой 2026-10-05 (`research/scripts/probe-temp-pass.py`), создание (`POST`) ждёт подключения услуги `TEMP_PASS` на адрес — до этого 404. Эндпоинты возвращают **голые JSON-массивы**, без обёртки `data`.
+
+```http
+GET    /api/mh-temp-pass/mobile/v1/rest/v1/temp-passes/time-to-life?placeId=<id>
+       → [int]   сроки в секундах. live: [3600, 14400, 43200, 86400] (1/4/12/24 ч)
+GET    /api/mh-temp-pass/mobile/v1/rest/v1/temp-passes/access-controls?placeId=<id>
+       → [{id, name, roleName, externalId}]   live: поля roleName/externalId сверх статики {id,name}
+GET    /api/mh-temp-pass/mobile/v1/rest/v1/temp-passes?placeId=<id>
+       → [TempPassRaw]   выданные ссылки
+POST   /api/mh-temp-pass/mobile/v1/rest/v1/temp-passes
+       body {placeId:int, ttl:int, accessControlIds:[int]} → TempPassRaw   (static-only; 404 пока услуга не подключена)
+DELETE /api/mh-temp-pass/mobile/v1/rest/v1/temp-passes/{id}
+       body {placeId:int} → void   (DELETE с телом; маршрут подтверждён пробой)
+```
+
+`TempPassRaw {id, sharedLinkMessage, status, expiredAt, availableAccessControl:[{id,name,roleName}]}`. Ссылку несёт `sharedLinkMessage`.
+
+Реализовано в `feat/temporary-access` (A-118): действия `create_temporary_access` (`SupportsResponse.ONLY`, вернуть `message`/`expires_at`/`status`), `list_temporary_access` (состав без ссылки плюс объекты адреса с id для выдачи) и `revoke_temporary_access` (неизвестный id — ошибка ввода до DELETE, затем отзыв с подтверждением по повторному чтению). Все три — admin-only (выдача физического доступа), `ttl` валидируется против `time-to-life`, объекты — против `access-controls`, на 404 внятный отказ «услуга не подключена». Ссылка (`sharedLinkMessage`) в `SENSITIVE_KEYS`, в логи/состояние/список не попадает; остаётся сток `response_variable` → трассировка скрипта (S-26).
+
 ### `GET /api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens`
 
 🎯 **Пользовательские настройки видимости** для экрана камер/домофонов в приложении оператора. Используется в [`api.py:query_screens_settings`](../../custom_components/elektronny_gorod/api.py).

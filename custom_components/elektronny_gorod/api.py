@@ -555,6 +555,101 @@ class ElektronnyGorodAPI:
         data = payload.get("data") if isinstance(payload, dict) else None
         return data if isinstance(data, dict) else {}
 
+    async def query_temp_access_controls(
+        self, place_id: str
+    ) -> list[dict[str, Any]]:
+        """Объекты адреса, которым можно выдать временный доступ (A-118).
+
+        static-only (ADR-0006): контракт из APK «Мой Дом», чтение
+        подтверждено живой пробой — поля `{id, name, roleName, externalId}`.
+        Эндпоинт отдаёт голый JSON-массив, без обёртки `data`.
+        """
+        api_url = (
+            "/api/mh-temp-pass/mobile/v1/rest/v1/temp-passes"
+            f"/access-controls?placeId={place_id}"
+        )
+        data = await self._temp_pass_list(api_url)
+        return [item for item in data if isinstance(item, dict)]
+
+    async def query_temp_access_ttls(self, place_id: str) -> list[int]:
+        """Допустимые сроки жизни ссылки в секундах (A-118).
+
+        Значения задаёт сервер (не константы клиента). Живой пробой
+        подтверждено `[3600, 14400, 43200, 86400]` — 1/4/12/24 ч.
+        """
+        api_url = (
+            "/api/mh-temp-pass/mobile/v1/rest/v1/temp-passes"
+            f"/time-to-life?placeId={place_id}"
+        )
+        data = await self._temp_pass_list(api_url)
+        return [int(x) for x in data if isinstance(x, (int, float)) and not isinstance(x, bool)]
+
+    async def query_temp_passes(self, place_id: str) -> list[dict[str, Any]]:
+        """Выданные пропуски адреса (A-118).
+
+        🔴 Элемент несёт `sharedLinkMessage` — действующую ссылку. Вызывающий
+        обязан не класть её в состояние/логи; наружу отдаётся только состав
+        без ссылки.
+        """
+        api_url = (
+            "/api/mh-temp-pass/mobile/v1/rest/v1/temp-passes"
+            f"?placeId={place_id}"
+        )
+        data = await self._temp_pass_list(api_url)
+        return [item for item in data if isinstance(item, dict)]
+
+    async def create_temp_pass(
+        self, place_id: str, ttl: int, access_control_ids: list[int]
+    ) -> dict[str, Any]:
+        """Создать ссылку временного доступа к выбранным объектам (A-118).
+
+        static-only (ADR-0006): форма запроса из APK «Мой Дом»; `POST`
+        вживую не подтверждён — услуга `TEMP_PASS` подключается оператором
+        на адрес, без неё сервер отвечает 404 (отказ разбирает вызывающий).
+
+        🔴 Возвращённое несёт `sharedLinkMessage` — действующую ссылку:
+        войти по ней может любой, кто её увидел. Не логировать, не
+        сохранять — отдать вызывающему и забыть.
+        """
+        body = {
+            "placeId": int(place_id),
+            "ttl": ttl,
+            "accessControlIds": access_control_ids,
+        }
+        api_url = "/api/mh-temp-pass/mobile/v1/rest/v1/temp-passes"
+        response = await self.http.post(api_url, json.dumps(body))
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+
+        payload = await response.json()
+        data = payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
+        return data if isinstance(data, dict) else {}
+
+    async def delete_temp_pass(self, place_id: str, pass_id: int) -> None:
+        """Отозвать выданную ссылку (A-118).
+
+        DELETE с телом — мирроринг приложения. Маршрут подтверждён живой
+        пробой. Отзыв вызывающий подтверждает повторным чтением списка, а
+        не кодом ответа.
+        """
+        api_url = f"/api/mh-temp-pass/mobile/v1/rest/v1/temp-passes/{pass_id}"
+        await self.http.delete(api_url, json.dumps({"placeId": int(place_id)}))
+
+    async def _temp_pass_list(self, api_url: str) -> list[Any]:
+        """GET эндпоинта `mh-temp-pass`, возвращающего массив.
+
+        Эндпоинты отдают голый JSON-массив; на всякий случай принимается и
+        обёртка `{"data": [...]}`. Не-массив (отказ-объект, скаляр) даёт
+        пустой список — разбор отказа по коду статуса делает транспорт.
+        """
+        response = await self.http.get(api_url)
+        if not isinstance(response, ClientResponse):
+            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        payload = await response.json()
+        if isinstance(payload, dict):
+            payload = payload.get("data")
+        return payload if isinstance(payload, list) else []
+
     async def query_camera_stream(self, camera_id: str) -> str | None:
         """Query the stream URL for the given camera."""
         api_url = (

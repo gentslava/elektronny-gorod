@@ -280,6 +280,48 @@
           "description": "The place device to invite the person to."
         }
       }
+    },
+    "create_temporary_access": {
+      "name": "Create temporary access",
+      "description": "Create a time-limited link to selected doors of one address and return it to the caller. Whoever opens the link can open those doors until it expires; anyone who sees it can use it. The integration neither stores nor logs the link, but the response ends up in a script trace if you capture it with response_variable. Admin only.",
+      "fields": {
+        "device_id": {
+          "name": "Place",
+          "description": "The place device whose doors to grant."
+        },
+        "ttl": {
+          "name": "Lifetime (seconds)",
+          "description": "Link lifetime; must be one of the values the operator allows for this address (e.g. 3600, 14400, 43200, 86400)."
+        },
+        "access_control_ids": {
+          "name": "Access control IDs",
+          "description": "Which objects to grant, by id — take them from List temporary access. Leave empty to grant every object available for this address."
+        }
+      }
+    },
+    "list_temporary_access": {
+      "name": "List temporary access",
+      "description": "List the temporary-access links issued for one address: id, status, expiry and objects, plus the address objects with their ids for granting. The link itself is never returned — use the id to revoke. Admin only.",
+      "fields": {
+        "device_id": {
+          "name": "Place",
+          "description": "The place device to list issued links for."
+        }
+      }
+    },
+    "revoke_temporary_access": {
+      "name": "Revoke temporary access",
+      "description": "Revoke an issued temporary-access link by its id and confirm it is gone. Admin only.",
+      "fields": {
+        "device_id": {
+          "name": "Place",
+          "description": "The place device the link belongs to."
+        },
+        "pass_id": {
+          "name": "Pass ID",
+          "description": "The id of the issued link, from List temporary access."
+        }
+      }
     }
   },
   "exceptions": {
@@ -315,6 +357,33 @@
     },
     "no_active_call": {
       "message": "No incoming intercom call right now — there is nothing to answer or hang up."
+    },
+    "temp_access_requires_admin": {
+      "message": "Only an administrator can manage temporary access: it opens physical doors. Automations cannot call it, because an automation drops the caller identity — run it manually or from a script."
+    },
+    "temp_access_not_connected": {
+      "message": "Temporary access is not connected for this address. The operator provisions the service on the address; until then the link cannot be created."
+    },
+    "temp_access_bad_ttl": {
+      "message": "The operator does not allow this lifetime for the address. Allowed values (seconds): {allowed}."
+    },
+    "temp_access_bad_control": {
+      "message": "One of the selected objects does not belong to this address or cannot be granted temporary access."
+    },
+    "temp_access_no_controls": {
+      "message": "This address has no objects that temporary access can be granted to."
+    },
+    "temp_access_empty": {
+      "message": "The operator answered without a link, so there is nothing to send."
+    },
+    "temp_access_request_failed": {
+      "message": "The temporary-access request to the operator failed. Check the connection and try again."
+    },
+    "temp_access_revoke_failed": {
+      "message": "The link is still listed after the revoke request, so it may still work. Try again."
+    },
+    "temp_access_unknown_pass": {
+      "message": "There is no issued link with this id for the address. Get the id from List temporary access."
     }
   }
 }

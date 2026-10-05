@@ -18,3 +18,54 @@ create_home_invite:
           filter:
             - integration: elektronny_gorod
               model: Place
+
+# Временный доступ к выбранным дверям со сроком (A-118, static-only).
+# Отличается от приглашения в дом: разовый доступ к объектам, а не членство.
+# Ответ-only и только администратору — выдаёт физический доступ.
+create_temporary_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: elektronny_gorod
+              model: Place
+    ttl:
+      required: true
+      selector:
+        number:
+          min: 3600
+          max: 86400
+          unit_of_measurement: s
+          mode: box
+    access_control_ids:
+      required: false
+      selector:
+        object:
+
+list_temporary_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: elektronny_gorod
+              model: Place
+
+revoke_temporary_access:
+  fields:
+    device_id:
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: elektronny_gorod
+              model: Place
+    pass_id:
+      required: true
+      selector:
+        number:
+          min: 1
+          mode: box
