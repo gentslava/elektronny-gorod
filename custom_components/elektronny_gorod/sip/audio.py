@@ -2,7 +2,7 @@
 
 Домофон оператора шлёт только G.711 (PCMU pt=0 / PCMA pt=8); voip-utils хардкодит
 Opus — поэтому транскод наш слой (design.md §3.1). `audioop` удалён из stdlib в
-Python 3.13 (PEP 594) → зависимость `audioop-lts` (manifest) возвращает модуль.
+Python 3.13 (PEP 594) → зависимость HA core `audioop-lts` возвращает модуль.
 
 `pcm_to_g711` используется в рантайме `sip/uplink.py` (uplink-микрофон → G.711 →
 RTP). `g711_to_pcm` (downlink G.711→PCM) — резерв; downlink-транскод сейчас делает

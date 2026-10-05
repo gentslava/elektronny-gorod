@@ -136,7 +136,11 @@ async_setup_entry:
      ленивое создание адресов вернёт плоский список устройств (A-100)
   9. await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
      → каждая платформа читает `coordinator.data` и создаёт entity:
-       - camera.async_setup_entry: data["cameras"] → ElektronnyGorodCamera
+       - camera.async_setup_entry: data["cameras"] → ElektronnyGorodCamera;
+         listener координатора добавляет новые camera IDs на последующих обновлениях, один раз на ID; снимается через entry.async_on_unload.
+         Временная пропажа камеры не удаляет сущность. Видимость новой камеры задаётся до регистрации, существующий пользовательский выбор сохраняется.
+         Registry create/update вызывает prompt reconcile stream manager;
+         обработчик помечен HA callback и выполняется в event loop.
        - lock.async_setup_entry:   data["locks"]   → ElektronnyGorodLock
        - sensor.async_setup_entry: balances/call state + RTSP diagnostic sensor
        - switch.async_setup_entry: data["dnd"]      → ElektronnyGorodDNDSwitch (×3 per place)

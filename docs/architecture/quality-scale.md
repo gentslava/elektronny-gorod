@@ -96,7 +96,7 @@ External reference:
 | `docs-examples` | ✅ есть пример автоматизации в README |
 | `docs-known-limitations` | ⚠️ есть в feature/release docs; сверить canonical README |
 | `docs-supported-devices` | ⚠️ нечётко |
-| `dynamic-devices` | 🔴 нет (places загружаются 1 раз) |
+| `dynamic-devices` | 🟡 частично в candidate A-119: новые camera IDs добавляются на обновлениях координатора; остальные платформы создают сущности при setup. Полное Gold-правило не закрыто |
 | `entity-disabled-by-default` | n/a |
 | `exception-translations` | 🟡 частично: через `translation_key` переведены отказы замка (`cannot_lock`/`cannot_unlock`), вызова (`answer`/`hangup`), приглашения в дом (`invite_*`) и DND (`dnd_*`); без перевода — около 17 `BrowseError`/`Unresolvable` в `media_source.py` (их текст человек видит в медиабраузере, например «Archive is temporarily unavailable»), `ConfigEntryAuthFailed` и `UpdateFailed` в `coordinator.py`, голый `Unauthorized` в `history_ws.py` и исключения самого HA |
 | `icon-translations` | n/a |
