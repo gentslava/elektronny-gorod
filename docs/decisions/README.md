@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (ADR registry synchronized through ADR-0016)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-10-05 (ADR registry synchronized through ADR-0016; ADR-0006 revised)
 
 Source files:
 - `*.md` in this directory
@@ -38,7 +38,7 @@ Quality gates:
 | [0003](0003-iot-class-strategy.md) | Стратегия `iot_class` и polling | **accepted** (slice 3a реализован) | 2026-05-22 |
 | [0004](0004-token-redaction.md) | Token redaction в логах | **accepted** (реализован в hotfix PR #31) | 2026-05-22 |
 | [0005](0005-lock-vs-button.md) | Lock vs Button для домофона | proposed | 2026-05-22 |
-| [0006](0006-mirror-app-behavior.md) | Mirror application behavior | accepted | 2026-05-23 |
+| [0006](0006-mirror-app-behavior.md) | Mirror application behavior | accepted (область уточнена 2026-10-05) | 2026-05-23 |
 | [0007](0007-stateful-emulator-baseline.md) | Stateful emulator baseline для HAR-сбора | accepted | 2026-05-23 |
 | [0008](0008-shared-client-session.md) | Shared `ClientSession` через `async_get_clientsession(hass)` | accepted | 2026-05-24 |
 | [0009](0009-camera-stream-auto-recovery.md) | Camera stream auto-recovery при истечении operator session | accepted | 2026-05-27 |

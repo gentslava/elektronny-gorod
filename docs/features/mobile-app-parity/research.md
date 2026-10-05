@@ -78,8 +78,8 @@ Missing API wrappers: event search, camera event list, archive playback and down
 
 ## Recommendation
 
-Implement in evidence order: history/archive first, then the now-unblocked NTK guest invitation slice. Keys and private-camera controls still wait for enabled account/hardware captures. Keep each capability independently degradable.
+Implement in evidence order: history/archive first, then the now-unblocked NTK guest invitation slice. Keys and private-camera controls are confirmed by an enabled-account/hardware HAR or live probe where possible, otherwise ship static-only per ADR-0006. Keep each capability independently degradable.
 
 ## Quality gate
 
-`RESEARCH_DONE` — completed. Static-only slices retain explicit capture gates.
+`RESEARCH_DONE` — completed. Static-only slices follow ADR-0006: confirmed by HAR or a live probe where possible, otherwise shipped labelled static-only; enum values only from observed traffic.
