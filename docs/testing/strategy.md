@@ -1,7 +1,7 @@
-Status: Active Owner: QA / Testing Agent Last reviewed: 2026-10-05 (перемер на кандидате `feat/guest-invite`: пин CI и минимум; пробел по APK-инструментам)
+Status: Active Owner: QA / Testing Agent Last reviewed: 2026-10-05 (перемер на кандидате `feat/temporary-access`: пин CI и минимум)
 
 Source files:
-- `tests/**` (73 test-модуля + `conftest.py`)
+- `tests/**` (75 test-модулей + `conftest.py`)
 - `.github/workflows/python-tests.yaml`
 - `pytest.ini`, `requirements_test.txt`
 - `custom_components/elektronny_gorod/**`
@@ -31,8 +31,8 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | **1239 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-10-05; `.venv` собран под пин CI `PHC_CURRENT`: Python 3.14.7, HA 2026.9.0b6). На минимуме 2026.8.1 — **1237 passed, 2 skipped**, в отдельном окружении под минимальный пин матрицы CI (HA 2026.8.1, PHC 0.13.355 — задан в матрице, отдельной переменной под него нет), 2026-10-05. Команда та же, но `.venv` для этого не годится — он собран под пин CI и минимальные цифры воспроизвести не может. Два skip — тесты FCM, требующие `firebase-messaging`: на минимальном пине пакет не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
-| Test modules | 73 файла `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
+| Локальный suite | **1288 passed** (`PYTHONPATH=. .venv/bin/pytest tests/ -q`, 2026-10-05; `.venv` собран под пин CI `PHC_CURRENT`: Python 3.14.8, HA 2026.9.0b6). На минимуме 2026.8.1 — **1286 passed, 2 skipped**, в отдельном окружении под минимальный пин матрицы CI (HA 2026.8.1, PHC 0.13.355 — задан в матрице, отдельной переменной под него нет), 2026-10-05. Команда та же, но `.venv` для этого не годится — он собран под пин CI и минимальные цифры воспроизвести не может. Два skip — тесты FCM, требующие `firebase-messaging`: на минимальном пине пакет не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
+| Test modules | 75 файлов `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | **62 passed**, `tsc --noEmit` и production bundle build |
 | Product website | **73 passed**, `tsc --noEmit` и Vite production build (`website/`) |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
@@ -44,10 +44,11 @@ Quality gates:
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
 | Эмуляция клиента | `user_agent`: идентификаторы устройства переживают перезагрузку, версия приложения следует за константой (A-119) |
 | Home invitation | приглашение в дом (`create_home_invite`): контракт запроса против приложения, экранирование query, отказ на 401 через настоящий `http.py` без разбора тела как JSON, admin-гейт и отказ вызову без пользователя, маршрут к записи-владельцу адреса, отказ не-адресу и выгруженной записи, `SupportsResponse.ONLY`, проекция `{link,message}`, отказ на пустую ссылку и на ответ не той формы сквозь настоящий разбор, пин ключа `link` в редакции, sentinel по журналу на транспорте и на действии |
+| Temporary access (A-118) | `mh-temp-pass`: транспорт пяти методов (голый массив и обёртка `data`, точное тело POST/DELETE, binary-ветка), выбор срока против `time-to-life` и объектов против `access-controls`, дефолт «все объекты», 404 → «услуга не подключена», прочий отказ/таймаут → request_failed, пустая ссылка, admin-гейт на всех трёх действиях и отказ вызову без пользователя, перевод отказов на всех местах вызова (создание, чтение перед созданием, список, чтение перед отзывом, отзыв), `sharedLinkMessage` не в журнале и не в списке, пин ключа `sharedlinkmessage` в редакции, список отдаёт id объектов для выдачи, форма действия с пустым полем объектов (`null`) или одним объектом принимается, неизвестный `pass_id` — ошибка ввода до DELETE, отзыв с подтверждением по повторному чтению |
 | Media Source archive | browse hierarchy place → camera → day → event, opaque-ID navigation, signed-URL resolve без persistence, retention/playability errors, hidden-camera exclusion, event→camera binding на resolve (event_id из пути валиден только среди событий этой камеры/дня), transient-vs-no-recording mapping, boundary logging с opaque IDs, multi-entry root |
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Website CI | `website.yml`: typecheck + Vitest + production build перед GitHub Pages deploy |
-| Coverage | **97.52%** общий, все 42 модуля выше 95% (замер 2026-10-05; тоньше всех `history_ws.py` — 95.19%). Помодульный порог держит шаг CI «Enforce the per-module coverage floor»: агрегатного было бы мало — модуль, упавший до нуля, прячется за общей цифрой; каноническая команда приведена ниже |
+| Coverage | **97.65%** общий, все 42 модуля выше 95% (замер 2026-10-05; `api.py` 100%, `__init__.py` 98%, тоньше всех `history_ws.py` — 95%). Помодульный порог держит шаг CI «Enforce the per-module coverage floor»: агрегатного было бы мало — модуль, упавший до нуля, прячется за общей цифрой; каноническая команда приведена ниже |
 
 Остающиеся gap-и: нет полностью автоматизированного live-теста против оператора и физического домофона; часть широкого REST API покрыта точечными контрактными тестами. Live/PCAP evidence хранится отдельно в `research/intercom-call-probe/`.
 
@@ -251,7 +252,7 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 
 ## Definition of done для TESTS_PASS gate
 
-- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 1239 passed (2026-10-05); на минимальном пине 1237 passed, 2 skipped (2026-10-05).
+- [x] `PYTHONPATH=. .venv/bin/pytest tests/ -q` зелёный локально: 1288 passed (2026-10-05); на минимальном пине 1286 passed, 2 skipped (2026-10-05).
 - [x] `frontend`: 62 Vitest tests, TypeScript check and production build green.
 - [ ] Перед релизом проверить зелёный `.github/workflows/python-tests.yaml` на master.
 - [x] Перед заявлением coverage-процента выполнить свежий coverage-run и сохранить evidence.

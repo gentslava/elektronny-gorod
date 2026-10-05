@@ -153,7 +153,7 @@ History `EventEntity` additive и не требует config-entry migration: st
 | `diagnostics.py` | ✅ redacted | `TO_REDACT ⊇ SENSITIVE_KEYS`, counters-only snapshot |
 | `repairs.py` | ❌ | P2 |
 | FCM degraded Repairs issue | ✅ persistent error per config entry | non-fixable; title identifies the affected entry; auto-delete after confirmed recovery, deliberate disable, or entry removal |
-| `services.yaml` (свои сервисы) | ✅ `answer` / `hangup` | SIP-вызов |
+| `services.yaml` (свои сервисы) | ✅ `answer` / `hangup`; `create_home_invite`; `create_temporary_access` / `list_temporary_access` / `revoke_temporary_access` | SIP-вызов; приглашение в дом (A-93); временный доступ (A-118) |
 | Поддержка `system_health` | ❌ | P3 |
 
 ## Translations

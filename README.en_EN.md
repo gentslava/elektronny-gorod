@@ -60,6 +60,7 @@ The integration mirrors the APIs of the official My Home and Umnyy Dom.ru apps: 
 - [🕘 Event history](#-event-history)
 - [🎞 Camera archive in the media browser](#-camera-archive-in-the-media-browser)
 - [👤 Home invitation](#-home-invitation)
+- [🚪 Temporary access by link](#-temporary-access-by-link)
 - [Automation example: balance](#automation-example-balance)
 - [Issues and Contributions](#issues-and-contributions)
 - [License](#license)
@@ -186,6 +187,7 @@ To remove the integration itself rather than one account: open "Elektronny Gorod
 - **Answered and missed call history** — one entity per place plus a combined Lovelace card with filters and pagination.
 - **Camera recordings archive in the media browser** — browse motion events by day and play clips with seeking (see [the section below](#-camera-archive-in-the-media-browser)).
 - **Home invitation** — the `create_home_invite` action returns a link that makes a family member or a guest a user of the address (see [below](#-home-invitation)).
+- **Temporary access by link** — `create_temporary_access` / `list_temporary_access` / `revoke_temporary_access`: one-off access to selected doors with a lifetime (see [below](#-temporary-access-by-link)).
 - Account health: balance, days until blocking and blocked status.
 - Do-not-disturb controls for intercom and management-company calls.
 
@@ -407,7 +409,7 @@ Cameras hidden via the "Visible on dashboard" toggle are excluded from the archi
 
 This is how you invite a family member or a guest: whoever accepts the link becomes a user of the chosen address in the operator's app, with everything that follows from it there. In the app this is People → selected address → Add guest; an address can be used by the contract owner and up to four invited people.
 
-> **This is not temporary access.** The app has a separate feature that gives a guest access to selected doors and cameras. The integration does not implement it yet.
+> **This is not temporary access.** Time-limited access to selected doors is a separate set of actions, [below](#-temporary-access-by-link).
 
 The `elektronny_gorod.create_home_invite` action returns the link and a ready-made share message:
 
@@ -427,6 +429,32 @@ response_variable: invite
 - The integration neither stores nor logs the link. It does land in the script trace if you capture the response in `response_variable`, and in `home-assistant.log` if debug logging is on.
 - The integration cannot revoke an invitation once issued.
 - Only Electronic City is supported for now: the brand code for Dom.ru is known from the app but unconfirmed by a live request, and the integration does not guess it.
+
+## 🚪 Temporary access by link
+
+Unlike a home invitation (permanent membership), this is **one-off access** to selected doors with a lifetime: whoever accepts the link opens the chosen objects until it expires. Three actions:
+
+- `elektronny_gorod.create_temporary_access` — pick an address, a lifetime and, optionally, specific objects; returns a link with text.
+- `elektronny_gorod.list_temporary_access` — see issued links (id, status, expiry, objects) and the address objects with their ids — that is where `access_control_ids` values come from. The link itself is not shown in the list.
+- `elektronny_gorod.revoke_temporary_access` — revoke a link by id; the integration confirms access is closed.
+
+```yaml
+action: elektronny_gorod.create_temporary_access
+data:
+  device_id: <place device>
+  ttl: 3600                 # lifetime in seconds: 3600 / 14400 / 43200 / 86400 (1/4/12/24 h)
+  # access_control_ids: [11, 22]   # optional; without it — every available object
+response_variable: pass
+```
+
+Then `{{ pass.message }}` can be forwarded to the guest and `{{ pass.expires_at }}` shows the expiry.
+
+**What to know.**
+
+- The lifetime is set by the operator: only values from `time-to-life` are allowed (typically 1, 4, 12 and 24 hours). A different lifetime is rejected with the allowed values.
+- All three actions are **administrator-only**: they open physical doors. Not callable from automations; a script run by an administrator works.
+- The integration neither stores nor logs the link, and it is not in entity state or the list either. It does land in the script trace if you capture the response in `response_variable`, and in `home-assistant.log` if debug logging is on.
+- **The operator provisions the "Temporary access" service on the address.** Until then, create returns a clear "service not connected" refusal. Reads and revoke are confirmed by a live request; create itself is taken from the app code and will be confirmed by the first user who has the service.
 
 ## Automation example: balance
 Here is an example of automation for low balance notification:
