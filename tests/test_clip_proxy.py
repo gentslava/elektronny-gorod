@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import struct
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -36,6 +37,20 @@ _EVENT_ID = "3001"
 _OPERATOR_URL = "https://savevideo.example/signed-clip.mp4"
 
 
+def _box(kind: bytes, payload: bytes = b"") -> bytes:
+    """Один ISO-BMFF box с 32-битным размером."""
+    return struct.pack(">I", 8 + len(payload)) + kind + payload
+
+
+# Минимальный валидный mp4: ftyp + moov + mdat. Прокси кеширует только
+# дописанный клип, поэтому произвольные байты в роли тела больше не годятся.
+_FTYP = _box(b"ftyp", b"isom\x00\x00\x00\x00")
+_CLIP = _FTYP + _box(b"moov", b"idx") + _box(b"mdat", b"data")
+# Файл, который оператор ещё дописывает: ftyp, free и mdat с size=0, без moov
+# (снимок 2026-10-26, A-123).
+_INCOMPLETE = _FTYP + _box(b"free") + struct.pack(">I", 0) + b"mdat" + b"growing"
+
+
 def _coordinator(
     download_url: str = _OPERATOR_URL,
     download_error: Exception | None = None,
@@ -49,12 +64,14 @@ def _coordinator(
 def _fake_upstream(
     *,
     status: int = 200,
-    chunks: tuple[bytes, ...] = (b"mp4", b"data"),
+    chunks: tuple[bytes, ...] = (_CLIP[:3], _CLIP[3:]),
     headers: dict[str, str] | None = None,
 ) -> MagicMock:
     upstream = MagicMock()
     upstream.status = status
-    upstream.headers = headers or {"Content-Length": "7"}
+    upstream.headers = headers or {
+        "Content-Length": str(sum(len(chunk) for chunk in chunks))
+    }
 
     async def _iter_chunked(_size: int):
         for chunk in chunks:
@@ -111,8 +128,8 @@ async def test_view_streams_clip(hass, clip_client) -> None:
     assert resp.headers["Content-Type"] == "video/mp4"
     # Без Accept-Ranges Chromium помечает источник потоковым и гасит seek.
     assert resp.headers["Accept-Ranges"] == "bytes"
-    assert resp.headers["Content-Length"] == "7"
-    assert await resp.read() == b"mp4data"
+    assert resp.headers["Content-Length"] == str(len(_CLIP))
+    assert await resp.read() == _CLIP
     assert session.get.await_args.args == (_OPERATOR_URL,)
     assert session.get.await_count == 1
     upstream.close.assert_called_once()
@@ -140,9 +157,9 @@ async def test_view_serves_range_itself(hass, clip_client) -> None:
         resp = await client.get(url, headers={"Range": "bytes=0-2"})
 
     assert resp.status == 206
-    assert resp.headers["Content-Range"] == "bytes 0-2/7"
+    assert resp.headers["Content-Range"] == f"bytes 0-2/{len(_CLIP)}"
     assert resp.headers["Content-Length"] == "3"
-    assert await resp.read() == b"mp4"
+    assert await resp.read() == _CLIP[:3]
     # Range наверх не уходит — оператор его не поддерживает.
     assert session.get.await_args.args == (_OPERATOR_URL,)
     assert "headers" not in session.get.await_args.kwargs
@@ -165,10 +182,11 @@ async def test_view_range_suffix_and_unsatisfiable(hass, clip_client) -> None:
         beyond = await client.get(url, headers={"Range": "bytes=99-"})
 
     assert suffix.status == 206
-    assert suffix.headers["Content-Range"] == "bytes 3-6/7"
-    assert await suffix.read() == b"data"
+    total = len(_CLIP)
+    assert suffix.headers["Content-Range"] == f"bytes {total - 4}-{total - 1}/{total}"
+    assert await suffix.read() == _CLIP[-4:]
     assert beyond.status == 416
-    assert beyond.headers["Content-Range"] == "bytes */7"
+    assert beyond.headers["Content-Range"] == f"bytes */{total}"
 
 
 async def test_view_rejects_bad_token_and_unknown_entry(hass, clip_client) -> None:
@@ -304,7 +322,7 @@ async def test_view_polls_storage_until_clip_ready(hass, clip_client) -> None:
     entry.runtime_data = coordinator
     entry.mock_state(hass, ConfigEntryState.LOADED)
 
-    ready = _fake_upstream(chunks=(b"mp4", b"data"))
+    ready = _fake_upstream(chunks=(_CLIP[:3], _CLIP[3:]))
     session = MagicMock()
     session.get = AsyncMock(side_effect=[_fake_locked_upstream(), ready])
 
@@ -319,7 +337,7 @@ async def test_view_polls_storage_until_clip_ready(hass, clip_client) -> None:
         resp = await client.get(clip_proxy_url(hass, entry.entry_id, _EVENT_ID))
 
     assert resp.status == 200
-    assert await resp.read() == b"mp4data"
+    assert await resp.read() == _CLIP
     assert coordinator.api.query_event_download.await_count == 1
     assert session.get.await_count == 2
     assert session.get.await_args.args == (_OPERATOR_URL,)
@@ -349,7 +367,7 @@ async def test_clip_is_fetched_once_and_reused(hass, clip_client) -> None:
 
     assert first.status == 200
     assert seek.status == 206
-    assert await seek.read() == b"data"
+    assert await seek.read() == _CLIP[3:7]
     assert coordinator.api.query_event_download.await_count == 1
     assert session.get.await_count == 1
 
@@ -468,7 +486,7 @@ async def test_view_ignores_malformed_range(hass, clip_client) -> None:
         )
 
     assert resp.status == 200
-    assert await resp.read() == b"mp4data"
+    assert await resp.read() == _CLIP
 
 
 async def test_view_refuses_empty_body(hass, clip_client) -> None:
@@ -622,3 +640,127 @@ def test_zero_suffix_is_unsatisfiable() -> None:
     from custom_components.elektronny_gorod.clip_proxy import _RANGE_UNSATISFIABLE
 
     assert _parse_range("bytes=-0") == _RANGE_UNSATISFIABLE
+
+
+# ─── A-123: недописанный клип не кешируется ─────────────────────────────────
+
+
+async def test_incomplete_clip_is_retried_not_cached(hass, clip_client) -> None:
+    """Растущий mp4 без `moov` — это «ещё готовится», а не клип.
+
+    Оператор снимает 423 раньше, чем закрыл запись: отдаёт `ftyp, free,
+    mdat(size=0)`. Закешированный на TTL, он отравлял бы все запросы.
+    """
+    from custom_components.elektronny_gorod import clip_proxy
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Test")
+    entry.add_to_hass(hass)
+    coordinator = _coordinator()
+    entry.runtime_data = coordinator
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+
+    session = MagicMock()
+    session.get = AsyncMock(
+        side_effect=[
+            _fake_upstream(chunks=(_INCOMPLETE,)),
+            _fake_upstream(chunks=(_CLIP,)),
+        ]
+    )
+
+    with patch(
+        "custom_components.elektronny_gorod.clip_proxy.async_get_clientsession",
+        return_value=session,
+    ), patch(
+        "custom_components.elektronny_gorod.clip_proxy._DOWNLOAD_PREPARE_BACKOFF",
+        (0.01,),
+    ):
+        client = clip_client
+        url = clip_proxy_url(hass, entry.entry_id, _EVENT_ID)
+        first = await client.get(url)
+        second = await client.get(url)
+
+    assert first.status == 200
+    assert await first.read() == _CLIP
+    assert second.status == 200
+    # Минт один, второй запрос обслужен кешем с полным файлом.
+    assert coordinator.api.query_event_download.await_count == 1
+    assert session.get.await_count == 2
+    cached = clip_proxy._cache_get(hass, entry.entry_id, _EVENT_ID)
+    assert cached is not None
+    assert cached.data == _CLIP
+
+
+async def test_incomplete_clip_until_budget_is_503_and_uncached(
+    hass, clip_client
+) -> None:
+    from custom_components.elektronny_gorod import clip_proxy
+
+    entry = MockConfigEntry(domain=DOMAIN, title="Test")
+    entry.add_to_hass(hass)
+    entry.runtime_data = _coordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+
+    session = MagicMock()
+    session.get = AsyncMock(
+        side_effect=lambda *_a, **_k: _fake_upstream(chunks=(_INCOMPLETE,))
+    )
+
+    with patch(
+        "custom_components.elektronny_gorod.clip_proxy.async_get_clientsession",
+        return_value=session,
+    ), patch(
+        "custom_components.elektronny_gorod.clip_proxy._DOWNLOAD_PREPARE_BACKOFF",
+        (0.01,),
+    ), patch(
+        "custom_components.elektronny_gorod.clip_proxy._DOWNLOAD_PREPARE_BUDGET",
+        0.05,
+    ):
+        client = clip_client
+        resp = await client.get(clip_proxy_url(hass, entry.entry_id, _EVENT_ID))
+
+    assert resp.status == 503
+    assert session.get.await_count >= 2
+    assert clip_proxy._cache_get(hass, entry.entry_id, _EVENT_ID) is None
+
+
+def _largesize_box(kind: bytes, payload: bytes = b"") -> bytes:
+    """Box с 64-битным размером: size == 1, largesize идёт после типа."""
+    return struct.pack(">I", 1) + kind + struct.pack(">Q", 16 + len(payload)) + payload
+
+
+@pytest.mark.parametrize(
+    ("data", "expected"),
+    [
+        pytest.param(_CLIP, True, id="moov-before-mdat"),
+        pytest.param(
+            _FTYP + _box(b"mdat", b"data") + _box(b"moov", b"idx"),
+            True,
+            id="moov-after-mdat",
+        ),
+        pytest.param(
+            _FTYP + _largesize_box(b"mdat", b"data") + _box(b"moov"),
+            True,
+            id="largesize-box-skipped",
+        ),
+        pytest.param(
+            _FTYP + _largesize_box(b"moov", b"idx"), True, id="largesize-moov"
+        ),
+        pytest.param(_INCOMPLETE, False, id="size0-last-box-no-moov"),
+        pytest.param(
+            _FTYP + struct.pack(">I", 0) + b"moov" + b"xx",
+            True,
+            id="size0-last-box-is-moov",
+        ),
+        pytest.param(_FTYP + _box(b"mdat", b"data"), False, id="no-moov"),
+        pytest.param(_FTYP + struct.pack(">I", 99) + b"moov", False, id="truncated-box"),
+        pytest.param(_FTYP + b"\x00\x00\x00", False, id="truncated-header"),
+        pytest.param(_FTYP + struct.pack(">I", 4) + b"moov", False, id="size-below-header"),
+        pytest.param(_FTYP + struct.pack(">I", 1) + b"mdat" + b"\x00\x00", False, id="truncated-largesize"),
+        pytest.param(b"", False, id="empty"),
+        pytest.param(b"not an mp4 at all, just text", False, id="garbage"),
+    ],
+)
+def test_mp4_complete(data: bytes, expected: bool) -> None:
+    from custom_components.elektronny_gorod.clip_proxy import _mp4_complete
+
+    assert _mp4_complete(data) is expected
