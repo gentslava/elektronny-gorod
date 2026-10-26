@@ -324,6 +324,108 @@ automation:
           entity_id: lock.YOUR_INTERCOM
 ```
 
+> **Push reaches only some phones?** Check the device names in Companion. Two phones of the same model register under the same default name, for example `A065`. Home Assistant addresses pushes by that name, so both share one `notify.mobile_app_a065` and only the phone that registered last gets the notification. A `mobile_app` device action does not help either: the second phone drops out of the target list entirely. Rename one of them in Companion: Settings → Companion app → Servers & devices → your server → Device name.
+
+### Example 3. Yandex Station: announcement, ringtone and "Alice, open"
+
+Alice announces which door is ringing and plays a ringtone until the door is opened, the call is dropped or it ends. While the call is ringing and for two minutes after, "Алиса, открой" ("Alice, open") opens exactly the door that rang. "Алиса, отбой" ("Alice, hang up") stops the ringtone and drops the call in Home Assistant: the call screen card goes away. It does not decline the call on the panel itself: if the call was not answered, the panel is not told and keeps ringing until its own timeout. You cannot talk to the visitor through the speaker either: its microphone is not accessible, so the conversation stays on the phone or in the [call screen card](#-call-screen-card).
+
+Requirements:
+
+1. The [Yandex.Station](https://github.com/AlexxIT/YandexStation) integration (HACS) with the speaker in local mode, so it can play a file by URL.
+2. A ringtone: any mp3 at `/config/www/doorbell_ring.mp3`, about a minute long; the call ends earlier on its own. The speaker downloads it from `http://YOUR_HA_IP:8123/local/doorbell_ring.mp3`, so use the Home Assistant address in your local network.
+3. Two scenarios in the "Дом с Алисой" app. For each one: Scenarios → +, "If" — "Phrase", "Then" — your speaker → "Run command" with the text `ничего не делай` ("do nothing"). The command then reaches Home Assistant silently as a `yandex_scenario` event. The scenario name must match the name in the automation:
+   - «Домофон открыть» — phrases «открой», «открой дверь», «открывай»;
+   - «Домофон отбой» — phrases «отбой», «сбрось», «отклони».
+
+You can test the scenarios without a call: the `yandex_station.send_command` action with `command: sendText` and `text: открой` hands the phrase to the speaker as if it had been spoken, and Alice answers that nobody is ringing.
+
+```yaml
+automation:
+  # 1) Call: announcement and ringtone until the call is over
+  - alias: "Doorbell: Alice announces the call"
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: event.YOUR_INTERCOM_doorbell_call
+        # a state restored after a reload is not a new call
+        not_from:
+          - unavailable
+          - unknown
+    conditions:
+      - "{{ trigger.from_state is not none and trigger.to_state.attributes.event_type == 'ring' }}"
+    actions:
+      - action: media_player.play_media
+        target:
+          entity_id: media_player.YOUR_STATION
+        data:
+          media_content_type: text
+          media_content_id: "Звонок в домофон. {{ trigger.to_state.attributes.gate_name }}"
+      - delay: 3
+      - action: media_player.play_media
+        target:
+          entity_id: media_player.YOUR_STATION
+        data:
+          media_content_type: music
+          media_content_id: "http://YOUR_HA_IP:8123/local/doorbell_ring.mp3"
+      # wait for a state, not an event: a door opened during the announcement is caught too
+      - wait_template: >-
+          {{ not is_state('lock.YOUR_INTERCOM', 'locked')
+             or state_attr('event.YOUR_INTERCOM_doorbell_call', 'event_type') != 'ring' }}
+        timeout: 75
+      - action: media_player.media_stop
+        target:
+          entity_id: media_player.YOUR_STATION
+
+  # 2) "Alice, open": only while ringing and for two minutes after
+  - alias: "Doorbell: Alice, open"
+    triggers:
+      - trigger: event
+        event_type: yandex_scenario
+        event_data:
+          scenario_name: Домофон открыть
+    actions:
+      - if: "{{ as_timestamp(states('event.YOUR_INTERCOM_doorbell_call'), 0) > now().timestamp() - 120 }}"
+        then:
+          - action: media_player.media_stop
+            target:
+              entity_id: media_player.YOUR_STATION
+          - action: lock.unlock
+            target:
+              entity_id: lock.YOUR_INTERCOM
+          - action: media_player.play_media
+            target:
+              entity_id: "{{ trigger.event.data.entity_id }}"
+            data:
+              media_content_type: text
+              media_content_id: "Открываю"
+        else:
+          - action: media_player.play_media
+            target:
+              entity_id: "{{ trigger.event.data.entity_id }}"
+            data:
+              media_content_type: text
+              media_content_id: "Сейчас никто не звонит в домофон"
+
+  # 3) "Alice, hang up": stop the ringtone and drop the call in Home Assistant
+  - alias: "Doorbell: Alice, hang up"
+    triggers:
+      - trigger: event
+        event_type: yandex_scenario
+        event_data:
+          scenario_name: Домофон отбой
+    actions:
+      - action: media_player.media_stop
+        target:
+          entity_id: media_player.YOUR_STATION
+      - action: elektronny_gorod.hangup
+        continue_on_error: true
+```
+
+For several doors use the same automations with a list of `event.*_doorbell_call` entities in the trigger and an "event → lock" mapping in `variables`. The operator sends the full address in `gate_name`: Alice cannot read it within three seconds, and the ringtone cuts the announcement off. Use a short name from the same mapping or a longer `delay`. The speaker hears "Алиса, …" over the ringtone. A scenario with the phrase «открой» catches only that exact phrase, so "Алиса, открой YouTube" works as before.
+
+> Anyone the speaker can hear can open the door by voice, a TV included, and so can any family member through the "Дом с Алисой" app, even away from home. That is why the window is limited to two minutes after a call; make it shorter if that is too long.
+
 ## 📞 Call screen card
 
 Ready-to-use Lovelace card `custom:eg-intercom-call-card` — the whole call on one screen: guest video, "Open door" with a protected gesture, accept/hang up, microphone. Driven by `sensor.<intercom>_call_state`, styled with Home Assistant theme tokens (dark/light), responsive from phone to wall panel.

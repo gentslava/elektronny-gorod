@@ -177,6 +177,110 @@ export const AUTOMATIONS: AutomationRecipe[] = [
           volume_level: 0.2`,
   },
   {
+    id: "yandex-station",
+    category: "ring",
+    tab: "Яндекс Станция",
+    title: "Алиса объявляет звонок, «Алиса, открой» открывает звонившую дверь",
+    story:
+      "Колонка говорит, какая дверь звонит, и играет мелодию, пока не откроют. Телефон искать не нужно: «Алиса, открой» — и звонившая дверь открыта, «Алиса, отбой» — мелодия смолкает и вызов снимается в Home Assistant.",
+    chain: [
+      "event: ring",
+      "Алиса: «Звонок в домофон»",
+      "мелодия до открытия",
+      "«Алиса, открой» → lock.unlock",
+    ],
+    difficulty: "medium",
+    entities: [
+      "event.YOUR_INTERCOM_doorbell_call",
+      "media_player.YOUR_STATION",
+      "lock.YOUR_INTERCOM",
+    ],
+    requires: [
+      "Интеграция Yandex.Station (HACS), колонка в локальном режиме",
+      "Мелодия вызова в /config/www/doorbell_ring.mp3",
+      "Сценарии «Домофон открыть» и «Домофон отбой» в «Доме с Алисой»: фраза → колонка → «Выполнить команду: ничего не делай»",
+    ],
+    yaml: `automation:
+  # 1) Звонок: объявление и мелодия, пока вызов не закончится
+  - alias: "Домофон: Алиса объявляет звонок"
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: event.YOUR_INTERCOM_doorbell_call
+        # восстановление состояния после перезагрузки — не новый звонок
+        not_from:
+          - unavailable
+          - unknown
+    conditions:
+      - "{{ trigger.from_state is not none and trigger.to_state.attributes.event_type == 'ring' }}"
+    actions:
+      - action: media_player.play_media
+        target:
+          entity_id: media_player.YOUR_STATION
+        data:
+          media_content_type: text
+          media_content_id: "Звонок в домофон. {{ trigger.to_state.attributes.gate_name }}"
+      - delay: 3
+      - action: media_player.play_media
+        target:
+          entity_id: media_player.YOUR_STATION
+        data:
+          media_content_type: music
+          media_content_id: "http://YOUR_HA_IP:8123/local/doorbell_ring.mp3"
+      # ждём состояния, а не события: дверь, открытую ещё во время объявления, тоже видно
+      - wait_template: >-
+          {{ not is_state('lock.YOUR_INTERCOM', 'locked')
+             or state_attr('event.YOUR_INTERCOM_doorbell_call', 'event_type') != 'ring' }}
+        timeout: 75
+      - action: media_player.media_stop
+        target:
+          entity_id: media_player.YOUR_STATION
+
+  # 2) «Алиса, открой»: только пока звонят и ещё две минуты после
+  - alias: "Домофон: Алиса, открой"
+    triggers:
+      - trigger: event
+        event_type: yandex_scenario
+        event_data:
+          scenario_name: Домофон открыть
+    actions:
+      - if: "{{ as_timestamp(states('event.YOUR_INTERCOM_doorbell_call'), 0) > now().timestamp() - 120 }}"
+        then:
+          - action: media_player.media_stop
+            target:
+              entity_id: media_player.YOUR_STATION
+          - action: lock.unlock
+            target:
+              entity_id: lock.YOUR_INTERCOM
+          - action: media_player.play_media
+            target:
+              entity_id: "{{ trigger.event.data.entity_id }}"
+            data:
+              media_content_type: text
+              media_content_id: "Открываю"
+        else:
+          - action: media_player.play_media
+            target:
+              entity_id: "{{ trigger.event.data.entity_id }}"
+            data:
+              media_content_type: text
+              media_content_id: "Сейчас никто не звонит в домофон"
+
+  # 3) «Алиса, отбой»: выключить мелодию и снять вызов в Home Assistant
+  - alias: "Домофон: Алиса, отбой"
+    triggers:
+      - trigger: event
+        event_type: yandex_scenario
+        event_data:
+          scenario_name: Домофон отбой
+    actions:
+      - action: media_player.media_stop
+        target:
+          entity_id: media_player.YOUR_STATION
+      - action: elektronny_gorod.hangup
+        continue_on_error: true`,
+  },
+  {
     id: "family-notify",
     category: "ring",
     tab: "Вся семья",

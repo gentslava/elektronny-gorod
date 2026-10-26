@@ -322,6 +322,108 @@ automation:
           entity_id: lock.YOUR_INTERCOM
 ```
 
+> **Пуш приходит не на все телефоны?** Проверьте имена устройств в Companion. Два телефона одной модели по умолчанию регистрируются под одинаковым именем, например `A065`. Home Assistant адресует пуш по этому имени, поэтому оба делят один `notify.mobile_app_a065`, и уведомление получает только телефон, зарегистрированный последним. Не помогает даже действие устройства `mobile_app`: второй телефон выпадает из списка адресатов целиком. Лечится переименованием: в Companion откройте «Настройки → Приложение-компаньон → Серверы и устройства → ваш сервер → Имя устройства».
+
+### Пример 3. Яндекс Станция: объявление, мелодия вызова и «Алиса, открой»
+
+Алиса объявляет, какая дверь звонит, и играет мелодию, пока дверь не откроют, звонок не сбросят или он не закончится. Пока идёт вызов и ещё две минуты после него, «Алиса, открой» открывает именно звонившую дверь. «Алиса, отбой» выключает мелодию и снимает вызов в Home Assistant: гаснет карточка экрана вызова. Отклонить звонок на самой панели так нельзя: если вызов не приняли, панель об отбое не узнаёт и звонит до своего таймаута. Поговорить с гостем через колонку тоже нельзя: доступа к её микрофону нет, разговор остаётся на телефоне или в [карточке экрана вызова](#карточка-экрана-вызова).
+
+Что нужно:
+
+1. Интеграция [Yandex.Station](https://github.com/AlexxIT/YandexStation) (HACS) с колонкой в локальном режиме: так она проигрывает файл по ссылке.
+2. Мелодия вызова — любой mp3 в `/config/www/doorbell_ring.mp3`. Длина около минуты; вызов сам заканчивается раньше. Колонка скачивает её по адресу `http://YOUR_HA_IP:8123/local/doorbell_ring.mp3`, поэтому нужен адрес Home Assistant в локальной сети.
+3. Два сценария в приложении «Дом с Алисой». Для каждого: «Сценарии → +», в «Если» — «Фраза», в «Тогда» — ваша колонка → «Выполнить команду» с текстом `ничего не делай`. Так команда беззвучно уходит в Home Assistant событием `yandex_scenario`. Имя сценария должно совпадать с именем в автоматизации:
+   - «Домофон открыть» — фразы «открой», «открой дверь», «открывай»;
+   - «Домофон отбой» — фразы «отбой», «сбрось», «отклони».
+
+Проверить сценарии можно без звонка: действие `yandex_station.send_command` с `command: sendText` и `text: открой` передаёт колонке фразу так, будто её сказали вслух, и Алиса ответит, что сейчас никто не звонит.
+
+```yaml
+automation:
+  # 1) Звонок: объявление и мелодия, пока вызов не закончится
+  - alias: "Домофон: Алиса объявляет звонок"
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: event.YOUR_INTERCOM_doorbell_call
+        # восстановление состояния после перезагрузки — не новый звонок
+        not_from:
+          - unavailable
+          - unknown
+    conditions:
+      - "{{ trigger.from_state is not none and trigger.to_state.attributes.event_type == 'ring' }}"
+    actions:
+      - action: media_player.play_media
+        target:
+          entity_id: media_player.YOUR_STATION
+        data:
+          media_content_type: text
+          media_content_id: "Звонок в домофон. {{ trigger.to_state.attributes.gate_name }}"
+      - delay: 3
+      - action: media_player.play_media
+        target:
+          entity_id: media_player.YOUR_STATION
+        data:
+          media_content_type: music
+          media_content_id: "http://YOUR_HA_IP:8123/local/doorbell_ring.mp3"
+      # ждём состояния, а не события: дверь, открытую ещё во время объявления, тоже видно
+      - wait_template: >-
+          {{ not is_state('lock.YOUR_INTERCOM', 'locked')
+             or state_attr('event.YOUR_INTERCOM_doorbell_call', 'event_type') != 'ring' }}
+        timeout: 75
+      - action: media_player.media_stop
+        target:
+          entity_id: media_player.YOUR_STATION
+
+  # 2) «Алиса, открой»: только пока звонят и ещё две минуты после
+  - alias: "Домофон: Алиса, открой"
+    triggers:
+      - trigger: event
+        event_type: yandex_scenario
+        event_data:
+          scenario_name: Домофон открыть
+    actions:
+      - if: "{{ as_timestamp(states('event.YOUR_INTERCOM_doorbell_call'), 0) > now().timestamp() - 120 }}"
+        then:
+          - action: media_player.media_stop
+            target:
+              entity_id: media_player.YOUR_STATION
+          - action: lock.unlock
+            target:
+              entity_id: lock.YOUR_INTERCOM
+          - action: media_player.play_media
+            target:
+              entity_id: "{{ trigger.event.data.entity_id }}"
+            data:
+              media_content_type: text
+              media_content_id: "Открываю"
+        else:
+          - action: media_player.play_media
+            target:
+              entity_id: "{{ trigger.event.data.entity_id }}"
+            data:
+              media_content_type: text
+              media_content_id: "Сейчас никто не звонит в домофон"
+
+  # 3) «Алиса, отбой»: выключить мелодию и снять вызов в Home Assistant
+  - alias: "Домофон: Алиса, отбой"
+    triggers:
+      - trigger: event
+        event_type: yandex_scenario
+        event_data:
+          scenario_name: Домофон отбой
+    actions:
+      - action: media_player.media_stop
+        target:
+          entity_id: media_player.YOUR_STATION
+      - action: elektronny_gorod.hangup
+        continue_on_error: true
+```
+
+Несколько дверей — те же автоматизации со списком `event.*_doorbell_call` в триггере и сопоставлением «событие → замок» в `variables`. В `gate_name` оператор отдаёт полный адрес: за три секунды Алиса его не дочитает, и мелодия перебьёт объявление. Берите короткое имя из того же сопоставления или увеличьте `delay`. Колонка слышит «Алиса, …» и поверх мелодии. Сценарий с фразой «открой» перехватывает только эту фразу целиком, «Алиса, открой YouTube» работает как раньше.
+
+> Дверь голосом откроет любой, кого услышит колонка, в том числе телевизор, и любой член семьи из приложения «Дом с Алисой», даже не из дома. Поэтому окно ограничено двумя минутами после звонка; сократите его, если это много.
+
 ## 📞 Двусторонний звук: ответить и говорить
 
 > ⚠️ **Продвинутая фича.** Приём вызова домофона по SIP — поверх события звонка выше. Работает удалённо (4G) через авторизованный канал Home Assistant, без экспозиции go2rtc наружу.
