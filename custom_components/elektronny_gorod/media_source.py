@@ -2,17 +2,22 @@
 
 Browse: account entry → place → camera → day → events.
 Resolve: one signed mp4 per event, fetched on demand and discarded;
-an event still being recorded resolves to the camera live view (A-124).
+an event still being recorded plays from its start as the operator archive
+stream through HA Stream (HLS), falling back to the camera live view (A-124).
 Opaque IDs only — signed URLs are never logged or persisted
 (spec: docs/specs/2026-08-29-media-source-design.md).
 """
 
 from __future__ import annotations
 
+import asyncio
+import logging
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components import media_source as ha_media_source
+from homeassistant.components.camera import DynamicStreamSettings
 from homeassistant.components.media_player import (
     BrowseError,
     BrowseMedia,
@@ -25,12 +30,14 @@ from homeassistant.components.media_source.models import (
     MediaSourceItem,
     PlayMedia,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.components.stream import HLS_PROVIDER, Stream, create_stream
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 from homeassistant.util import dt as dt_util
 
+from ._logging import UrlPathRedactFilter
 from .clip_proxy import async_register_clip_view, clip_proxy_url
 from .coordinator import async_get_coordinator
 from .const import DOMAIN, LOGGER
@@ -40,6 +47,8 @@ _SOURCE_TITLE = "Электронный город"
 
 _MIME_MP4 = "video/mp4"
 _MIME_HLS_CAMERA = "application/vnd.apple.mpegurl"
+# Единственный HLS-тип, который играет плеер медиабраузера HA (см.
+# `_live_play_media`): им отдаются и эфир, и поток архива.
 _MIME_HLS_FRONTEND = "application/x-mpegURL"
 
 _CAMERA_SOURCES = ("intercom", "public")
@@ -55,6 +64,16 @@ _MOTION_EVENT_SUBJECT_ID = 126
 # (A-124, прод 2026-10-26). Завершённые события не меняются.
 _LIVE_GRACE_SEC = 15
 
+# Потоки архива идущих событий: (entry_id, camera_id, event_id) → Stream.
+# Живой поток переиспользуется повторным resolve; остановленный (idle HLS,
+# отказ worker-а, выгрузка записи) выбрасывается — ссылка оператора выдаётся
+# заново на каждый запрос, поэтому новый resolve берёт свежую.
+_ARCHIVE_STREAMS_KEY = f"{DOMAIN}_archive_streams"
+_ARCHIVE_LOCK_KEY = f"{DOMAIN}_archive_streams_lock"
+# Логгер, в который HA Stream пишет источник потока с меткой `stream_label`
+# (`homeassistant/components/stream/__init__.py`, `Stream.__init__`).
+_STREAM_LOGGER_PREFIX = "homeassistant.components.stream.stream"
+
 # EN-fallback для подписей событий (длительность, «идёт запись»);
 # переопределяются категорией `common` translations (hass.config.language).
 _DEFAULT_DURATION_LABELS = {
@@ -68,6 +87,51 @@ _DEFAULT_DURATION_LABELS = {
 def _event_in_progress(event: Any, now_ts: float) -> bool:
     """Запись события ещё идёт: окончание позже, чем `now - grace`."""
     return event.timestamp + event.duration > now_ts - _LIVE_GRACE_SEC
+
+
+def _tz_offset(timestamp: int) -> int:
+    """Смещение часового пояса HA в момент `timestamp`, в секундах.
+
+    Приложение шлёт в `TZ` смещение устройства (25200 для UTC+7); у нас
+    устройство — это HA, и смещение берётся на время события (переход на
+    летнее время меняет его).
+    """
+    offset = dt_util.as_local(dt_util.utc_from_timestamp(timestamp)).utcoffset()
+    return int(offset.total_seconds()) if offset is not None else 0
+
+
+def _archive_streams(hass: HomeAssistant) -> dict[tuple[str, str, str], Stream]:
+    return hass.data.setdefault(_ARCHIVE_STREAMS_KEY, {})
+
+
+def _stream_alive(stream: Stream) -> bool:
+    """Провайдер HLS снимается при остановке потока (`Stream.stop`)."""
+    return HLS_PROVIDER in stream.outputs()
+
+
+def _archive_stream_label(camera_id: str) -> str:
+    """Метка потока для логгера HA Stream; фильтр ставится один раз.
+
+    Метка на камеру, а не на событие: логгеры модуля `logging` живут до
+    конца процесса, и метка на событие копила бы их без предела.
+    """
+    label = f"{DOMAIN}_archive_{camera_id}"
+    stream_logger = logging.getLogger(f"{_STREAM_LOGGER_PREFIX}.{label}")
+    if not any(
+        isinstance(existing, UrlPathRedactFilter)
+        for existing in stream_logger.filters
+    ):
+        stream_logger.addFilter(UrlPathRedactFilter())
+    return label
+
+
+async def async_stop_archive_streams(hass: HomeAssistant, entry_id: str) -> None:
+    """Остановить потоки архива записи (выгрузка config entry)."""
+    streams: dict[tuple[str, str, str], Stream] = (
+        hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
+    )
+    for key in [key for key in streams if key[0] == entry_id]:
+        await streams.pop(key).stop()
 
 
 def _recent_days(count: int) -> list[date]:
@@ -178,10 +242,20 @@ class ElektronnyGorodMediaSource(MediaSource):
             or not (event.available and event.goto_enabled)
         ):
             raise Unresolvable("Recording is not available")
-        # Идущее событие у оператора — недописанный mp4 (A-123/A-124):
-        # вместо клипа открываем эфир этой же камеры, без отката на клип.
+        # Идущее событие у оператора — недописанный mp4 (A-123/A-124). Как в
+        # приложении, играем его с начала потоком архива; не вышло — эфир
+        # этой же камеры, без отката на клип.
         if _event_in_progress(event, dt_util.utcnow().timestamp()):
+            play = await self._archive_play_media(
+                coordinator, entry_id, camera_id, event
+            )
+            if play is not None:
+                return play
             return await self._live_play_media(item, camera_id)
+        # Завершённое событие — намеренно MP4 через прокси клипа, а не поток
+        # архива: в медиабраузере конечный файл с перемоткой удобнее
+        # бесконечного потока, и это то же содержимое, что «Скачать» в
+        # приложении (A-124).
         # Ссылку у оператора не запрашиваем: каждый минт запускает
         # подготовку mp4 заново (снимок 2026-05-25 — 4 отказа 423 и ~11 с
         # ожидания), поэтому минт должен быть ровно один и живёт в прокси.
@@ -190,6 +264,104 @@ class ElektronnyGorodMediaSource(MediaSource):
             url=clip_proxy_url(self._hass, entry_id, event_id),
             mime_type=_MIME_MP4,
         )
+
+    async def _archive_play_media(
+        self, coordinator: Any, entry_id: str, camera_id: str, event: Any
+    ) -> PlayMedia | None:
+        """Идущее событие с начала: поток архива оператора → HA Stream → HLS.
+
+        `None` — поток недоступен (ссылки нет, stream не загружен, worker не
+        стартовал); вызывающий открывает эфир. Подписанная ссылка уходит
+        только в HA Stream: в логах, состоянии и ответе фронтенду её нет —
+        фронтенд получает HLS-endpoint HA со своим токеном.
+        """
+        streams = _archive_streams(self._hass)
+        key = (entry_id, camera_id, event.id)
+        lock: asyncio.Lock = self._hass.data.setdefault(
+            _ARCHIVE_LOCK_KEY, asyncio.Lock()
+        )
+        async with lock:
+            for stale in [k for k, found in streams.items() if not _stream_alive(found)]:
+                del streams[stale]
+            stream = streams.get(key)
+            if stream is None:
+                stream = await self._create_archive_stream(
+                    coordinator, camera_id, event
+                )
+                if stream is None:
+                    return None
+            try:
+                stream.add_provider(HLS_PROVIDER)
+                await stream.start()
+                url = stream.endpoint_url(HLS_PROVIDER)
+            except (HomeAssistantError, RuntimeError, ValueError) as ex:
+                LOGGER.debug(
+                    "Media source archive stream failed to start for "
+                    "camera_id=%s event_id=%s (%s); live view",
+                    camera_id,
+                    event.id,
+                    type(ex).__name__,
+                )
+                streams.pop(key, None)
+                await stream.stop()
+                return None
+            streams[key] = stream
+        return PlayMedia(url=url, mime_type=_MIME_HLS_FRONTEND)
+
+    async def _create_archive_stream(
+        self, coordinator: Any, camera_id: str, event: Any
+    ) -> Stream | None:
+        """Свежая ссылка архива с начала события → новый HA Stream."""
+        source = await coordinator.api.query_camera_archive_stream(
+            camera_id, event.timestamp, _tz_offset(event.timestamp)
+        )
+        if not source:
+            LOGGER.debug(
+                "Media source archive stream unavailable for camera_id=%s "
+                "event_id=%s; live view",
+                camera_id,
+                event.id,
+            )
+            return None
+        try:
+            stream = create_stream(
+                self._hass,
+                source,
+                options={},
+                dynamic_stream_settings=DynamicStreamSettings(),
+                stream_label=_archive_stream_label(camera_id),
+            )
+        except HomeAssistantError as ex:
+            # Интеграция stream не загружена или отвергла параметры.
+            LOGGER.debug(
+                "Media source archive stream not created for camera_id=%s "
+                "event_id=%s (%s); live view",
+                camera_id,
+                event.id,
+                type(ex).__name__,
+            )
+            return None
+        stream.set_update_callback(self._archive_stream_watchdog(stream))
+        return stream
+
+    def _archive_stream_watchdog(self, stream: Stream) -> Callable[[], None]:
+        """Отказ worker-а — остановить поток, а не повторять его вечно.
+
+        HA Stream повторяет тот же источник, пока жив провайдер, а idle-таймер
+        HLS заводится только первым сегментом: поток с истёкшей ссылкой или
+        вне срока хранения иначе жил бы до перезапуска HA и писал ошибку на
+        каждом круге. Повтор и не нужен: оператор выдаёт новую ссылку на
+        каждый запрос, и следующий resolve возьмёт свежую.
+        """
+
+        @callback
+        def _on_state_change() -> None:
+            if not stream.available:
+                self._hass.async_create_task(
+                    stream.stop(), name=f"{DOMAIN}_archive_stream_stop"
+                )
+
+        return _on_state_change
 
     async def _live_play_media(
         self, item: MediaSourceItem, camera_id: str

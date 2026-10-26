@@ -24,6 +24,7 @@ from homeassistant.core import HomeAssistant, ServiceCall, ServiceResponse, Supp
 from .api import ElektronnyGorodAPI
 from .http import error_status
 from .clip_proxy import async_release_clip_cache
+from .media_source import async_stop_archive_streams
 from .const import (
     DOMAIN,
     LOGGER,
@@ -978,6 +979,8 @@ async def async_unload_entry(
     """
     # Клипы этого entry больше не нужны — не ждём истечения TTL.
     async_release_clip_cache(hass, entry.entry_id)
+    # Потоки архива идущих событий этого entry (A-124) — не ждём idle HLS.
+    await async_stop_archive_streams(hass, entry.entry_id)
     fcm_listener = hass.data.get(_FCM_DATA, {}).get(entry.entry_id)
     if fcm_listener is not None:
         # Как и в двух других точках остановки: текст исключения зависимости

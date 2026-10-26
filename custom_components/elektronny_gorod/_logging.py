@@ -11,9 +11,12 @@
 
 Используй redact(data) для dict/headers, попадающих в логи.
 Используй redact_path(url) для URL/path попадающих в логи.
+Используй UrlPathRedactFilter для чужого логгера, который пишет подписанную
+ссылку целиком (HA Stream, A-124).
 """
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -124,3 +127,33 @@ def redact_path(url_or_path: str) -> str:
     if not is_auth_path(url_or_path):
         return url_or_path
     return _AUTH_PATH_ID_PATTERN.sub(r"\1***", url_or_path)
+
+
+# Схема и хост остаются, путь и query — нет: у подписанной ссылки оператора
+# на поток (`https://forpost-<N>.<host>:18081/rtsp/<stream-id>/<token>/d=1`)
+# токен стоит в пути, а не в userinfo или query.
+_URL_PATH_PATTERN = re.compile(
+    r"(\b[a-z][a-z0-9+.\-]*://[^/\s?#'\"]+)[^\s,)'\"]*", re.IGNORECASE
+)
+
+
+def redact_url_paths(text: str) -> str:
+    """Оставить от каждого URL в тексте только схему и хост."""
+    return _URL_PATH_PATTERN.sub(rf"\1/{REDACTED}", text)
+
+
+class UrlPathRedactFilter(logging.Filter):
+    """Фильтр логгера: путь и query любых URL в сообщении — под маску.
+
+    Нужен там, где ссылку пишет не наш код. HA Stream логирует источник через
+    `redact_credentials`, а тот прячет только userinfo и query
+    `auth/user/password` — токен в пути ссылки оператора остаётся на виду.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        redacted = redact_url_paths(message)
+        if redacted != message:
+            record.msg = redacted
+            record.args = ()
+        return True
