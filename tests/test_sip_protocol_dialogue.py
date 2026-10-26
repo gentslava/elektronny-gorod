@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 
 import pytest
 
@@ -290,8 +291,12 @@ def test_ack_without_answer_is_ignored() -> None:
     assert transport.sent == []
 
 
-def test_repeated_ack_is_harmless() -> None:
-    """Сервер может повторить ACK (ретрансмит) — второй не должен падать."""
+def test_repeated_ack_is_harmless(caplog: pytest.LogCaptureFixture) -> None:
+    """Сервер может повторить ACK (ретрансмит) — второй не должен падать.
+
+    Ошибку разбора `datagram_received` глотает в журнал, поэтому падение
+    видно только по записи уровня ERROR.
+    """
     protocol, _ = _protocol()
     protocol.datagram_received(_request("INVITE"), ("10.0.0.9", 5060))
     protocol.answer(protocol._invite_msg, ("10.0.0.9", 5060), "10.0.0.2", 40000, 0, "PCMU")
@@ -300,6 +305,49 @@ def test_repeated_ack_is_harmless() -> None:
     protocol.datagram_received(_request("ACK"), ("10.0.0.9", 5060))
 
     assert protocol.acked.done() and protocol.acked.result() is None
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_resent_answer_repeats_the_first_one() -> None:
+    """Потерянный `200 OK` повторяется дословно и туда же — иначе панель не узнает об ответе."""
+    protocol, transport = _protocol()
+    protocol.datagram_received(_request("INVITE"), ("10.0.0.9", 5060))
+    protocol.answer(protocol._invite_msg, ("10.0.0.9", 5060), "10.0.0.2", 40000, 0, "PCMU")
+    first = transport.sent[-1]
+    transport.sent.clear()
+
+    protocol.resend_answer()
+
+    assert transport.sent == [first]
+
+
+def test_resend_without_answer_sends_nothing() -> None:
+    protocol, transport = _protocol()
+    protocol.datagram_received(_request("INVITE"), ("10.0.0.9", 5060))
+    transport.sent.clear()
+
+    protocol.resend_answer()
+
+    assert transport.sent == []
+
+
+def test_cancel_after_answer_does_not_terminate_the_invite() -> None:
+    """CANCEL, разминувшийся с нашим `200 OK`: INVITE уже отвечен, `487` на него не шлём.
+
+    CANCEL всё равно подтверждаем и сообщаем наверх.
+    """
+    cancelled: list[bool] = []
+    protocol, transport = _protocol(on_cancel=lambda: cancelled.append(True))
+    protocol.datagram_received(_request("INVITE"), ("10.0.0.9", 5060))
+    protocol.answer(protocol._invite_msg, ("10.0.0.9", 5060), "10.0.0.2", 40000, 0, "PCMU")
+    transport.sent.clear()
+
+    protocol.datagram_received(_request("CANCEL"), ("10.0.0.9", 5060))
+
+    text = _sent_text(transport)
+    assert "SIP/2.0 200 OK" in text and "CSeq: 1 CANCEL" in text
+    assert "487" not in text
+    assert cancelled == [True]
 
 
 def test_hangup_without_a_dialog_sends_nothing() -> None:

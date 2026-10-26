@@ -233,8 +233,48 @@ async def test_end_releases_held_call_when_cancelled_during_ack_wait() -> None:
     with pytest.raises(asyncio.CancelledError):
         await task
 
+    held.sip.send_bye.assert_called_once()
     held.release.assert_called_once()
     assert mgr.holding is False
+
+
+_MGR = "custom_components.elektronny_gorod.sip.manager"
+
+
+async def test_end_resends_answer_while_waiting_for_ack() -> None:
+    """Потерянный `200 OK` повторяется, пока нет ACK: иначе панель звонит до таймаута."""
+    loop = asyncio.get_running_loop()
+    acked = loop.create_future()
+    mgr, held, parent = _end_manager(acked)
+    parent.attach_mock(held.sip.resend_answer, "resend_answer")
+
+    with patch(f"{_MGR}.ANSWER_RETRANSMIT_T1", 0.01), patch(f"{_MGR}.ACK_TIMEOUT", 5.0):
+        task = loop.create_task(mgr.async_end())
+        await asyncio.sleep(0.05)
+        assert held.sip.resend_answer.called, "200 OK не повторён после T1"
+        held.sip.send_bye.assert_not_called()
+        resent = held.sip.resend_answer.call_count
+
+        acked.set_result(None)
+        await task
+
+    assert held.sip.resend_answer.call_count == resent, "повтор после ACK"
+    names = [c[0] for c in parent.mock_calls]
+    assert names[0] == "answer"
+    assert set(names[1:-2]) == {"resend_answer"}
+    assert names[-2:] == ["send_bye", "release"]
+
+
+async def test_end_does_not_resend_answer_once_acked() -> None:
+    acked = asyncio.get_running_loop().create_future()
+    acked.set_result(None)
+    mgr, held, _parent = _end_manager(acked)
+
+    with patch(f"{_MGR}.ANSWER_RETRANSMIT_T1", 0.001):
+        await mgr.async_end()
+
+    held.sip.resend_answer.assert_not_called()
+    held.sip.send_bye.assert_called_once()
 
 
 async def test_end_releases_held_call_when_answer_raises() -> None:

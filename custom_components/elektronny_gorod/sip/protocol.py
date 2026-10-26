@@ -62,6 +62,8 @@ class SipProtocol(asyncio.DatagramProtocol):
         self.dialog: DialogState | None = None
         # ACK на наш 200 OK: создаётся в answer(), резолвится входящим ACK.
         self.acked: asyncio.Future[None] | None = None
+        # Отправленный 200 OK и адрес — для ретрансмита до ACK (resend_answer).
+        self._answer: tuple[bytes, tuple] | None = None
         # Держимый INVITE (register-on-ring): для 100 Trying / 487 на CANCEL / accept.
         self._invite_msg = None
         self._invite_addr: tuple | None = None
@@ -114,8 +116,11 @@ class SipProtocol(asyncio.DatagramProtocol):
                     self.on_bye()
             elif method == "CANCEL":
                 # Отмена неотвеченного вызова: 200 на CANCEL + 487 на держимый INVITE.
+                # CANCEL, разминувшийся с нашим 200 OK, INVITE уже не отменяет —
+                # 487 на отвеченный INVITE не шлём.
                 self._respond_200(msg, addr)
-                self._send_487()
+                if self.acked is None:
+                    self._send_487()
                 if self.on_cancel is not None:
                     self.on_cancel()
             elif method == "ACK":
@@ -189,8 +194,15 @@ class SipProtocol(asyncio.DatagramProtocol):
         contact = f"<sip:{self.login}@{self.local_ip}:{self._lport};transport=udp>"
         ok = build_200_ok(invite_msg, sdp_body, self.local_tag, contact, self.ua)
         self.acked = asyncio.get_event_loop().create_future()
-        self.transport.sendto(ok.encode(), addr)
+        self._answer = (ok.encode(), addr)
+        self.transport.sendto(*self._answer)
         self.dialog = extract_dialog(invite_msg, self.local_tag)
+
+    def resend_answer(self) -> None:
+        """Повторить отправленный 200 OK (ретрансмит до ACK, RFC 3261 §13.3.1.4)."""
+        if self.transport is None or self._answer is None:
+            return
+        self.transport.sendto(*self._answer)
 
     def send_bye(self) -> None:
         if self.transport is None or self.dialog is None:

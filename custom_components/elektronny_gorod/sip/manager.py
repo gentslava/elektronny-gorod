@@ -34,6 +34,9 @@ SIP_USER_AGENT = "Myhome/Myhome-android"  # зеркало приложения 
 REGISTER_TIMEOUT = 5.0
 INVITE_TIMEOUT = 8.0  # INVITE приходит за ~90мс после REGISTER; запас на сеть
 ACK_TIMEOUT = 2.0  # ждём ACK на 200 OK перед BYE; не дождались — BYE всё равно уходит
+# Ретрансмит 200 OK до ACK (UDP, RFC 3261 §13.3.1.4): первый повтор через T1, далее
+# интервал удваивается, пока не придёт ACK или не истечёт ACK_TIMEOUT.
+ANSWER_RETRANSMIT_T1 = 0.5
 
 
 def _media_from_offer(body: str) -> tuple[int, str, str, int] | None:
@@ -52,6 +55,23 @@ def _media_from_offer(body: str) -> tuple[int, str, str, int] | None:
         return None
     codec = sdp["rtpmap"].get(str(pt), "PCMU/8000" if pt == 0 else "PCMA/8000")
     return pt, codec, sdp["conn_ip"], audio["port"]
+
+
+async def _await_ack(sip: SipProtocol, acked: asyncio.Future[None]) -> bool:
+    """Ждать ACK на 200 OK до `ACK_TIMEOUT`, повторяя 200 OK (T1, удвоение). True — пришёл."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + ACK_TIMEOUT
+    interval = ANSWER_RETRANSMIT_T1
+    while True:
+        remaining = deadline - loop.time()
+        # asyncio.wait, не wait_for: таймаут интервала не должен отменять future.
+        await asyncio.wait((acked,), timeout=min(interval, remaining))
+        if acked.done():
+            return True
+        if interval >= remaining:  # ждали до самого дедлайна
+            return False
+        sip.resend_answer()
+        interval *= 2
 
 
 def _outbound_ip(host: str) -> str:
@@ -269,7 +289,8 @@ class SipManager:
         """Завершить вызов на панели.
 
         Активный — как `async_hangup` (BYE). Держимый: `200 OK` → ожидание `ACK`
-        (до `ACK_TIMEOUT`) → BYE → release; RTP/uplink не поднимаем. Нет вызова — no-op.
+        (до `ACK_TIMEOUT`, с ретрансмитом `200 OK`) → BYE → release; RTP/uplink не
+        поднимаем. Нет вызова — no-op.
         """
         active, self._active = self._active, None
         held, self._held = self._held, None
@@ -295,13 +316,10 @@ class SipManager:
             # acked создаётся внутри answer() — читать строго после него. None:
             # транспорт уже закрыт и 200 OK не ушёл — ждать нечего.
             acked = held.sip.acked
-            if acked is not None:
-                try:
-                    await asyncio.wait_for(acked, ACK_TIMEOUT)
-                except TimeoutError:
-                    LOGGER.debug(
-                        "SIP: ACK на 200 OK не получен за %.1fs — BYE всё равно", ACK_TIMEOUT
-                    )
+            if acked is not None and not await _await_ack(held.sip, acked):
+                LOGGER.debug(
+                    "SIP: ACK на 200 OK не получен за %.1fs — BYE всё равно", ACK_TIMEOUT
+                )
         finally:
             # BYE и при отмене: 200 OK уже мог уйти, панель надо отпустить.
             try:
