@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.elektronny_gorod.sip.manager import SipManager
+from custom_components.elektronny_gorod.sip.manager import RTP_LOCAL_PORT, SipManager
 
 
 def _held_with_body(body: str) -> MagicMock:
@@ -118,3 +118,87 @@ async def test_accept_never_raises_on_malformed_sdp(body: str) -> None:
     mgr, _ = _manager_holding(body)
     result = await mgr.accept()
     assert result is False
+
+
+# --- async_end: завершить вызов на панели (200 OK → ACK → BYE) -----------------
+
+_OFFER_PCMU = "v=0\r\nc=IN IP4 10.0.0.1\r\nm=audio 4000 RTP/AVP 0\r\n"
+
+
+def _end_manager(acked: asyncio.Future | None) -> tuple[SipManager, MagicMock, MagicMock]:
+    """Менеджер с держимым вызовом; `parent` пишет порядок answer → send_bye → release."""
+    mgr, held = _manager_holding(_OFFER_PCMU)
+    held.sip.acked = acked
+    parent = MagicMock()
+    parent.attach_mock(held.sip.answer, "answer")
+    parent.attach_mock(held.sip.send_bye, "send_bye")
+    parent.attach_mock(held.release, "release")
+    return mgr, held, parent
+
+
+async def test_end_answers_then_hangs_up_held_call() -> None:
+    acked = asyncio.get_running_loop().create_future()
+    acked.set_result(None)
+    mgr, held, parent = _end_manager(acked)
+
+    await mgr.async_end()
+
+    names = [c[0] for c in parent.mock_calls]
+    assert names == ["answer", "send_bye", "release"]
+    answer_args = held.sip.answer.call_args.args
+    assert answer_args[:2] == (held.invite_msg, held.addr)
+    assert answer_args[2] == held.local_ip
+    assert answer_args[3] == RTP_LOCAL_PORT
+    assert answer_args[4] == 0
+    assert answer_args[5] == "PCMU/8000"
+    assert mgr.holding is False
+
+
+async def test_end_sends_bye_even_without_ack() -> None:
+    pending = asyncio.get_running_loop().create_future()
+    mgr, held, parent = _end_manager(pending)
+
+    with patch("custom_components.elektronny_gorod.sip.manager.ACK_TIMEOUT", 0.01):
+        await mgr.async_end()
+
+    assert [c[0] for c in parent.mock_calls] == ["answer", "send_bye", "release"]
+    assert mgr.holding is False
+
+
+async def test_end_skips_ack_wait_when_transport_closed() -> None:
+    # answer() вернулся рано (транспорт закрыт) → acked остался None → не ждём.
+    mgr, held, parent = _end_manager(None)
+
+    await mgr.async_end()
+
+    assert [c[0] for c in parent.mock_calls] == ["answer", "send_bye", "release"]
+
+
+async def test_end_releases_silently_on_malformed_offer() -> None:
+    mgr, held = _manager_holding("v=0\r\nc=IN IP4 10.0.0.1\r\n")
+
+    await mgr.async_end()
+
+    held.sip.answer.assert_not_called()
+    held.sip.send_bye.assert_not_called()
+    held.release.assert_called_once()
+    assert mgr.holding is False
+
+
+async def test_end_hangs_up_active_call() -> None:
+    mgr = SipManager(fcm_token="TOK")
+    active = MagicMock()
+    active.teardown = AsyncMock()
+    mgr._active = active
+
+    await mgr.async_end()
+
+    active.teardown.assert_awaited_once_with(send_bye=True)
+    assert mgr.in_call is False
+
+
+async def test_end_without_call_is_noop() -> None:
+    mgr = SipManager(fcm_token="TOK")
+    await mgr.async_end()
+    assert mgr.in_call is False
+    assert mgr.holding is False

@@ -8,7 +8,11 @@
 - `async_answer(mint, on_downlink)`: fallback-композиция hold+accept (если held-фазы
   не было — register-on-answer как раньше, чтобы приём не регрессировал).
 
-`async_hangup`: BYE/release + cleanup. Один активный/держимый вызов (фикс-порты,
+`async_end`: завершить вызов НА ПАНЕЛИ — активный: BYE; держимый: `200 OK` → `ACK` → `BYE`
+(панель оператора отпускает вызов только после ответа какого-либо форка; тихий `release`
+держимого её не освобождает). RTP-сокет и uplink при этом не поднимаются.
+
+`async_hangup`: тихий BYE/release + cleanup. Один активный/держимый вызов (фикс-порты,
 PRD F1 first-answer-wins). Слой downlink/uplink — через `on_downlink`/`uplink_provider`.
 Сетевой слой — проверяется research-пробой/живым звонком, не юнит-тестами.
 """
@@ -29,6 +33,25 @@ RTP_LOCAL_PORT = 40016
 SIP_USER_AGENT = "Myhome/Myhome-android"  # зеркало приложения (call-answer-model.md)
 REGISTER_TIMEOUT = 5.0
 INVITE_TIMEOUT = 8.0  # INVITE приходит за ~90мс после REGISTER; запас на сеть
+ACK_TIMEOUT = 2.0  # ждём ACK на 200 OK перед BYE; не дождались — BYE всё равно уходит
+
+
+def _media_from_offer(body: str) -> tuple[int, str, str, int] | None:
+    """Разобрать SDP-offer (untrusted network input) → `(pt, codec, door_ip, door_port)`.
+
+    `None` — offer непригоден: нет audio, пустой список payload, нечисловой payload-type.
+    (Битые `m=`-строки с нечисловым/отсутствующим портом `parse_sdp` отбрасывает сам.)
+    """
+    sdp = parse_sdp(body)
+    audio = next((m for m in sdp["media"] if m["type"] == "audio"), None)
+    if not audio or not audio["fmts"]:
+        return None
+    try:
+        pt = int(audio["fmts"][0])
+    except ValueError:
+        return None
+    codec = sdp["rtpmap"].get(str(pt), "PCMU/8000" if pt == 0 else "PCMA/8000")
+    return pt, codec, sdp["conn_ip"], audio["port"]
 
 
 def _outbound_ip(host: str) -> str:
@@ -195,23 +218,15 @@ class SipManager:
             LOGGER.warning("SIP: accept без держимого вызова — игнор")
             return False
         loop = asyncio.get_running_loop()
-        # SDP-offer — untrusted network input (INVITE body). parse_sdp толерантен к
-        # битым строкам, но пустой fmts / отсутствие audio — валидный SDP без payload:
-        # degrade (release + False), а не краш → утечка моста в контроллере (P1-1).
-        sdp = parse_sdp(held.invite_msg.body)
-        audio = next((m for m in sdp["media"] if m["type"] == "audio"), None)
-        if not audio or not audio["fmts"]:
-            LOGGER.warning("SIP: нет audio/payload в SDP-offer — degrade")
+        # SDP-offer — untrusted network input (INVITE body): пустой fmts / отсутствие
+        # audio — валидный SDP без payload → degrade (release + False), а не краш →
+        # утечка моста в контроллере (P1-1).
+        media = _media_from_offer(held.invite_msg.body)
+        if media is None:
+            LOGGER.warning("SIP: SDP-offer без пригодного audio/payload — degrade")
             held.release()
             return False
-        try:
-            pt = int(audio["fmts"][0])
-        except ValueError:
-            LOGGER.warning("SIP: нечисловой payload-type в SDP-offer — degrade")
-            held.release()
-            return False
-        codec = sdp["rtpmap"].get(str(pt), "PCMU/8000" if pt == 0 else "PCMA/8000")
-        door_ip, door_port = sdp["conn_ip"], audio["port"]
+        pt, codec, door_ip, door_port = media
 
         rtp_transport, rtp = await loop.create_datagram_endpoint(
             lambda: RtpSession(pt, on_downlink=on_downlink),
@@ -249,6 +264,39 @@ class SipManager:
         elif held is not None:
             held.release()
             LOGGER.info("SIP: держимый вызов снят (hangup до ответа)")
+
+    async def async_end(self) -> None:
+        """Завершить вызов на панели.
+
+        Активный — как `async_hangup` (BYE). Держимый: `200 OK` → ожидание `ACK`
+        (до `ACK_TIMEOUT`) → BYE → release; RTP/uplink не поднимаем. Нет вызова — no-op.
+        """
+        active, self._active = self._active, None
+        held, self._held = self._held, None
+        if active is not None:
+            await active.teardown(send_bye=True)
+            LOGGER.info("SIP: вызов завершён (hangup)")
+            return
+        if held is None:
+            return
+        media = _media_from_offer(held.invite_msg.body)
+        if media is None:
+            LOGGER.warning("SIP: SDP-offer без пригодного audio/payload — тихий release")
+            held.release()
+            return
+        pt, codec, _door_ip, _door_port = media
+        held.sip.answer(held.invite_msg, held.addr, held.local_ip, RTP_LOCAL_PORT, pt, codec)
+        # acked создаётся внутри answer() — читать строго после него. None: транспорт
+        # уже закрыт и 200 OK не ушёл — ждать нечего.
+        acked = held.sip.acked
+        if acked is not None:
+            try:
+                await asyncio.wait_for(acked, ACK_TIMEOUT)
+            except TimeoutError:
+                LOGGER.debug("SIP: ACK на 200 OK не получен за %.1fs — BYE всё равно", ACK_TIMEOUT)
+        held.sip.send_bye()
+        held.release()
+        LOGGER.info("SIP: вызов завершён на панели (200 OK → BYE)")
 
     def _frame_provider(self) -> bytes | None:
         return self._uplink_provider() if self._uplink_provider is not None else None
