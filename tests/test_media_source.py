@@ -51,6 +51,9 @@ def _coordinator(
             query_event_download=AsyncMock(
                 return_value="https://savevideo.example/signed-clip.mp4"
             ),
+            # По умолчанию поток архива недоступен: тесты шага 1 (A-124)
+            # проверяют эфир, то есть ветку отката шага 2.
+            query_camera_archive_stream=AsyncMock(return_value=None),
         ),
         data={
             "places": (
@@ -1122,3 +1125,450 @@ async def test_resolve_live_view_uses_real_ha_resolver(hass, freezer) -> None:
         await _source(hass).async_resolve_media(_resolve_item(hass, entry))
 
     coordinator.api.query_event_download.assert_not_awaited()
+
+
+async def test_resolve_finished_event_never_requests_archive_stream(
+    hass, freezer
+) -> None:
+    """Завершённое событие остаётся MP4 через прокси клипа (A-124 шаг 2)."""
+    from custom_components.elektronny_gorod.media_source import _LIVE_GRACE_SEC
+
+    coordinator = _coordinator(events=(_live_event(),))
+    entry = _entry(hass, coordinator)
+    freezer.move_to(
+        dt_util.utc_from_timestamp(_LIVE_EVENT_END + _LIVE_GRACE_SEC)
+    )
+
+    play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    assert play.mime_type == "video/mp4"
+    coordinator.api.query_camera_archive_stream.assert_not_awaited()
+
+
+# --- A-124 шаг 2: идущее событие играет с начала потоком архива -------------
+
+_ARCHIVE_URL = "https://forpost-1.example:18081/rtsp/STREAM-ID/SIGNED-TOKEN/d=1"
+_HLS_MIME = "application/x-mpegURL"
+
+
+def _setup_stream_component(hass) -> list:
+    """Состояние интеграции stream без PyAV (в тестовом venv его нет).
+
+    Ровно то, что кладёт `stream.async_setup`: настройки HLS, шаблон
+    endpoint-а и общий список потоков. Объекты `Stream` — настоящие.
+    """
+    from homeassistant.components.stream.const import (
+        ATTR_ENDPOINTS,
+        ATTR_SETTINGS,
+        ATTR_STREAMS,
+        DOMAIN as STREAM_DOMAIN,
+        HLS_PROVIDER,
+    )
+    from homeassistant.components.stream.core import STREAM_SETTINGS_NON_LL_HLS
+
+    streams: list = []
+    hass.config.components.add(STREAM_DOMAIN)
+    hass.data[STREAM_DOMAIN] = {
+        ATTR_ENDPOINTS: {HLS_PROVIDER: "/api/hls/{}/master_playlist.m3u8"},
+        ATTR_SETTINGS: STREAM_SETTINGS_NON_LL_HLS,
+        ATTR_STREAMS: streams,
+    }
+    return streams
+
+
+def _patch_stream_start(**kwargs):
+    """Без рабочего потока: `Stream.start` поднимал бы поток PyAV."""
+    from homeassistant.components.stream import Stream
+
+    return patch.object(Stream, "start", AsyncMock(**kwargs))
+
+
+def _archive_entry(hass, *, url: str | None = _ARCHIVE_URL):
+    coordinator = _coordinator(events=(_live_event(),))
+    coordinator.api.query_camera_archive_stream = AsyncMock(return_value=url)
+    entry = _entry(hass, coordinator)
+    _register_camera_entity(hass, entry)
+    return coordinator, entry
+
+
+async def test_tz_offset_follows_ha_time_zone_at_event_time(hass) -> None:
+    """TZ — смещение часового пояса HA в момент события, в секундах."""
+    from datetime import datetime as dt, timezone
+
+    from custom_components.elektronny_gorod.media_source import _tz_offset
+
+    await hass.config.async_set_time_zone("Asia/Novosibirsk")
+    assert _tz_offset(_EVENT_TS) == 25200
+
+    await hass.config.async_set_time_zone("Europe/Berlin")
+    winter = int(dt(2026, 1, 15, 12, tzinfo=timezone.utc).timestamp())
+    summer = int(dt(2026, 7, 15, 12, tzinfo=timezone.utc).timestamp())
+    assert _tz_offset(winter) == 3600
+    assert _tz_offset(summer) == 7200
+
+
+async def test_resolve_in_progress_plays_archive_from_event_start_as_hls(
+    hass, freezer
+) -> None:
+    """Как приложение: поток архива с начала события → HA Stream → HLS."""
+    await hass.config.async_set_time_zone("Asia/Novosibirsk")
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry = _archive_entry(hass)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with _patch_stream_start() as start, _patch_camera_resolve() as camera_resolve:
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    coordinator.api.query_camera_archive_stream.assert_awaited_once_with(
+        _INTERCOM_ID, _EVENT_TS, 25200
+    )
+    assert len(ha_streams) == 1
+    stream = ha_streams[0]
+    assert stream.source == _ARCHIVE_URL
+    assert list(stream.outputs()) == ["hls"]
+    start.assert_awaited_once()
+    assert play.url == stream.endpoint_url("hls")
+    assert play.url.startswith("/api/hls/")
+    assert play.url.endswith("/master_playlist.m3u8")
+    # Плеер медиабраузера HA играет HLS только с этим MIME (прод 2026-10-26).
+    assert play.mime_type == _HLS_MIME
+    camera_resolve.assert_not_awaited()
+    coordinator.api.query_event_download.assert_not_awaited()
+
+
+async def test_resolve_in_progress_reuses_alive_archive_stream(
+    hass, freezer
+) -> None:
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry = _archive_entry(hass)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    source = _source(hass)
+
+    with _patch_stream_start():
+        first = await source.async_resolve_media(_resolve_item(hass, entry))
+        second = await source.async_resolve_media(_resolve_item(hass, entry))
+
+    coordinator.api.query_camera_archive_stream.assert_awaited_once()
+    assert len(ha_streams) == 1
+    assert second.url == first.url
+
+
+async def test_concurrent_resolves_share_one_archive_stream(hass, freezer) -> None:
+    import asyncio
+
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry = _archive_entry(hass)
+
+    async def _slow_archive(*_args):
+        # Запрос к оператору уступает цикл: без этого два resolve не
+        # переплетаются, и тест не отличает код с lock от кода без него.
+        await asyncio.sleep(0)
+        return _ARCHIVE_URL
+
+    coordinator.api.query_camera_archive_stream = AsyncMock(
+        side_effect=_slow_archive
+    )
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    source = _source(hass)
+
+    with _patch_stream_start():
+        first, second = await asyncio.gather(
+            source.async_resolve_media(_resolve_item(hass, entry)),
+            source.async_resolve_media(_resolve_item(hass, entry)),
+        )
+
+    coordinator.api.query_camera_archive_stream.assert_awaited_once()
+    assert len(ha_streams) == 1
+    assert first.url == second.url
+
+
+async def test_resolve_after_idle_stop_requests_a_fresh_archive_link(
+    hass, freezer
+) -> None:
+    """Остановленный поток (idle HLS) не переиспользуется: ссылка новая."""
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry = _archive_entry(hass)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    source = _source(hass)
+
+    with _patch_stream_start():
+        await source.async_resolve_media(_resolve_item(hass, entry))
+        # Так HA останавливает поток по idle-таймеру HLS: провайдер снят.
+        await ha_streams[0].stop()
+        await source.async_resolve_media(_resolve_item(hass, entry))
+
+    assert coordinator.api.query_camera_archive_stream.await_count == 2
+    assert len(ha_streams) == 2
+    assert list(ha_streams[1].outputs()) == ["hls"]
+
+
+async def test_resolve_archive_unavailable_falls_back_to_live_view(
+    hass, freezer
+) -> None:
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry = _archive_entry(hass, url=None)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with _patch_stream_start() as start, _patch_camera_resolve() as camera_resolve:
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    coordinator.api.query_camera_archive_stream.assert_awaited_once()
+    camera_resolve.assert_awaited_once()
+    assert play.url == _LIVE_PLAY_URL
+    assert ha_streams == []
+    start.assert_not_awaited()
+
+
+async def test_resolve_without_stream_integration_falls_back_to_live_view(
+    hass, freezer, caplog
+) -> None:
+    """`create_stream` отказывает (stream не загружен) → эфир, без ссылки в логах."""
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    coordinator, entry = _archive_entry(hass)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    assert "stream" not in hass.config.components
+
+    with _patch_camera_resolve() as camera_resolve:
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    camera_resolve.assert_awaited_once()
+    assert play.url == _LIVE_PLAY_URL
+    assert "SIGNED-TOKEN" not in caplog.text
+    assert "forpost-1.example" not in caplog.text
+
+
+async def test_resolve_stream_start_failure_falls_back_to_live_view(
+    hass, freezer, caplog
+) -> None:
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry = _archive_entry(hass)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    source = _source(hass)
+
+    with (
+        _patch_stream_start(side_effect=RuntimeError("can't start new thread")),
+        _patch_camera_resolve() as camera_resolve,
+    ):
+        play = await source.async_resolve_media(_resolve_item(hass, entry))
+
+    camera_resolve.assert_awaited_once()
+    assert play.url == _LIVE_PLAY_URL
+    # Неудачный поток остановлен и не переиспользуется следующим resolve.
+    assert ha_streams[0].outputs() == {}
+    with _patch_stream_start():
+        await source.async_resolve_media(_resolve_item(hass, entry))
+    assert coordinator.api.query_camera_archive_stream.await_count == 2
+    assert "SIGNED-TOKEN" not in caplog.text
+
+
+async def test_archive_stream_worker_failure_stops_without_retry(
+    hass, freezer
+) -> None:
+    """Отказ worker-а (ссылка истекла, вне архива) — стоп, а не повтор вечно.
+
+    HA Stream повторяет тот же URL бесконечно, пока жив провайдер, а idle-таймер
+    HLS стартует только с первым сегментом: без остановки поток с битой
+    ссылкой жил бы до перезапуска HA и писал ошибку на каждом круге.
+    """
+    ha_streams = _setup_stream_component(hass)
+    _coordinator_unused, entry = _archive_entry(hass)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with _patch_stream_start():
+        await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+    stream = ha_streams[0]
+    assert stream.outputs()
+
+    # Так worker HA сообщает об отказе перед паузой повтора (`_set_state`).
+    stream._async_update_state(False)
+    await hass.async_block_till_done()
+
+    assert stream.outputs() == {}
+
+
+async def test_archive_stream_logger_redacts_signed_link(hass, freezer, caplog) -> None:
+    """HA Stream пишет источник в свой логгер; путь с токеном — под маской.
+
+    `redact_credentials` HA прячет только userinfo и query `auth/user/password`,
+    а токен оператора стоит в пути ссылки.
+    """
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    ha_streams = _setup_stream_component(hass)
+    _coordinator_unused, entry = _archive_entry(hass)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with _patch_stream_start():
+        await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+    stream = ha_streams[0]
+    # Публичный метод, который пишет источник через логгер этого потока —
+    # тот же, куда уходят «Started stream» и «Error from stream worker».
+    stream.update_source(_ARCHIVE_URL.replace("SIGNED-TOKEN", "OTHER-TOKEN"))
+
+    assert "Updating stream source" in caplog.text
+    assert "OTHER-TOKEN" not in caplog.text
+    assert "SIGNED-TOKEN" not in caplog.text
+    assert "STREAM-ID" not in caplog.text
+
+
+async def test_stop_archive_streams_stops_only_that_entry(hass, freezer) -> None:
+    from custom_components.elektronny_gorod.media_source import (
+        async_stop_archive_streams,
+    )
+
+    ha_streams = _setup_stream_component(hass)
+    _coordinator_a, entry_a = _archive_entry(hass)
+    coordinator_b = _coordinator(events=(_live_event(),))
+    coordinator_b.api.query_camera_archive_stream = AsyncMock(
+        return_value=_ARCHIVE_URL
+    )
+    entry_b = _entry(hass, coordinator_b, title="Second Account")
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    source = _source(hass)
+
+    with _patch_stream_start():
+        await source.async_resolve_media(_resolve_item(hass, entry_a))
+        await source.async_resolve_media(_resolve_item(hass, entry_b))
+    stream_a, stream_b = ha_streams
+
+    await async_stop_archive_streams(hass, entry_a.entry_id)
+
+    assert stream_a.outputs() == {}
+    assert list(stream_b.outputs()) == ["hls"]
+
+
+async def test_archive_stream_is_not_shared_between_events_of_one_camera(
+    hass, freezer
+) -> None:
+    """Живой поток одного события не отдаётся другому событию той же камеры."""
+    ha_streams = _setup_stream_component(hass)
+    first_event = _live_event(event_id="3001")
+    second_event = _event(
+        event_id="3002", timestamp=_EVENT_TS + 10, duration=_LIVE_EVENT_DURATION
+    )
+    coordinator = _coordinator(events=(second_event, first_event))
+    coordinator.api.query_camera_archive_stream = AsyncMock(
+        side_effect=[_ARCHIVE_URL, _ARCHIVE_URL.replace("SIGNED", "OTHER")]
+    )
+    entry = _entry(hass, coordinator)
+    _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    source = _source(hass)
+
+    with _patch_stream_start():
+        first = await source.async_resolve_media(
+            _resolve_item(hass, entry, event_id="3001")
+        )
+        second = await source.async_resolve_media(
+            _resolve_item(hass, entry, event_id="3002")
+        )
+
+    assert [call.args[1] for call in (
+        coordinator.api.query_camera_archive_stream.await_args_list
+    )] == [_EVENT_TS, _EVENT_TS + 10]
+    assert len(ha_streams) == 2
+    assert first.url != second.url
+    assert list(ha_streams[0].outputs()) == ["hls"]
+
+
+async def test_archive_stream_label_is_per_camera_with_one_filter(
+    hass, freezer
+) -> None:
+    """Метка потока — на камеру (без event_id), фильтр на логгере один."""
+    import logging
+
+    from custom_components.elektronny_gorod._logging import UrlPathRedactFilter
+
+    ha_streams = _setup_stream_component(hass)
+    coordinator = _coordinator(
+        events=(
+            _event(
+                event_id="3002",
+                timestamp=_EVENT_TS + 10,
+                duration=_LIVE_EVENT_DURATION,
+            ),
+            _live_event(event_id="3001"),
+        )
+    )
+    coordinator.api.query_camera_archive_stream = AsyncMock(
+        return_value=_ARCHIVE_URL
+    )
+    entry = _entry(hass, coordinator)
+    _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    source = _source(hass)
+
+    with (
+        _patch_stream_start(),
+        patch(
+            "custom_components.elektronny_gorod.media_source.create_stream",
+            wraps=__import__(
+                "homeassistant.components.stream", fromlist=["create_stream"]
+            ).create_stream,
+        ) as create,
+    ):
+        for event_id in ("3001", "3002"):
+            await source.async_resolve_media(
+                _resolve_item(hass, entry, event_id=event_id)
+            )
+
+    labels = {call.kwargs["stream_label"] for call in create.call_args_list}
+    assert labels == {f"{DOMAIN}_archive_{_INTERCOM_ID}"}
+    assert len(ha_streams) == 2
+    stream_logger = logging.getLogger(
+        f"homeassistant.components.stream.stream.{DOMAIN}_archive_{_INTERCOM_ID}"
+    )
+    assert (
+        sum(isinstance(f, UrlPathRedactFilter) for f in stream_logger.filters) == 1
+    )
+
+
+async def test_stop_archive_streams_waits_for_resolve_holding_the_lock(
+    hass, freezer
+) -> None:
+    """Выгрузка во время resolve: ни KeyError, ни потока у выгруженной записи."""
+    import asyncio
+
+    from custom_components.elektronny_gorod.media_source import (
+        _ARCHIVE_STREAMS_KEY,
+        async_stop_archive_streams,
+    )
+
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry = _archive_entry(hass)
+    requested = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _held_archive(*_args):
+        requested.set()
+        await release.wait()
+        return _ARCHIVE_URL
+
+    coordinator.api.query_camera_archive_stream = AsyncMock(
+        side_effect=_held_archive
+    )
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with _patch_stream_start():
+        resolve = asyncio.ensure_future(
+            _source(hass).async_resolve_media(_resolve_item(hass, entry))
+        )
+        await requested.wait()
+        stop = asyncio.ensure_future(
+            async_stop_archive_streams(hass, entry.entry_id)
+        )
+        for _ in range(5):
+            await asyncio.sleep(0)
+        release.set()
+        await resolve
+        await stop
+
+    streams = hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
+    assert not [key for key in streams if key[0] == entry.entry_id]
+    assert ha_streams[0].outputs() == {}

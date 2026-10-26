@@ -336,3 +336,32 @@ async def test_manager_stream_info_read_is_sanitized(
 
     assert await manager.async_get_stream_info(CAMERA_ID) is None
     manager.client.async_get_stream.assert_awaited_once_with("eg_100")
+
+
+async def test_unload_stops_archive_streams_of_the_entry(
+    hass: HomeAssistant,
+    mock_api,
+) -> None:
+    """A-124 шаг 2: выгрузка записи гасит её потоки архива медиабраузера."""
+    from custom_components.elektronny_gorod.media_source import (
+        _ARCHIVE_STREAMS_KEY,
+    )
+
+    entry = _entry(keep_warm=False)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    own = MagicMock()
+    own.stop = AsyncMock()
+    foreign = MagicMock()
+    foreign.stop = AsyncMock()
+    streams = hass.data.setdefault(_ARCHIVE_STREAMS_KEY, {})
+    streams[(entry.entry_id, CAMERA_ID, "3001")] = own
+    streams[("other-entry", CAMERA_ID, "3002")] = foreign
+
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    own.stop.assert_awaited_once()
+    foreign.stop.assert_not_awaited()
+    assert list(streams) == [("other-entry", CAMERA_ID, "3002")]

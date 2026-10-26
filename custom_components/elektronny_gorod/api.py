@@ -668,6 +668,42 @@ class ElektronnyGorodAPI:
         except Exception:
             return None
 
+    async def query_camera_archive_stream(
+        self, camera_id: str, start_ts: int, tz_offset: int
+    ) -> str | None:
+        """Поток архива камеры с момента `start_ts` (A-124).
+
+        Зеркало приложения (HAR 9.11.0, 2026-10-26): событие из списка, в том
+        числе идущее, играется потоком архива с начала события; параметры — в
+        том же порядке. `tz_offset` — смещение часового пояса в секундах.
+
+        Ответ — подписанная ссылка на HTTPS-поток FLV: ни её, ни тело ответа
+        не логируем. Отказ оператора (в том числе HTTP 500 / `11005` — вне
+        срока хранения) и бизнес-ошибка при HTTP 200 (`Error`/`ErrorCode`)
+        дают `None`: вызывающий откатывается на эфир, а не падает.
+        """
+        api_url = (
+            f"/rest/v1/forpost/cameras/{camera_id}/video"
+            f"?TS={int(start_ts)}&TZ={int(tz_offset)}"
+            "&LightStream=0&Format=H264&Speed=-1.0"
+        )
+        try:
+            response = await self.http.get(api_url)
+            if not isinstance(response, ClientResponse):
+                return None
+            payload = await response.json()
+        except (ClientError, TimeoutError, ValueError):
+            # Транспорт уже записал метод, путь и статус на debug; тело ответа
+            # (в нём может быть ссылка) сюда не попадает.
+            return None
+        data = payload.get("data") if isinstance(payload, dict) else None
+        if not isinstance(data, dict):
+            return None
+        if data.get("Error") or data.get("ErrorCode") is not None:
+            return None
+        url = data.get("URL")
+        return url if isinstance(url, str) and url else None
+
     async def query_camera_snapshot(
         self,
         camera_id: str,
