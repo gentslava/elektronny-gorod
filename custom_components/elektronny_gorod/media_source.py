@@ -39,6 +39,8 @@ from .history import place_display_name
 _SOURCE_TITLE = "Электронный город"
 
 _MIME_MP4 = "video/mp4"
+_MIME_HLS_CAMERA = "application/vnd.apple.mpegurl"
+_MIME_HLS_FRONTEND = "application/x-mpegURL"
 
 _CAMERA_SOURCES = ("intercom", "public")
 
@@ -206,7 +208,7 @@ class ElektronnyGorodMediaSource(MediaSource):
         if entry is None or entry.disabled_by is not None:
             raise Unresolvable("Live view is not available")
         try:
-            return await ha_media_source.async_resolve_media(
+            play = await ha_media_source.async_resolve_media(
                 self._hass,
                 ha_media_source.generate_media_source_id("camera", entry.entity_id),
                 item.target_media_player,
@@ -218,6 +220,13 @@ class ElektronnyGorodMediaSource(MediaSource):
                 type(ex).__name__,
             )
             raise Unresolvable("Live view is not available") from None
+        # Плеер медиабраузера фронтенда HA (hui-dialog-web-browser-play-media)
+        # включает HLS только для sourceType === "application/x-mpegURL";
+        # camera media source отдаёт "application/vnd.apple.mpegurl", и
+        # браузер показывает «тип мультимедиа не поддерживается».
+        if play.mime_type.lower() == _MIME_HLS_CAMERA.lower():
+            return PlayMedia(url=play.url, mime_type=_MIME_HLS_FRONTEND)
+        return play
 
     def _browse_root(self) -> BrowseMedia:
         children: list[BrowseMedia] = []

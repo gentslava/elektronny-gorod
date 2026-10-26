@@ -966,6 +966,41 @@ async def test_resolve_in_progress_event_returns_camera_live_view(
     coordinator.api.query_event_download.assert_not_awaited()
 
 
+async def test_resolve_live_view_hls_mime_normalised_for_frontend(
+    hass, freezer
+) -> None:
+    """Плеер медиабраузера HA понимает только application/x-mpegURL."""
+    entry = _entry(hass, _coordinator(events=(_live_event(),)))
+    _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with _patch_camera_resolve():
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    assert play.url == _LIVE_PLAY_URL
+    assert play.mime_type == "application/x-mpegURL"
+
+
+async def test_resolve_live_view_non_hls_mime_passes_through(
+    hass, freezer
+) -> None:
+    from homeassistant.components.media_source.models import PlayMedia
+
+    entry = _entry(hass, _coordinator(events=(_live_event(),)))
+    _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    mjpeg = PlayMedia(
+        url="/api/camera_proxy_stream/camera.x?token=t",
+        mime_type="multipart/x-mixed-replace",
+    )
+
+    with _patch_camera_resolve(return_value=mjpeg):
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    assert play.url == mjpeg.url
+    assert play.mime_type == "multipart/x-mixed-replace"
+
+
 async def test_resolve_live_view_passes_target_media_player(hass, freezer) -> None:
     entry = _entry(hass, _coordinator(events=(_live_event(),)))
     entity_id = _register_camera_entity(hass, entry)
