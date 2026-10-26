@@ -40,6 +40,7 @@ from .const import (
     DEFAULT_GO2RTC_BASE_URL,
     DEFAULT_GO2RTC_RTSP_HOST,
     STREAM_MANAGER_DATA,
+    SIGNAL_DOOR_OPENED,
     SIGNAL_DOORBELL,
     SIP_DATA as _SIP_DATA,
 )
@@ -232,6 +233,11 @@ async def async_setup_entry(
     )
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_DOORBELL, sip_controller.handle_signal)
+    )
+    entry.async_on_unload(
+        async_dispatcher_connect(
+            hass, SIGNAL_DOOR_OPENED, sip_controller.handle_door_opened
+        )
     )
     hass.data.setdefault(_SIP_DATA, {})[entry.entry_id] = sip_controller
     async_register_history_ws_command(hass)
@@ -1000,7 +1006,8 @@ async def async_unload_entry(
     # действий нет до перезапуска HA (правило Bronze `action-setup`).
     sip_controller = hass.data.get(_SIP_DATA, {}).pop(entry.entry_id, None)
     if sip_controller is not None:
-        await sip_controller.async_hangup()
+        # Выгрузка — не решение пользователя: панель не трогаем, отпускаем молча.
+        await sip_controller.async_hangup(end_ringing=False)
 
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         hass.data.get(_FCM_DATA, {}).pop(entry.entry_id, None)

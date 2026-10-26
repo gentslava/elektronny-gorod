@@ -69,6 +69,10 @@ AREA_PUBLIC_CAM: Final = "Городские камеры"
 # Shared cross-module → в const.py (см. constants-locality.md).
 SIGNAL_DOORBELL: Final = f"{DOMAIN}_doorbell"
 
+# Дверь домофона открыта из HA: lock.py (sender, аргумент — `access_control_id: str`)
+# → DoorbellCallController (listener, __init__.py подписывает). Shared → в const.py.
+SIGNAL_DOOR_OPENED: Final = f"{DOMAIN}_door_opened"
+
 # Реестр SIP-контроллеров per-entry в hass.data: __init__ (setup/unload) пишет,
 # uplink_ws (WS-команда микрофона) читает. Shared cross-module → в const.py.
 SIP_DATA: Final = f"{DOMAIN}_sip"

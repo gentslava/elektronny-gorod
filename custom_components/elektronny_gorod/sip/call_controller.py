@@ -8,7 +8,10 @@
   если held не поднялся — fallback на `async_answer` (register-on-answer);
 - приём `CANCEL` (сброс с панели / ответ на др. устройстве) → `on_cancelled` →
   мгновенный dismiss экрана (через EVENT_SIP_CALL active=false, чистит хелпер);
-- сервис `hangup` → `SipManager.async_hangup` (BYE / release held).
+- сервис `hangup` и сигнал `SIGNAL_DOOR_OPENED` (дверь открыта из HA) →
+  `SipManager.async_end`: звонок гасится НА ПАНЕЛИ (активный — BYE; держимый —
+  `200 OK` → ACK → BYE). Тихое снятие (`SipManager.async_hangup`, без трогания
+  панели) — только при выгрузке записи, FCM `ended`, смене звонящего и hold-таймауте.
 
 🔴 Call-ID binding (call-answer-model.md §6.5): держим/отвечаем только на активный
 вызов в окне `CallInvalidated`. Один held/активный вызов за раз (фикс-порты).
@@ -94,6 +97,16 @@ class ActiveCall:
     deadline: datetime
 
 
+def _same_call(a: ActiveCall | None, b: ActiveCall | None) -> bool:
+    """Один и тот же вызов по идентификаторам (дубль FCM `ring` — новый объект)."""
+    return (
+        a is not None
+        and b is not None
+        and a.call_id == b.call_id
+        and a.access_control_id == b.access_control_id
+    )
+
+
 class DoorbellCallController:
     """Трекинг вызова + register-on-ring hold/accept через SipManager (один на entry)."""
 
@@ -114,6 +127,12 @@ class DoorbellCallController:
         # access_control_id → camera_id (для видео-источника стрима вызова, B).
         self._camera_resolver = camera_resolver
         self._active: ActiveCall | None = None
+        # Вызов, который сейчас снимает `async_hangup` (ждёт ACK): его повторный
+        # FCM `ring` — дубль, а не новый звонок.
+        self._ending: ActiveCall | None = None
+        # Инвариант: плечо в `_manager` принадлежит `_active`. Hold ставит плечо
+        # только для всё ещё активного вызова; ответ делает свой вызов активным,
+        # а звонок другой панели во время ответа игнорируется.
         self._manager: SipManager | None = None
         self._bridge: AudioBridge | None = None
         # Uplink-микрофон (Phase C, ADR-0013): WS-транспорт кормит sink через
@@ -166,17 +185,25 @@ class DoorbellCallController:
             if dt_util.utcnow() >= active.deadline:
                 LOGGER.info("SIP: протухший ring (дедлайн в прошлом) — игнор")
                 return
+            if _same_call(active, self._ending):
+                # Отбой этого вызова ещё ждёт ACK, менеджер уже забран: без
+                # гварда дубль поднял бы `ringing` и лишний REGISTER.
+                LOGGER.info("SIP: повторный ring завершаемого вызова — игнор")
+                return
+            if self._call_state == CALL_STATE_CONNECTING and self._answer_lock.locked():
+                # Идёт ответ: плечо уже не `holding` (внутри `accept`) или ещё не
+                # поставлено (fallback) — ветки ниже приняли бы ring за новый вызов
+                # и сняли бы принимаемый. Как при разговоре (A-89): не трогаем.
+                # Лок — чтобы прерванный ответ не оставил гвард навсегда.
+                LOGGER.info("SIP: идёт ответ — игнор ring")
+                return
             if self._manager is not None:
                 # A-89: уже держим/в разговоре. Различаем разговор vs держимый.
                 if self._manager.in_call:
                     # Идёт разговор — одновременный второй вне scope, не рвём текущий.
                     LOGGER.info("SIP: идёт разговор — игнор ring другого домофона")
                     return
-                same_call = self._active is not None and (
-                    active.call_id == self._active.call_id
-                    and active.access_control_id == self._active.access_control_id
-                )
-                if same_call:
+                if _same_call(active, self._active):
                     # Повторный ring того же держимого вызова — дедуп, не пере-hold.
                     LOGGER.info("SIP: повторный ring держимого вызова — игнор")
                     return
@@ -278,9 +305,18 @@ class DoorbellCallController:
             except Exception:  # noqa: BLE001 — degrade: экран живёт от FCM, dismiss по таймеру
                 LOGGER.warning("SIP hold: REGISTER/hold не удался — degrade", exc_info=True)
                 held = False
-            if held:
-                self._manager = manager
-                self._schedule_hold_timeout()
+            if not held:
+                return
+            if not _same_call(self._active, call):
+                # Пока шли REGISTER/INVITE, вызов кончился (FCM `ended`) или
+                # позвонила другая панель — плечо устарело. Отпускаем молча:
+                # пользователь этот вызов не трогал. Hold нового вызова в очереди
+                # найдёт `_manager is None` и поднимет своё плечо.
+                LOGGER.debug("SIP hold: вызов сменился во время REGISTER/INVITE — плечо снято")
+                await manager.async_hangup()
+                return
+            self._manager = manager
+            self._schedule_hold_timeout()
 
     # ---- сервисы answer / hangup ----
     async def async_answer(self) -> bool:
@@ -323,7 +359,11 @@ class DoorbellCallController:
                         fcm_call_id=call.call_id,
                     )
                     if ok:
+                        # Поднят разговор с вызовом, который принял пользователь:
+                        # ring другой панели и FCM `ended` за время REGISTER/INVITE
+                        # его не вытесняют (как в `handle_signal` при разговоре).
                         self._manager = manager
+                        self._active = call
             except Exception:  # noqa: BLE001 — degrade: мост снять, экран живёт от FCM
                 LOGGER.warning("SIP answer: accept/register упал — снимаю мост (degrade)",
                                exc_info=True)
@@ -347,8 +387,28 @@ class DoorbellCallController:
                 await self._teardown_audio_bridge(bridge)
             return ok
 
-    async def async_hangup(self) -> bool:
-        """Завершить разговор (BYE) / снять держимый (release) + снять аудио-мост.
+    @callback
+    def handle_door_opened(self, access_control_id: str) -> None:
+        """SIGNAL_DOOR_OPENED: дверь открыта из HA → погасить звонок на панели.
+
+        Только своя панель: открытие другой двери вызов не трогает. Синхронный
+        callback лишь ставит задачу — `async_hangup` берёт `_answer_lock` и ждёт
+        сеть, в диспетчере этого делать нельзя."""
+        if self._active is None or self._active.access_control_id != access_control_id:
+            return
+        self._hass.async_create_task(self.async_hangup(expected=self._active))
+
+    async def async_hangup(
+        self, *, end_ringing: bool = True, expected: ActiveCall | None = None
+    ) -> bool:
+        """Завершить разговор (BYE) / снять держимый + снять аудио-мост.
+
+        `end_ringing=True` (отбой пользователя, открытие двери) — звонок гасится
+        на панели (`SipManager.async_end`). `False` (выгрузка записи) — тихое
+        снятие без трогания панели (`SipManager.async_hangup`).
+
+        `expected` — вызов, к которому относится отбой (открытие двери): если к
+        моменту взятия лока активен уже другой вызов, ничего не трогаем.
 
         Возвращает, было ли что снимать. Судить об этом снаружи нельзя:
         `current_call()` гаснет по истечении **окна ответа**, а разговор живёт
@@ -360,30 +420,50 @@ class DoorbellCallController:
         лока await-ит `_setup_audio_bridge` (`self._bridge` ещё None, ставится
         ПОСЛЕ await'ов), параллельный hangup забрал бы teardown, не увидев
         ещё-None мост → answer присвоил бы `self._bridge` → orphaned ffmpeg +
-        HTTP-listener :40020. Вызывается только из сервис-хендлеров/unload-таймера
-        (не из методов под локом) — self-deadlock'а нет."""
+        HTTP-listener :40020. Вызывается только из сервис-хендлеров, таймеров и
+        задачи открытия двери (не из методов под локом) — self-deadlock'а нет."""
         async with self._answer_lock:
+            if expected is not None and not _same_call(self._active, expected):
+                # Пока отбой ждал лок (hold держит его на REGISTER/INVITE), вызов
+                # кончился или позвонила другая панель. Плечо прежнего вызова hold
+                # уже отпустил; если плечо есть, оно — нового активного вызова, и
+                # открытие чужой двери его не трогает.
+                return False
             self._cancel_call_timeout()
             self._cancel_hold_timeout()
             manager, self._manager = self._manager, None
             bridge, self._bridge = self._bridge, None
-            had_call = (
-                manager is not None or bridge is not None or self._active is not None
-            )
+            # Снимаемый вызов фиксируем до сети: `async_end` ждёт ACK (до
+            # `ACK_TIMEOUT`), и FCM `ring` другой панели в это окно ставит новый
+            # `_active` — его гасить и забывать нельзя.
+            call = self._active
+            had_call = manager is not None or bridge is not None or call is not None
             self._clear_uplink_sink()
-            if manager is not None:
-                await manager.async_hangup()
             if had_call:
                 # Гасим экран всегда, когда было что снимать. Под `manager is
                 # not None` это не работало на штатной ветке degrade (нет
                 # FCM-токена, не удался REGISTER/hold): отбой отчитывался
                 # успехом, не погасив вызов, — карточка звонила до
                 # ring-таймаута, а второе нажатие отвечало «нет вызова».
-                # До сброса `_active`: `_emit_call_state` читает из него ids.
+                # До сети: `_emit_call_state` читает ids из `_active`, а он
+                # ещё наш; сбой сети ниже экран уже не оставит звонить.
                 self._emit_call_state(CALL_STATE_ENDED)
                 self._fire_call_state(False)
-            self._active = None  # вызов окончен — не оставляем висеть до idle-reset
-            await self._teardown_audio_bridge(bridge)
+            self._ending = call
+            try:
+                if manager is not None:
+                    # Держимое плечо без вызова (окно ответа истекло, а снятие
+                    # по ring-таймауту ещё в очереди) отвечать нельзя — только
+                    # тихо отпустить.
+                    if end_ringing and (manager.in_call or call is not None):
+                        await manager.async_end()
+                    else:
+                        await manager.async_hangup()
+            finally:
+                self._ending = None
+                if self._active is call:
+                    self._active = None  # вызов окончен — не висит до idle-reset
+                await self._teardown_audio_bridge(bridge)
             return had_call
 
     async def _async_release_held(self) -> None:

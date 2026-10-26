@@ -181,7 +181,7 @@ async def test_actions_survive_the_unload_of_the_last_entry(
     ):
         assert await async_unload_entry(hass, entry) is True
 
-    controller.async_hangup.assert_awaited_once()
+    controller.async_hangup.assert_awaited_once_with(end_ringing=False)
     assert hass.services.has_service(DOMAIN, SERVICE_ANSWER)
     assert hass.services.has_service(DOMAIN, SERVICE_HANGUP)
 

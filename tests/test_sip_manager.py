@@ -15,7 +15,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from custom_components.elektronny_gorod.sip.manager import SipManager
+from custom_components.elektronny_gorod.sip.manager import RTP_LOCAL_PORT, SipManager
 
 
 def _held_with_body(body: str) -> MagicMock:
@@ -118,3 +118,200 @@ async def test_accept_never_raises_on_malformed_sdp(body: str) -> None:
     mgr, _ = _manager_holding(body)
     result = await mgr.accept()
     assert result is False
+
+
+# --- async_end: завершить вызов на панели (200 OK → ACK → BYE) -----------------
+
+_OFFER_PCMU = "v=0\r\nc=IN IP4 10.0.0.1\r\nm=audio 4000 RTP/AVP 0\r\n"
+
+
+def _end_manager(acked: asyncio.Future | None) -> tuple[SipManager, MagicMock, MagicMock]:
+    """Менеджер с держимым вызовом; `parent` пишет порядок answer → send_bye → release."""
+    mgr, held = _manager_holding(_OFFER_PCMU)
+    held.sip.acked = acked
+    parent = MagicMock()
+    parent.attach_mock(held.sip.answer, "answer")
+    parent.attach_mock(held.sip.send_bye, "send_bye")
+    parent.attach_mock(held.release, "release")
+    return mgr, held, parent
+
+
+async def test_end_answers_then_hangs_up_held_call() -> None:
+    acked = asyncio.get_running_loop().create_future()
+    acked.set_result(None)
+    mgr, held, parent = _end_manager(acked)
+
+    await mgr.async_end()
+
+    names = [c[0] for c in parent.mock_calls]
+    assert names == ["answer", "send_bye", "release"]
+    answer_args = held.sip.answer.call_args.args
+    assert answer_args[:2] == (held.invite_msg, held.addr)
+    assert answer_args[2] == held.local_ip
+    assert answer_args[3] == RTP_LOCAL_PORT
+    assert answer_args[4] == 0
+    assert answer_args[5] == "PCMU/8000"
+    assert mgr.holding is False
+
+
+async def test_end_sends_bye_even_without_ack() -> None:
+    pending = asyncio.get_running_loop().create_future()
+    mgr, held, parent = _end_manager(pending)
+
+    with patch("custom_components.elektronny_gorod.sip.manager.ACK_TIMEOUT", 0.01):
+        await mgr.async_end()
+
+    assert [c[0] for c in parent.mock_calls] == ["answer", "send_bye", "release"]
+    assert mgr.holding is False
+
+
+async def test_end_skips_ack_wait_when_transport_closed() -> None:
+    # answer() вернулся рано (транспорт закрыт) → acked остался None → не ждём.
+    mgr, held, parent = _end_manager(None)
+
+    await mgr.async_end()
+
+    assert [c[0] for c in parent.mock_calls] == ["answer", "send_bye", "release"]
+
+
+async def test_end_releases_silently_on_malformed_offer() -> None:
+    mgr, held = _manager_holding("v=0\r\nc=IN IP4 10.0.0.1\r\n")
+
+    await mgr.async_end()
+
+    held.sip.answer.assert_not_called()
+    held.sip.send_bye.assert_not_called()
+    held.release.assert_called_once()
+    assert mgr.holding is False
+
+
+async def test_end_hangs_up_active_call() -> None:
+    mgr = SipManager(fcm_token="TOK")
+    active = MagicMock()
+    active.teardown = AsyncMock()
+    mgr._active = active
+
+    await mgr.async_end()
+
+    active.teardown.assert_awaited_once_with(send_bye=True)
+    assert mgr.in_call is False
+
+
+async def test_end_without_call_is_noop() -> None:
+    mgr = SipManager(fcm_token="TOK")
+    await mgr.async_end()
+    assert mgr.in_call is False
+    assert mgr.holding is False
+
+
+async def test_end_waits_for_ack_before_bye() -> None:
+    # BYE не должен уходить, пока ACK не пришёл (и не истёк ACK_TIMEOUT).
+    loop = asyncio.get_running_loop()
+    acked = loop.create_future()
+    mgr, held, parent = _end_manager(acked)
+
+    task = loop.create_task(mgr.async_end())
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    held.sip.answer.assert_called_once()
+    held.sip.send_bye.assert_not_called()
+    held.release.assert_not_called()
+
+    acked.set_result(None)
+    await task
+
+    assert [c[0] for c in parent.mock_calls] == ["answer", "send_bye", "release"]
+
+
+async def test_end_releases_held_call_when_cancelled_during_ack_wait() -> None:
+    loop = asyncio.get_running_loop()
+    mgr, held, _parent = _end_manager(loop.create_future())
+
+    task = loop.create_task(mgr.async_end())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    held.sip.send_bye.assert_called_once()
+    held.release.assert_called_once()
+    assert mgr.holding is False
+
+
+_MGR = "custom_components.elektronny_gorod.sip.manager"
+
+
+async def test_end_resends_answer_while_waiting_for_ack() -> None:
+    """Потерянный `200 OK` повторяется, пока нет ACK: иначе панель звонит до таймаута."""
+    loop = asyncio.get_running_loop()
+    acked = loop.create_future()
+    mgr, held, parent = _end_manager(acked)
+    parent.attach_mock(held.sip.resend_answer, "resend_answer")
+
+    with patch(f"{_MGR}.ANSWER_RETRANSMIT_T1", 0.01), patch(f"{_MGR}.ACK_TIMEOUT", 5.0):
+        task = loop.create_task(mgr.async_end())
+        await asyncio.sleep(0.05)
+        assert held.sip.resend_answer.called, "200 OK не повторён после T1"
+        held.sip.send_bye.assert_not_called()
+        resent = held.sip.resend_answer.call_count
+
+        acked.set_result(None)
+        await task
+
+    assert held.sip.resend_answer.call_count == resent, "повтор после ACK"
+    names = [c[0] for c in parent.mock_calls]
+    assert names[0] == "answer"
+    assert set(names[1:-2]) == {"resend_answer"}
+    assert names[-2:] == ["send_bye", "release"]
+
+
+async def test_end_doubles_resend_interval_while_waiting_for_ack() -> None:
+    """Повтор `200 OK` реже с каждым разом: T1, 2·T1, 4·T1… (RFC 3261 §13.3.1.4).
+
+    Без удвоения панель засыпали бы одинаковыми ответами всё ожидание ACK.
+    Интервалы снимаем с таймаутов ожидания, а не с часов, — тест не зависит от
+    нагрузки машины. После четвёртого ожидания приходит ACK.
+    """
+    loop = asyncio.get_running_loop()
+    acked = loop.create_future()
+    mgr, _held, _parent = _end_manager(acked)
+    real_wait = asyncio.wait
+    timeouts: list[float] = []
+
+    async def recording_wait(fs, *, timeout):
+        timeouts.append(timeout)
+        if len(timeouts) == 4:
+            acked.set_result(None)
+        return await real_wait(fs, timeout=timeout)
+
+    with (
+        patch(f"{_MGR}.ANSWER_RETRANSMIT_T1", 0.01),
+        patch(f"{_MGR}.ACK_TIMEOUT", 5.0),
+        patch(f"{_MGR}.asyncio.wait", recording_wait),
+    ):
+        await mgr.async_end()
+
+    assert timeouts == [0.01, 0.02, 0.04, 0.08]
+
+
+async def test_end_does_not_resend_answer_once_acked() -> None:
+    acked = asyncio.get_running_loop().create_future()
+    acked.set_result(None)
+    mgr, held, _parent = _end_manager(acked)
+
+    with patch(f"{_MGR}.ANSWER_RETRANSMIT_T1", 0.001):
+        await mgr.async_end()
+
+    held.sip.resend_answer.assert_not_called()
+    held.sip.send_bye.assert_called_once()
+
+
+async def test_end_releases_held_call_when_answer_raises() -> None:
+    mgr, held, _parent = _end_manager(None)
+    held.sip.answer.side_effect = OSError("boom")
+
+    with pytest.raises(OSError):
+        await mgr.async_end()
+
+    held.release.assert_called_once()
+    assert mgr.holding is False

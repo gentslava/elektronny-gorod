@@ -5,6 +5,9 @@ Synthetic state-cycle (UNLOCKED → 5s → LOCKED) сохраняется как
 но реализован через `async_call_later` (вместо `asyncio.sleep` в `async_update`),
 что совместимо с `CoordinatorEntity` (у которой `should_poll=False`).
 
+Успешное открытие двери дополнительно завершает звонящий вызов той же панели
+(`SIGNAL_DOOR_OPENED` → `DoorbellCallController`).
+
 Полное решение `lock → button` отложено в ADR-0005 (отдельный PR).
 """
 from __future__ import annotations
@@ -17,11 +20,12 @@ from homeassistant.components.lock import LockEntity, LockState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.device_registry import DeviceInfo
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import AREA_INTERCOM, DOMAIN, LOGGER
+from .const import AREA_INTERCOM, DOMAIN, LOGGER, SIGNAL_DOOR_OPENED
 from .device import linked_to_place, place_device_id
 from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 from .entity_migration import lock_unique_id
@@ -197,6 +201,11 @@ class ElektronnyGorodLock(
         же самое, что отпереть: физическое действие одно, дверь человек
         открывает рукой. Объявление добавило бы в карточку вторую кнопку, не
         добавив возможности.
+
+        Успешное открытие сообщает панель сигналом `SIGNAL_DOOR_OPENED`:
+        звонящий вызов **той же** панели гасится (`DoorbellCallController`).
+        При отказе оператора сигнала нет — вызов продолжает звонить, и его
+        ещё можно принять.
         """
         LOGGER.info("Unlock %s", self.unique_id)
         self._state = LockState.UNLOCKING
@@ -216,6 +225,9 @@ class ElektronnyGorodLock(
             raise HomeAssistantError(
                 translation_domain=DOMAIN, translation_key="cannot_unlock"
             ) from err
+        async_dispatcher_send(
+            self.hass, SIGNAL_DOOR_OPENED, str(self._access_control_id)
+        )
         self._state = LockState.UNLOCKED
         self._schedule_reset(LOCK_UNLOCK_DELAY)
         self.async_write_ha_state()
