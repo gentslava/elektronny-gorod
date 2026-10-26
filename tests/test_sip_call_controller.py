@@ -1090,3 +1090,100 @@ async def test_switch_caller_releases_old_silently(controller):
 
     old.async_hangup.assert_awaited_once()
     old.async_end.assert_not_awaited()
+
+
+async def test_ring_of_other_panel_during_hangup_survives():
+    """Звонок другой панели, пришедший пока отбой ждёт ACK, не теряется.
+
+    Держимый вызов гасится через `200 OK` → ожидание `ACK` (до двух секунд).
+    FCM `ring` панели B в это окно ставит новый активный вызов; отбой панели A,
+    закончив ожидание, не должен гасить и забывать звонок B — иначе B звонит
+    на панели, а HA его уже не видит.
+    """
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    gate = asyncio.Event()
+    manager = _manager_mock(holding=True, in_call=False)
+    manager.async_end = AsyncMock(side_effect=gate.wait)
+    c._manager = manager
+
+    hangup = asyncio.create_task(c.async_hangup())
+    await asyncio.sleep(0)
+    assert manager.async_end.called, "предпосылка: отбой ждёт ACK"
+    c.handle_signal(_ring(ac="B", call_id="c2"))
+    _drop_tasks(tasks)  # hold-таск B здесь не нужен
+    c._hass.bus.async_fire.reset_mock()
+    gate.set()
+
+    assert await hangup is True
+
+    call = c.current_call()
+    assert call is not None and call.call_id == "c2", "звонок B потерян"
+    fired = c._hass.bus.async_fire.call_args_list
+    assert _call_states(c._hass) == [], "вызову B выставлен «Завершён»"
+    assert not any(cl.args[0] == EVENT_SIP_CALL for cl in fired), "экран B погашен"
+
+
+async def test_ring_of_other_panel_during_hangup_keeps_old_call_ended():
+    """«Завершён» уходит за отклонённый вызов A — с его идентификаторами."""
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    gate = asyncio.Event()
+    manager = _manager_mock(holding=True, in_call=False)
+    manager.async_end = AsyncMock(side_effect=gate.wait)
+    c._manager = manager
+
+    hangup = asyncio.create_task(c.async_hangup())
+    await asyncio.sleep(0)
+    c.handle_signal(_ring(ac="B", call_id="c2"))
+    _drop_tasks(tasks)
+    gate.set()
+    await hangup
+
+    ended = [
+        p["call_id"] for p in _call_state_payloads(c._hass) if p["state"] == CALL_STATE_ENDED
+    ]
+    assert ended == ["c1"]
+
+
+async def test_hangup_releases_held_call_left_without_a_ring(controller):
+    """Держимый вызов без активного звонка отпускается молча, без ответа панели.
+
+    Так бывает, когда FCM `ended` пришёл, пока шли REGISTER/INVITE: вызов уже
+    закончился, держимое плечо осталось. Отвечать `200 OK` на уже завершённый
+    вызов нельзя — отбой только освобождает порт.
+    """
+    manager = _manager_mock(holding=True, in_call=False)
+    controller._manager = manager
+    assert controller._active is None, "предпосылка: активного звонка нет"
+
+    assert await controller.async_hangup() is True
+
+    manager.async_hangup.assert_awaited_once()
+    manager.async_end.assert_not_awaited()
+
+
+async def test_hangup_cleans_up_when_ending_at_panel_fails(controller):
+    """Сбой сети при сбросе на панели не оставляет карточку звонить.
+
+    Ошибка всплывает вызывающему, но экран гаснет, вызов забыт, мост снят.
+    """
+    controller.handle_signal(_ring())
+    manager = _manager_mock(holding=True, in_call=False)
+    manager.async_end.side_effect = OSError("sendto")
+    controller._manager = manager
+    bridge = MagicMock(stop=AsyncMock())
+    controller._bridge = bridge
+
+    with pytest.raises(OSError):
+        await controller.async_hangup()
+
+    assert controller.current_call() is None
+    assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
+    assert any(
+        cl.args[0] == EVENT_SIP_CALL and cl.args[1] == {"active": False}
+        for cl in controller._hass.bus.async_fire.call_args_list
+    ), "экран вызова не погашен"
+    bridge.stop.assert_awaited_once()

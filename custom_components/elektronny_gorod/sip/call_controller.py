@@ -385,26 +385,34 @@ class DoorbellCallController:
             self._cancel_hold_timeout()
             manager, self._manager = self._manager, None
             bridge, self._bridge = self._bridge, None
-            had_call = (
-                manager is not None or bridge is not None or self._active is not None
-            )
+            # Снимаемый вызов фиксируем до сети: `async_end` ждёт ACK (до
+            # `ACK_TIMEOUT`), и FCM `ring` другой панели в это окно ставит новый
+            # `_active` — его гасить и забывать нельзя.
+            call = self._active
+            had_call = manager is not None or bridge is not None or call is not None
             self._clear_uplink_sink()
-            if manager is not None:
-                if end_ringing:
-                    await manager.async_end()
-                else:
-                    await manager.async_hangup()
             if had_call:
                 # Гасим экран всегда, когда было что снимать. Под `manager is
                 # not None` это не работало на штатной ветке degrade (нет
                 # FCM-токена, не удался REGISTER/hold): отбой отчитывался
                 # успехом, не погасив вызов, — карточка звонила до
                 # ring-таймаута, а второе нажатие отвечало «нет вызова».
-                # До сброса `_active`: `_emit_call_state` читает из него ids.
+                # До сети: `_emit_call_state` читает ids из `_active`, а он
+                # ещё наш; сбой сети ниже экран уже не оставит звонить.
                 self._emit_call_state(CALL_STATE_ENDED)
                 self._fire_call_state(False)
-            self._active = None  # вызов окончен — не оставляем висеть до idle-reset
-            await self._teardown_audio_bridge(bridge)
+            try:
+                if manager is not None:
+                    # Держимое плечо без вызова (FCM `ended` пришёл, пока шли
+                    # REGISTER/INVITE) отвечать нельзя — только тихо отпустить.
+                    if end_ringing and (manager.in_call or call is not None):
+                        await manager.async_end()
+                    else:
+                        await manager.async_hangup()
+            finally:
+                if self._active is call:
+                    self._active = None  # вызов окончен — не висит до idle-reset
+                await self._teardown_audio_bridge(bridge)
             return had_call
 
     async def _async_release_held(self) -> None:
