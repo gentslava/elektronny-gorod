@@ -197,3 +197,69 @@ def test_redact_path_masks_the_whole_login_segment(path):
     assert "***" in redacted
     for digits in ("999", "1234567", "123-45-67", "123", "45", "67"):
         assert digits not in redacted, f"{path} → {redacted}"
+
+
+# --- A-124: URL в чужих логах (HA Stream) ----------------------------------
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        (
+            "Started stream: https://forpost-1.example:18081/rtsp/ID/SEC,RET/d=1",
+            "Started stream: https://forpost-1.example:18081/***",
+        ),
+        (
+            "x https://h.example/rtsp/(SEC)RET/d=1 y",
+            "x https://h.example/*** y",
+        ),
+        # Формат HA Stream: `Error opening stream (<strerror>, <URL>)`.
+        (
+            "Error opening stream (Server returned 404 Not Found, "
+            "https://h.example:18081/rtsp/ID/SEC,RET/d=1)",
+            "Error opening stream (Server returned 404 Not Found, "
+            "https://h.example:18081/***)",
+        ),
+        (
+            "a https://one.example/p/TOKEN-ONE and 'https://two.example/q?x=TOKEN-TWO'",
+            "a https://one.example/*** and 'https://two.example/***'",
+        ),
+        ("no url here (just text, commas)", "no url here (just text, commas)"),
+    ],
+)
+def test_redact_url_paths(text, expected):
+    from custom_components.elektronny_gorod._logging import redact_url_paths
+
+    assert redact_url_paths(text) == expected
+
+
+def _record(msg, args):
+    import logging
+
+    return logging.LogRecord("t", logging.ERROR, __file__, 1, msg, args, None)
+
+
+def test_url_path_filter_rewrites_record_with_url():
+    from custom_components.elektronny_gorod._logging import UrlPathRedactFilter
+
+    record = _record(
+        "Error from stream worker: %s",
+        ("Error opening stream (boom, https://h.example/rtsp/A/SEC,RET/d=1)",),
+    )
+
+    assert UrlPathRedactFilter().filter(record) is True
+    assert record.getMessage() == (
+        "Error from stream worker: Error opening stream (boom, https://h.example/***)"
+    )
+    assert "RET" not in record.getMessage()
+
+
+def test_url_path_filter_leaves_record_without_url_untouched():
+    from custom_components.elektronny_gorod._logging import UrlPathRedactFilter
+
+    args = ("camera", 3)
+    record = _record("Restarting %s in %d seconds", args)
+
+    assert UrlPathRedactFilter().filter(record) is True
+    assert record.msg == "Restarting %s in %d seconds"
+    assert record.args is args
