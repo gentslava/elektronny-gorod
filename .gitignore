@@ -113,3 +113,6 @@ coverage.xml
 !website/**/*.[jJ][pP][gG]
 !website/**/*.[wW][eE][bB][pP]
 !pencil/images/*.[pP][nN][gG]
+
+# Видеопотоки, записанные mitm-tee-stream.py
+research/api/streams/

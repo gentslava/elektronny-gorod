@@ -132,6 +132,7 @@ AVD_NAME=Pixel_8_API_34 APP_PACKAGE=ru.inetra.intercom \
 # Остановить capture
 ./research/scripts/05-capture-stop.sh
 # → research/api/2026-05-23-home-screen-refresh.har
+# видео (video/*) — в research/api/streams/<дата>-<сценарий>/ (mitm-tee-stream.py)
 ```
 
 ## Шаблон сценария — класс B (auth)
@@ -167,3 +168,9 @@ AVD_NAME=Pixel_8_API_34 APP_PACKAGE=ru.inetra.intercom \
 - [`runbooks/har-collection.md`](../../docs/aidd/runbooks/har-collection.md) — пошаговая инструкция.
 - [`.claude/agents/reverse-engineer.md`](../../.claude/agents/reverse-engineer.md) — кто запускает это от лица AI.
 - [`.claude/commands/capture-har.md`](../../.claude/commands/capture-har.md) — slash-команда оркестратор.
+
+## Видеопотоки в захвате
+
+`04-capture-start.sh` подключает `mitm-tee-stream.py`: ответы `video/*` (поток оператора `video/x-flv` с `forpost-N:18081`) идут насквозь — иначе mitmproxy копит бесконечный ответ и приложение показывает «Видео недоступно» — и параллельно пишутся в `research/api/streams/<дата>-<сценарий>/<хост>-<n>.flv`. В HAR у таких ответов остаются заголовки без тела. Каталог в `.gitignore`.
+
+Эмулятор с образом Google Play (`ro.debuggable=0`) не даёт `adb root`, поэтому системный сертификат из `01-baseline-setup.sh` не ставится; приложение после `apk-mitm` доверяет пользовательским сертификатам — CA ставится через «Настройки → Шифрование и учётные данные → Установить сертификат → Сертификат ЦС». Разделённые сборки (`.apks`/`.xapk`) ставятся `adb install-multiple` распакованных `*.apk`; нужен вариант с `config.arm64_v8a.apk` для arm64-эмулятора.

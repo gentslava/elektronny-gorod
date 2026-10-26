@@ -37,7 +37,13 @@ if [[ -f "$FLOW_FILE" ]]; then
 fi
 
 echo "→ Старт mitmdump → $FLOW_FILE"
-nohup mitmdump -p "$MITM_PORT" -w "$FLOW_FILE" >/tmp/mitmdump.log 2>&1 &
+# Видео (video/*) идёт насквозь и параллельно пишется в $MITM_DUMP_DIR/streams/
+# (mitm-tee-stream.py); остальные большие тела тоже стримятся, чтобы бесконечные
+# ответы не копились в памяти и приложение не падало в «Видео недоступно».
+STREAM_DIR="$MITM_DUMP_DIR/streams/$DATE-$SCENARIO"
+nohup mitmdump -p "$MITM_PORT" -w "$FLOW_FILE" \
+    -s "$(dirname "${BASH_SOURCE[0]}")/mitm-tee-stream.py" --set tee_dir="$STREAM_DIR" \
+    --set stream_large_bodies=1m >/tmp/mitmdump.log 2>&1 &
 echo $! > "$PID_FILE"
 
 # Дать mitmdump время подняться
