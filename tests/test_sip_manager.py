@@ -202,3 +202,47 @@ async def test_end_without_call_is_noop() -> None:
     await mgr.async_end()
     assert mgr.in_call is False
     assert mgr.holding is False
+
+
+async def test_end_waits_for_ack_before_bye() -> None:
+    # BYE не должен уходить, пока ACK не пришёл (и не истёк ACK_TIMEOUT).
+    loop = asyncio.get_running_loop()
+    acked = loop.create_future()
+    mgr, held, parent = _end_manager(acked)
+
+    task = loop.create_task(mgr.async_end())
+    await asyncio.sleep(0.05)
+    assert not task.done()
+    held.sip.answer.assert_called_once()
+    held.sip.send_bye.assert_not_called()
+    held.release.assert_not_called()
+
+    acked.set_result(None)
+    await task
+
+    assert [c[0] for c in parent.mock_calls] == ["answer", "send_bye", "release"]
+
+
+async def test_end_releases_held_call_when_cancelled_during_ack_wait() -> None:
+    loop = asyncio.get_running_loop()
+    mgr, held, _parent = _end_manager(loop.create_future())
+
+    task = loop.create_task(mgr.async_end())
+    await asyncio.sleep(0.05)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    held.release.assert_called_once()
+    assert mgr.holding is False
+
+
+async def test_end_releases_held_call_when_answer_raises() -> None:
+    mgr, held, _parent = _end_manager(None)
+    held.sip.answer.side_effect = OSError("boom")
+
+    with pytest.raises(OSError):
+        await mgr.async_end()
+
+    held.release.assert_called_once()
+    assert mgr.holding is False

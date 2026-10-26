@@ -285,17 +285,29 @@ class SipManager:
             held.release()
             return
         pt, codec, _door_ip, _door_port = media
-        held.sip.answer(held.invite_msg, held.addr, held.local_ip, RTP_LOCAL_PORT, pt, codec)
-        # acked создаётся внутри answer() — читать строго после него. None: транспорт
-        # уже закрыт и 200 OK не ушёл — ждать нечего.
-        acked = held.sip.acked
-        if acked is not None:
+        # _held уже снят, поэтому release обязан выполниться при любом исходе (отмена
+        # задачи во время ожидания ACK, исключение answer()): иначе SIP-транспорт и
+        # регистрация утекут, а позже async_hangup держимый вызов уже не найдёт.
+        try:
+            held.sip.answer(
+                held.invite_msg, held.addr, held.local_ip, RTP_LOCAL_PORT, pt, codec
+            )
+            # acked создаётся внутри answer() — читать строго после него. None:
+            # транспорт уже закрыт и 200 OK не ушёл — ждать нечего.
+            acked = held.sip.acked
+            if acked is not None:
+                try:
+                    await asyncio.wait_for(acked, ACK_TIMEOUT)
+                except TimeoutError:
+                    LOGGER.debug(
+                        "SIP: ACK на 200 OK не получен за %.1fs — BYE всё равно", ACK_TIMEOUT
+                    )
+        finally:
+            # BYE и при отмене: 200 OK уже мог уйти, панель надо отпустить.
             try:
-                await asyncio.wait_for(acked, ACK_TIMEOUT)
-            except TimeoutError:
-                LOGGER.debug("SIP: ACK на 200 OK не получен за %.1fs — BYE всё равно", ACK_TIMEOUT)
-        held.sip.send_bye()
-        held.release()
+                held.sip.send_bye()
+            finally:
+                held.release()
         LOGGER.info("SIP: вызов завершён на панели (200 OK → BYE)")
 
     def _frame_provider(self) -> bytes | None:
