@@ -1187,3 +1187,84 @@ async def test_hangup_cleans_up_when_ending_at_panel_fails(controller):
         for cl in controller._hass.bus.async_fire.call_args_list
     ), "экран вызова не погашен"
     bridge.stop.assert_awaited_once()
+
+
+async def test_queued_door_open_does_not_end_the_next_caller():
+    """Открытие двери A, ждущее лок, не гасит звонок панели B, пришедший за это время.
+
+    Лок держит hold-таск A (REGISTER/INVITE — до десятка секунд). Пока отбой
+    по открытию двери стоит в очереди, звонит панель B. Отбой — про вызов A:
+    выставлять «Завершён» вызову B, забывать его и трогать SIP-плечо нельзя.
+    """
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    await c._answer_lock.acquire()  # hold-таск A ещё держит лок
+    c.handle_door_opened("A")
+    assert len(tasks) == 1
+    door_open = asyncio.create_task(tasks.pop())
+    await asyncio.sleep(0)
+    c.handle_signal(_ring(ac="B", call_id="c2"))
+    _drop_tasks(tasks)  # hold-таск B здесь не нужен
+    manager = _manager_mock(holding=True, in_call=False)
+    c._manager = manager  # hold завершился, плечо уже не отличить по вызову
+    c._hass.bus.async_fire.reset_mock()
+    c._answer_lock.release()
+
+    assert await door_open is False
+
+    call = c.current_call()
+    assert call is not None and call.call_id == "c2", "звонок B потерян"
+    assert _call_states(c._hass) == [], "вызову B выставлен «Завершён»"
+    fired = c._hass.bus.async_fire.call_args_list
+    assert not any(cl.args[0] == EVENT_SIP_CALL for cl in fired), "экран B погашен"
+    manager.async_end.assert_not_awaited()
+    manager.async_hangup.assert_not_awaited()
+    assert c._manager is manager
+
+
+async def test_duplicate_ring_of_call_being_ended_is_ignored():
+    """Повторный FCM `ring` отклоняемого вызова не оживляет его.
+
+    Пока отбой ждёт ACK, менеджер уже забран, и дубль `ring` того же вызова
+    выглядел бы новым звонком: карточка снова звонила бы до ring-таймаута, а
+    HA слал бы лишний REGISTER.
+    """
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    gate = asyncio.Event()
+    manager = _manager_mock(holding=True, in_call=False)
+    manager.async_end = AsyncMock(side_effect=gate.wait)
+    c._manager = manager
+
+    hangup = asyncio.create_task(c.async_hangup())
+    await asyncio.sleep(0)
+    assert manager.async_end.called, "предпосылка: отбой ждёт ACK"
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+
+    assert tasks == [], "дубль поставил hold-таск"
+    gate.set()
+    assert await hangup is True
+
+    assert c.current_call() is None
+    states = _call_states(c._hass)
+    assert CALL_STATE_RINGING not in states[states.index(CALL_STATE_ENDED):]
+
+
+async def test_ring_after_hangup_is_a_new_call():
+    """Отметка «вызов завершается» живёт только на время отбоя.
+
+    Новый `ring` с теми же идентификаторами после отбоя — снова звонок.
+    """
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    c._manager = _manager_mock(holding=True, in_call=False)
+    await c.async_hangup()
+
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+
+    assert c.current_call() is not None
+    assert len(tasks) == 1, "hold-таск нового вызова не поставлен"
+    _drop_tasks(tasks)

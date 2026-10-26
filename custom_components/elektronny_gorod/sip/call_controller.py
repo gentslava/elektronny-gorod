@@ -97,6 +97,16 @@ class ActiveCall:
     deadline: datetime
 
 
+def _same_call(a: ActiveCall | None, b: ActiveCall | None) -> bool:
+    """Один и тот же вызов по идентификаторам (дубль FCM `ring` — новый объект)."""
+    return (
+        a is not None
+        and b is not None
+        and a.call_id == b.call_id
+        and a.access_control_id == b.access_control_id
+    )
+
+
 class DoorbellCallController:
     """Трекинг вызова + register-on-ring hold/accept через SipManager (один на entry)."""
 
@@ -117,6 +127,9 @@ class DoorbellCallController:
         # access_control_id → camera_id (для видео-источника стрима вызова, B).
         self._camera_resolver = camera_resolver
         self._active: ActiveCall | None = None
+        # Вызов, который сейчас снимает `async_hangup` (ждёт ACK): его повторный
+        # FCM `ring` — дубль, а не новый звонок.
+        self._ending: ActiveCall | None = None
         self._manager: SipManager | None = None
         self._bridge: AudioBridge | None = None
         # Uplink-микрофон (Phase C, ADR-0013): WS-транспорт кормит sink через
@@ -169,17 +182,18 @@ class DoorbellCallController:
             if dt_util.utcnow() >= active.deadline:
                 LOGGER.info("SIP: протухший ring (дедлайн в прошлом) — игнор")
                 return
+            if _same_call(active, self._ending):
+                # Отбой этого вызова ещё ждёт ACK, менеджер уже забран: без
+                # гварда дубль поднял бы `ringing` и лишний REGISTER.
+                LOGGER.info("SIP: повторный ring завершаемого вызова — игнор")
+                return
             if self._manager is not None:
                 # A-89: уже держим/в разговоре. Различаем разговор vs держимый.
                 if self._manager.in_call:
                     # Идёт разговор — одновременный второй вне scope, не рвём текущий.
                     LOGGER.info("SIP: идёт разговор — игнор ring другого домофона")
                     return
-                same_call = self._active is not None and (
-                    active.call_id == self._active.call_id
-                    and active.access_control_id == self._active.access_control_id
-                )
-                if same_call:
+                if _same_call(active, self._active):
                     # Повторный ring того же держимого вызова — дедуп, не пере-hold.
                     LOGGER.info("SIP: повторный ring держимого вызова — игнор")
                     return
@@ -359,14 +373,19 @@ class DoorbellCallController:
         сеть, в диспетчере этого делать нельзя."""
         if self._active is None or self._active.access_control_id != access_control_id:
             return
-        self._hass.async_create_task(self.async_hangup())
+        self._hass.async_create_task(self.async_hangup(expected=self._active))
 
-    async def async_hangup(self, *, end_ringing: bool = True) -> bool:
+    async def async_hangup(
+        self, *, end_ringing: bool = True, expected: ActiveCall | None = None
+    ) -> bool:
         """Завершить разговор (BYE) / снять держимый + снять аудио-мост.
 
         `end_ringing=True` (отбой пользователя, открытие двери) — звонок гасится
         на панели (`SipManager.async_end`). `False` (выгрузка записи) — тихое
         снятие без трогания панели (`SipManager.async_hangup`).
+
+        `expected` — вызов, к которому относится отбой (открытие двери): если к
+        моменту взятия лока активен уже другой вызов, ничего не трогаем.
 
         Возвращает, было ли что снимать. Судить об этом снаружи нельзя:
         `current_call()` гаснет по истечении **окна ответа**, а разговор живёт
@@ -378,9 +397,15 @@ class DoorbellCallController:
         лока await-ит `_setup_audio_bridge` (`self._bridge` ещё None, ставится
         ПОСЛЕ await'ов), параллельный hangup забрал бы teardown, не увидев
         ещё-None мост → answer присвоил бы `self._bridge` → orphaned ffmpeg +
-        HTTP-listener :40020. Вызывается только из сервис-хендлеров/unload-таймера
-        (не из методов под локом) — self-deadlock'а нет."""
+        HTTP-listener :40020. Вызывается только из сервис-хендлеров, таймеров и
+        задачи открытия двери (не из методов под локом) — self-deadlock'а нет."""
         async with self._answer_lock:
+            if expected is not None and not _same_call(self._active, expected):
+                # Пока отбой ждал лок (hold держит его на REGISTER/INVITE), вызов
+                # кончился или позвонила другая панель. Экран, таймеры и менеджер
+                # теперь её: чей держимый вызов — не различить, а сбросить чужой
+                # нельзя. Плечо прежнего вызова, если осталось, снимет hold-таймаут.
+                return False
             self._cancel_call_timeout()
             self._cancel_hold_timeout()
             manager, self._manager = self._manager, None
@@ -401,6 +426,7 @@ class DoorbellCallController:
                 # ещё наш; сбой сети ниже экран уже не оставит звонить.
                 self._emit_call_state(CALL_STATE_ENDED)
                 self._fire_call_state(False)
+            self._ending = call
             try:
                 if manager is not None:
                     # Держимое плечо без вызова (FCM `ended` пришёл, пока шли
@@ -410,6 +436,7 @@ class DoorbellCallController:
                     else:
                         await manager.async_hangup()
             finally:
+                self._ending = None
                 if self._active is call:
                     self._active = None  # вызов окончен — не висит до idle-reset
                 await self._teardown_audio_bridge(bridge)

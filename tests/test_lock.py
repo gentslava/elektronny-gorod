@@ -170,7 +170,7 @@ async def test_unlock_ends_the_call_of_the_same_panel(
     """Замок → сигнал → подписка в `__init__` → контроллер гасит звонок панели."""
     eid = await _setup_lock(hass)
     (controller,) = hass.data[SIP_DATA].values()
-    controller._active = ActiveCall(
+    call = controller._active = ActiveCall(
         call_id="call-1",
         place_id=PLACE_ID,
         access_control_id=str(AC_ID),
@@ -185,7 +185,8 @@ async def test_unlock_ends_the_call_of_the_same_panel(
         )
         await hass.async_block_till_done()
 
-    hangup.assert_awaited_once_with()
+    # Отбой привязан к вызову панели: позвонит другая — его не тронет.
+    hangup.assert_awaited_once_with(expected=call)
     # Выгрузка записи в teardown завершила бы «живой» вызов и взвела бы
     # таймер возврата в idle — тест его не ждёт, снимаем вызов сами.
     controller._active = None
