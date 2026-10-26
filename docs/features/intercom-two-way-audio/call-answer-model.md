@@ -102,7 +102,7 @@ Authorization: Digest realm="{realm}", nonce="...", algorithm=MD5, username="{lo
 3. По явному **«ответить»** (сервис/кнопка, в окне `CallInvalidated` ~30с):
    - принять уже держимый `INVITE` → **`200 OK` немедленно** (SDP: локальный адрес, G.711, `sendrecv`);
    - **сразу слать RTP uplink** (+ STUN-keepalive) → активировать latching → downlink;
-   - `hangup` → `BYE`.
+   - `hangup` → `BYE`; до ответа — `200 OK` → `ACK` → `BYE`, иначе панель не отпускает вызов (§6a).
 4. Кодек **G.711 PCMU/PCMA**, plain RTP/UDP, без STUN/SRTP. Latching обеспечивает downlink за NAT.
 5. 🔴 **Привязка к `Call-ID`:** ответ строго привязан к `Call-ID` из FCM `CALL_INCOMING`; **не отвечать на завершённый/сброшенный вызов**. Иначе запоздалый `REGISTER` (от вызова, который не дождался ответа) поймает `INVITE` *следующего* вызова → ложный «ответ сразу» (баг рассинхрона — наблюдался в probe при сбросе до ответа). В интеграции: один активный «ответ»-флоу на `Call-ID`, отмена по `CallInvalidated`/`CALL_END`.
 

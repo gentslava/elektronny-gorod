@@ -92,9 +92,9 @@
 |---|---|---|
 | 1 | Входящий вызов | `event` ring → `sensor.*_call_state=ringing`; карточка/уведомление показывают видео домофона (без звука) + Принять/Отклонить/Открыть; таймер окна 30с |
 | 2 | Принять | Тап «Принять» → `elektronny_gorod.answer` → REGISTER→INVITE→200 OK (<1с, `connecting`) → `active`; первый жест снимает mute → слышно гостя; (микрофон по политике — см. §13) |
-| 3 | Отклонить | Тап «Отклонить» → `elektronny_gorod.hangup` (до ответа = decline/CANCEL) → `ended` → карточка скрывается |
-| 4 | Открыть без ответа | Slide/hold/confirm «Открыть» → `lock.unlock` (accessControlOpen), **не трогая SIP**; вызов продолжает звонить, можно затем Принять или Отклонить |
-| 5 | Открыть во время разговора | То же «Открыть» поверх активного видео; разговор не прерывается; overlay «Открыто» |
+| 3 | Отклонить | Тап «Отклонить» → `elektronny_gorod.hangup`; до ответа держимый вызов принимается и сразу завершается (`200 OK` → `BYE`), иначе панель звонит до таймаута ([A-120](../../audit/project-audit.md)) → панель замолкает → `ended` → карточка скрывается |
+| 4 | Открыть без ответа | Slide/hold/confirm «Открыть» → `lock.unlock` (accessControlOpen); после успешного открытия вызов той же панели завершается (`200 OK` → `BYE`), панель замолкает → `ended`. Ответить после открытия нельзя; открытие другой панели вызов не трогает |
+| 5 | Открыть во время разговора | То же «Открыть» поверх активного видео; после успешного открытия разговор завершается (`BYE`), как в штатном приложении; overlay «Открыто» |
 | 6 | Завершить разговор | Тап «Завершить» → `elektronny_gorod.hangup` (BYE) → `ended` → скрытие; микрофон/плеер останавливаются |
 | 7 | Видео недоступно | Стрим EOF/ошибка → `camera_unavailable`: плейсхолдер `mdi:cctv-off` + «Видео недоступно» + Повторить; **аудио и кнопки работают** |
 | 8 | Звук недоступен | downlink 0 / WebRTC-audio fail → `audio_unavailable`: видео есть, бейдж «Звук недоступен» |
@@ -189,7 +189,7 @@
 | Кнопка | Где | Действие (реальное) | Цвет/роль | Условие/блок |
 |---|---|---|---|---|
 | **Принять** | incoming | `elektronny_gorod.answer` | success (green), primary | только `ringing`; исчезает после ответа |
-| **Отклонить** | incoming | `elektronny_gorod.hangup` (decline/CANCEL) | error (red) | только `ringing`/`connecting` |
+| **Отклонить** | incoming | `elektronny_gorod.hangup` (до ответа `200 OK` → `BYE`) | error (red) | только `ringing`/`connecting` |
 | **Завершить** | active | `elektronny_gorod.hangup` (BYE) | error (red) | только `active`/`connecting` |
 | **Открыть** | incoming+active | `lock.unlock` (lock домофона) | нейтрально-акцентный | всегда, пока есть домофон; **независимо от SIP** |
 | **Микрофон** | active | card-local `getUserMedia` → WS `elektronny_gorod/intercom_uplink` | toggle | secure origin + permission (§13) |
