@@ -265,6 +265,35 @@ async def test_end_resends_answer_while_waiting_for_ack() -> None:
     assert names[-2:] == ["send_bye", "release"]
 
 
+async def test_end_doubles_resend_interval_while_waiting_for_ack() -> None:
+    """Повтор `200 OK` реже с каждым разом: T1, 2·T1, 4·T1… (RFC 3261 §13.3.1.4).
+
+    Без удвоения панель засыпали бы одинаковыми ответами всё ожидание ACK.
+    Интервалы снимаем с таймаутов ожидания, а не с часов, — тест не зависит от
+    нагрузки машины. После четвёртого ожидания приходит ACK.
+    """
+    loop = asyncio.get_running_loop()
+    acked = loop.create_future()
+    mgr, _held, _parent = _end_manager(acked)
+    real_wait = asyncio.wait
+    timeouts: list[float] = []
+
+    async def recording_wait(fs, *, timeout):
+        timeouts.append(timeout)
+        if len(timeouts) == 4:
+            acked.set_result(None)
+        return await real_wait(fs, timeout=timeout)
+
+    with (
+        patch(f"{_MGR}.ANSWER_RETRANSMIT_T1", 0.01),
+        patch(f"{_MGR}.ACK_TIMEOUT", 5.0),
+        patch(f"{_MGR}.asyncio.wait", recording_wait),
+    ):
+        await mgr.async_end()
+
+    assert timeouts == [0.01, 0.02, 0.04, 0.08]
+
+
 async def test_end_does_not_resend_answer_once_acked() -> None:
     acked = asyncio.get_running_loop().create_future()
     acked.set_result(None)
