@@ -1268,3 +1268,140 @@ async def test_ring_after_hangup_is_a_new_call():
     assert c.current_call() is not None
     assert len(tasks) == 1, "hold-таск нового вызова не поставлен"
     _drop_tasks(tasks)
+
+
+# ─── Плечо ставится только для всё ещё активного вызова (A-120) ─────────────
+
+
+def _gated_manager(gate: asyncio.Event, method: str) -> MagicMock:
+    """Мок SipManager: `method` (hold/answer) ждёт `gate`, затем успех."""
+    manager = _manager_mock(holding=True, in_call=False)
+
+    async def _wait(*_a, **_k) -> bool:
+        await gate.wait()
+        return True
+
+    setattr(manager, method, AsyncMock(side_effect=_wait))
+    return manager
+
+
+async def test_stale_hold_leg_released_when_other_panel_rings():
+    """Звонок панели B во время REGISTER/INVITE панели A: плечо A не ставится.
+
+    Иначе карточка показывает B, а «Принять» отвечает держимому INVITE A,
+    hold-таймаут A гасит B, а открытие двери A не находит своего вызова.
+    """
+    c, tasks = _collecting_controller()
+    gate = asyncio.Event()
+    mgr_a = _gated_manager(gate, "register_and_hold")
+    mgr_b = _manager_mock(holding=True, in_call=False)
+    mgr_b.register_and_hold = AsyncMock(return_value=True)
+    with patch(_MGR_PATH, side_effect=[mgr_a, mgr_b]):
+        c.handle_signal(_ring(ac="A", call_id="c1"))
+        hold_a = asyncio.create_task(tasks.pop())
+        await asyncio.sleep(0)
+        assert mgr_a.register_and_hold.called, "предпосылка: hold A ждёт сеть"
+        c.handle_signal(_ring(ac="B", call_id="c2"))
+        hold_b = asyncio.create_task(tasks.pop())
+        gate.set()
+        await hold_a
+
+        mgr_a.async_hangup.assert_awaited_once()
+        mgr_a.async_end.assert_not_awaited()
+        assert c._manager is not mgr_a, "поставлено плечо сменившегося вызова"
+
+        await hold_b
+
+    assert c._manager is mgr_b, "вызов B не удержан"
+    call = c.current_call()
+    assert call is not None and call.call_id == "c2"
+
+
+async def test_stale_hold_leg_released_after_fcm_ended():
+    """FCM `ended` во время REGISTER/INVITE: плечо отпускается молча, не висит."""
+    c, tasks = _collecting_controller()
+    gate = asyncio.Event()
+    mgr_a = _gated_manager(gate, "register_and_hold")
+    with patch(_MGR_PATH, return_value=mgr_a):
+        c.handle_signal(_ring(ac="A", call_id="c1"))
+        hold_a = asyncio.create_task(tasks.pop())
+        await asyncio.sleep(0)
+        c.handle_signal(_ended(ac="A", call_id="c1"))
+        assert tasks == [], "предпосылка: снимать ещё нечего"
+        gate.set()
+        await hold_a
+
+    mgr_a.async_hangup.assert_awaited_once()
+    mgr_a.async_end.assert_not_awaited()
+    assert c._manager is None
+
+
+async def test_door_open_queued_behind_hold_ends_call_at_panel():
+    """Открытие двери, ждущее hold того же вызова, гасит его на панели."""
+    c, tasks = _collecting_controller()
+    gate = asyncio.Event()
+    mgr_a = _gated_manager(gate, "register_and_hold")
+    with patch(_MGR_PATH, return_value=mgr_a):
+        c.handle_signal(_ring(ac="A", call_id="c1"))
+        hold_a = asyncio.create_task(tasks.pop())
+        await asyncio.sleep(0)
+        c.handle_door_opened("A")
+        door_open = asyncio.create_task(tasks.pop())
+        gate.set()
+        await hold_a
+
+    assert await door_open is True
+    mgr_a.async_end.assert_awaited_once()
+    mgr_a.async_hangup.assert_not_awaited()
+    assert c._manager is None
+    assert c.current_call() is None
+
+
+async def test_fallback_answer_keeps_call_when_other_panel_rings():
+    """Звонок панели B во время ответа без held-плеча не перехватывает разговор A.
+
+    Разговор с A уже поднят — это вызов, который принял пользователь. Звонок
+    другой панели во время разговора игнорируется, как и в `handle_signal`.
+    """
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)  # hold не поднялся — ответ пойдёт через fallback
+    gate = asyncio.Event()
+    mgr_a = _gated_manager(gate, "async_answer")
+    with patch(_MGR_PATH, return_value=mgr_a):
+        answer = asyncio.create_task(c.async_answer())
+        await asyncio.sleep(0)
+        assert mgr_a.async_answer.called, "предпосылка: ответ ждёт сеть"
+        c.handle_signal(_ring(ac="B", call_id="c2"))
+        _drop_tasks(tasks)
+        gate.set()
+        assert await answer is True
+
+    call = c.current_call()
+    assert call is not None and call.call_id == "c1", "разговор приписан звонку B"
+    active = [p for p in _call_state_payloads(c._hass) if p["state"] == CALL_STATE_ACTIVE]
+    assert [p["call_id"] for p in active] == ["c1"]
+    mgr_a.in_call = True
+    c.handle_door_opened("A")
+    assert len(tasks) == 1, "открытие двери A не нашло свой разговор"
+    await tasks.pop()
+    mgr_a.async_end.assert_awaited_once()
+
+
+async def test_fallback_answer_keeps_call_after_fcm_ended():
+    """FCM `ended` во время ответа без held-плеча не отвязывает поднятый разговор."""
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    gate = asyncio.Event()
+    mgr_a = _gated_manager(gate, "async_answer")
+    with patch(_MGR_PATH, return_value=mgr_a):
+        answer = asyncio.create_task(c.async_answer())
+        await asyncio.sleep(0)
+        c.handle_signal(_ended(ac="A", call_id="c1"))
+        gate.set()
+        assert await answer is True
+
+    call = c.current_call()
+    assert call is not None and call.call_id == "c1"
+    assert c._manager is mgr_a

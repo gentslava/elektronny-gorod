@@ -130,6 +130,8 @@ class DoorbellCallController:
         # Вызов, который сейчас снимает `async_hangup` (ждёт ACK): его повторный
         # FCM `ring` — дубль, а не новый звонок.
         self._ending: ActiveCall | None = None
+        # Инвариант: плечо в `_manager` принадлежит `_active` (или идущему
+        # разговору). Ставится после await только для всё ещё активного вызова.
         self._manager: SipManager | None = None
         self._bridge: AudioBridge | None = None
         # Uplink-микрофон (Phase C, ADR-0013): WS-транспорт кормит sink через
@@ -295,9 +297,18 @@ class DoorbellCallController:
             except Exception:  # noqa: BLE001 — degrade: экран живёт от FCM, dismiss по таймеру
                 LOGGER.warning("SIP hold: REGISTER/hold не удался — degrade", exc_info=True)
                 held = False
-            if held:
-                self._manager = manager
-                self._schedule_hold_timeout()
+            if not held:
+                return
+            if not _same_call(self._active, call):
+                # Пока шли REGISTER/INVITE, вызов кончился (FCM `ended`) или
+                # позвонила другая панель — плечо устарело. Отпускаем молча:
+                # пользователь этот вызов не трогал. Hold нового вызова в очереди
+                # найдёт `_manager is None` и поднимет своё плечо.
+                LOGGER.debug("SIP hold: вызов сменился во время REGISTER/INVITE — плечо снято")
+                await manager.async_hangup()
+                return
+            self._manager = manager
+            self._schedule_hold_timeout()
 
     # ---- сервисы answer / hangup ----
     async def async_answer(self) -> bool:
@@ -340,7 +351,11 @@ class DoorbellCallController:
                         fcm_call_id=call.call_id,
                     )
                     if ok:
+                        # Поднят разговор с вызовом, который принял пользователь:
+                        # ring другой панели и FCM `ended` за время REGISTER/INVITE
+                        # его не вытесняют (как в `handle_signal` при разговоре).
                         self._manager = manager
+                        self._active = call
             except Exception:  # noqa: BLE001 — degrade: мост снять, экран живёт от FCM
                 LOGGER.warning("SIP answer: accept/register упал — снимаю мост (degrade)",
                                exc_info=True)
@@ -402,9 +417,9 @@ class DoorbellCallController:
         async with self._answer_lock:
             if expected is not None and not _same_call(self._active, expected):
                 # Пока отбой ждал лок (hold держит его на REGISTER/INVITE), вызов
-                # кончился или позвонила другая панель. Экран, таймеры и менеджер
-                # теперь её: чей держимый вызов — не различить, а сбросить чужой
-                # нельзя. Плечо прежнего вызова, если осталось, снимет hold-таймаут.
+                # кончился или позвонила другая панель. Плечо прежнего вызова hold
+                # уже отпустил; если плечо есть, оно — нового активного вызова, и
+                # открытие чужой двери его не трогает.
                 return False
             self._cancel_call_timeout()
             self._cancel_hold_timeout()
@@ -429,8 +444,9 @@ class DoorbellCallController:
             self._ending = call
             try:
                 if manager is not None:
-                    # Держимое плечо без вызова (FCM `ended` пришёл, пока шли
-                    # REGISTER/INVITE) отвечать нельзя — только тихо отпустить.
+                    # Держимое плечо без вызова (окно ответа истекло, а снятие
+                    # по ring-таймауту ещё в очереди) отвечать нельзя — только
+                    # тихо отпустить.
                     if end_ringing and (manager.in_call or call is not None):
                         await manager.async_end()
                     else:
