@@ -1,4 +1,4 @@
-Status: Active Owner: Reverse Engineer Agent + HA Expert Agent Last reviewed: 2026-07-15 (mobile apps 9.9.0: AVD screen inventory + APK/HAR/PCAP reconciliation; implementation candidates documented)
+Status: Active Owner: Reverse Engineer Agent + HA Expert Agent Last reviewed: 2026-10-26 (Мой Дом 9.11.0: полный crawl HAR + STOMP-кадры сверены с документом; ранее — 2026-07-15, приложения 9.9.0: AVD screen inventory + APK/HAR/PCAP reconciliation)
 
 Source files:
 - `custom_components/elektronny_gorod/api.py` (текущая реализация)
@@ -41,6 +41,8 @@ Reverse-engineered API reference для бэкенда `myhome.proptech.ru`, о�
 | 2026-07-15 | Умный Дом.ру 9.9.0 | password auth and current account surface | AVD runtime UI; gated key/private-camera screens were unavailable on this account |
 | 2026-07-15 | Мой Дом 9.9.0 | full app network flow | PCAP: DNS/TLS/SIP/video transport; HTTP remains encrypted |
 | 2026-10-26 | Мой Дом 9.11.0 | camera archive: live, event from list, timeline seek, ongoing event; main tabs | decrypted HAR (`event-in-progress-playback`) |
+| 2026-10-26 | Мой Дом 9.11.0 | full app crawl: cold start, главная, камера подъезда (live, событие, «Скачать», скорость, пред./след., fullscreen), 3 камеры лифтов, 1 публичная городская камера без событий, вкладка «События» (фильтры, paging, вызов → камера на момент вызова), «Люди», «Кабинет», «Добавить гостя» | decrypted HAR (`full-app-crawl`) + mitmproxy `.flow` (STOMP-кадры); тела FLV (`research/api/streams/`, не коммитятся) — только проба контейнера/кодека |
+| 2026-10-26 | Мой Дом 9.11.0 | camera archive, второй прогон: вкладки, DND, онбординг «добавить камеру» | mitmproxy `.flow` (`event-in-progress-playback-2`), включая STOMP-кадры |
 
 Static diffs for both 9.9.0 flavours are summarized in [`research/apk/9.9.0-analysis.md`](../../research/apk/9.9.0-analysis.md).
 
@@ -49,6 +51,19 @@ Evidence labels in this reference:
 - **HAR-confirmed** — method/path and payload were observed on the wire.
 - **Runtime UI** — the screen/behaviour was exercised on the AVD, but its request may not have been captured.
 - **Static-only** — Retrofit/DTO contract was extracted from the signed APK. It is implementation input, not a promise that the current account or backend enables the feature. Implementing it is allowed per [ADR-0006](../decisions/0006-mirror-app-behavior.md): the label stays until a HAR or a live probe confirms the call, and whatever was observed becomes a sanitized fixture.
+
+## Изменения 9.9.0 → 9.11.0 (HAR 9.11.0, 2026-10-26)
+
+Сводка по двум захватам 9.11.0 («Мой Дом», Android AVD, mitmproxy) против HAR 9.9.0 от 2026-07-15. Операторские хосты в 9.11.0: `myhome.proptech.ru`, `static.proptech.ru`, `forpost-<N>.novotelecom.ru:18081` (`N` = 07/15/20), `myhome-savevideo.ertelecom.ru`. Остальное (Firebase/Crashlytics/`connectivitycheck`/`play.googleapis.com`) — шум, не документируется.
+
+- **Контракт запуска не менялся.** Cold start 9.11.0 — тот же набор, что и в 9.9.0: `POST device-installations`, `GET subscriber-places`, `GET places/{place_id}/cameras`, `GET places/{place_id}/accesscontrols`, `GET places/{place_id}/screen-sections`, `GET v2/places/{place_id}/public/cameras`, `GET stomp/available-features`, `POST subscriberNotifications`, `POST communications`, `GET settings/screens`, WS `/events`. Сравнение структур ответов с HAR 9.9.0 показало идентичную форму для `subscriber-places`, `cameras`, `screen-sections`, `settings/screens`, `available-features`, `communications`, `device-installations`, `events/search`, `v2/forpost/cameras/{id}/events`, `video`.
+- **Новые поля.** `recordType` в элементах `GET .../accesscontrols` (на уровне access control; в `entrances[]` его нет) и `GET v2/places/{place_id}/public/cameras`; в HAR 9.9.0 его не было. Наблюдённые значения — `MOTION_WITH_BUFFERING` (3 из 3 SIP-домофонов) и `CONTINUOUS` (19 из 19 публичных камер). Остальные значения enum не подтверждены.
+- **Nullable.** `GET .../finance` → `data.amountSum` в 9.11.0 равен `null` (в 9.9.0 был числом); потребитель не должен предполагать `float`.
+- **Новые endpoints относительно HAR 9.9.0.** `GET /rest/v1/places/{place_id}/cameras/models`, `GET /api/mh-camera-personal/mobile/v1/accountId/{account_id}/check` (оба — только `.flow` второго прогона), `GET static.proptech.ru/assets/cameras/<model>-wo-back.png` и STOMP-кадры (подписка `/user/queue`). Остальное, что выглядит «новым» относительно HAR 9.9.0 (`video?TS=`, `events/{id}/downloads`, `guests/link`), в документе уже было из более ранних снимков и AVD; здесь оно подтверждено HAR 9.11.0.
+- **Документированные endpoints, которых нет в этих сценариях:** `GET /public/v1/operators` и auth-цепочка (в 9.11.0 залогиненный cold start без повторного входа), `GET subscribers/profiles`, `POST .../sipdevices` (в crawl вызов не принимали), `DELETE subscriberNotifications`, `GET .../cameras/features/info`, `GET mh-camera-personal/.../cameras/{id}/events`, `mh-temp-pass`, private-camera settings. Это не признак удаления: сценарии их не вызывают (`profiles` и `features/info` нет и в HAR 9.9.0 от 2026-07-15).
+- **Экраны без собственного трафика.** Вкладки «Люди» (карточка гостя), «Кабинет» (уведомления, разрешения, помощь, о приложении, оплата), фильтры «События» (дата, устройства, люди) и fullscreen камеры не породили в crawl ни одного нового запроса к операторским хостам: данные берутся из уже загруженных `subscriber-places?placeId=`, `finance`, `events/search`. `do_not_disturb` в crawl вообще не запрашивался; он есть только во втором прогоне.
+- **Стенд, а не контракт.** В `device-installations` и `subscriberNotifications` из 9.11.0 нет `pushToken`: AVD `sdk_gphone64_arm64` не выдал FCM-токен. Ответы `myhome.proptech.ru` несут `set-cookie: spid=...` и `x-sp-crid`; приложение `Cookie` не возвращает.
+- **Bearer уходит и на `static.proptech.ru`.** Запросы картинок моделей камер несут `Authorization`, `operator` и `traceparent` так же, как REST. Нужен ли токен серверу статики — не проверено; в логах/diagnostics такой URL всё равно нельзя печатать вместе с headers.
 
 ## Backends — separate ecosystems
 
@@ -119,7 +134,7 @@ Nothing A065 | Android 16 | erth | 9.9.0 (90900020)  | <account_id> | 1 | <uuid>
 - Для **WebSocket handshake** user-agent содержит `null` в полях account_id и place_id (поля пустые до выбора place).
 - Для **pre-auth** запросов (`device-installations`, `subscriberNotifications`-DELETE, public endpoints) — account_id пустой, place_id может быть пустым или текущим, operator_id может быть `null`.
 - UUID стабилен per-install (один на одно устройство).
-- Актуальная версия обоих приложений: **9.9.0 (90900020)**. Runtime `APP_VERSION` синхронизирован с «Мой Дом».
+- Актуальная версия «Мой Дом»: **9.11.0 (91100000)** (HAR 9.11.0, 2026-10-26: UA `... | ntk | 9.11.0 (91100000) | ...`, `appVersion: "9.11.0"`, `appVersionCode: 91100000`); формат UA и набор стандартных headers не изменились. Runtime `APP_VERSION` синхронизирован с «Мой Дом» 9.11.0. «Умный Дом.ру» (`erth`) после 9.9.0 (90900020) не снимался.
 
 ### `traceparent` header
 
@@ -395,6 +410,8 @@ Response:
 
 🟡 **`data: null`** для абонентов «Электронного города» — STOMP-фичи **системно выключены** на уровне оператора (подтверждено: в личном кабинете <https://2090000.ru/> у ЭГ-абонента **нет** UI-опции, связанной со STOMP / real-time push / расширенными уведомлениями). Backend `proptech.ru` мультитенантный — STOMP может быть включён для других операторов на той же платформе (Дом.ру «Умный домофон+» и др.), но **не** для ЭГ. Это **не значит, что STOMP не нужен** — поведение при включённых фичах требует отдельной проверки (юзер другого оператора либо приёмочное тестирование вслепую).
 
+⚠️ **Уточнение HAR 9.11.0 (2026-10-26):** REST по-прежнему отдаёт `{"data": null}` для аккаунта «Электронного города», но тот же аккаунт получает список feature codes **по STOMP** сразу после подписки `/user/queue` (см. [WebSocket (STOMP)](#1-websocket-stomp--wssmyhomeproptechru443events)). Значит, `data: null` в REST не доказывает, что фичи выключены на уровне оператора; утверждение выше про «системно выключены» опирается только на отсутствие UI в кабинете оператора. В 9.11.0 REST-проба идёт **после** открытия WebSocket (Date 101-ответа на секунду раньше), а не перед ним.
+
 **У нас не реализован** — необходим для подключения к [`wss://.../events`](../audit/project-audit.md).
 
 ## Places / subscriber
@@ -487,6 +504,8 @@ Runtime response (`Мой Дом` 9.9.0, `app=2`, HTTP 200):
   }
 }
 ```
+
+**HAR 9.11.0, 2026-10-26 (экран «Добавить гостя» → «Приглашение в дом»):** приложение **создаёт приглашение запросом `POST`**, а не показывает заранее выданное. `POST /api/mh-auth/mobile/v1/guests/link?placeId=<place_id>&app=2` — ровно один запрос на открытие экрана (QR и ссылка строятся из одного ответа; повторных `POST`, запросов списка приглашений или отмены до конца захвата не было). Заголовки как у остальных REST (`Authorization`, `operator`, `traceparent`, UA), `Content-Length: 0`, без `Content-Type`; `200 application/json`, ответ в форме выше. Эффект на сервере — выпуск нового `invite` (UUID в ссылке) со сроком действия 30 минут; других побочных эффектов в захвате нет (ни `subscriberinvites`, ни обновления `subscriber-places` после POST). Ссылка в 9.11.0 — AppMetrica-редирект на deep link: `https://<id>.redirect.appmetrica.yandex.com/myhome.proptech.ru/guest-invite?invite=<invite_uuid>&appmetrica_tracking_id=<n>`; `message` — шаблон `Приглашение в "Мой дом" действительно 30 мин. <link> Убедитесь, что у вас установлена актуальная версия (для Android: 8.28.0 и выше, для iOS: 8.7.1 и выше)`. Реальные значения в документе не приводятся.
 
 Повтор того же POST без `Authorization` возвращает **HTTP 401** с коротким `text/plain` body, а не JSON error envelope. Клиент не должен безусловно вызывать JSON parser на auth failure. Commit-safe fixtures: [`tests/fixtures/mobile_app_9_9_0`](../../tests/fixtures/mobile_app_9_9_0/README.md).
 
@@ -641,6 +660,8 @@ GET response:
 
 POST body — массив объектов того же shape (без обёртки `{do_not_disturb: ...}`), с обновлённым `status`. Response: пустое тело (200).
 
+HAR 9.11.0, 2026-10-26 (`.flow` второго прогона; GET `200`): форма ответа та же. Наблюдённый срез — `DO_NOT_DISTURB_ROOT.status=true`, `INTERCOM_CALLS.status=false`, `MANAGEMENT_COMPANY_CALLS.status=true`, у всех `editable: true`. Зависимые пункты приходят в GET и при включённом master, т. е. «скрытие» зависимых — только UI. В crawl-HAR этот GET отсутствует (экран уведомлений кабинета в нём не породил запроса).
+
 #### Семантика: master + 2 dependent
 
 Структура **иерархическая** — один root-флаг управляет двумя зависимыми:
@@ -713,6 +734,10 @@ Response shape:
 ```
 
 ⚠️ **`externalCameraId` существует на двух уровнях** (ac.* и entrances[*].*). В типичной single-entrance конфигурации значения совпадают, но schema допускает их различие. Multi-entrance bug (camera показывает другую entrance) подтверждает, что **приоритет должен быть entrance-level**: маппить camera→entrance, не camera→ac. AC-level `externalCameraId` следует трактовать как shortcut для случая ac-без-entrances, либо вообще игнорировать.
+
+HAR 9.11.0, 2026-10-26: подтверждено для камеры, которую приложение реально открывает. У access control с одним entrance AC-level `externalCameraId` совпал с `externalCameraId` **другого** AC, а entrance-level — нет; live-поток, архив и камера «на момент вызова» из вкладки «События» открывались именно по entrance-level id (`event.source.id` → `accesscontrols[id].entrances[].externalCameraId`, и этот же id стоит в `forpost/cameras/{id}/video` и `.../events`). Entrance-level id — единственный надёжный ключ камеры домофона.
+
+Новое поле 9.11.0 (HAR 9.11.0, 2026-10-26): `recordType` на уровне access control (в `entrances[]` его нет). Наблюдалось `"MOTION_WITH_BUFFERING"` у всех трёх SIP-домофонов аккаунта; полный enum и семантика не подтверждены. Тот же ключ есть у публичных камер (`CONTINUOUS`).
 
 **У нас:** [`api.py:query_access_controls`](../../custom_components/elektronny_gorod/api.py#L204) — используем только id/name/allowOpen/entrances. Не используем `previewAvailable`, `allowVideo`, `allowCallMobile` — это потенциал для дополнительной функциональности (см. audit).
 
@@ -849,6 +874,8 @@ POST /rest/v1/places/<place_id>/accesscontrols/activations
 
 Публичные камеры (двор / подъезд). Используется в [`api.py:query_public_cameras`](../../custom_components/elektronny_gorod/api.py#L246).
 
+Элемент `data[]` (HAR 9.11.0, 2026-10-26): `id`, `name`, `previewAvailable`, `videoDownloadAvailable`, `quota`, `timeZone`, **`recordType`**. Поле `recordType` добавилось после HAR 9.9.0; на аккаунте с 19 камерами у всех `"CONTINUOUS"`. Лифтовые и общедомовые камеры приходят именно отсюда (на экране `settings/screens` они `PUBLIC_CAMERA`), а не из `places/{place_id}/cameras` — последний на этом аккаунте вернул `{"data": []}`.
+
 ### `GET /rest/v1/places/{place_id}/screen-sections`
 
 Структура экрана с группами камер. Response: `{"sections": [...]}`. Используется в [`api.py:query_sections`](../../custom_components/elektronny_gorod/api.py#L261), но результат **игнорируется**. См. [audit A-18](../audit/project-audit.md).
@@ -895,6 +922,17 @@ Stream URL.
 - Для **идущего** события (окончание `Time + Duration` ещё не наступило) запрос тот же: поток с начала события, который догоняет эфир. Пункт «Скачать» у идущего события приложение не показывает — `downloads` используется только для скачивания завершённого.
 - Ответ — `data.URL` на `https://forpost-<N>.<operator-host>:18081/rtsp/<stream-id>/<token>/d=1`; несмотря на `/rtsp/` в пути, это **HTTPS-поток `Content-Type: video/x-flv`** (бесконечный ответ). Тип и хост у эфира и архива одинаковые; новая ссылка выдаётся на каждый запрос.
 - Список событий камеры приложение запрашивает тем же `v2/forpost/cameras/{id}/events`; соседние события для перехода «предыдущее/следующее» — с `Count=1` и `orderByTime=ASC/DESC` вокруг текущего момента.
+
+**Контейнер и кодек потока (ffprobe по телам, снятым HAR 9.11.0, 2026-10-26; сами файлы не хранятся в репозитории):** контейнер **FLV** (заголовок `FLV\x01`, `format_name=flv`), видео **H.264** (`h264`; профили `Baseline` и `Main`, `yuv420p`/`yuvj420p`; 1280x720 или 1920x1080; 25 fps, у одной камеры 30 fps). Звук есть не у всех потоков: у камеры подъезда (`forpost-15`) — **MP3 mono 44100 Hz** (кодек `mp3`, не AAC), у лифтовых (`forpost-20`) и городской (`forpost-07`) камер аудиодорожки нет. Длительность в FLV-метаданных бессмысленна (поток бесконечный, `duration` — мусор), поэтому `ffprobe`/HA stream должны работать без неё. Клиент (ExoPlayer, `User-Agent: Dalvik/...`) шлёт `GET` без `Range`, `Icy-MetaData: 1`, `Accept-Encoding: identity`, а не headers REST (`Authorization`, `operator` в запросе потока нет) — токен лежит в path. Один запрос на ссылку; соединение живёт, пока экран открыт. Хост зависит от камеры (`forpost-15`/`-20`/`-07`), а не от режима live/архив.
+
+**Окна запросов `v2/forpost/cameras/{id}/events` при открытии камеры (HAR 9.11.0, 2026-10-26; `now` — часы клиента, совпадали с серверными):**
+- «Последнее событие в retention»: `orderByTime=DESC&Count=1`, `UpperDate=now-60s`, `LowerDate=now-retention+60s`; retention 14 суток (`1209540 s` назад) у камеры домофона и 7 суток (`604740 s`) у лифтовых и городской. Совпадает с таблицей retention выше.
+- Лента событий: `DESC&Count=100`, первая страница `UpperDate=now`, `LowerDate≈now-94 мин` (минута округлена вниз, `5585–5682 s` назад); вторая — `UpperDate=<LowerDate первой>`, `LowerDate=<локальная полночь камеры в UTC>` (например `T17:00:00Z` для `TZ=25200`). Т. е. «сегодня» догружается двумя окнами, а не одним запросом.
+- Проба «что дальше»: `ASC&Count=1`, `LowerDate=<позиция воспроизведения>+30s`, `UpperDate=now+60s`; позиция — `now` в live (окно целиком в будущем, повторяется при каждом открытии) и `TS` открываемого события в архиве (разница ровно `+30 s` при длительностях события 30, 34 и 193 с, т. е. это не `Time+Duration`). Запрос уходит в ту же секунду, что и `video?TS=`. Ответ `{"data": []}`, если следующего события нет.
+- Камера «на момент вызова» (клик по событию вызова на вкладке «События»): `video?TS=<timestamp события вызова>&TZ=<смещение>&LightStream=0&Format=H264&Speed=-1.0` и `events` `DESC&Count=100` с окном `≈TS-93 мин … TS+95 мин` (обе границы округлены до минуты). Камера — entrance-level `externalCameraId` источника события (см. `accesscontrols` выше); `downloads` не вызывается.
+- В каждом из 5 запросов архива `Speed` равнялся `-1.0` (`TZ=25200`, `LightStream=0`, `Format=H264`); переключение скорости воспроизведения, fullscreen и кнопки пред./след. не породили запросов с другими значениями `Speed` — скорость в наблюдённых сценариях меняется на стороне плеера либо не использовалась. Фича-код `VIDEO_ARCHIVE_SPEED` приходит по STOMP.
+- У публичной городской камеры (`forpost-07`) события пусты (`{"data": []}`) и в retention-пробе, и в окне «сегодня»; поток при этом открывается — события не обязаны существовать для live/архива.
+- Во всех записях ответов crawl (455 с повторами): `EventSubjectID=126`, `IsGotoEnabled=1`, `isAvailable=true`, `Duration` 30–287 с. `Message` форматируется в локальном времени камеры (`► HH:MM:SS - HH:MM:SS` по `TZ`), а не в UTC.
 
 Response shape (success):
 ```json
@@ -965,11 +1003,45 @@ Response:
 
 📊 **Наблюдаемые тайминги (production 2026-09-02):** от первого обращения до готовности 4.2–6.4 с (2–3 отказа `423`), размер клипов 4.2–14.7 МБ, само скачивание — доли секунды. Приложение на том же пути ждало ~11 с.
 
+**HAR 9.11.0, 2026-10-26 («Скачать» на завершённом событии камеры подъезда):** контракт не изменился. `GET .../events/{event_id}/downloads?container=mp4` → 200 `{"data": "https://myhome-savevideo.ertelecom.ru/?<32hex>=<hex>.mp4"}`; затем `GET` по ссылке — два `423` (`{"Error": "Файл не готов для загрузки", "ErrorCode": 102, "status": 423}`) и `200` примерно через 4 с после первого обращения (≈7 с от минта). Запросы к storage-хосту несут только `User-Agent: Dalvik/...`, `Accept-Encoding: gzip` — без `Authorization`; токен — в query. Успех: `Content-Type: application/octet-stream`, `Content-Disposition: attachment`, `Content-Length` ≈ 4.4 МБ для клипа 30 с, `Access-Control-Allow-Origin: *`. Значение query-параметра — hex от ASCII-строки `video-<camera_id>-<yyyymmddHHMMSS>_<yyyymmddHHMMSS>` (начало и конец клипа в **локальном времени камеры**, `TZ`), и то же имя стоит в `filename` заголовка; имя ключа (32 hex) в этом захвате одно. Для идущего события пункта «Скачать» нет (см. выше).
+
 🔵 Реализован в [`api.py:query_event_download`](../../custom_components/elektronny_gorod/api.py); browsing — `media_source.py` (spec: `docs/specs/2026-08-29-media-source-design.md`).
 
 ### `GET /api/mh-camera/mobile/v1/places/{place_id}/cameras/features/info`
 
 Список поддерживаемых фич камер места. Response: `{"data": [strings]}`. **У нас не реализован.** Можно использовать для feature-detection (включать ли определённые entity).
+
+### `GET /rest/v1/places/{place_id}/cameras/models`
+
+Каталог поддерживаемых моделей камер для онбординга «добавить камеру» (HAR 9.11.0, 2026-10-26, `.flow` второго прогона; экран-инициатор выведен по порядку запросов, не подтверждён). Требует `Authorization`. Response (`200 application/json`, `Cache-Control: no-cache, no-store`):
+
+```json
+{
+  "data": [
+    {
+      "modelId": 13,
+      "modelName": "<vendor model>",
+      "marketUrl": null,
+      "imageUrl": "https://static.proptech.ru/assets/cameras/<model>-wo-back.png",
+      "capabilities": ["CAMERA_MIRROR", "MOTION", "MIC", "SPEAKER", "..."]
+    }
+  ]
+}
+```
+
+На аккаунте вернулось 16 моделей (бренды IMOU, OMNY, Tiandy, QVC). Объединение `capabilities` по каталогу: `CAMERA_MIRROR`, `CAMERA_ROTATION`, `ETHERNET_CONNECTION`, `MIC`, `MOTION`, `MOTION_SENSITIVITY`, `PIR`, `PUSH_TO_TALK`, `QR_ETHERNET_CONNECTION`, `QR_WIFI_CONNECTION`, `SET_SPEAKER_VOLUME`, `SPEAKER`, `WIFI_2`, `WIFI_5`, `WIFI_CONNECTION`, `WIFI_DIRECT`. Это словарь тех же capability-кодов, что у private-camera настроек ниже; `marketUrl` у всех наблюдённых `null`. Для HA не нужен: каталог к уже подключённым камерам аккаунта не привязан.
+
+Сразу за ним приложение скачивает по одной PNG на модель: `GET https://static.proptech.ru/assets/cameras/<model>-wo-back.png` (`200 image/png`, ≈110 КБ на файл) — с теми же `Authorization`/`operator`/`traceparent`.
+
+### `GET /api/mh-camera-personal/mobile/v1/accountId/{account_id}/check`
+
+Проверка соглашения для личных камер (HAR 9.11.0, 2026-10-26, `.flow` второго прогона; вызывается перед `cameras/models`). Response (`200 application/json`):
+
+```json
+{ "validAgreements": [], "validAgreement": true }
+```
+
+Смысл `validAgreements` (пустой массив при `validAgreement: true`) не выяснен. `{account_id}` в path — PII, в логах и diagnostics маскировать.
 
 ### Private camera settings (static-only contracts)
 
@@ -1121,6 +1193,8 @@ Response shape:
 
 **Текущее использование в интеграции:** `balance` — state денежного sensor; `blocked` — `binary_sensor` с `device_class=problem`; `daysToBlock` — duration sensor. `amountSum`, `targetDate`, `paymentLink` и `blocked` также доступны как атрибуты balance sensor, `daysToWarning`/`company` сохраняются coordinator-ом. Отдельного `button.pay` намеренно нет: HA Button — server-side trigger и не может надёжно открыть URL в браузере пользователя. Для оплаты используются Lovelace `tap_action: url` или mobile notification `OPEN_URL` по атрибуту. См. [audit A-57](../audit/project-audit.md).
 
+HAR 9.11.0, 2026-10-26: `data.amountSum` может быть `null` (в HAR 9.9.0 приходило число), при `blocked: false`, `blockType: "NOT_BLOCKED"`, `daysToBlock: null`, `daysToWarning: null`, `company: null`. Остальные ключи без изменений.
+
 ## Event log (история действий)
 
 ### `POST /rest/v1/events/search?page={n}&sort=occurredAt,DESC`
@@ -1135,6 +1209,8 @@ Request body:
 Endpoint не привязан к одному домофону: он возвращает общую ленту выбранных мест, а конкретный источник каждой строки задаётся парой `placeId + source.type + source.id`. Place-history entity передаёт свой `placeId`; per-device представление дополнительно фильтруется локально по access control.
 
 Query: `page=<0..N>` (pagination), `sort=occurredAt,DESC` (URL-encoded запятая, `sort=occurredAt%2CDESC`).
+
+HAR 9.11.0, 2026-10-26: тело и форма ответа без изменений — `{"placeIds":[<place_id>]}`, страницы `0` и `1`, `size=20`. Фильтры вкладки «События» (дата, устройства, люди) **не породили новых запросов** (в теле нет ни дат, ни источников) — они применяются к уже загруженным страницам на клиенте. В этих захватах встретились только `accessControlCallMissed` и `accessControlCallAccepted`, источник — `source.type="accessControl"`; `totalElements` рос так же постранично (`21 → 41`). Клик по строке вызова не дёргает `events/search`: он открывает камеру домофона на момент `timestamp` события (см. «Воспроизведение событий»).
 
 Response shape (Spring Pageable):
 ```json
@@ -1225,11 +1301,23 @@ Host: myhome.proptech.ru
 
 Response: `101 Switching Protocols`. Дальше — STOMP frames over WebSocket.
 
-**Что неизвестно:**
-- Какие именно типы событий уходят по WS, а какие — нет.
-- Точки подписки (STOMP `SUBSCRIBE destination:/...`).
-- Сообщения keep-alive vs реальные события.
-- Поведение reconnect.
+**Кадры STOMP (`.flow` 9.11.0, 2026-10-26, два независимых прогона; HAR WebSocket-кадры не содержит):**
+
+```
+> CONNECT        accept-version:1.2,1.1,1.0  host:myhome.proptech.ru  heart-beat:0,0
+< CONNECTED      version:1.2  heart-beat:10000,10000  user-name:<subscriber_id>
+> SUBSCRIBE      id:<uuid>  destination:/user/queue  content-length:0
+< MESSAGE        destination:/user/queue  content-type:application/json  subscription:<uuid>  message-id:<uuid>-<n>
+                 {"type":"availableFeatures","payload":{"placeId":<place_id>,"featuresCodes":[...],"featuresParams":[{"version":1,"marketUrl":"<url>","featureCode":"CAMERA_ROTATION"}]}}
+```
+
+- Авторизация — только в HTTP-заголовках handshake; в кадре `CONNECT` нет `login`/`passcode`/`Authorization`. `user-name` в `CONNECTED` — `subscriber.id` аккаунта.
+- Единственная подписка — `/user/queue`; единственное полученное сообщение — `availableFeatures` (≈470 байт) сразу после `SUBSCRIBE`. В обоих прогонах за время сессии других сообщений не было (события вызова по STOMP не приходят — подтверждает FCM-вывод ниже). Сессии короткие (3–4 кадра), `heart-beat` сервер объявляет 10 с, клиент `0,0`.
+- `featuresCodes` у наблюдённого аккаунта ЭГ: `PRIVATE_CAMERA`, `PAYMENT_LINK`, `VIDEO_SNAPSHOT`, `CAMERA_ROTATION`, `EDIT_PROFILE_INFO`, `SET_CAMERA_MIRROR`, `PUSH_TO_TALK`, `VIDEO_ARCHIVE_SPEED`, `CAMERA_SOFTWARE_UPDATE_IMOU`, `ADD_METRICS`, `CHAT_NTK`, `TIANDY_CAMERA_FOR_SALE`, `FAVORITES`, `DO_NOT_DISTURB_CUSTOMER`, `DO_NOT_DISTURB`. Это feature-flags приложения, а не события.
+
+**Что остаётся неизвестным:**
+- Какие ещё типы сообщений (`type`) бывают в `/user/queue`, кроме `availableFeatures` (в наших захватах — ни одного).
+- Поведение reconnect и серверный push обновления фич.
 
 См. [audit A-47](../audit/project-audit.md) — research-фаза перед реализацией.
 
@@ -1342,6 +1430,8 @@ Common request body shape (оба POST):
 ```
 
 `device-installations` вызывается pre-auth без `Authorization`; bind `subscriberNotifications` — после auth с Bearer.
+
+HAR 9.11.0, 2026-10-26: на cold start уже залогиненного приложения `device-installations` идёт **с** `Authorization` (то же в HAR 9.9.0 `events-history-pagination`); pre-auth без токена он идёт только в login-сценариях. Ответ для «Мой Дом» (`operatorId` 1) — `AUTH_PROVIDER: {"myhome": {}}` и `MOBILE_URL.{domain,policy}`, без блока `erid` (он относится к Дом.ру).
 
 Responses:
 

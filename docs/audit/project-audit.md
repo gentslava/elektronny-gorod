@@ -347,6 +347,7 @@ Quality gates:
 - **Каверзы:** в HAR содержимое STOMP-фреймов **не зафиксировано**. WebSocket может нести **не все** события — часть может идти через SIP (см. A-49) или FCM. До получения HAR или живой пробы с активным сценарием (реальный звонок в домофон с записью WS-фреймов) — **не строить spec**.
 - **Recommended first step:** записать HAR со сценарием звонка через альтернативный capture (mitmproxy с WebSocket-decode опциями, либо `mitmdump --mode reverse:` для расшифровки). Когда фреймы будут на руках — отдельный feature folder с PRD.
 - **НЕ делать:** не «угадывать» STOMP topics и схему сообщений (нарушение ADR-0006).
+- **Новое наблюдение (HAR/flow «Мой Дом» 9.11.0, 2026-10-26):** кадры STOMP расшифрованы. `CONNECT` без credentials, `CONNECTED` с `user-name:<subscriber_id>` и heart-beat 10000,10000, `SUBSCRIBE /user/queue`; сразу приходит `MESSAGE {"type":"availableFeatures","payload":{placeId, featuresCodes, featuresParams}}`, хотя REST `stomp/available-features` в тех же сессиях отдаёт `data:null`. Других типов сообщений в сценариях обхода (камеры, события, вызовы из ленты) не было. Вывод «STOMP-фичи системно выключены» неточен — канал живой и несёт как минимум список фич; события вызова по-прежнему идут через FCM (ADR-0011). Нужен захват именно в момент звонка, чтобы закрыть вопрос. Подробности — [`api-reference.md`](../architecture/api-reference.md), раздел STOMP.
 
 ### A-48. Snapshot домофона (`accesscontrols/{ac}/snapshots`) не реализован
 
