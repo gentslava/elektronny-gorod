@@ -296,6 +296,7 @@ RU_LABELS = {
     "duration_min_sec": "{minutes} мин {seconds} сек",
     "duration_min": "{minutes} мин",
     "duration_sec": "{seconds} сек",
+    "recording_in_progress": "Идёт запись",
 }
 
 
@@ -383,7 +384,12 @@ def test_translation_files_carry_duration_labels_in_common() -> None:
         with (base / name).open(encoding="utf-8") as file:
             data = json.load(file)
         assert "media" not in data, name
-        for key in ("duration_min_sec", "duration_min", "duration_sec"):
+        for key in (
+            "duration_min_sec",
+            "duration_min",
+            "duration_sec",
+            "recording_in_progress",
+        ):
             assert key in data["common"], f"{name}: {key} missing in common"
 
 
@@ -851,3 +857,233 @@ async def test_root_skips_entry_that_is_not_loaded(hass) -> None:
 
     assert [child.title for child in result.children] == ["Loaded Account"]
 
+
+
+# --- A-124: идущее событие открывает эфир камеры ---------------------------
+
+_LIVE_EVENT_DURATION = 30
+_LIVE_EVENT_END = _EVENT_TS + _LIVE_EVENT_DURATION
+_LIVE_PLAY_URL = "/api/hls/test-token/master_playlist.m3u8"
+
+
+def _local_hms(timestamp: int) -> str:
+    return dt_util.as_local(dt_util.utc_from_timestamp(timestamp)).strftime(
+        "%H:%M:%S"
+    )
+
+
+def _register_camera_entity(hass, entry, camera_id: str = _INTERCOM_ID) -> str:
+    registry = er.async_get(hass)
+    created = registry.async_get_or_create(
+        "camera", DOMAIN, f"{DOMAIN}_camera_{camera_id}", config_entry=entry
+    )
+    return created.entity_id
+
+
+def _live_event(event_id: str = "3001") -> CameraHistoryEvent:
+    return _event(
+        event_id=event_id, timestamp=_EVENT_TS, duration=_LIVE_EVENT_DURATION
+    )
+
+
+def _patch_camera_resolve(**kwargs):
+    from homeassistant.components.media_source.models import PlayMedia
+
+    kwargs.setdefault(
+        "return_value",
+        PlayMedia(url=_LIVE_PLAY_URL, mime_type="application/vnd.apple.mpegurl"),
+    )
+    return patch(
+        "homeassistant.components.media_source.async_resolve_media",
+        AsyncMock(**kwargs),
+    )
+
+
+async def test_day_marks_in_progress_event_and_keeps_it_playable(
+    hass, freezer
+) -> None:
+    """Окончание в будущем → «● Идёт запись · HH:MM:SS», играемо."""
+    finished_ts = _EVENT_TS - 600
+    events = (
+        _live_event(event_id="3002"),
+        _event(event_id="3001", timestamp=finished_ts, duration=12),
+    )
+    entry = _entry(hass, _coordinator(events=events))
+    # Оператор держит окончание идущего события на несколько секунд впереди.
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    hass.config.language = "ru"
+
+    result = await _source(hass).async_browse_media(
+        _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}")
+    )
+
+    live, finished = result.children
+    assert live.title == f"● Идёт запись · {_local_hms(_EVENT_TS)}"
+    assert live.can_play is True
+    assert finished.title == f"{_local_hms(finished_ts)} · 12 сек"
+    assert finished.can_play is True
+
+
+async def test_day_event_past_grace_keeps_finished_title(hass, freezer) -> None:
+    """Окончание ровно на границе grace — событие уже завершено."""
+    from custom_components.elektronny_gorod.media_source import _LIVE_GRACE_SEC
+
+    entry = _entry(hass, _coordinator(events=(_live_event(),)))
+    freezer.move_to(
+        dt_util.utc_from_timestamp(_LIVE_EVENT_END + _LIVE_GRACE_SEC)
+    )
+    hass.config.language = "ru"
+
+    result = await _source(hass).async_browse_media(
+        _item(hass, f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}")
+    )
+
+    assert result.children[0].title == f"{_local_hms(_EVENT_TS)} · 30 сек"
+
+
+def test_live_grace_is_fifteen_seconds() -> None:
+    from custom_components.elektronny_gorod.media_source import _LIVE_GRACE_SEC
+
+    assert _LIVE_GRACE_SEC == 15
+
+
+async def test_resolve_in_progress_event_returns_camera_live_view(
+    hass, freezer
+) -> None:
+    coordinator = _coordinator(events=(_live_event(),))
+    entry = _entry(hass, coordinator)
+    entity_id = _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with _patch_camera_resolve() as camera_resolve:
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    camera_resolve.assert_awaited_once_with(
+        hass, f"media-source://camera/{entity_id}", None
+    )
+    assert play.url == _LIVE_PLAY_URL
+    assert "/api/elektronny_gorod/clips/" not in play.url
+    coordinator.api.query_event_download.assert_not_awaited()
+
+
+async def test_resolve_live_view_passes_target_media_player(hass, freezer) -> None:
+    entry = _entry(hass, _coordinator(events=(_live_event(),)))
+    entity_id = _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    item = MediaSourceItem(
+        hass=hass,
+        domain=DOMAIN,
+        identifier=(
+            f"{entry.entry_id}/{_PLACE_ID}/{_INTERCOM_ID}/{_day_str()}/3001"
+        ),
+        target_media_player="media_player.tv",
+    )
+
+    with _patch_camera_resolve() as camera_resolve:
+        await _source(hass).async_resolve_media(item)
+
+    camera_resolve.assert_awaited_once_with(
+        hass, f"media-source://camera/{entity_id}", "media_player.tv"
+    )
+
+
+async def test_resolve_grace_boundary(hass, freezer) -> None:
+    """end > now - grace → эфир; end == now - grace → клип как раньше."""
+    from custom_components.elektronny_gorod.media_source import _LIVE_GRACE_SEC
+
+    entry = _entry(hass, _coordinator(events=(_live_event(),)))
+    _register_camera_entity(hass, entry)
+
+    freezer.move_to(
+        dt_util.utc_from_timestamp(_LIVE_EVENT_END + _LIVE_GRACE_SEC - 1)
+    )
+    with _patch_camera_resolve() as camera_resolve:
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+    camera_resolve.assert_awaited_once()
+    assert play.url == _LIVE_PLAY_URL
+
+    freezer.move_to(
+        dt_util.utc_from_timestamp(_LIVE_EVENT_END + _LIVE_GRACE_SEC)
+    )
+    with _patch_camera_resolve() as camera_resolve:
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+    camera_resolve.assert_not_awaited()
+    assert play.mime_type == "video/mp4"
+    assert play.url.startswith(
+        f"/api/elektronny_gorod/clips/{entry.entry_id}/3001?t="
+    )
+
+
+async def test_resolve_in_progress_without_camera_entity_is_unresolvable(
+    hass, freezer
+) -> None:
+    coordinator = _coordinator(events=(_live_event(),))
+    entry = _entry(hass, coordinator)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with (
+        _patch_camera_resolve() as camera_resolve,
+        pytest.raises(Unresolvable, match="Live view is not available"),
+    ):
+        await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    camera_resolve.assert_not_awaited()
+    coordinator.api.query_event_download.assert_not_awaited()
+
+
+async def test_resolve_in_progress_with_disabled_camera_is_unresolvable(
+    hass, freezer
+) -> None:
+    entry = _entry(hass, _coordinator(events=(_live_event(),)))
+    entity_id = _register_camera_entity(hass, entry)
+    er.async_get(hass).async_update_entity(
+        entity_id, disabled_by=er.RegistryEntryDisabler.USER
+    )
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with (
+        _patch_camera_resolve() as camera_resolve,
+        pytest.raises(Unresolvable, match="Live view is not available"),
+    ):
+        await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    camera_resolve.assert_not_awaited()
+
+
+async def test_resolve_in_progress_live_failure_does_not_fall_back_to_clip(
+    hass, freezer, caplog
+) -> None:
+    import logging
+
+    coordinator = _coordinator(events=(_live_event(),))
+    entry = _entry(hass, coordinator)
+    _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    caplog.set_level(logging.DEBUG)
+
+    with (
+        _patch_camera_resolve(
+            side_effect=Unresolvable("Stream integration not loaded")
+        ),
+        pytest.raises(Unresolvable, match="Live view is not available"),
+    ):
+        await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    coordinator.api.query_event_download.assert_not_awaited()
+    assert "/api/elektronny_gorod/clips/" not in caplog.text
+    assert "savevideo.example" not in caplog.text
+
+
+async def test_resolve_live_view_uses_real_ha_resolver(hass, freezer) -> None:
+    """Без мока: публичный `media_source.async_resolve_media` HA реально
+    вызывается; его отказ (media_source не загружен) → наш Unresolvable."""
+    coordinator = _coordinator(events=(_live_event(),))
+    entry = _entry(hass, coordinator)
+    _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    assert "media_source" not in hass.config.top_level_components
+
+    with pytest.raises(Unresolvable, match="Live view is not available"):
+        await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    coordinator.api.query_event_download.assert_not_awaited()

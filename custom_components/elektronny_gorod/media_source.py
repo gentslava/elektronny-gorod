@@ -1,7 +1,8 @@
 """Native Media Source: forpost camera motion-event clips.
 
 Browse: account entry → place → camera → day → events.
-Resolve: one signed mp4 per event, fetched on demand and discarded.
+Resolve: one signed mp4 per event, fetched on demand and discarded;
+an event still being recorded resolves to the camera live view (A-124).
 Opaque IDs only — signed URLs are never logged or persisted
 (spec: docs/specs/2026-08-29-media-source-design.md).
 """
@@ -11,6 +12,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
+from homeassistant.components import media_source as ha_media_source
 from homeassistant.components.media_player import (
     BrowseError,
     BrowseMedia,
@@ -24,6 +26,7 @@ from homeassistant.components.media_source.models import (
     PlayMedia,
 )
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 from homeassistant.util import dt as dt_util
@@ -44,13 +47,26 @@ _OTHER_RETENTION_DAYS = 7
 
 _MOTION_EVENT_SUBJECT_ID = 126
 
-# EN-fallback для duration-labels; переопределяются категорией `common`
-# translations (hass.config.language).
+# Событие считается идущим, пока его окончание `timestamp + duration` не
+# ушло в прошлое дальше этого окна: оператор держит окончание идущей записи
+# на несколько секунд впереди «сейчас» и сдвигает его, пока длится движение
+# (A-124, прод 2026-10-26). Завершённые события не меняются.
+_LIVE_GRACE_SEC = 15
+
+# EN-fallback для подписей событий (длительность, «идёт запись»);
+# переопределяются категорией `common` translations (hass.config.language).
 _DEFAULT_DURATION_LABELS = {
     "duration_min_sec": "{minutes} min {seconds} sec",
     "duration_min": "{minutes} min",
     "duration_sec": "{seconds} sec",
+    "recording_in_progress": "Recording",
 }
+
+
+def _event_in_progress(event: Any, now_ts: float) -> bool:
+    """Запись события ещё идёт: окончание позже, чем `now - grace`."""
+    return event.timestamp + event.duration > now_ts - _LIVE_GRACE_SEC
+
 
 def _recent_days(count: int) -> list[date]:
     today = dt_util.now().date()
@@ -160,6 +176,10 @@ class ElektronnyGorodMediaSource(MediaSource):
             or not (event.available and event.goto_enabled)
         ):
             raise Unresolvable("Recording is not available")
+        # Идущее событие у оператора — недописанный mp4 (A-123/A-124):
+        # вместо клипа открываем эфир этой же камеры, без отката на клип.
+        if _event_in_progress(event, dt_util.utcnow().timestamp()):
+            return await self._live_play_media(item, camera_id)
         # Ссылку у оператора не запрашиваем: каждый минт запускает
         # подготовку mp4 заново (снимок 2026-05-25 — 4 отказа 423 и ~11 с
         # ожидания), поэтому минт должен быть ровно один и живёт в прокси.
@@ -168,6 +188,36 @@ class ElektronnyGorodMediaSource(MediaSource):
             url=clip_proxy_url(self._hass, entry_id, event_id),
             mime_type=_MIME_MP4,
         )
+
+    async def _live_play_media(
+        self, item: MediaSourceItem, camera_id: str
+    ) -> PlayMedia:
+        """Эфир камеры через штатный camera media source HA.
+
+        Сущность ищется в entity registry по стабильному unique_id, как и в
+        `_camera_visible`; разрешение потока делегируется
+        `media-source://camera/<entity_id>`.
+        """
+        registry = er.async_get(self._hass)
+        entity_id = registry.async_get_entity_id(
+            "camera", DOMAIN, f"{DOMAIN}_camera_{camera_id}"
+        )
+        entry = registry.async_get(entity_id) if entity_id else None
+        if entry is None or entry.disabled_by is not None:
+            raise Unresolvable("Live view is not available")
+        try:
+            return await ha_media_source.async_resolve_media(
+                self._hass,
+                ha_media_source.generate_media_source_id("camera", entry.entity_id),
+                item.target_media_player,
+            )
+        except HomeAssistantError as ex:
+            LOGGER.debug(
+                "Media source live view failed for camera_id=%s (%s)",
+                camera_id,
+                type(ex).__name__,
+            )
+            raise Unresolvable("Live view is not available") from None
 
     def _browse_root(self) -> BrowseMedia:
         children: list[BrowseMedia] = []
@@ -332,9 +382,12 @@ class ElektronnyGorodMediaSource(MediaSource):
             raise BrowseError("Archive is temporarily unavailable") from None
         base = f"{entry_id}/{place_id}/{camera_id}/{day_str}"
         labels = await self._duration_labels()
+        now_ts = dt_util.utcnow().timestamp()
         children = [
             BrowseMedia(
-                title=self._event_title(event, labels),
+                title=self._event_title(
+                    event, labels, in_progress=_event_in_progress(event, now_ts)
+                ),
                 media_class=MediaClass.VIDEO,
                 media_content_type=MediaType.VIDEO,
                 media_content_id=_uri(f"{base}/{event.id}"),
@@ -367,8 +420,16 @@ class ElektronnyGorodMediaSource(MediaSource):
         return labels
 
     @staticmethod
-    def _event_title(event: Any, labels: dict[str, str]) -> str:
+    def _event_title(
+        event: Any, labels: dict[str, str], *, in_progress: bool = False
+    ) -> str:
         local = dt_util.as_local(dt_util.utc_from_timestamp(event.timestamp))
+        if in_progress:
+            # Длительность идущей записи ещё растёт — вместо неё метка.
+            return (
+                f"● {labels['recording_in_progress']} · "
+                f"{local.strftime('%H:%M:%S')}"
+            )
         duration = int(event.duration)
         if duration >= 60:
             minutes, seconds = divmod(duration, 60)
