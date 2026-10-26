@@ -104,6 +104,10 @@ def _archive_streams(hass: HomeAssistant) -> dict[tuple[str, str, str], Stream]:
     return hass.data.setdefault(_ARCHIVE_STREAMS_KEY, {})
 
 
+def _archive_lock(hass: HomeAssistant) -> asyncio.Lock:
+    return hass.data.setdefault(_ARCHIVE_LOCK_KEY, asyncio.Lock())
+
+
 def _stream_alive(stream: Stream) -> bool:
     """Провайдер HLS снимается при остановке потока (`Stream.stop`)."""
     return HLS_PROVIDER in stream.outputs()
@@ -126,12 +130,21 @@ def _archive_stream_label(camera_id: str) -> str:
 
 
 async def async_stop_archive_streams(hass: HomeAssistant, entry_id: str) -> None:
-    """Остановить потоки архива записи (выгрузка config entry)."""
-    streams: dict[tuple[str, str, str], Stream] = (
-        hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
-    )
-    for key in [key for key in streams if key[0] == entry_id]:
-        await streams.pop(key).stop()
+    """Остановить потоки архива записи (выгрузка config entry).
+
+    Под тем же lock, что и resolve: идущий resolve сначала регистрирует свой
+    поток, и выгрузка его тоже останавливает; а чистка остановленных потоков
+    в resolve не может убрать ключ между выборкой и `pop`. Выгрузка может
+    подождать запрос к оператору — это не дольше REST-таймаута.
+    """
+    async with _archive_lock(hass):
+        streams: dict[tuple[str, str, str], Stream] = (
+            hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
+        )
+        for key in [key for key in streams if key[0] == entry_id]:
+            stream = streams.pop(key, None)
+            if stream is not None:
+                await stream.stop()
 
 
 def _recent_days(count: int) -> list[date]:
@@ -277,10 +290,7 @@ class ElektronnyGorodMediaSource(MediaSource):
         """
         streams = _archive_streams(self._hass)
         key = (entry_id, camera_id, event.id)
-        lock: asyncio.Lock = self._hass.data.setdefault(
-            _ARCHIVE_LOCK_KEY, asyncio.Lock()
-        )
-        async with lock:
+        async with _archive_lock(self._hass):
             for stale in [k for k, found in streams.items() if not _stream_alive(found)]:
                 del streams[stale]
             stream = streams.get(key)

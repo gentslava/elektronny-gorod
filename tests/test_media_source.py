@@ -1528,3 +1528,47 @@ async def test_archive_stream_label_is_per_camera_with_one_filter(
         sum(isinstance(f, UrlPathRedactFilter) for f in stream_logger.filters) == 1
     )
 
+
+async def test_stop_archive_streams_waits_for_resolve_holding_the_lock(
+    hass, freezer
+) -> None:
+    """Выгрузка во время resolve: ни KeyError, ни потока у выгруженной записи."""
+    import asyncio
+
+    from custom_components.elektronny_gorod.media_source import (
+        _ARCHIVE_STREAMS_KEY,
+        async_stop_archive_streams,
+    )
+
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry = _archive_entry(hass)
+    requested = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _held_archive(*_args):
+        requested.set()
+        await release.wait()
+        return _ARCHIVE_URL
+
+    coordinator.api.query_camera_archive_stream = AsyncMock(
+        side_effect=_held_archive
+    )
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with _patch_stream_start():
+        resolve = asyncio.ensure_future(
+            _source(hass).async_resolve_media(_resolve_item(hass, entry))
+        )
+        await requested.wait()
+        stop = asyncio.ensure_future(
+            async_stop_archive_streams(hass, entry.entry_id)
+        )
+        for _ in range(5):
+            await asyncio.sleep(0)
+        release.set()
+        await resolve
+        await stop
+
+    streams = hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
+    assert not [key for key in streams if key[0] == entry.entry_id]
+    assert ha_streams[0].outputs() == {}
