@@ -382,10 +382,10 @@ async def test_answer_tears_down_bridge_when_accept_raises():
 
 async def test_hangup_tears_down_manager(controller):
     controller._manager = MagicMock()
-    controller._manager.async_hangup = AsyncMock()
+    controller._manager.async_end = AsyncMock()
     mgr = controller._manager
     await controller.async_hangup()
-    mgr.async_hangup.assert_awaited_once()
+    mgr.async_end.assert_awaited_once()
     assert controller._manager is None
 
 
@@ -410,6 +410,7 @@ async def test_hangup_during_answer_does_not_orphan_bridge():
     held.in_call = False
     held.accept = AsyncMock(return_value=True)
     held.async_hangup = AsyncMock()
+    held.async_end = AsyncMock()
     c._manager = held
 
     with patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
@@ -595,7 +596,7 @@ async def test_answer_creates_uplink_sink_with_downlink_pt():
 
 async def test_uplink_sink_cleared_on_hangup(controller):
     controller._manager = MagicMock()
-    controller._manager.async_hangup = AsyncMock()
+    controller._manager.async_end = AsyncMock()
     controller._uplink_sink = MagicMock()
     await controller.async_hangup()
     assert controller._uplink_sink is None
@@ -692,7 +693,7 @@ async def test_call_state_connecting_then_active_on_answer(controller):
 async def test_call_state_ended_on_hangup(controller):
     controller.handle_signal(_ring())
     controller._manager = MagicMock()
-    controller._manager.async_hangup = AsyncMock()
+    controller._manager.async_end = AsyncMock()
     await controller.async_hangup()
     assert _call_states(controller._hass)[-1] == CALL_STATE_ENDED
 
@@ -830,7 +831,7 @@ async def test_hangup_clears_active_immediately(controller):
     # `_active` сбрасывается сразу на hangup (не висит до idle-reset → не путает след. звонок).
     controller.handle_signal(_ring())
     controller._manager = MagicMock()
-    controller._manager.async_hangup = AsyncMock()
+    controller._manager.async_end = AsyncMock()
     await controller.async_hangup()
     assert controller.current_call() is None
 
@@ -864,13 +865,13 @@ async def test_hangup_reports_a_live_conversation_past_the_window(
     из-за которой кнопка «Завершить» переставала работать.
     """
     controller.handle_signal(_ring())
-    manager = MagicMock(async_hangup=AsyncMock())
+    manager = MagicMock(async_end=AsyncMock())
     controller._manager = manager
     controller._active = None  # окно ответа истекло, разговор продолжается
 
     assert controller.current_call() is None, "предпосылка: окно закрыто"
     assert await controller.async_hangup() is True
-    manager.async_hangup.assert_awaited_once()
+    manager.async_end.assert_awaited_once()
 
 
 # ─── Удержание вызова: условия, при которых оно не начинается ───────────────
@@ -965,3 +966,127 @@ async def test_hangup_ends_a_ringing_call_that_never_got_a_sip_leg(controller):
         for call in controller._hass.bus.async_fire.call_args_list
     ), "экран вызова не погашен"
     assert await controller.async_hangup() is False, "снимать больше нечего"
+
+
+# ─── «Отклонить» и открытие двери завершают вызов на панели (A-120) ─────────
+
+
+def _collecting_controller() -> tuple[DoorbellCallController, list]:
+    """Контроллер, у которого `async_create_task` копит корутины, а не закрывает."""
+    tasks: list = []
+    hass = MagicMock()
+    hass.async_create_task = lambda coro, *a, **k: tasks.append(coro)
+    api = MagicMock()
+    return DoorbellCallController(hass, api, lambda: "FCMTOK"), tasks
+
+
+def _drop_tasks(tasks: list) -> None:
+    """Закрыть накопленные корутины (hold-таск ring) и очистить список."""
+    for coro in tasks:
+        coro.close()
+    tasks.clear()
+
+
+def _manager_mock(**attrs) -> MagicMock:
+    manager = MagicMock(**attrs)
+    manager.async_end = AsyncMock()
+    manager.async_hangup = AsyncMock()
+    return manager
+
+
+async def test_hangup_ends_ringing_at_panel(controller):
+    """Пользовательский «Отклонить» снимает вызов через `async_end` (на панели)."""
+    controller.handle_signal(_ring())
+    manager = _manager_mock(holding=True, in_call=False)
+    controller._manager = manager
+
+    await controller.async_hangup()
+
+    manager.async_end.assert_awaited_once()
+    manager.async_hangup.assert_not_awaited()
+
+
+async def test_hangup_without_end_ringing_releases_silently(controller):
+    """Выгрузка записи отпускает вызов молча — панель не трогаем."""
+    controller.handle_signal(_ring())
+    manager = _manager_mock(holding=True, in_call=False)
+    controller._manager = manager
+
+    assert await controller.async_hangup(end_ringing=False) is True
+
+    manager.async_hangup.assert_awaited_once()
+    manager.async_end.assert_not_awaited()
+    assert controller.current_call() is None
+
+
+async def test_door_opened_for_ringing_panel_hangs_up():
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A"))
+    _drop_tasks(tasks)  # ring ставит hold-таск; здесь важен только таск открытия
+    manager = _manager_mock(holding=True, in_call=False)
+    c._manager = manager
+
+    c.handle_door_opened("A")
+
+    assert len(tasks) == 1
+    await tasks[0]
+    manager.async_end.assert_awaited_once()
+    manager.async_hangup.assert_not_awaited()
+    assert c.current_call() is None
+    assert _call_states(c._hass)[-1] == CALL_STATE_ENDED
+
+
+async def test_door_opened_for_other_panel_is_ignored():
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A"))
+    _drop_tasks(tasks)
+
+    c.handle_door_opened("B")
+
+    assert tasks == []
+    assert c.current_call() is not None
+
+
+def test_door_opened_without_call_is_ignored():
+    c, tasks = _collecting_controller()
+
+    c.handle_door_opened("A")
+
+    assert tasks == []
+
+
+async def test_door_opened_during_conversation_hangs_up():
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A"))
+    _drop_tasks(tasks)
+    manager = _manager_mock(holding=False, in_call=True)
+    c._manager = manager
+
+    c.handle_door_opened("A")
+
+    assert len(tasks) == 1
+    await tasks[0]
+    manager.async_end.assert_awaited_once()
+
+
+async def test_fcm_ended_while_holding_releases_silently(controller):
+    """Конец вызова по FCM отпускает держимый молча: панель уже закончила сама."""
+    controller.handle_signal(_ring(call_id="c1"))
+    manager = _manager_mock(in_call=False, holding=True)
+    controller._manager = manager
+
+    await controller._async_release_held()
+
+    manager.async_hangup.assert_awaited_once()
+    manager.async_end.assert_not_awaited()
+
+
+async def test_switch_caller_releases_old_silently(controller):
+    """Смена звонящего отпускает старый вызов молча, без `200 OK → BYE`."""
+    old = _manager_mock()
+    controller._async_hold_current = AsyncMock()
+
+    await controller._async_switch_caller(old)
+
+    old.async_hangup.assert_awaited_once()
+    old.async_end.assert_not_awaited()

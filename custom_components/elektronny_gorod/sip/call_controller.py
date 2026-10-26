@@ -8,7 +8,10 @@
   если held не поднялся — fallback на `async_answer` (register-on-answer);
 - приём `CANCEL` (сброс с панели / ответ на др. устройстве) → `on_cancelled` →
   мгновенный dismiss экрана (через EVENT_SIP_CALL active=false, чистит хелпер);
-- сервис `hangup` → `SipManager.async_hangup` (BYE / release held).
+- сервис `hangup` и сигнал `SIGNAL_DOOR_OPENED` (дверь открыта из HA) →
+  `SipManager.async_end`: звонок гасится НА ПАНЕЛИ (активный — BYE; держимый —
+  `200 OK` → ACK → BYE). Тихое снятие (`SipManager.async_hangup`, без трогания
+  панели) — только при выгрузке записи, FCM `ended`, смене звонящего и hold-таймауте.
 
 🔴 Call-ID binding (call-answer-model.md §6.5): держим/отвечаем только на активный
 вызов в окне `CallInvalidated`. Один held/активный вызов за раз (фикс-порты).
@@ -347,8 +350,23 @@ class DoorbellCallController:
                 await self._teardown_audio_bridge(bridge)
             return ok
 
-    async def async_hangup(self) -> bool:
-        """Завершить разговор (BYE) / снять держимый (release) + снять аудио-мост.
+    @callback
+    def handle_door_opened(self, access_control_id: str) -> None:
+        """SIGNAL_DOOR_OPENED: дверь открыта из HA → погасить звонок на панели.
+
+        Только своя панель: открытие другой двери вызов не трогает. Синхронный
+        callback лишь ставит задачу — `async_hangup` берёт `_answer_lock` и ждёт
+        сеть, в диспетчере этого делать нельзя."""
+        if self._active is None or self._active.access_control_id != access_control_id:
+            return
+        self._hass.async_create_task(self.async_hangup())
+
+    async def async_hangup(self, *, end_ringing: bool = True) -> bool:
+        """Завершить разговор (BYE) / снять держимый + снять аудио-мост.
+
+        `end_ringing=True` (отбой пользователя, открытие двери) — звонок гасится
+        на панели (`SipManager.async_end`). `False` (выгрузка записи) — тихое
+        снятие без трогания панели (`SipManager.async_hangup`).
 
         Возвращает, было ли что снимать. Судить об этом снаружи нельзя:
         `current_call()` гаснет по истечении **окна ответа**, а разговор живёт
@@ -372,7 +390,10 @@ class DoorbellCallController:
             )
             self._clear_uplink_sink()
             if manager is not None:
-                await manager.async_hangup()
+                if end_ringing:
+                    await manager.async_end()
+                else:
+                    await manager.async_hangup()
             if had_call:
                 # Гасим экран всегда, когда было что снимать. Под `manager is
                 # not None` это не работало на штатной ветке degrade (нет
