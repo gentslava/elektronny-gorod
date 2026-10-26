@@ -130,8 +130,9 @@ class DoorbellCallController:
         # Вызов, который сейчас снимает `async_hangup` (ждёт ACK): его повторный
         # FCM `ring` — дубль, а не новый звонок.
         self._ending: ActiveCall | None = None
-        # Инвариант: плечо в `_manager` принадлежит `_active` (или идущему
-        # разговору). Ставится после await только для всё ещё активного вызова.
+        # Инвариант: плечо в `_manager` принадлежит `_active`. Hold ставит плечо
+        # только для всё ещё активного вызова; ответ делает свой вызов активным,
+        # а звонок другой панели во время ответа игнорируется.
         self._manager: SipManager | None = None
         self._bridge: AudioBridge | None = None
         # Uplink-микрофон (Phase C, ADR-0013): WS-транспорт кормит sink через
@@ -188,6 +189,13 @@ class DoorbellCallController:
                 # Отбой этого вызова ещё ждёт ACK, менеджер уже забран: без
                 # гварда дубль поднял бы `ringing` и лишний REGISTER.
                 LOGGER.info("SIP: повторный ring завершаемого вызова — игнор")
+                return
+            if self._call_state == CALL_STATE_CONNECTING and self._answer_lock.locked():
+                # Идёт ответ: плечо уже не `holding` (внутри `accept`) или ещё не
+                # поставлено (fallback) — ветки ниже приняли бы ring за новый вызов
+                # и сняли бы принимаемый. Как при разговоре (A-89): не трогаем.
+                # Лок — чтобы прерванный ответ не оставил гвард навсегда.
+                LOGGER.info("SIP: идёт ответ — игнор ring")
                 return
             if self._manager is not None:
                 # A-89: уже держим/в разговоре. Различаем разговор vs держимый.

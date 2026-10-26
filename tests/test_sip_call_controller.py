@@ -1405,3 +1405,150 @@ async def test_fallback_answer_keeps_call_after_fcm_ended():
     call = c.current_call()
     assert call is not None and call.call_id == "c1"
     assert c._manager is mgr_a
+
+
+# ─── Звонок во время ответа не перехватывает принимаемый вызов (A-120) ──────
+
+
+def _answering_controller(gate: asyncio.Event, window: str):
+    """Контроллер с держимым вызовом A, ответ на который застрял в окне `window`.
+
+    `bridge` — подъём аудио-моста (плечо ещё `holding`); `accept` — внутри
+    `SipManager.accept` (`_held` уже забран: ни `holding`, ни `in_call`).
+    """
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    held = _manager_mock(holding=True, in_call=False)
+    held.detach = MagicMock()
+    c._manager = held
+    real_setup = c._setup_audio_bridge
+
+    async def _setup(call):
+        if window == "bridge":
+            await gate.wait()
+        return await real_setup(call)
+
+    async def _accept(**_k) -> bool:
+        held.holding = False
+        if window == "accept":
+            await gate.wait()
+        held.in_call = True
+        return True
+
+    c._setup_audio_bridge = _setup
+    held.accept = AsyncMock(side_effect=_accept)
+    return c, tasks, held
+
+
+@pytest.mark.parametrize("window", ["bridge", "accept"])
+async def test_ring_of_other_panel_during_answer_is_ignored(window):
+    """Звонок панели B во время ответа A не уходит в смену звонящего.
+
+    Иначе смена отвязывает и снимает принимаемое плечо A, мост и страховка
+    разговора остаются сиротами, а «Разговор» уходит с идентификаторами B.
+    """
+    gate = asyncio.Event()
+    c, tasks, held = _answering_controller(gate, window)
+    answer = asyncio.create_task(c.async_answer())
+    await asyncio.sleep(0)
+    assert _call_states(c._hass)[-1] == CALL_STATE_CONNECTING, "предпосылка: ответ идёт"
+
+    c.handle_signal(_ring(ac="B", call_id="c2"))
+
+    assert tasks == [], "звонок B поставил смену звонящего"
+    gate.set()
+    assert await answer is True
+    held.detach.assert_not_called()
+    held.async_hangup.assert_not_awaited()
+    held.async_end.assert_not_awaited()
+    assert c._manager is held
+    assert c.current_call().call_id == "c1"
+    payloads = _call_state_payloads(c._hass)
+    assert [p["call_id"] for p in payloads if p["state"] == CALL_STATE_RINGING] == ["c1"]
+    assert [p["call_id"] for p in payloads if p["state"] == CALL_STATE_ACTIVE] == ["c1"]
+
+
+async def test_ring_of_other_panel_during_fallback_answer_is_ignored():
+    """Ответ без held-плеча: звонок B не поднимает `ringing` и hold на фикс-порту."""
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    gate = asyncio.Event()
+    mgr_a = _gated_manager(gate, "async_answer")
+    with patch(_MGR_PATH, return_value=mgr_a):
+        answer = asyncio.create_task(c.async_answer())
+        await asyncio.sleep(0)
+        assert mgr_a.async_answer.called, "предпосылка: ответ ждёт сеть"
+
+        c.handle_signal(_ring(ac="B", call_id="c2"))
+
+        assert tasks == [], "звонок B поставил hold"
+        gate.set()
+        assert await answer is True
+
+    payloads = _call_state_payloads(c._hass)
+    assert [p["call_id"] for p in payloads if p["state"] == CALL_STATE_RINGING] == ["c1"]
+    assert c.current_call().call_id == "c1"
+
+
+async def test_duplicate_ring_during_fallback_answer_is_ignored():
+    """Дубль `ring` принимаемого вызова не возвращает карточку в `ringing`."""
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    gate = asyncio.Event()
+    mgr_a = _gated_manager(gate, "async_answer")
+    with patch(_MGR_PATH, return_value=mgr_a):
+        answer = asyncio.create_task(c.async_answer())
+        await asyncio.sleep(0)
+
+        c.handle_signal(_ring(ac="A", call_id="c1"))
+
+        assert tasks == [], "дубль поставил hold"
+        gate.set()
+        assert await answer is True
+
+    assert _call_states(c._hass) == [
+        CALL_STATE_RINGING, CALL_STATE_CONNECTING, CALL_STATE_ACTIVE,
+    ]
+
+
+async def test_stale_hold_leg_released_after_ring_expiry():
+    """Окно ответа истекло во время REGISTER/INVITE: плечо отпускается молча."""
+    c, tasks = _collecting_controller()
+    gate = asyncio.Event()
+    mgr_a = _gated_manager(gate, "register_and_hold")
+    with patch(_MGR_PATH, return_value=mgr_a):
+        c.handle_signal(_ring(ac="A", call_id="c1"))
+        hold_a = asyncio.create_task(tasks.pop())
+        await asyncio.sleep(0)
+        c._on_ring_expired()
+        assert c._active is None, "предпосылка: ring-таймаут снял вызов"
+        gate.set()
+        await hold_a
+
+    mgr_a.async_hangup.assert_awaited_once()
+    mgr_a.async_end.assert_not_awaited()
+    assert c._manager is None
+
+
+async def test_ring_after_cancelled_answer_is_not_ignored():
+    """Прерванный ответ (отмена задачи сервиса) не глушит следующие звонки.
+
+    Фаза остаётся `connecting`, но лок отпущен — гвард «идёт ответ» снят.
+    """
+    gate = asyncio.Event()
+    c, tasks, _held = _answering_controller(gate, "accept")
+    answer = asyncio.create_task(c.async_answer())
+    await asyncio.sleep(0)
+    answer.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await answer
+    assert _call_states(c._hass)[-1] == CALL_STATE_CONNECTING, "предпосылка"
+
+    c.handle_signal(_ring(ac="B", call_id="c2"))
+
+    assert len(tasks) == 1, "звонок B после прерванного ответа проигнорирован"
+    _drop_tasks(tasks)
+    assert c.current_call().call_id == "c2"
