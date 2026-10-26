@@ -1258,6 +1258,16 @@ async def test_concurrent_resolves_share_one_archive_stream(hass, freezer) -> No
 
     ha_streams = _setup_stream_component(hass)
     coordinator, entry = _archive_entry(hass)
+
+    async def _slow_archive(*_args):
+        # Запрос к оператору уступает цикл: без этого два resolve не
+        # переплетаются, и тест не отличает код с lock от кода без него.
+        await asyncio.sleep(0)
+        return _ARCHIVE_URL
+
+    coordinator.api.query_camera_archive_stream = AsyncMock(
+        side_effect=_slow_archive
+    )
     freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
     source = _source(hass)
 
@@ -1431,3 +1441,90 @@ async def test_stop_archive_streams_stops_only_that_entry(hass, freezer) -> None
 
     assert stream_a.outputs() == {}
     assert list(stream_b.outputs()) == ["hls"]
+
+
+async def test_archive_stream_is_not_shared_between_events_of_one_camera(
+    hass, freezer
+) -> None:
+    """Живой поток одного события не отдаётся другому событию той же камеры."""
+    ha_streams = _setup_stream_component(hass)
+    first_event = _live_event(event_id="3001")
+    second_event = _event(
+        event_id="3002", timestamp=_EVENT_TS + 10, duration=_LIVE_EVENT_DURATION
+    )
+    coordinator = _coordinator(events=(second_event, first_event))
+    coordinator.api.query_camera_archive_stream = AsyncMock(
+        side_effect=[_ARCHIVE_URL, _ARCHIVE_URL.replace("SIGNED", "OTHER")]
+    )
+    entry = _entry(hass, coordinator)
+    _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    source = _source(hass)
+
+    with _patch_stream_start():
+        first = await source.async_resolve_media(
+            _resolve_item(hass, entry, event_id="3001")
+        )
+        second = await source.async_resolve_media(
+            _resolve_item(hass, entry, event_id="3002")
+        )
+
+    assert [call.args[1] for call in (
+        coordinator.api.query_camera_archive_stream.await_args_list
+    )] == [_EVENT_TS, _EVENT_TS + 10]
+    assert len(ha_streams) == 2
+    assert first.url != second.url
+    assert list(ha_streams[0].outputs()) == ["hls"]
+
+
+async def test_archive_stream_label_is_per_camera_with_one_filter(
+    hass, freezer
+) -> None:
+    """Метка потока — на камеру (без event_id), фильтр на логгере один."""
+    import logging
+
+    from custom_components.elektronny_gorod._logging import UrlPathRedactFilter
+
+    ha_streams = _setup_stream_component(hass)
+    coordinator = _coordinator(
+        events=(
+            _event(
+                event_id="3002",
+                timestamp=_EVENT_TS + 10,
+                duration=_LIVE_EVENT_DURATION,
+            ),
+            _live_event(event_id="3001"),
+        )
+    )
+    coordinator.api.query_camera_archive_stream = AsyncMock(
+        return_value=_ARCHIVE_URL
+    )
+    entry = _entry(hass, coordinator)
+    _register_camera_entity(hass, entry)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    source = _source(hass)
+
+    with (
+        _patch_stream_start(),
+        patch(
+            "custom_components.elektronny_gorod.media_source.create_stream",
+            wraps=__import__(
+                "homeassistant.components.stream", fromlist=["create_stream"]
+            ).create_stream,
+        ) as create,
+    ):
+        for event_id in ("3001", "3002"):
+            await source.async_resolve_media(
+                _resolve_item(hass, entry, event_id=event_id)
+            )
+
+    labels = {call.kwargs["stream_label"] for call in create.call_args_list}
+    assert labels == {f"{DOMAIN}_archive_{_INTERCOM_ID}"}
+    assert len(ha_streams) == 2
+    stream_logger = logging.getLogger(
+        f"homeassistant.components.stream.stream.{DOMAIN}_archive_{_INTERCOM_ID}"
+    )
+    assert (
+        sum(isinstance(f, UrlPathRedactFilter) for f in stream_logger.filters) == 1
+    )
+
