@@ -49,6 +49,41 @@ def _prepare_delay(attempt: int) -> float:
     index = min(attempt, len(_DOWNLOAD_PREPARE_BACKOFF) - 1)
     return _DOWNLOAD_PREPARE_BACKOFF[index]
 
+_BOX_HEADER = 8
+_BOX_HEADER_LARGE = 16
+
+
+def _mp4_complete(data: bytes) -> bool:
+    """Есть ли в mp4 верхнеуровневый `moov`, то есть файл дописан.
+
+    Оператор снимает 423 раньше, чем закрыл запись, и отдаёт растущий файл
+    `ftyp, free, mdat(size=0)` без индекса (A-123): плеер его не откроет.
+    Идём по верхнеуровневым box-ам ISO-BMFF: `size == 1` — 64-битный размер
+    следует за типом, `size == 0` — box тянется до конца данных и он
+    последний. Заголовок, не влезающий в данные, размер меньше заголовка или
+    box, выходящий за конец данных, — файл недописан.
+    """
+    total = len(data)
+    offset = 0
+    while offset + _BOX_HEADER <= total:
+        size = int.from_bytes(data[offset : offset + 4], "big")
+        kind = data[offset + 4 : offset + 8]
+        header = _BOX_HEADER
+        if size == 1:
+            header = _BOX_HEADER_LARGE
+            if offset + header > total:
+                return False
+            size = int.from_bytes(data[offset + 8 : offset + 16], "big")
+        elif size == 0:
+            return kind == b"moov"
+        if size < header or offset + size > total:
+            return False
+        if kind == b"moov":
+            return True
+        offset += size
+    return False
+
+
 _CACHE_KEY = f"{DOMAIN}_clip_cache"
 _LOCKS_KEY = f"{DOMAIN}_clip_locks"
 _SEMAPHORE_KEY = f"{DOMAIN}_clip_downloads"
@@ -410,6 +445,23 @@ class ClipProxyView(HomeAssistantView):
                     return self.json_message(
                         "Archive is temporarily unavailable", 502
                     )
+                if not _mp4_complete(data):
+                    # Оператор отдаёт файл, который ещё дописывает (нет moov):
+                    # кеш закрепил бы неиграемый клип на весь TTL (A-123).
+                    # Это то же «ещё готовится», что и 423.
+                    LOGGER.debug(
+                        "Clip proxy got an unfinished mp4 for event_id=%s "
+                        "(%s bytes) — waiting",
+                        event_id,
+                        len(data),
+                    )
+                    if time.monotonic() >= deadline:
+                        return self.json_message(
+                            "Recording is being prepared, try again shortly", 503
+                        )
+                    await asyncio.sleep(_prepare_delay(attempt))
+                    attempt += 1
+                    continue
                 LOGGER.debug(
                     "Clip proxy cached event_id=%s (%s bytes)", event_id, len(data)
                 )
