@@ -14,10 +14,14 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from aiohttp import ClientError
+
 from homeassistant.components.lock import LockEntityFeature
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.dispatcher import async_dispatcher_connect
+from homeassistant.util import dt as dt_util
 
 from custom_components.elektronny_gorod.const import (
     CONF_ACCESS_TOKEN,
@@ -25,8 +29,11 @@ from custom_components.elektronny_gorod.const import (
     CONF_REFRESH_TOKEN,
     CONF_USER_AGENT,
     DOMAIN,
+    SIGNAL_DOOR_OPENED,
+    SIP_DATA,
 )
 from custom_components.elektronny_gorod.entity_migration import lock_unique_id
+from custom_components.elektronny_gorod.sip.call_controller import ActiveCall
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
 PLACE_ID = "1000000"
@@ -127,6 +134,61 @@ async def test_unlock_still_opens_the_door(hass: HomeAssistant, mock_api):
     )
 
     mock_api.open_lock.assert_awaited_once_with(PLACE_ID, AC_ID, ENTRANCE_ID)
+
+
+async def test_unlock_reports_opened_door(hass: HomeAssistant, mock_api):
+    """Успешное открытие сообщает панель сигналом — по нему гасится её звонок."""
+    eid = await _setup_lock(hass)
+    received: list[str] = []
+    async_dispatcher_connect(hass, SIGNAL_DOOR_OPENED, received.append)
+
+    await hass.services.async_call(
+        "lock", "unlock", {"entity_id": eid}, blocking=True
+    )
+
+    assert received == [str(AC_ID)]
+
+
+async def test_failed_unlock_does_not_report(hass: HomeAssistant, mock_api):
+    """Отказ оператора молчит: вызов продолжает звонить, его можно принять."""
+    eid = await _setup_lock(hass)
+    mock_api.open_lock.side_effect = ClientError()
+    received: list[str] = []
+    async_dispatcher_connect(hass, SIGNAL_DOOR_OPENED, received.append)
+
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "lock", "unlock", {"entity_id": eid}, blocking=True
+        )
+
+    assert received == []
+
+
+async def test_unlock_ends_the_call_of_the_same_panel(
+    hass: HomeAssistant, mock_api
+):
+    """Замок → сигнал → подписка в `__init__` → контроллер гасит звонок панели."""
+    eid = await _setup_lock(hass)
+    (controller,) = hass.data[SIP_DATA].values()
+    controller._active = ActiveCall(
+        call_id="call-1",
+        place_id=PLACE_ID,
+        access_control_id=str(AC_ID),
+        deadline=dt_util.utcnow() + timedelta(seconds=60),
+    )
+
+    with patch.object(
+        controller, "async_hangup", AsyncMock(return_value=True)
+    ) as hangup:
+        await hass.services.async_call(
+            "lock", "unlock", {"entity_id": eid}, blocking=True
+        )
+        await hass.async_block_till_done()
+
+    hangup.assert_awaited_once_with()
+    # Выгрузка записи в teardown завершила бы «живой» вызов и взвела бы
+    # таймер возврата в idle — тест его не ждёт, снимаем вызов сами.
+    controller._active = None
 
 
 async def test_lock_refuses_with_a_reason(hass: HomeAssistant, mock_api):
