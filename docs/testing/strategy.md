@@ -207,6 +207,8 @@ Mocked tests prove policy and orchestration, not end-to-end playback. Before mer
 - INVITE pre-answer: немедленный `100 Trying`; `200 OK` только в `accept()`.
 - `CANCEL`/`487`, `BYE`, detach/release и malformed-network-input cleanup.
 - Call-ID guards, held caller switching, FCM-ended во время живого разговора.
+- Отбой на панели (A-120): держимый вызов `200 OK` → `ACK` → `BYE`, `BYE` уходит и без `ACK` и при отмене/сбое; повтор `200 OK` с удвоением интервала (T1, 2·T1, …; снимается с таймаутов ожидания, не с часов); ACK чужого Call-ID ответ не подтверждает; `487` не уходит на CANCEL после нашего `200 OK`. Тихий release — при выгрузке, FCM `ended`, смене звонящего и держимом плече без вызова.
+- Открытие двери (A-120): успешный `lock.unlock` через `SIGNAL_DOOR_OPENED` гасит вызов той же панели, другой панели и отказ оператора — не трогает; открытие, дождавшееся лока при звонке другой панели, ничего не меняет; звонок другой панели во время ожидания ACK не теряется, дубль `ring` снимаемого вызова его не оживляет; сбой сети при отбое не оставляет экран звонить.
 - RTP G.711, AudioBridge downlink, UplinkSink/WebSocket uplink.
 - One-build-per-call, concurrent first-open dedup, shared producer и teardown.
 

@@ -227,7 +227,7 @@ async_unload_entry:
 | **Logging redaction** | `_logging.py` | `redact()` для headers/dict, `redact_path()` для auth URLs |
 | **External integration** | `go2rtc.py` | `Go2RtcClient` для sanitized stream/preload API, producer health и RTSP URL; raw producer source не пересекает read/diagnostic boundary; validation/audio helpers остаются отдельными контрактами |
 | **Camera stream ownership** | `stream_manager.py` | per-entry owner `eg_<camera_id>`: separate background/on-demand gates, per-camera refresh dedup, in-place policy update, 28:30 PATCH, retry, stream/preload/producer reconcile и unload quiescence ([ADR-0014](../decisions/0014-go2rtc-stream-manager.md)) |
-| **SIP subsystem** | `sip/` (14 модулей) | SIP-UAS: REGISTER-on-ring → held-INVITE → 200 OK → RTP-latching; AudioBridge (downlink → go2rtc); `uplink.py` `UplinkSink` (микрофон-PCM → G.711) + дрейф-компенсированный RTP-uplink (`rtp.py`); ADR-0012, ADR-0013 |
+| **SIP subsystem** | `sip/` (14 модулей) | SIP-UAS: REGISTER-on-ring → held-INVITE → 200 OK → RTP-latching; отбой и успешное открытие двери гасят вызов на панели: держимый — `200 OK` → `ACK` своего диалога (повтор `200 OK` до `ACK_TIMEOUT`) → `BYE`, активный — `BYE` (A-120); AudioBridge (downlink → go2rtc); `uplink.py` `UplinkSink` (микрофон-PCM → G.711) + дрейф-компенсированный RTP-uplink (`rtp.py`); ADR-0012, ADR-0013 |
 | **Uplink transport** | `uplink_ws.py`, `www/eg-intercom-mic-card.js` | WS-команда `elektronny_gorod/intercom_uplink` (`async_register_binary_handler`): Int16-PCM микрофона из Lovelace-карты `getUserMedia` → `DoorbellCallController.feed_uplink` → `UplinkSink`; static-регистрация JS-карты (ADR-0013) |
 | **Call camera** | `call_camera.py` | camera-сущность активного вызова: `stream_source()` собирает свежий `eg_intercom_call` (видео + аудио-мост) → RTSP; вне вызова → `None` |
 | **FCM listener** | `fcm.py` | `DoorbellFcmListener` — FCM-триггер вызова → `SIGNAL_DOORBELL` → `DoorbellCallController.handle_signal`; per-entry circuit breaker ограничивает reconnect-loop паузами 15 мин / 1 ч / 6 ч / 24 ч и показывает persistent Repairs issue с названием затронутого аккаунта. Startup, watchdog и unload сериализованы; failed stop сохраняет owner и блокирует replacement. Owner claim/start выполняются после последнего fallible setup-await; surviving owner не заменяется, entry остаётся loaded без realtime FCM и без setup-retry loop. После failed unload removal повторяет stop; повторный failure требует restart и сохраняет owner до него |
@@ -368,6 +368,8 @@ HA service call lock.unlock
     if ClientError:
       → self._state = JAMMED; _schedule_reset(LOCK_JAMMED_DELAY)
     else:
+      → async_dispatcher_send(SIGNAL_DOOR_OPENED, ac_id)
+        → DoorbellCallController.handle_door_opened: вызов той же панели → async_hangup (A-120)
       → self._state = UNLOCKED; _schedule_reset(LOCK_UNLOCK_DELAY)
     → async_call_later(hass, delay, _restore_locked):
         when fires: self._state = LOCKED; async_write_ha_state
@@ -407,10 +409,15 @@ HA service call lock.unlock
   Сброс с панели → SIP CANCEL → sip/protocol.py → on_cancelled
     → EVENT_SIP_CALL active=false → dismiss экрана мгновенно
 
-  «Положить трубку» → сервис elektronny_gorod.hangup
-    → DoorbellCallController.hangup()
-      → SipManager.async_hangup() → BYE → on_bye
+  «Отклонить» / «Положить трубку» → сервис elektronny_gorod.hangup
+  Успешный lock.unlock той же панели → SIGNAL_DOOR_OPENED → handle_door_opened (A-120)
+    → DoorbellCallController.async_hangup()   ← ENDED на экран до сети
+      → SipManager.async_end()
+        держимый: 200 OK → ждём ACK своего Call-ID (повтор 200 OK: T1, удвоение, до ACK_TIMEOUT) → BYE → release
+        активный: BYE
       → AudioBridge.stop() → remove_audio_stream(eg_intercom_call)
+    Открытие, дождавшееся лока уже при вызове другой панели, ничего не трогает.
+    Выгрузка записи / FCM ended / hold-таймаут / смена звонящего → тихий SipManager.async_hangup() (панель не трогаем)
 ```
 
 ### DND toggle flow
