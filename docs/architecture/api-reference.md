@@ -40,6 +40,7 @@ Reverse-engineered API reference для бэкенда `myhome.proptech.ru`, о�
 | 2026-07-15 | Мой Дом 9.9.0 | events/archive and owner/guest screens | AVD runtime UI; network contracts are HAR/static-tier as marked below |
 | 2026-07-15 | Умный Дом.ру 9.9.0 | password auth and current account surface | AVD runtime UI; gated key/private-camera screens were unavailable on this account |
 | 2026-07-15 | Мой Дом 9.9.0 | full app network flow | PCAP: DNS/TLS/SIP/video transport; HTTP remains encrypted |
+| 2026-10-26 | Мой Дом 9.11.0 | camera archive: live, event from list, timeline seek, ongoing event; main tabs | decrypted HAR (`event-in-progress-playback`) |
 
 Static diffs for both 9.9.0 flavours are summarized in [`research/apk/9.9.0-analysis.md`](../../research/apk/9.9.0-analysis.md).
 
@@ -887,6 +888,13 @@ Stream URL.
 - `Speed=-1.0` — при перемотке назад.
 
 Приложение использует тот же endpoint и для live, и для playback — разница только в параметрах. Это **функциональность видеоархива** (просмотр прошлых записей).
+
+**Воспроизведение событий (HAR 9.11.0, 2026-10-26):**
+
+- Нажатие на событие в списке камеры — это **поток архива** `video?TS=<начало события>&TZ=<смещение, с>&LightStream=0&Format=H264&Speed=-1.0`, а не `events/{id}/downloads`. `TS` равен `Time` события (unix-секунды, UTC); прыжок по таймлайну — тот же запрос с другим `TS`; кнопка Live — тот же эндпоинт без `TS`.
+- Для **идущего** события (окончание `Time + Duration` ещё не наступило) запрос тот же: поток с начала события, который догоняет эфир. Пункт «Скачать» у идущего события приложение не показывает — `downloads` используется только для скачивания завершённого.
+- Ответ — `data.URL` на `https://forpost-<N>.<operator-host>:18081/rtsp/<stream-id>/<token>/d=1`; несмотря на `/rtsp/` в пути, это **HTTPS-поток `Content-Type: video/x-flv`** (бесконечный ответ). Тип и хост у эфира и архива одинаковые; новая ссылка выдаётся на каждый запрос.
+- Список событий камеры приложение запрашивает тем же `v2/forpost/cameras/{id}/events`; соседние события для перехода «предыдущее/следующее» — с `Count=1` и `orderByTime=ASC/DESC` вокруг текущего момента.
 
 Response shape (success):
 ```json
