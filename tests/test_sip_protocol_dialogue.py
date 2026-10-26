@@ -264,6 +264,44 @@ def test_answering_sends_media_details_and_remembers_the_dialog() -> None:
     assert protocol.dialog is not None, "без диалога отбой отправить не выйдет"
 
 
+def test_ack_after_answer_is_reported() -> None:
+    """ACK на наш 200 OK подтверждает ответ: только после него можно слать BYE."""
+    protocol, transport = _protocol()
+    protocol.datagram_received(_request("INVITE"), ("10.0.0.9", 5060))
+    protocol.answer(protocol._invite_msg, ("10.0.0.9", 5060), "10.0.0.2", 40000, 0, "PCMU")
+    assert protocol.acked is not None and not protocol.acked.done()
+    transport.sent.clear()
+
+    protocol.datagram_received(_request("ACK"), ("10.0.0.9", 5060))
+
+    assert protocol.acked.done()
+    assert transport.sent == [], "на ACK не отвечают"
+
+
+def test_ack_without_answer_is_ignored() -> None:
+    """ACK до нашего ответа ничего не значит и не должен ничего ломать."""
+    protocol, transport = _protocol()
+    protocol.datagram_received(_request("INVITE"), ("10.0.0.9", 5060))
+    transport.sent.clear()
+
+    protocol.datagram_received(_request("ACK"), ("10.0.0.9", 5060))
+
+    assert protocol.acked is None
+    assert transport.sent == []
+
+
+def test_repeated_ack_is_harmless() -> None:
+    """Сервер может повторить ACK (ретрансмит) — второй не должен падать."""
+    protocol, _ = _protocol()
+    protocol.datagram_received(_request("INVITE"), ("10.0.0.9", 5060))
+    protocol.answer(protocol._invite_msg, ("10.0.0.9", 5060), "10.0.0.2", 40000, 0, "PCMU")
+
+    protocol.datagram_received(_request("ACK"), ("10.0.0.9", 5060))
+    protocol.datagram_received(_request("ACK"), ("10.0.0.9", 5060))
+
+    assert protocol.acked.done() and protocol.acked.result() is None
+
+
 def test_hangup_without_a_dialog_sends_nothing() -> None:
     protocol, transport = _protocol()
     protocol.send_bye()

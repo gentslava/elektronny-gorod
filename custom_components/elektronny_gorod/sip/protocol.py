@@ -60,6 +60,8 @@ class SipProtocol(asyncio.DatagramProtocol):
         self.registered: asyncio.Future[bool] | None = None
         self.invite: asyncio.Future[tuple] | None = None
         self.dialog: DialogState | None = None
+        # ACK на наш 200 OK: создаётся в answer(), резолвится входящим ACK.
+        self.acked: asyncio.Future[None] | None = None
         # Держимый INVITE (register-on-ring): для 100 Trying / 487 на CANCEL / accept.
         self._invite_msg = None
         self._invite_addr: tuple | None = None
@@ -116,6 +118,10 @@ class SipProtocol(asyncio.DatagramProtocol):
                 self._send_487()
                 if self.on_cancel is not None:
                     self.on_cancel()
+            elif method == "ACK":
+                # ACK на наш 200 OK — без ответа; до answer() игнорируем.
+                if self.acked is not None and not self.acked.done():
+                    self.acked.set_result(None)
             elif method in ("OPTIONS", "NOTIFY", "INFO"):
                 self._respond_200(msg, addr)
         except Exception:  # noqa: BLE001 — не валим сокет на битом пакете
@@ -182,6 +188,7 @@ class SipProtocol(asyncio.DatagramProtocol):
         sdp_body = build_g711_answer(media_ip, media_port, payload_type, codec)
         contact = f"<sip:{self.login}@{self.local_ip}:{self._lport};transport=udp>"
         ok = build_200_ok(invite_msg, sdp_body, self.local_tag, contact, self.ua)
+        self.acked = asyncio.get_event_loop().create_future()
         self.transport.sendto(ok.encode(), addr)
         self.dialog = extract_dialog(invite_msg, self.local_tag)
 
