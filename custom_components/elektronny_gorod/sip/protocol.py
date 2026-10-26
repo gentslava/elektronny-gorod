@@ -124,8 +124,15 @@ class SipProtocol(asyncio.DatagramProtocol):
                 if self.on_cancel is not None:
                     self.on_cancel()
             elif method == "ACK":
-                # ACK на наш 200 OK — без ответа; до answer() игнорируем.
-                if self.acked is not None and not self.acked.done():
+                # ACK на наш 200 OK — без ответа; до answer() игнорируем. ACK
+                # чужого диалога (другой Call-ID) ответ не подтверждает — иначе
+                # BYE ушёл бы раньше, чем панель узнала о нашем 200 OK.
+                if (
+                    self.acked is not None
+                    and not self.acked.done()
+                    and self.dialog is not None
+                    and msg.first("call-id") == self.dialog.call_id
+                ):
                     self.acked.set_result(None)
             elif method in ("OPTIONS", "NOTIFY", "INFO"):
                 self._respond_200(msg, addr)

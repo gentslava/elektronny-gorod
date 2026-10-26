@@ -39,13 +39,13 @@ def _protocol(**kwargs) -> tuple[SipProtocol, _Transport]:
     return protocol, transport
 
 
-def _request(method: str, *, extra: str = "") -> bytes:
+def _request(method: str, *, extra: str = "", call_id: str = "call-42") -> bytes:
     return (
         f"{method} sip:000@r.example SIP/2.0\r\n"
         "Via: SIP/2.0/UDP 10.0.0.9:5060;branch=z9hG4bKdoor\r\n"
         "From: <sip:door@r.example>;tag=doortag\r\n"
         "To: <sip:000@r.example>\r\n"
-        "Call-ID: call-42\r\n"
+        f"Call-ID: {call_id}\r\n"
         f"CSeq: 1 {method}\r\n"
         f"{extra}"
         "Content-Length: 0\r\n\r\n"
@@ -306,6 +306,21 @@ def test_repeated_ack_is_harmless(caplog: pytest.LogCaptureFixture) -> None:
 
     assert protocol.acked.done() and protocol.acked.result() is None
     assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+
+def test_ack_of_another_dialog_does_not_confirm_the_answer() -> None:
+    """ACK чужого диалога (другой Call-ID) наш `200 OK` не подтверждает.
+
+    Иначе ожидание ACK закончится раньше времени, и BYE уйдёт панели до того,
+    как она узнала об ответе, — вызов на панели не сбросится.
+    """
+    protocol, _ = _protocol()
+    protocol.datagram_received(_request("INVITE"), ("10.0.0.9", 5060))
+    protocol.answer(protocol._invite_msg, ("10.0.0.9", 5060), "10.0.0.2", 40000, 0, "PCMU")
+
+    protocol.datagram_received(_request("ACK", call_id="other-7"), ("10.0.0.9", 5060))
+
+    assert protocol.acked is not None and not protocol.acked.done()
 
 
 def test_resent_answer_repeats_the_first_one() -> None:
