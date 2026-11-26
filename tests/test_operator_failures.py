@@ -528,7 +528,7 @@ async def test_servicepipe_403_setup_retries_without_reauth(
     entry = _make_config_entry()
     entry.add_to_hass(hass)
 
-    waf_err = ServicePipeBlockError(_response(403), request_id="13005083566:3")
+    waf_err = ServicePipeBlockError(403, request_id="13005083566:3")
 
     with patch(
         "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
@@ -558,7 +558,7 @@ async def test_servicepipe_on_places_raises_update_failed_and_records_block(
     entry = _make_config_entry()
     entry.add_to_hass(hass)
 
-    waf_err = ServicePipeBlockError(_response(403), request_id="13005083566:3")
+    waf_err = ServicePipeBlockError(403, request_id="13005083566:3")
 
     with patch(
         "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
@@ -589,7 +589,7 @@ async def test_servicepipe_on_subcall_records_block_and_clears_on_clean_tick(
     entry = _make_config_entry()
     entry.add_to_hass(hass)
 
-    waf_err = ServicePipeBlockError(_response(403), request_id="sp-req-1234567890ab")
+    waf_err = ServicePipeBlockError(403, request_id="sp-req-1234567890ab")
 
     with patch(
         "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"

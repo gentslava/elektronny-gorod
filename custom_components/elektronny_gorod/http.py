@@ -120,13 +120,13 @@ class ServicePipeBlockError(ClientError):
 
     def __init__(
         self,
-        response: ClientResponse,
+        status: int | None = None,
         *,
         request_id: str | None = None,
     ) -> None:
-        super().__init__(response)
-        self.status: int | None = getattr(response, "status", None)
+        self.status: int | None = status
         self.request_id: str | None = redact_request_id(request_id)
+        super().__init__(str(self))
 
     def __str__(self) -> str:
         """Безопасное текстовое представление без URL, заголовков и HTML."""
@@ -158,7 +158,7 @@ def error_status(err: BaseException) -> int | None:
     превращались не в понятное сообщение формы, а в «неизвестную ошибку» с
     трассировкой, потому что config flow ловит только `ValueError`.
     """
-    if isinstance(err, ServicePipeBlockError) and err.status is not None:
+    if isinstance(err, ServicePipeBlockError):
         return err.status
     args = getattr(err, "args", ())
     response = args[0] if args else None
@@ -181,8 +181,14 @@ def _find_header_ci(headers: Any, name: str) -> str | None:
     return None
 
 
-async def _read_bounded_body(response: ClientResponse) -> str:
-    """Безопасно прочитать до 64 KiB тела ответа для проверки ServicePipe."""
+async def _read_bounded_body(response: ClientResponse) -> tuple[str, bytes]:
+    """Безопасно прочитать до 64 KiB тела ответа для проверки ServicePipe.
+
+    Возвращает `(decoded_text, uncached_prefix)`. `uncached_prefix` непустой,
+    только если байты читались напрямую из `response.content` (что сдвигает
+    `StreamReader` без записи в `response._body`) и их нужно склеить с
+    остатком на не-ServicePipe `binary=True` ответах.
+    """
     try:
         content = getattr(response, "content", None)
         content_read = getattr(content, "read", None)
@@ -196,40 +202,40 @@ async def _read_bounded_body(response: ClientResponse) -> str:
                         break
                     chunks.append(bytes(chunk))
                     total += len(chunk)
-                return b"".join(chunks)[:_MAX_BLOCK_BODY_BYTES].decode(
-                    "utf-8", errors="replace"
-                )
+                prefix = b"".join(chunks)[:_MAX_BLOCK_BODY_BYTES]
+                return prefix.decode("utf-8", errors="replace"), prefix
             raw = await content_read(_MAX_BLOCK_BODY_BYTES)
             if isinstance(raw, (bytes, bytearray)):
-                return bytes(raw[:_MAX_BLOCK_BODY_BYTES]).decode(
-                    "utf-8", errors="replace"
-                )
+                prefix = bytes(raw[:_MAX_BLOCK_BODY_BYTES])
+                return prefix.decode("utf-8", errors="replace"), prefix
 
         read_fn = getattr(response, "read", None)
         if inspect.iscoroutinefunction(read_fn):
             raw = await read_fn()
             if isinstance(raw, (bytes, bytearray)):
-                return bytes(raw[:_MAX_BLOCK_BODY_BYTES]).decode(
-                    "utf-8", errors="replace"
+                return (
+                    bytes(raw[:_MAX_BLOCK_BODY_BYTES]).decode(
+                        "utf-8", errors="replace"
+                    ),
+                    b"",
                 )
 
         text_fn = getattr(response, "text", None)
         if inspect.iscoroutinefunction(text_fn):
             text = await text_fn()
             if isinstance(text, str):
-                return text[:_MAX_BLOCK_BODY_BYTES]
+                return text[:_MAX_BLOCK_BODY_BYTES], b""
     except (ClientError, TimeoutError, UnicodeDecodeError, OSError):
-        return ""
-    return ""
+        return "", b""
+    return "", b""
 
 
 def _detect_service_pipe(
     status: int | None,
-    content_type: str,
     sp_crid: str | None,
     body: str,
 ) -> tuple[bool, str | None]:
-    """Распознать HTML-страницу блокировки ServicePipe и извлечь сырой request_id."""
+    """Распознать HTML-страницу блокировки ServicePipe по содержимому тела."""
     if body and _SP_SHAPE1_RE.search(body):
         match = _SP_SHAPE1_ID_RE.search(body)
         raw_id = match.group(1).strip() if match else None
@@ -245,45 +251,51 @@ def _detect_service_pipe(
         raw_id = match.group(1).strip() if match else None
         return True, raw_id or sp_crid or None
 
-    if status == 403 and "html" in content_type.lower():
-        if "if you are not a bot" in body.lower() or bool(sp_crid):
-            return True, sp_crid or None
+    if status == 403 and body and "if you are not a bot" in body.lower():
+        return True, sp_crid or None
 
     return False, None
 
 
 async def _raise_if_service_pipe_block(
     response: ClientResponse, endpoint: str
-) -> None:
-    """Проверить ответ на ServicePipe WAF и поднять ServicePipeBlockError."""
+) -> bytes:
+    """Проверить ответ на ServicePipe WAF и поднять ServicePipeBlockError.
+
+    Если блок не подтвердился, возвращает uncached prefix байтов (если чтение
+    шло напрямую из `response.content`), чтобы caller не потерял начало потока.
+    """
     headers = getattr(response, "headers", None)
     content_type = _find_header_ci(headers, "Content-Type") or ""
-    ct_lower = content_type.lower()
+    mime_type = content_type.split(";", 1)[0].strip().lower()
     sp_crid = _find_header_ci(headers, "X-SP-CRID")
 
     inspect_body = (
-        "text/html" in ct_lower
+        mime_type == "text/html"
         if response.ok
-        else ("html" in ct_lower or (not ct_lower and sp_crid is not None))
+        else ("html" in mime_type or (not mime_type and sp_crid is not None))
     )
     if not inspect_body:
-        return
+        return b""
 
-    body = await _read_bounded_body(response)
-    matched, raw_id = _detect_service_pipe(
-        getattr(response, "status", None), content_type, sp_crid, body
-    )
+    body, uncached_prefix = await _read_bounded_body(response)
+    status = getattr(response, "status", None)
+    matched, raw_id = _detect_service_pipe(status, sp_crid, body)
     if not matched:
-        return
+        return uncached_prefix
+
+    close_fn = getattr(response, "close", None)
+    if callable(close_fn):
+        close_fn()
 
     redacted_id = redact_request_id(raw_id)
     LOGGER.debug(
         "API request blocked by ServicePipe WAF: %s [%s] request_id=%s",
         redact_path(endpoint),
-        response.status,
+        status,
         redacted_id,
     )
-    raise ServicePipeBlockError(response, request_id=raw_id)
+    raise ServicePipeBlockError(status, request_id=raw_id)
 
 
 class HTTP:
@@ -366,7 +378,7 @@ class HTTP:
             assert_never(method)  # pyright: ignore[reportUnreachable]
 
         if binary:
-            await _raise_if_service_pipe_block(response, endpoint)
+            uncached_prefix = await _raise_if_service_pipe_block(response, endpoint)
             # Статус проверяем и здесь: иначе тело ошибки оператора уходит
             # вызывающему как «данные». Для снимка это означало картинку из
             # JSON-текста ошибки, которую потребитель принимал за кадр.
@@ -380,7 +392,8 @@ class HTTP:
                     response.status,
                 )
                 raise ClientError(response)
-            return await response.read()
+            tail = await response.read()
+            return uncached_prefix + tail if uncached_prefix else tail
 
         await _log_response(response)
         await _raise_if_service_pipe_block(response, endpoint)

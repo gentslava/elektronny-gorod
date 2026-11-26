@@ -596,7 +596,7 @@ async def test_collector_methods_do_not_disguise_refusal_as_emptiness(
 
 
 def _waf_error(status: int = 403) -> ServicePipeBlockError:
-    return ServicePipeBlockError(_response(status), request_id="13005083566:3")
+    return ServicePipeBlockError(status, request_id="13005083566:3")
 
 
 @pytest.mark.parametrize(

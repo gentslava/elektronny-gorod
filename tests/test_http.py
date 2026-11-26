@@ -570,12 +570,11 @@ async def test_servicepipe_never_leaks_ip_datetime_html_or_auth_context(
 
 
 def test_servicepipe_error_str_without_request_id() -> None:
-    """str(ServicePipeBlockError) без request_id безопасен и не требует args[0].__str__."""
-    resp = _FakeResponse(403, url="https://example/auth/v2/login/+79991112233")
-    err = ServicePipeBlockError(resp)
+    """str(ServicePipeBlockError) без request_id безопасен и не хранит ClientResponse."""
+    err = ServicePipeBlockError(403)
     assert str(err) == "ServicePipe WAF block (status=403)"
-    assert "+79991112233" not in str(err)
-    assert "+79991112233" not in repr(err)
+    assert error_status(err) == 403
+    assert all(not isinstance(arg, ClientResponse) for arg in err.args)
 
 
 async def test_non_servicepipe_html_error_raises_plain_client_error(
@@ -809,3 +808,127 @@ async def test_binary_200_text_html_servicepipe_raises(
 
     assert exc_info.value.status == 200
     assert exc_info.value.request_id == "sp-r...90ab"
+
+
+async def test_403_bot_challenge_without_content_type_and_generic_403_with_sp_crid(
+    http_client, fake_session
+) -> None:
+    """ServicePipe определяется по телу: 403 без Content-Type ловится, обычный 403 HTML с X-SP-CRID — нет."""
+    bot_html = (_FIXTURES / "servicepipe_403_bot.html").read_bytes()
+    resp_bot = _html_response(
+        403,
+        bot_html,
+        headers={"X-SP-CRID": "13005083566:3"},
+    )
+    fake_session.get = AsyncMock(return_value=resp_bot)
+
+    with pytest.raises(ServicePipeBlockError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert exc_info.value.status == 403
+    assert exc_info.value.request_id == "1300...66:3"
+
+    # Обычная HTML-страница 403 с X-SP-CRID, но без маркеров ServicePipe — это обычный отказ, не WAF.
+    generic_html = b"<html><body><h1>403 Forbidden</h1><hr>nginx</body></html>"
+    resp_generic = _html_response(
+        403,
+        generic_html,
+        headers={"Content-Type": "text/html; charset=utf-8", "X-SP-CRID": "13005083566:3"},
+    )
+    fake_session.get = AsyncMock(return_value=resp_generic)
+
+    with pytest.raises(ClientError) as plain_exc:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert not is_service_pipe_block(plain_exc.value)
+    assert error_status(plain_exc.value) == 403
+
+
+async def test_real_aiohttp_binary_text_html_preserves_bytes_and_block_closes_response(
+    hass, monkeypatch, aiohttp_client, socket_enabled
+) -> None:
+    """Реальный aiohttp: 200 text/html JPEG (633 и 70633 байт) возвращается целым, 403 JSON читается, блок закрывает response."""
+    import asyncio
+    from aiohttp import web
+
+    payloads = {
+        "633": b"\xff\xd8\xff\xe0" + b"\x41" * 629,
+        "70633": b"\xff\xd8\xff\xe0" + b"\x42" * 70629,
+    }
+    json_err = b'{"errorCode": "11005"}'
+
+    async def handle_jpg(request: web.Request) -> web.Response:
+        body = payloads[request.query["size"]]
+        return web.Response(status=200, content_type="text/html", body=body)
+
+    async def handle_json_403(request: web.Request) -> web.Response:
+        ct = (
+            'application/json; profile="https://example.invalid/text/html"'
+            if request.query.get("param") == "1"
+            else "application/json"
+        )
+        return web.Response(
+            status=403,
+            headers={"Content-Type": ct, "X-SP-CRID": "13005083566:3"},
+            body=json_err,
+        )
+
+    async def handle_slow_block(request: web.Request) -> web.StreamResponse:
+        resp = web.StreamResponse(
+            status=403,
+            headers={"Content-Type": "text/html", "X-SP-CRID": "13005083566:3"},
+        )
+        await resp.prepare(request)
+        await resp.write((_FIXTURES / "servicepipe_shape1.html").read_bytes())
+        await resp.write(b"x" * 70000)
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            return resp
+        return resp
+
+    app = web.Application()
+    app.router.add_get("/jpg", handle_jpg)
+    app.router.add_get("/json403", handle_json_403)
+    app.router.add_get("/block", handle_slow_block)
+
+    test_client = await aiohttp_client(app)
+    session = test_client.session
+    captured_responses: list[ClientResponse] = []
+    orig_get = session.get
+
+    async def _tracked_get(url, **kwargs):
+        resp = await orig_get(url, **kwargs)
+        captured_responses.append(resp)
+        return resp
+
+    monkeypatch.setattr(session, "get", _tracked_get)
+    monkeypatch.setattr(
+        "custom_components.elektronny_gorod.http.async_get_clientsession",
+        lambda _hass: session,
+    )
+    ua = MagicMock()
+    ua.__str__ = lambda self: "test-ua"
+    client = HTTP(hass, ua, access_token="T", refresh_token=None, operator="1")
+    client._base_url = str(test_client.make_url("")).rstrip("/")
+
+    # 1) Снимок 633 и 70633 байт с 200 text/html возвращается побайтно целым.
+    for size_key, expected in payloads.items():
+        got = await client.get(f"/jpg?size={size_key}", binary=True)
+        assert got == expected
+
+    # 2) 403 application/json (голый и с параметром, содержащим text/html) с X-SP-CRID
+    #    остаётся обычным ClientError и читается целиком.
+    for path in ("/json403", "/json403?param=1"):
+        with pytest.raises(ClientError) as json_exc:
+            await client.get(path)
+        assert not is_service_pipe_block(json_exc.value)
+        assert await json_exc.value.args[0].json() == {"errorCode": "11005"}
+
+    # 3) Подтверждённый ServicePipe 403 с медленным хвостом закрывает соединение.
+    with pytest.raises(ServicePipeBlockError) as waf_exc:
+        await client.get("/block")
+    assert waf_exc.value.status == 403
+    assert waf_exc.value.request_id == "sp-r...90ab"
+    assert all(not isinstance(a, ClientResponse) for a in waf_exc.value.args)
+    assert captured_responses[-1].closed is True
