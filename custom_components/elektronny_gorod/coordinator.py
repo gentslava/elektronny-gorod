@@ -34,9 +34,10 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
 
 from .api import ElektronnyGorodAPI
-from .http import is_unauthorized
+from .http import ServicePipeBlockError, is_unauthorized
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_OPERATOR_ID,
@@ -100,6 +101,8 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         # Виды данных, по которым оператор сейчас молчит: `(что, place_id)`.
         # Нужны, чтобы сообщить об отказе один раз, а не каждый цикл.
         self._failing: set[tuple[str, str]] = set()
+        self.last_waf_block: dict[str, Any] | None = None
+        self._waf_blocked_this_tick: bool = False
 
         # Dispatcher listener (для будущих фич; сейчас no-op).
         self._unsub_notifications: Callable[[], None] = async_dispatcher_connect(
@@ -197,9 +200,13 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         ⚠️ Race-safety: serial по places (см. module docstring).
         """
+        self._waf_blocked_this_tick = False
         try:
             places = await self._api.query_places()
         except Exception as ex:  # noqa: BLE001
+            if isinstance(ex, ServicePipeBlockError):
+                self._record_waf_block(ex)
+                raise UpdateFailed("places: ServicePipeBlockError") from ex
             # 401 повтором не лечится: токен отозван, и ждать нечего. Home
             # Assistant по этому исключению сам предложит войти заново, а
             # раньше запись просто уходила в «недоступна» без объяснения.
@@ -217,6 +224,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
 
         if not places:
             # Тоже один раз: у заблокированного аккаунта список пуст сутками.
+            self.last_waf_block = None
             self._note_failure("Список адресов", None, "оператор вернул пустой список")
             return {"places": [], "balances": [], "cameras": [], "locks": [], "dnd": {}}
 
@@ -299,6 +307,8 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     dnd[str(place_id)] = dnd_items
 
         cameras = dedupe_by_id(cameras) if cameras else []
+        if not self._waf_blocked_this_tick:
+            self.last_waf_block = None
 
         LOGGER.debug(
             "Coordinator refresh: %d places, %d balances, %d cameras, %d locks, %d dnd",
@@ -314,6 +324,14 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         }
 
     @callback
+    def _record_waf_block(self, err: ServicePipeBlockError) -> None:
+        """Зафиксировать последнюю WAF-блокировку (только UTC timestamp и redacted id)."""
+        self.last_waf_block = {
+            "at": dt_util.utcnow().isoformat(),
+            "request_id": err.request_id,
+        }
+
+    @callback
     def _note_failure(
         self, what: str, place_id: str | None, err: Exception | str
     ) -> None:
@@ -326,6 +344,9 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         один раз и один раз о возвращении. Пишем тип исключения, а не текст:
         в тексте оператора может оказаться адрес или идентификатор.
         """
+        if isinstance(err, ServicePipeBlockError):
+            self._record_waf_block(err)
+            self._waf_blocked_this_tick = True
         key = (what, str(place_id or ""))
         if key in self._failing:
             return

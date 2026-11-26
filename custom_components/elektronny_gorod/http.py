@@ -1,13 +1,15 @@
 """HTTP interface."""
 
-from typing import Literal, assert_never
+import inspect
+import re
+from typing import Any, Literal, assert_never
 
-from aiohttp import ClientError, ClientResponse, ClientTimeout
+from aiohttp import ClientError, ClientResponse, ClientTimeout, StreamReader
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
-from ._logging import redact, is_auth_path, redact_path
+from ._logging import REDACTED, redact, is_auth_path, redact_path
 from .const import (
     BASE_API_URL,
     LOGGER,
@@ -29,6 +31,22 @@ _BINARY_TIMEOUT = ClientTimeout(total=60, connect=10)
 _PREAUTH_PATH_PREFIXES = (
     "/auth/",
     "/api/mh-customer-device/mobile/public/",
+)
+
+_MAX_BLOCK_BODY_BYTES = 65536
+
+# Сигнатуры HTML-заглушки ServicePipe / WAF (APK 9.9.0 ve/c.java, ve/d.java + issue #107/#102).
+_SP_SHAPE1_RE = re.compile(r"""<p[^>]*\bid\s*=\s*["']REQUEST-ID["']""", re.IGNORECASE)
+_SP_SHAPE1_ID_RE = re.compile(
+    r"""<p[^>]*\bid\s*=\s*["']REQUEST-ID["'][^>]*>\s*(?:ID:\s*)?([^<\r\n]+)""",
+    re.IGNORECASE,
+)
+_SP_SHAPE2_INFO_RE = re.compile(r"""\bid\s*=\s*["']info["']""", re.IGNORECASE)
+_SP_SHAPE2_DATETIME_RE = re.compile(r"""\bdatetime\s*:""", re.IGNORECASE)
+_SP_SHAPE2_IP_RE = re.compile(r"""\bip\s*:""", re.IGNORECASE)
+_SP_SHAPE2_ID_RE = re.compile(
+    r"""(?:<br\s*/?>\s*|\n\s*)id:\s*([^\s<]+)""",
+    re.IGNORECASE,
 )
 
 
@@ -80,6 +98,57 @@ async def _log_response(response: ClientResponse) -> None:
     )
 
 
+def redact_request_id(raw: str | None) -> str | None:
+    """Оставить безопасные символы correlation ID и замаскировать середину."""
+    if raw is None:
+        return None
+    stripped = raw.strip()
+    if stripped == REDACTED:
+        return REDACTED
+    cleaned = "".join(
+        ch for ch in stripped if ch.isascii() and (ch.isalnum() or ch in ":._-")
+    )
+    if not cleaned:
+        return None
+    if len(cleaned) > 8:
+        return f"{cleaned[:4]}...{cleaned[-4:]}"
+    return REDACTED
+
+
+class ServicePipeBlockError(ClientError):
+    """Запрос заблокирован антибот-защитой ServicePipe / WAF."""
+
+    def __init__(
+        self,
+        response: ClientResponse,
+        *,
+        request_id: str | None = None,
+    ) -> None:
+        super().__init__(response)
+        self.status: int | None = getattr(response, "status", None)
+        self.request_id: str | None = redact_request_id(request_id)
+
+    def __str__(self) -> str:
+        """Безопасное текстовое представление без URL, заголовков и HTML."""
+        if self.request_id:
+            return (
+                f"ServicePipe WAF block (status={self.status}, "
+                f"request_id={self.request_id})"
+            )
+        return f"ServicePipe WAF block (status={self.status})"
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(status={self.status!r}, "
+            f"request_id={self.request_id!r})"
+        )
+
+
+def is_service_pipe_block(err: BaseException) -> bool:
+    """True, если исключение вызвано блокировкой ServicePipe / WAF."""
+    return isinstance(err, ServicePipeBlockError)
+
+
 def error_status(err: BaseException) -> int | None:
     """Статус ответа оператора, если исключение его несёт.
 
@@ -89,6 +158,8 @@ def error_status(err: BaseException) -> int | None:
     превращались не в понятное сообщение формы, а в «неизвестную ошибку» с
     трассировкой, потому что config flow ловит только `ValueError`.
     """
+    if isinstance(err, ServicePipeBlockError) and err.status is not None:
+        return err.status
     args = getattr(err, "args", ())
     response = args[0] if args else None
     return response.status if isinstance(response, ClientResponse) else None
@@ -97,6 +168,122 @@ def error_status(err: BaseException) -> int | None:
 def is_unauthorized(err: BaseException) -> bool:
     """Оператор отверг токен: нужна новая авторизация, а не повтор запроса."""
     return error_status(err) == 401
+
+
+def _find_header_ci(headers: Any, name: str) -> str | None:
+    """Case-insensitive чтение заголовка из dict или CIMultiDictProxy."""
+    if not headers or not hasattr(headers, "items"):
+        return None
+    target = name.lower()
+    for key, value in headers.items():
+        if str(key).lower() == target:
+            return str(value)
+    return None
+
+
+async def _read_bounded_body(response: ClientResponse) -> str:
+    """Безопасно прочитать до 64 KiB тела ответа для проверки ServicePipe."""
+    try:
+        content = getattr(response, "content", None)
+        content_read = getattr(content, "read", None)
+        if inspect.iscoroutinefunction(content_read):
+            if isinstance(content, StreamReader):
+                chunks: list[bytes] = []
+                total = 0
+                while total < _MAX_BLOCK_BODY_BYTES:
+                    chunk = await content_read(_MAX_BLOCK_BODY_BYTES - total)
+                    if not isinstance(chunk, (bytes, bytearray)) or not chunk:
+                        break
+                    chunks.append(bytes(chunk))
+                    total += len(chunk)
+                return b"".join(chunks)[:_MAX_BLOCK_BODY_BYTES].decode(
+                    "utf-8", errors="replace"
+                )
+            raw = await content_read(_MAX_BLOCK_BODY_BYTES)
+            if isinstance(raw, (bytes, bytearray)):
+                return bytes(raw[:_MAX_BLOCK_BODY_BYTES]).decode(
+                    "utf-8", errors="replace"
+                )
+
+        read_fn = getattr(response, "read", None)
+        if inspect.iscoroutinefunction(read_fn):
+            raw = await read_fn()
+            if isinstance(raw, (bytes, bytearray)):
+                return bytes(raw[:_MAX_BLOCK_BODY_BYTES]).decode(
+                    "utf-8", errors="replace"
+                )
+
+        text_fn = getattr(response, "text", None)
+        if inspect.iscoroutinefunction(text_fn):
+            text = await text_fn()
+            if isinstance(text, str):
+                return text[:_MAX_BLOCK_BODY_BYTES]
+    except (ClientError, TimeoutError, UnicodeDecodeError, OSError):
+        return ""
+    return ""
+
+
+def _detect_service_pipe(
+    status: int | None,
+    content_type: str,
+    sp_crid: str | None,
+    body: str,
+) -> tuple[bool, str | None]:
+    """Распознать HTML-страницу блокировки ServicePipe и извлечь сырой request_id."""
+    if body and _SP_SHAPE1_RE.search(body):
+        match = _SP_SHAPE1_ID_RE.search(body)
+        raw_id = match.group(1).strip() if match else None
+        return True, raw_id or sp_crid or None
+
+    if (
+        body
+        and _SP_SHAPE2_INFO_RE.search(body)
+        and _SP_SHAPE2_DATETIME_RE.search(body)
+        and _SP_SHAPE2_IP_RE.search(body)
+    ):
+        match = _SP_SHAPE2_ID_RE.search(body)
+        raw_id = match.group(1).strip() if match else None
+        return True, raw_id or sp_crid or None
+
+    if status == 403 and "html" in content_type.lower():
+        if "if you are not a bot" in body.lower() or bool(sp_crid):
+            return True, sp_crid or None
+
+    return False, None
+
+
+async def _raise_if_service_pipe_block(
+    response: ClientResponse, endpoint: str
+) -> None:
+    """Проверить ответ на ServicePipe WAF и поднять ServicePipeBlockError."""
+    headers = getattr(response, "headers", None)
+    content_type = _find_header_ci(headers, "Content-Type") or ""
+    ct_lower = content_type.lower()
+    sp_crid = _find_header_ci(headers, "X-SP-CRID")
+
+    inspect_body = (
+        "text/html" in ct_lower
+        if response.ok
+        else ("html" in ct_lower or (not ct_lower and sp_crid is not None))
+    )
+    if not inspect_body:
+        return
+
+    body = await _read_bounded_body(response)
+    matched, raw_id = _detect_service_pipe(
+        getattr(response, "status", None), content_type, sp_crid, body
+    )
+    if not matched:
+        return
+
+    redacted_id = redact_request_id(raw_id)
+    LOGGER.debug(
+        "API request blocked by ServicePipe WAF: %s [%s] request_id=%s",
+        redact_path(endpoint),
+        response.status,
+        redacted_id,
+    )
+    raise ServicePipeBlockError(response, request_id=raw_id)
 
 
 class HTTP:
@@ -179,6 +366,7 @@ class HTTP:
             assert_never(method)  # pyright: ignore[reportUnreachable]
 
         if binary:
+            await _raise_if_service_pipe_block(response, endpoint)
             # Статус проверяем и здесь: иначе тело ошибки оператора уходит
             # вызывающему как «данные». Для снимка это означало картинку из
             # JSON-текста ошибки, которую потребитель принимал за кадр.
@@ -195,6 +383,7 @@ class HTTP:
             return await response.read()
 
         await _log_response(response)
+        await _raise_if_service_pipe_block(response, endpoint)
         if response.ok:
             return response
         else:

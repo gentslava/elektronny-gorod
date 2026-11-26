@@ -26,7 +26,10 @@ from custom_components.elektronny_gorod.const import (
     CONF_USER_AGENT,
     DOMAIN,
 )
-from custom_components.elektronny_gorod.http import is_unauthorized
+from custom_components.elektronny_gorod.http import (
+    ServicePipeBlockError,
+    is_unauthorized,
+)
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
 
@@ -513,3 +516,106 @@ async def test_empty_place_list_complains_once_and_notices_recovery(
             assert [r for r in caplog.records if "данные снова приходят" in r.getMessage()], (
                 "возвращение данных должно быть видно"
             )
+
+
+# ─── ServicePipe / WAF (A-92) ───────────────────────────────────────────────
+
+
+async def test_servicepipe_403_setup_retries_without_reauth(
+    hass: HomeAssistant,
+) -> None:
+    """403 ServicePipe на query_places не запускает reauth и переводит entry в SETUP_RETRY."""
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    waf_err = ServicePipeBlockError(_response(403), request_id="13005083566:3")
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(side_effect=waf_err)
+
+        assert not await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert entry.state is ConfigEntryState.SETUP_RETRY
+    assert not hass.config_entries.flow.async_progress_by_handler(DOMAIN)
+
+
+async def test_servicepipe_on_places_raises_update_failed_and_records_block(
+    hass: HomeAssistant,
+) -> None:
+    """query_places при ServicePipeBlockError поднимает UpdateFailed и заполняет last_waf_block."""
+    from homeassistant.helpers.update_coordinator import UpdateFailed
+
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    waf_err = ServicePipeBlockError(_response(403), request_id="13005083566:3")
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(side_effect=waf_err)
+
+        coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
+
+        with pytest.raises(UpdateFailed, match="places: ServicePipeBlockError"):
+            await coordinator._async_update_data()
+
+    assert coordinator.last_waf_block is not None
+    assert coordinator.last_waf_block["request_id"] == "1300...66:3"
+    assert isinstance(coordinator.last_waf_block["at"], str)
+
+
+async def test_servicepipe_on_subcall_records_block_and_clears_on_clean_tick(
+    hass: HomeAssistant,
+) -> None:
+    """WAF в per-place подзапросе обновляет last_waf_block, а чистый тик его сбрасывает."""
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+
+    waf_err = ServicePipeBlockError(_response(403), request_id="sp-req-1234567890ab")
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.http = AsyncMock()
+        api.http.user_agent = AsyncMock()
+        api.query_places = AsyncMock(return_value=[{
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": "1000000", "address": "addr"},
+        }])
+        api.query_balance = AsyncMock(side_effect=waf_err)
+        api.query_screens_settings = AsyncMock(return_value={})
+        api.query_access_controls = AsyncMock(return_value=[])
+        api.query_cameras = AsyncMock(return_value=[])
+        api.query_public_cameras = AsyncMock(return_value=[])
+        api.query_dnd_settings = AsyncMock(return_value=[])
+
+        coordinator = ElektronnyGorodUpdateCoordinator(hass, entry=entry)
+        await coordinator._async_update_data()
+
+        assert coordinator.last_waf_block is not None
+        assert coordinator.last_waf_block["request_id"] == "sp-r...90ab"
+
+        # Чистый тик без WAF-блокировок сбрасывает last_waf_block.
+        api.query_balance = AsyncMock(return_value={"balance": 100.0})
+        await coordinator._async_update_data()
+
+        assert coordinator.last_waf_block is None
