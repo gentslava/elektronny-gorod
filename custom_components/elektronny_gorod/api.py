@@ -12,7 +12,7 @@ from aiohttp import ClientError, ClientResponse
 
 from homeassistant.core import HomeAssistant
 
-from .http import error_status, HTTP
+from .http import error_status, HTTP, is_service_pipe_block, ServicePipeBlockError
 from .user_agent import UserAgent
 
 # Эндпоинты привязки push-токена (зеркало приложения, см. FINDINGS §FCM).
@@ -132,6 +132,8 @@ class ElektronnyGorodAPI:
             raise ValueError("unknown_status")
 
         except Exception as e:
+            if is_service_pipe_block(e):
+                raise ValueError("waf_blocked") from e
             if error_status(e) == 400:
                 raise ValueError("invalid_login")
             if isinstance(e, ValueError):
@@ -159,6 +161,8 @@ class ElektronnyGorodAPI:
             return await response.json()
 
         except Exception as e:
+            if is_service_pipe_block(e):
+                raise ValueError("waf_blocked") from e
             if error_status(e) == 400:
                 raise ValueError("invalid_password")
             raise ValueError("unknown_status")
@@ -185,6 +189,8 @@ class ElektronnyGorodAPI:
             return
 
         except Exception as e:
+            if is_service_pipe_block(e):
+                raise ValueError("waf_blocked") from e
             if error_status(e) == 429:
                 raise ValueError("limit_exceeded")
             raise ValueError("unknown_status")
@@ -212,6 +218,8 @@ class ElektronnyGorodAPI:
             return await response.json()
 
         except Exception as e:
+            if is_service_pipe_block(e):
+                raise ValueError("waf_blocked") from e
             if error_status(e) == 406:
                 raise ValueError("invalid_format")
             raise ValueError("unknown_status")
@@ -230,6 +238,8 @@ class ElektronnyGorodAPI:
             return profile.get("data") if profile else {}
 
         except Exception as e:
+            if is_service_pipe_block(e):
+                raise ValueError("waf_blocked") from e
             if error_status(e) == 401:
                 raise ValueError("unauthorized")
             raise ValueError("unknown_status")
@@ -334,6 +344,8 @@ class ElektronnyGorodAPI:
         try:
             response = await self.http.get(api_url)
         except ClientError as ex:
+            if is_service_pipe_block(ex):
+                raise
             # Typed ForpostDownloadError — только для распознанного бизнес-кода
             # из JSON-тела. Транспортные сбои (timeout, 5xx-HTML) — это
             # транзиентные ошибки: пробрасываем исходный ClientError, чтобы
@@ -385,6 +397,8 @@ class ElektronnyGorodAPI:
             cameras = await response.json()
             data = cameras.get("data") if cameras else []
             return data
+        except ServicePipeBlockError:
+            raise
         except Exception:
             return []
 
@@ -434,6 +448,8 @@ class ElektronnyGorodAPI:
             cameras = await response.json()
             data = cameras.get("sections") if cameras else []
             return data
+        except ServicePipeBlockError:
+            raise
         except Exception:
             return []
 

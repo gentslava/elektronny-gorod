@@ -15,6 +15,7 @@ import pytest
 from aiohttp import ClientError, ClientResponse
 
 from custom_components.elektronny_gorod.api import ElektronnyGorodAPI
+from custom_components.elektronny_gorod.http import ServicePipeBlockError
 from custom_components.elektronny_gorod.user_agent import UserAgent
 
 _PHONE = "+79990000000"
@@ -589,3 +590,64 @@ async def test_collector_methods_do_not_disguise_refusal_as_emptiness(
 
     with pytest.raises(ClientError):
         await getattr(api, method)(*args)
+
+
+# ─── ServicePipe / WAF (A-92) ───────────────────────────────────────────────
+
+
+def _waf_error(status: int = 403) -> ServicePipeBlockError:
+    return ServicePipeBlockError(status, request_id="13005083566:3")
+
+
+@pytest.mark.parametrize(
+    ("method", "args", "verb"),
+    [
+        ("query_contracts", (_PHONE,), "get"),
+        ("verify_password", ("TS", "H1", "H2"), "post"),
+        ("request_sms_code", (_CONTRACT,), "post"),
+        ("verify_sms_code", (_CONTRACT, "1234"), "post"),
+        ("query_profile", (), "get"),
+    ],
+)
+async def test_auth_methods_map_servicepipe_block_to_waf_blocked(
+    hass, method: str, args: tuple[Any, ...], verb: str
+) -> None:
+    """Блокировка ServicePipe на auth/profile маппится в ValueError('waf_blocked')."""
+    api = _api(hass)
+    api._phone = _PHONE
+    setattr(api.http, verb, AsyncMock(side_effect=_waf_error()))
+
+    with pytest.raises(ValueError, match="^waf_blocked$"):
+        await getattr(api, method)(*args)
+
+
+@pytest.mark.parametrize(
+    ("method", "args"),
+    [
+        ("query_sections", ("PLACE",)),
+        ("query_old_cameras", ()),
+        ("query_event_download", ("3001",)),
+    ],
+)
+async def test_non_auth_methods_re_raise_servicepipe_block(
+    hass, method: str, args: tuple[Any, ...]
+) -> None:
+    """query_sections / query_old_cameras / query_event_download не глотают ServicePipeBlockError."""
+    api = _api(hass)
+    api.http.get = AsyncMock(side_effect=_waf_error())
+
+    with pytest.raises(ServicePipeBlockError):
+        await getattr(api, method)(*args)
+
+
+async def test_bool_and_optional_helpers_preserve_contract_on_servicepipe(hass) -> None:
+    """post_dnd_settings / query_camera_stream / push-хелперы сохраняют bool/None контракт."""
+    api = _api(hass)
+    api.http.get = AsyncMock(side_effect=_waf_error())
+    api.http.post = AsyncMock(side_effect=_waf_error())
+    api.http.delete = AsyncMock(side_effect=_waf_error())
+
+    assert await api.post_dnd_settings("PLACE", []) is False
+    assert await api.query_camera_stream("CAM") is None
+    assert await api.register_push_device("FCMTOKEN") is False
+    assert await api.unregister_push_device() is False

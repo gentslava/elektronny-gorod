@@ -1,4 +1,4 @@
-Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-08-14 (persistent FCM Repairs PII boundary, serialized lifecycle and release claims reconciled)
+Status: Active Owner: Home Assistant Expert Agent Last reviewed: 2026-11-26 (waf_blocked translation parity synced for A-92)
 
 Source files:
 - `custom_components/elektronny_gorod/manifest.json`
@@ -167,6 +167,7 @@ History `EventEntity` additive и не требует config-entry migration: st
 | FCM Repairs issue | ✅ source/ru/en, placeholder содержит только entry title; persistent PII duplication принято без расширения authenticated HA audience, а diagnostics redacts `title` перед export (S-23) |
 | History event types | ✅ `call_accepted`, `call_missed`, `motion` в source/ru/en |
 | External RTSP | ✅ options + `go2rtc_rtsp_urls` sensor name в source/ru/en |
+| ServicePipe / WAF (`waf_blocked`) | ✅ `config.error.waf_blocked` в source/ru/en |
 
 ## Платформы и manifest dependencies
 

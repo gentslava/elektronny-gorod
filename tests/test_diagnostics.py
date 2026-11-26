@@ -148,3 +148,68 @@ def test_to_redact_covers_sensitive_keys() -> None:
     from custom_components.elektronny_gorod._logging import SENSITIVE_KEYS
 
     assert SENSITIVE_KEYS <= TO_REDACT
+
+
+async def test_diagnostics_exposes_last_waf_block_safely(hass: HomeAssistant) -> None:
+    """last_waf_block отдаётся с redacted request_id, без IP/HTML/секретов."""
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+
+    class _WafCoordinator:
+        data = None
+        last_waf_block = {
+            "at": "2026-11-26T12:00:00+00:00",
+            "request_id": "13005083566:3",
+        }
+
+    entry.runtime_data = _WafCoordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["coordinator"] == {
+        "last_waf_block": {
+            "at": "2026-11-26T12:00:00+00:00",
+            "request_id": "1300...66:3",
+        }
+    }
+    blob = json.dumps(diag, default=str, ensure_ascii=False)
+    assert "13005083566:3" not in blob
+    for marker in _SENSITIVE_MARKERS:
+        assert marker not in blob
+
+
+async def test_diagnostics_exposes_last_waf_block_alongside_counts(
+    hass: HomeAssistant,
+) -> None:
+    """Когда есть и data, и last_waf_block, отдаются оба без утечек."""
+    entry = _make_entry()
+    entry.add_to_hass(hass)
+
+    class _WafWithDataCoordinator:
+        data = {
+            "places": [{"id": 1}],
+            "cameras": {},
+            "locks": {},
+            "balances": {},
+            "dnd": {},
+        }
+        last_waf_block = {
+            "at": "2026-11-26T12:00:00+00:00",
+            "request_id": "sp-r...90ab",
+        }
+
+    entry.runtime_data = _WafWithDataCoordinator()
+    entry.mock_state(hass, ConfigEntryState.LOADED)
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    assert diag["coordinator"] == {
+        "places": 1,
+        "cameras": 0,
+        "locks": 0,
+        "balances": 0,
+        "dnd": False,
+        "last_waf_block": {
+            "at": "2026-11-26T12:00:00+00:00",
+            "request_id": "sp-r...90ab",
+        },
+    }
