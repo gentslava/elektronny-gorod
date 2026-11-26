@@ -1695,6 +1695,185 @@ async def test_stop_archive_streams_aborts_in_flight_wait_and_awaits_background_
         await hass.async_block_till_done()
 
 
+async def test_two_entries_use_independent_archive_locks_and_prune_only_own_streams(
+    hass,
+) -> None:
+    """Per-entry lock и чистка только своих ключей: вторая запись не ждёт первую."""
+    import asyncio
+
+    from custom_components.elektronny_gorod.media_source import (
+        _ARCHIVE_IN_FLIGHT_KEY,
+        _ARCHIVE_STREAMS_KEY,
+        async_stop_archive_streams,
+    )
+
+    ha_streams = _setup_stream_component(hass)
+    _coord_a, entry_a, day_str = _realtime_archive_entry(hass)
+    now_ts = int(dt_util.utcnow().timestamp())
+    coord_b = _coordinator(
+        events=(_event(event_id="3001", timestamp=now_ts - 10, duration=60),)
+    )
+    coord_b.api.query_camera_archive_stream = AsyncMock(return_value=_ARCHIVE_URL)
+    entry_b = _entry(hass, coord_b, title="Second Account")
+    source = _source(hass)
+
+    async def _start_a_hang_b_ready(stream, *_args, **_kwargs):
+        if len(ha_streams) >= 2:
+            _emit_archive_segments(stream, 2)
+
+    streams = hass.data.setdefault(_ARCHIVE_STREAMS_KEY, {})
+    stale_b = MagicMock()
+    stale_b.available = False
+    stale_b.outputs = MagicMock(return_value={})
+    streams[(entry_b.entry_id, _INTERCOM_ID, "stale")] = stale_b
+
+    with (
+        _patch_stream_start(side_effect=_start_a_hang_b_ready),
+        _patch_camera_resolve() as camera_resolve,
+    ):
+        resolve_a = asyncio.create_task(
+            source.async_resolve_media(
+                _resolve_item(hass, entry_a, day_str=day_str)
+            )
+        )
+        while not (hass.data.get(_ARCHIVE_IN_FLIGHT_KEY) or {}).get(entry_a.entry_id):
+            await asyncio.sleep(0)
+
+        # Пока entry_a ждёт под своим lock, stale-ключ entry_b ею не тронут.
+        assert (entry_b.entry_id, _INTERCOM_ID, "stale") in streams
+
+        # entry_b резолвится и выгружается без ожидания entry_a.
+        play_b = await asyncio.wait_for(
+            source.async_resolve_media(
+                _resolve_item(hass, entry_b, day_str=day_str)
+            ),
+            timeout=1.0,
+        )
+        assert play_b.url.startswith("/api/hls/")
+        assert (entry_b.entry_id, _INTERCOM_ID, "stale") not in streams
+        await asyncio.wait_for(
+            async_stop_archive_streams(hass, entry_b.entry_id),
+            timeout=1.0,
+        )
+        assert ha_streams[1].outputs() == {}
+
+        # Завершаем entry_a штатной выгрузкой.
+        entry_a.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
+        await async_stop_archive_streams(hass, entry_a.entry_id)
+        with pytest.raises(Unresolvable):
+            await resolve_a
+
+    camera_resolve.assert_not_awaited()
+    assert ha_streams[0].outputs() == {}
+
+
+async def test_unload_during_query_camera_events_skips_mint_and_live_fallback(
+    hass,
+) -> None:
+    """Выгрузка во время `query_camera_events` отменяет resolve до минта и без эфира."""
+    import asyncio
+
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    requested = asyncio.Event()
+    release = asyncio.Event()
+    now_ts = int(dt_util.utcnow().timestamp())
+    events = (_event(event_id="3001", timestamp=now_ts - 10, duration=60),)
+
+    async def _slow_events(*_args, **_kwargs):
+        requested.set()
+        await release.wait()
+        return events
+
+    coordinator.api.query_camera_events = AsyncMock(side_effect=_slow_events)
+    source = _source(hass)
+
+    with _patch_camera_resolve() as camera_resolve:
+        resolve = asyncio.create_task(
+            source.async_resolve_media(_resolve_item(hass, entry, day_str=day_str))
+        )
+        await requested.wait()
+        entry.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
+        release.set()
+        with pytest.raises(Unresolvable):
+            await resolve
+
+    coordinator.api.query_camera_archive_stream.assert_not_awaited()
+    camera_resolve.assert_not_awaited()
+    assert ha_streams == []
+
+
+async def test_unload_during_archive_url_mint_skips_create_stream_and_live_fallback(
+    hass,
+) -> None:
+    """Выгрузка во время минта URL не создаёт Stream и не вызывает эфир."""
+    import asyncio
+
+    from custom_components.elektronny_gorod.media_source import (
+        async_stop_archive_streams,
+    )
+
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    requested = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _slow_mint(*_args, **_kwargs):
+        requested.set()
+        await release.wait()
+        return _ARCHIVE_URL
+
+    coordinator.api.query_camera_archive_stream = AsyncMock(side_effect=_slow_mint)
+    source = _source(hass)
+
+    with _patch_camera_resolve() as camera_resolve:
+        resolve = asyncio.create_task(
+            source.async_resolve_media(_resolve_item(hass, entry, day_str=day_str))
+        )
+        await requested.wait()
+        entry.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
+        unload_stop = asyncio.create_task(
+            async_stop_archive_streams(hass, entry.entry_id)
+        )
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(Unresolvable):
+            await resolve
+        await unload_stop
+
+    camera_resolve.assert_not_awaited()
+    assert ha_streams == []
+
+
+async def test_unload_right_after_archive_ready_stops_stream_without_storing(
+    hass,
+) -> None:
+    """Выгрузка сразу после готовности двух сегментов гасит поток и не кладёт в кеш."""
+    from custom_components.elektronny_gorod.media_source import _ARCHIVE_STREAMS_KEY
+
+    ha_streams = _setup_stream_component(hass)
+    _coord, entry, day_str = _realtime_archive_entry(hass)
+    source = _source(hass)
+
+    async def _unload_during_start(stream, *_args, **_kwargs):
+        _emit_archive_segments(stream, 2)
+        entry.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
+
+    with (
+        _patch_stream_start(side_effect=_unload_during_start),
+        _patch_camera_resolve() as camera_resolve,
+    ):
+        with pytest.raises(Unresolvable):
+            await source.async_resolve_media(
+                _resolve_item(hass, entry, day_str=day_str)
+            )
+
+    camera_resolve.assert_not_awaited()
+    assert len(ha_streams) == 1
+    assert ha_streams[0].outputs() == {}
+    assert not (hass.data.get(_ARCHIVE_STREAMS_KEY) or {})
+
+
 async def test_archive_stream_worker_failure_stops_without_retry(
     hass, freezer
 ) -> None:

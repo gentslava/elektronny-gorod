@@ -116,8 +116,10 @@ def _archive_streams(hass: HomeAssistant) -> dict[tuple[str, str, str], Stream]:
     return hass.data.setdefault(_ARCHIVE_STREAMS_KEY, {})
 
 
-def _archive_lock(hass: HomeAssistant) -> asyncio.Lock:
-    return hass.data.setdefault(_ARCHIVE_LOCK_KEY, asyncio.Lock())
+def _archive_lock(hass: HomeAssistant, entry_id: str) -> asyncio.Lock:
+    """Per-entry lock: независимые записи не блокируют resolve и выгрузку друг друга."""
+    locks: dict[str, asyncio.Lock] = hass.data.setdefault(_ARCHIVE_LOCK_KEY, {})
+    return locks.setdefault(entry_id, asyncio.Lock())
 
 
 def _stream_alive(stream: Stream) -> bool:
@@ -195,7 +197,7 @@ async def async_stop_archive_streams(hass: HomeAssistant, entry_id: str) -> None
     )
     for fail_event in in_flight.get(entry_id, ()):
         fail_event.set()
-    async with _archive_lock(hass):
+    async with _archive_lock(hass, entry_id):
         streams: dict[tuple[str, str, str], Stream] = (
             hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
         )
@@ -311,6 +313,8 @@ class ElektronnyGorodMediaSource(MediaSource):
                 type(ex).__name__,
             )
             raise Unresolvable("Archive is temporarily unavailable") from None
+        if self._coordinator(entry_id) is not coordinator:
+            raise Unresolvable("Unknown media item")
         event = next(
             (found for found in events if found.id == event_id), None
         )
@@ -360,8 +364,14 @@ class ElektronnyGorodMediaSource(MediaSource):
         """
         streams = _archive_streams(self._hass)
         key = (entry_id, camera_id, event.id)
-        async with _archive_lock(self._hass):
-            for stale in [k for k, found in streams.items() if not _stream_alive(found)]:
+        async with _archive_lock(self._hass, entry_id):
+            if self._coordinator(entry_id) is not coordinator:
+                raise Unresolvable("Unknown media item")
+            for stale in [
+                k
+                for k, found in streams.items()
+                if k[0] == entry_id and not _stream_alive(found)
+            ]:
                 del streams[stale]
             stream = streams.get(key)
             is_new = stream is None
@@ -389,6 +399,10 @@ class ElektronnyGorodMediaSource(MediaSource):
                     streams.pop(key, None)
                     _stop_archive_stream(self._hass, entry_id, stream)
                     return None
+                if self._coordinator(entry_id) is not coordinator:
+                    streams.pop(key, None)
+                    _stop_archive_stream(self._hass, entry_id, stream)
+                    raise Unresolvable("Unknown media item")
                 url = stream.endpoint_url(HLS_PROVIDER)
             except (HomeAssistantError, RuntimeError, ValueError) as ex:
                 LOGGER.debug(
@@ -416,6 +430,8 @@ class ElektronnyGorodMediaSource(MediaSource):
         source = await coordinator.api.query_camera_archive_stream(
             camera_id, event.timestamp, _tz_offset(event.timestamp)
         )
+        if self._coordinator(entry_id) is not coordinator:
+            raise Unresolvable("Unknown media item")
         if not source:
             LOGGER.debug(
                 "Media source archive stream unavailable for camera_id=%s "
