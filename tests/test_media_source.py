@@ -781,10 +781,13 @@ async def test_entry_without_cameras_or_unknown_entry_raises(hass) -> None:
         await _source(hass).async_browse_media(_item(hass, "no-such-entry"))
 
 
-def _resolve_item(hass, entry, camera_id=_INTERCOM_ID, event_id="3001") -> MediaSourceItem:
-    day_str = dt_util.as_local(dt_util.utc_from_timestamp(_EVENT_TS)).strftime(
-        "%Y%m%d"
-    )
+def _resolve_item(
+    hass, entry, camera_id=_INTERCOM_ID, event_id="3001", *, day_str: str | None = None
+) -> MediaSourceItem:
+    if day_str is None:
+        day_str = dt_util.as_local(dt_util.utc_from_timestamp(_EVENT_TS)).strftime(
+            "%Y%m%d"
+        )
     return _item(
         hass,
         f"{entry.entry_id}/{_PLACE_ID}/{camera_id}/{day_str}/{event_id}",
@@ -1176,11 +1179,43 @@ def _setup_stream_component(hass) -> list:
     return streams
 
 
-def _patch_stream_start(**kwargs):
-    """Без рабочего потока: `Stream.start` поднимал бы поток PyAV."""
+def _emit_archive_segments(stream, count: int = 2) -> None:
+    from homeassistant.components.stream.const import HLS_PROVIDER
+    from homeassistant.components.stream.core import Segment
+
+    track = stream.outputs().get(HLS_PROVIDER)
+    if track is None:
+        return
+    start_seq = len(track.sequences)
+    for seq in range(start_seq, count):
+        seg = Segment(
+            sequence=seq,
+            init=b"init",
+            stream_id=0,
+            start_time=dt_util.utcnow(),
+            _stream_outputs=[],
+            duration=2.0 if seq + 1 < count else 0.0,
+        )
+        track._async_put(seg)
+        track.idle_timer.clear()
+
+
+def _patch_stream_start(*, ready_segments: int = 2, fail_async: bool = False, **kwargs):
+    """Синтетический старт HA Stream без PyAV."""
     from homeassistant.components.stream import Stream
 
-    return patch.object(Stream, "start", AsyncMock(**kwargs))
+    async def _fake_start(self, *args, **_kwargs):
+        if fail_async:
+            self.hass.loop.call_soon(self._async_update_state, False)
+            return
+        if ready_segments:
+            _emit_archive_segments(self, ready_segments)
+
+    if "side_effect" in kwargs:
+        return patch.object(Stream, "start", autospec=True, **kwargs)
+    return patch.object(
+        Stream, "start", autospec=True, side_effect=_fake_start, **kwargs
+    )
 
 
 def _archive_entry(hass, *, url: str | None = _ARCHIVE_URL):
@@ -1189,6 +1224,17 @@ def _archive_entry(hass, *, url: str | None = _ARCHIVE_URL):
     entry = _entry(hass, coordinator)
     _register_camera_entity(hass, entry)
     return coordinator, entry
+
+
+def _realtime_archive_entry(hass, *, url: str | None = _ARCHIVE_URL):
+    """Идущее событие относительно реальных часов — без `freezer` для реальных таймаутов."""
+    now_ts = int(dt_util.utcnow().timestamp())
+    event = _event(event_id="3001", timestamp=now_ts - 10, duration=60)
+    coordinator = _coordinator(events=(event,))
+    coordinator.api.query_camera_archive_stream = AsyncMock(return_value=url)
+    entry = _entry(hass, coordinator)
+    _register_camera_entity(hass, entry)
+    return coordinator, entry, _day_str(event.timestamp)
 
 
 async def test_tz_offset_follows_ha_time_zone_at_event_time(hass) -> None:
@@ -1364,6 +1410,288 @@ async def test_resolve_stream_start_failure_falls_back_to_live_view(
         await source.async_resolve_media(_resolve_item(hass, entry))
     assert coordinator.api.query_camera_archive_stream.await_count == 2
     assert "SIGNED-TOKEN" not in caplog.text
+
+
+async def test_resolve_archive_worker_async_failure_falls_back_to_live_view(
+    hass, caplog
+) -> None:
+    """Асинхронный отказ worker-а при открытии источника → эфир, без ожидания таймаута."""
+    import logging
+
+    caplog.set_level(logging.DEBUG)
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    source = _source(hass)
+
+    with (
+        _patch_stream_start(fail_async=True),
+        _patch_camera_resolve() as camera_resolve,
+    ):
+        play = await source.async_resolve_media(
+            _resolve_item(hass, entry, day_str=day_str)
+        )
+
+    camera_resolve.assert_awaited_once()
+    assert play.url == _LIVE_PLAY_URL
+    assert len(ha_streams) == 1
+    assert ha_streams[0].outputs() == {}
+    assert not (hass.data.get("elektronny_gorod_archive_streams") or {})
+    assert "SIGNED-TOKEN" not in caplog.text
+
+    # Повторное открытие после асинхронного отказа берёт свежую ссылку.
+    with _patch_stream_start():
+        recovered = await source.async_resolve_media(
+            _resolve_item(hass, entry, day_str=day_str)
+        )
+    assert coordinator.api.query_camera_archive_stream.await_count == 2
+    assert recovered.url.startswith("/api/hls/")
+
+
+async def test_resolve_archive_waits_for_two_segments_and_handles_one_segment_failure(
+    hass, monkeypatch
+) -> None:
+    """Готовность — две sequences (как `HlsMasterPlaylistView`); один сегмент без второго → откат."""
+    import asyncio
+
+    monkeypatch.setattr(
+        "custom_components.elektronny_gorod.media_source._ARCHIVE_READY_TIMEOUT_SEC",
+        1.0,
+    )
+    ha_streams = _setup_stream_component(hass)
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    source = _source(hass)
+
+    async def _delayed_two_segments(stream, *_args, **_kwargs):
+        async def _produce() -> None:
+            await asyncio.sleep(0.02)
+            _emit_archive_segments(stream, 1)
+            await asyncio.sleep(0.04)
+            _emit_archive_segments(stream, 2)
+
+        hass.async_create_task(_produce())
+
+    with (
+        _patch_stream_start(side_effect=_delayed_two_segments),
+        _patch_camera_resolve() as camera_resolve,
+    ):
+        play = await source.async_resolve_media(
+            _resolve_item(hass, entry, day_str=day_str)
+        )
+
+    camera_resolve.assert_not_awaited()
+    assert play.url.startswith("/api/hls/")
+    assert len(ha_streams[0].outputs()["hls"].sequences) == 2
+
+    # Новый resolve с одним сегментом и последующим отказом worker-а → эфир.
+    await ha_streams[0].stop()
+
+    async def _one_segment_then_fail(stream, *_args, **_kwargs):
+        _emit_archive_segments(stream, 1)
+        hass.loop.call_later(0.02, stream._async_update_state, False)
+
+    with (
+        _patch_stream_start(side_effect=_one_segment_then_fail),
+        _patch_camera_resolve() as camera_resolve,
+    ):
+        fallback = await source.async_resolve_media(
+            _resolve_item(hass, entry, day_str=day_str)
+        )
+
+    camera_resolve.assert_awaited_once()
+    assert fallback.url == _LIVE_PLAY_URL
+    assert ha_streams[1].outputs() == {}
+
+
+async def test_resolve_archive_provider_removed_before_two_segments_falls_back(
+    hass,
+) -> None:
+    """Если worker завершается и снимает провайдер без `_set_state(False)` → откат на эфир."""
+    from homeassistant.components.stream.const import HLS_PROVIDER
+
+    ha_streams = _setup_stream_component(hass)
+    _coordinator_unused, entry, day_str = _realtime_archive_entry(hass)
+    source = _source(hass)
+
+    async def _end_without_state_false(stream, *_args, **_kwargs):
+        _emit_archive_segments(stream, 1)
+
+        async def _finish() -> None:
+            if hls := stream.outputs().get(HLS_PROVIDER):
+                await stream.remove_provider(hls)
+
+        hass.async_create_task(_finish())
+
+    with (
+        _patch_stream_start(side_effect=_end_without_state_false),
+        _patch_camera_resolve() as camera_resolve,
+    ):
+        play = await source.async_resolve_media(
+            _resolve_item(hass, entry, day_str=day_str)
+        )
+
+    camera_resolve.assert_awaited_once()
+    assert play.url == _LIVE_PLAY_URL
+    assert ha_streams[0].outputs() == {}
+
+
+async def test_resolve_archive_ready_timeout_falls_back_without_waiting_for_blocking_stop(
+    hass, monkeypatch, caplog
+) -> None:
+    """Дедлайн ожидания не ждёт 30-секундный PyAV open внутри `stream.stop()`."""
+    import asyncio
+    import logging
+    import time
+
+    from homeassistant.components.stream import Stream
+
+    caplog.set_level(logging.DEBUG)
+    monkeypatch.setattr(
+        "custom_components.elektronny_gorod.media_source._ARCHIVE_READY_TIMEOUT_SEC",
+        0.05,
+    )
+    ha_streams = _setup_stream_component(hass)
+    _coordinator_unused, entry, day_str = _realtime_archive_entry(hass)
+    source = _source(hass)
+
+    stop_started = asyncio.Event()
+    stop_release = asyncio.Event()
+
+    async def _slow_stop(self) -> None:
+        self._outputs = {}
+        self.access_token = None
+        stop_started.set()
+        await stop_release.wait()
+
+    started_at = time.monotonic()
+    try:
+        with (
+            patch.object(Stream, "stop", autospec=True, side_effect=_slow_stop),
+            _patch_stream_start(ready_segments=0),
+            _patch_camera_resolve() as camera_resolve,
+        ):
+            play = await source.async_resolve_media(
+                _resolve_item(hass, entry, day_str=day_str)
+            )
+            elapsed = time.monotonic() - started_at
+
+        assert elapsed < 0.5
+        camera_resolve.assert_awaited_once()
+        assert play.url == _LIVE_PLAY_URL
+        assert stop_started.is_set()
+        assert len(ha_streams) == 1
+        assert ha_streams[0].outputs() == {}
+        assert not (hass.data.get("elektronny_gorod_archive_streams") or {})
+        assert "SIGNED-TOKEN" not in caplog.text
+    finally:
+        stop_release.set()
+        await hass.async_block_till_done()
+
+
+async def test_resolve_archive_cancellation_propagates_without_live_fallback(
+    hass,
+) -> None:
+    """Отмена resolve пробрасывает `CancelledError` без эфира и без ожидания `stream.stop()`."""
+    import asyncio
+    import time
+
+    from homeassistant.components.stream import Stream
+
+    ha_streams = _setup_stream_component(hass)
+    _coordinator_unused, entry, day_str = _realtime_archive_entry(hass)
+    source = _source(hass)
+
+    stop_started = asyncio.Event()
+    stop_release = asyncio.Event()
+
+    async def _slow_stop(self) -> None:
+        self._outputs = {}
+        self.access_token = None
+        stop_started.set()
+        await stop_release.wait()
+
+    try:
+        with (
+            patch.object(Stream, "stop", autospec=True, side_effect=_slow_stop),
+            _patch_stream_start(ready_segments=0),
+            _patch_camera_resolve() as camera_resolve,
+        ):
+            task = asyncio.create_task(
+                source.async_resolve_media(
+                    _resolve_item(hass, entry, day_str=day_str)
+                )
+            )
+            await asyncio.sleep(0)
+            t0 = time.monotonic()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            elapsed = time.monotonic() - t0
+
+        assert elapsed < 0.5
+        camera_resolve.assert_not_awaited()
+        assert stop_started.is_set()
+        assert len(ha_streams) == 1
+        assert ha_streams[0].outputs() == {}
+        assert not (hass.data.get("elektronny_gorod_archive_streams") or {})
+    finally:
+        stop_release.set()
+        await hass.async_block_till_done()
+
+
+async def test_stop_archive_streams_aborts_in_flight_wait_and_awaits_background_stop(
+    hass,
+) -> None:
+    """Выгрузка прерывает ожидание готовности и дожидается фоновой остановки этого entry."""
+    import asyncio
+
+    from homeassistant.components.stream import Stream
+
+    from custom_components.elektronny_gorod.media_source import (
+        _ARCHIVE_IN_FLIGHT_KEY,
+        async_stop_archive_streams,
+    )
+
+    ha_streams = _setup_stream_component(hass)
+    _coordinator_unused, entry, day_str = _realtime_archive_entry(hass)
+    source = _source(hass)
+
+    stop_started = asyncio.Event()
+    stop_release = asyncio.Event()
+
+    async def _slow_stop(self) -> None:
+        self._outputs = {}
+        self.access_token = None
+        stop_started.set()
+        await stop_release.wait()
+
+    try:
+        with (
+            patch.object(Stream, "stop", autospec=True, side_effect=_slow_stop),
+            _patch_stream_start(ready_segments=0),
+            _patch_camera_resolve() as camera_resolve,
+        ):
+            resolve = asyncio.create_task(
+                source.async_resolve_media(
+                    _resolve_item(hass, entry, day_str=day_str)
+                )
+            )
+            while not (hass.data.get(_ARCHIVE_IN_FLIGHT_KEY) or {}).get(entry.entry_id):
+                await asyncio.sleep(0)
+            unload_stop = asyncio.create_task(
+                async_stop_archive_streams(hass, entry.entry_id)
+            )
+            await stop_started.wait()
+            assert not unload_stop.done()
+            stop_release.set()
+            await unload_stop
+            play = await resolve
+
+        camera_resolve.assert_awaited_once()
+        assert play.url == _LIVE_PLAY_URL
+        assert ha_streams[0].outputs() == {}
+    finally:
+        stop_release.set()
+        await hass.async_block_till_done()
 
 
 async def test_archive_stream_worker_failure_stops_without_retry(
