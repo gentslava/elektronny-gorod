@@ -1,4 +1,4 @@
-Status: Active Owner: Architecture Agent Last reviewed: 2026-08-11 (bounded per-entry FCM lifecycle and consolidated ADR-0015 candidate/review/publication contract)
+Status: Active Owner: Architecture Agent Last reviewed: 2026-11-26 (ServicePipe / WAF error flow synced for A-92 on fix/a92-servicepipe-block)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
@@ -442,6 +442,7 @@ HA service call switch.turn_on / turn_off
 | Внешние тайм-ауты | ✅ REST 30с / binary 60с, connect 10с (`http.py`, A-21/S-09); retry/backoff остаётся follow-up |
 | 429 rate limit | ловится в `request_sms_code` → `limit_exceeded`; в остальных местах не специально |
 | 401 unauthorized | `query_places` в координаторе → `is_unauthorized` → `ConfigEntryAuthFailed` → HA запускает `async_step_reauth` → `async_step_reauth_confirm`. Bearer на pre-auth endpoints больше не отправляется (см. `http.py`), поэтому reauth login проходит без коллизий. Auto-refresh access_token — отложен (см. A-22, [ADR-0006](../decisions/0006-mirror-app-behavior.md)) |
+| ServicePipe / WAF | `http.py` (`_raise_if_service_pipe_block`, bounded read ≤64 KiB) → `ServicePipeBlockError` с `redact_request_id` → в auth/profile `ValueError("waf_blocked")` (`config_flow` показывает ошибку `waf_blocked`), в `coordinator` `UpdateFailed` (places) / `_note_failure` (subcalls) без reauth + `last_waf_block` (`at`, redacted `request_id`) для `diagnostics.py` (A-92) |
 
 ## Entity model
 

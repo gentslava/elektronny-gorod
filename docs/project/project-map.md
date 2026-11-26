@@ -1,4 +1,4 @@
-Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-08-14 (4.0.1 release surfaces and product website/Pages workflow mapped)
+Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-11-26 (A-92 http/diagnostics/tests entries synced for fix/a92-servicepipe-block)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -169,7 +169,7 @@ elektronny-gorod/
 |---|---|---|
 | [`coordinator.py`](../../custom_components/elektronny_gorod/coordinator.py) | `DataUpdateCoordinator` | `update_interval=5min`, `_async_update_data` → `{places, balances, cameras, locks}` (ADR-0002) |
 | [`api.py`](../../custom_components/elektronny_gorod/api.py) | REST endpoints: auth, profile, places, access controls, cameras, locks, balance, screens, finance, sanitized history DTO (`query_events`, `query_camera_events`), push-registration, SIP credentials, home invite (`create_home_invite`), temporary access `mh-temp-pass` (`query_temp_access_ttls`/`_controls`, `query_temp_passes`, `create_temp_pass`, `delete_temp_pass`, A-118) | использует shared `HTTP` (ADR-0008); history parsers не сохраняют backend `message`; ссылка временного доступа (`sharedLinkMessage`) под редакцией |
-| [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log |
+| [`http.py`](../../custom_components/elektronny_gorod/http.py) | низкоуровневый HTTP | shared `async_get_clientsession(hass)` (ADR-0008); per-request copy headers; Bearer не шлётся на `/auth/*`; `redact_path()` в error log; распознавание ServicePipe/WAF block (`ServicePipeBlockError`, bounded read ≤64 KiB, `redact_request_id`, A-92) |
 | [`device.py`](../../custom_components/elektronny_gorod/device.py) | иерархия устройств | адрес регистрируется до forward-а платформ; `place_device_id` читает id из реестра со scope по entry; `linked_to_place` пропускает ключ вместо `None`, иначе связь стёрлась бы |
 | [`history.py`](../../custom_components/elektronny_gorod/history.py) | отдельный polling durable history | silent page-0 baseline per source; bounded ID dedup в HA `Store`; entry-scoped dispatcher; 5-minute interval; camera polling только для enabled motion-history entities; partial failure isolation |
 | [`history_ws.py`](../../custom_components/elektronny_gorod/history_ws.py) | read-only WebSocket browse старых вызовов | `elektronny_gorod/history`; проверка `POLICY_READ`; place entity охватывает access controls одного места, per-device entity — один access control; page `0..100`; безопасные source metadata |
@@ -226,7 +226,7 @@ elektronny-gorod/
 | Файл | Назначение |
 |---|---|
 | [`_logging.py`](../../custom_components/elektronny_gorod/_logging.py) | `redact()` + `SENSITIVE_KEYS` + `redact_path()` (ADR-0004) |
-| [`diagnostics.py`](../../custom_components/elektronny_gorod/diagnostics.py) | `async_get_config_entry_diagnostics` + `TO_REDACT` (S-08/S-16); coordinator-снимок = только счётчики |
+| [`diagnostics.py`](../../custom_components/elektronny_gorod/diagnostics.py) | `async_get_config_entry_diagnostics` + `TO_REDACT` (S-08/S-16); coordinator-снимок = только счётчики и redacted `last_waf_block` |
 
 ### Утилиты
 

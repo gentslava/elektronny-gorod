@@ -1,4 +1,4 @@
-Status: Active Owner: QA Agent Last reviewed: 2026-08-11 (current diagnostics and open-trap reconciliation)
+Status: Active Owner: QA Agent Last reviewed: 2026-11-26 (A-92 ServicePipe / WAF diagnostics note updated)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -113,7 +113,7 @@ logger:
 | Тесты проходят локально, падают в CI | сверить Python/HA matrix, plugins и команды с `testing/strategy.md` и CI workflow |
 | Временный сбой operator GET не восстанавливается автоматически | retry/backoff ещё не реализован — остаток A-21 |
 | После 401 HA просит войти заново | так задумано: auto-refresh нет (A-22), координатор поднимает `ConfigEntryAuthFailed` и запускает native reauth-flow |
-| VPN/WAF выглядит как пустой список камер | HTML service-pipe block маскируется generic API-ошибкой — A-92 |
+| VPN/WAF (ServicePipe) при входе или обновлении | `http.py` классифицирует HTML/403-блокировку как `ServicePipeBlockError` (A-92, ветка `fix/a92-servicepipe-block`): при входе показывается `waf_blocked`, в coordinator — `UpdateFailed`/`_note_failure` без reauth и `coordinator.last_waf_block` (`at` + redacted `request_id`) в diagnostics |
 | API-ошибка превращается в другой exception или пустой результат | широкие fallback-ветки — A-19/A-20 |
 
 ## Next reading
