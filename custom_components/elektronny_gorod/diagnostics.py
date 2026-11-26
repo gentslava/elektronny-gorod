@@ -24,6 +24,7 @@ from .const import (
     CONF_SUBSCRIBER_ID,
     DOMAIN,
 )
+from .http import redact_request_id
 
 # Источник правды по секретам — SENSITIVE_KEYS из _logging.py (ADR-0004).
 # Дополняем PII-идентификаторами, которые не секреты, но не должны утекать в
@@ -48,16 +49,25 @@ async def async_get_config_entry_diagnostics(
         "entry": async_redact_data(entry.as_dict(), TO_REDACT),
     }
 
-    # Снимок coordinator — только счётчики (без значений/PII).
+    # Снимок coordinator — только счётчики (без значений/PII) и безопасная WAF-сводка.
     coordinator = async_get_coordinator(hass, entry.entry_id)
     data = getattr(coordinator, "data", None)
+    last_waf_block = getattr(coordinator, "last_waf_block", None)
+    coord_diag: dict[str, Any] = {}
     if isinstance(data, dict):
-        diagnostics["coordinator"] = {
+        coord_diag.update({
             "places": len(data.get("places") or []),
             "cameras": len(data.get("cameras") or {}),
             "locks": len(data.get("locks") or {}),
             "balances": len(data.get("balances") or {}),
             "dnd": bool(data.get("dnd")),
+        })
+    if isinstance(last_waf_block, dict):
+        coord_diag["last_waf_block"] = {
+            "at": last_waf_block.get("at"),
+            "request_id": redact_request_id(last_waf_block.get("request_id")),
         }
+    if coord_diag:
+        diagnostics["coordinator"] = coord_diag
 
     return diagnostics

@@ -5,12 +5,21 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from aiohttp import ClientError
+from aiohttp import ClientError, ClientResponse
 
-from custom_components.elektronny_gorod.http import HTTP
+from custom_components.elektronny_gorod.http import (
+    HTTP,
+    ServicePipeBlockError,
+    error_status,
+    is_service_pipe_block,
+    redact_request_id,
+)
+
+_FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
 class _FakeResponse:
@@ -353,3 +362,573 @@ async def test_persistent_rest_failure_is_not_shouted_on_every_response(
         "об отказе решает вызывающий, а не транспорт"
     )
     assert len(ours) == 12, "на debug отказ виден — иначе диагностировать нечем"
+
+
+# --- A-92: ServicePipe / WAF block detection ------------------------------- #
+
+
+def _html_response(
+    status: int,
+    body: bytes | str,
+    *,
+    url: str = "https://example/rest/v3/subscriber-places",
+    headers: dict[str, str] | None = None,
+    use_text: bool = False,
+) -> MagicMock:
+    resp = MagicMock(spec=ClientResponse)
+    resp.status = status
+    resp.ok = 200 <= status < 300
+    resp.reason = "OK" if resp.ok else "Forbidden"
+    resp.method = "GET"
+    resp.url = url
+    resp.headers = headers or {"Content-Type": "text/html; charset=utf-8"}
+    if use_text:
+        text_val = body.decode("utf-8") if isinstance(body, bytes) else body
+        resp.text = AsyncMock(return_value=text_val)
+    else:
+        raw_val = body.encode("utf-8") if isinstance(body, str) else body
+        resp.read = AsyncMock(return_value=raw_val)
+    return resp
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        (None, None),
+        ("", None),
+        ("   ", None),
+        ("<!@#>", None),
+        ("short", "***"),
+        ("12345678", "***"),
+        ("13005083566:3", "1300...66:3"),
+        ("sp-req-1234567890ab", "sp-r...90ab"),
+        ("***", "***"),
+    ],
+)
+def test_redact_request_id(raw: str | None, expected: str | None) -> None:
+    """Correlation ID редачится детерминированно без потери короткого суффикса."""
+    assert redact_request_id(raw) == expected
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "status", "headers", "expected_id"),
+    [
+        (
+            "servicepipe_shape1.html",
+            403,
+            {"Content-Type": "text/html; charset=utf-8"},
+            "sp-r...90ab",
+        ),
+        (
+            "servicepipe_shape1.html",
+            200,
+            {"content-type": "text/html"},
+            "sp-r...90ab",
+        ),
+        (
+            "servicepipe_shape2.html",
+            403,
+            {"Content-Type": "text/html; charset=utf-8"},
+            "sp-i...3210",
+        ),
+        (
+            "servicepipe_shape2.html",
+            200,
+            {"Content-Type": "text/html; charset=utf-8"},
+            "sp-i...3210",
+        ),
+        (
+            "servicepipe_403_bot.html",
+            403,
+            {"Content-Type": "text/html", "X-SP-CRID": "13005083566:3"},
+            "1300...66:3",
+        ),
+        (
+            "servicepipe_403_bot.html",
+            403,
+            {"Content-Type": "text/html"},
+            None,
+        ),
+    ],
+)
+async def test_servicepipe_block_detected_across_shapes_and_statuses(
+    http_client,
+    fake_session,
+    fixture_name: str,
+    status: int,
+    headers: dict[str, str],
+    expected_id: str | None,
+) -> None:
+    """Все три формы ServicePipe (на 403 и 200 text/html) дают ServicePipeBlockError."""
+    html = (_FIXTURES / fixture_name).read_bytes()
+    resp = _html_response(status, html, headers=headers)
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ServicePipeBlockError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    err = exc_info.value
+    assert isinstance(err, ClientError)
+    assert is_service_pipe_block(err) is True
+    assert err.status == status
+    assert error_status(err) == status
+    assert err.request_id == expected_id
+
+
+async def test_servicepipe_detected_via_text_fallback(http_client, fake_session) -> None:
+    """Если mock ответа реализует только `.text()`, чтение тоже работает."""
+    html = (_FIXTURES / "servicepipe_shape1.html").read_text(encoding="utf-8")
+    resp = _html_response(403, html, use_text=True)
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ServicePipeBlockError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert exc_info.value.request_id == "sp-r...90ab"
+
+
+async def test_servicepipe_detected_on_binary_error(http_client, fake_session) -> None:
+    """На binary=True не-2xx ServicePipe HTML также поднимает ServicePipeBlockError."""
+    html = (_FIXTURES / "servicepipe_shape1.html").read_bytes()
+    resp = _html_response(403, html)
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ServicePipeBlockError) as exc_info:
+        await http_client.get("/rest/v1/forpost/cameras/1/snapshots", binary=True)
+
+    assert exc_info.value.status == 403
+    assert exc_info.value.request_id == "sp-r...90ab"
+
+
+@pytest.mark.parametrize("status", [400, 500])
+async def test_normal_json_errors_remain_plain_client_error(
+    http_client, fake_session, status: int
+) -> None:
+    """Обычные JSON-ошибки 400/500 не читаются как HTML и не превращаются в WAF."""
+    resp = MagicMock(spec=ClientResponse)
+    resp.status = status
+    resp.ok = False
+    resp.reason = "Error"
+    resp.method = "GET"
+    resp.url = "https://example/rest/v3/subscriber-places"
+    resp.headers = {"Content-Type": "application/json"}
+    resp.read = AsyncMock(side_effect=AssertionError("JSON body must not be read"))
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ClientError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert not is_service_pipe_block(exc_info.value)
+    assert error_status(exc_info.value) == status
+
+
+async def test_servicepipe_never_leaks_ip_datetime_html_or_auth_context(
+    http_client, fake_session, caplog
+) -> None:
+    """Sentinel: IP, datetime, полный HTML, телефон и токен не попадают в логи и str/repr."""
+    html = (_FIXTURES / "servicepipe_shape1.html").read_bytes()
+    auth_endpoint = "/auth/v2/login/+79991112233"
+    resp = _html_response(
+        403,
+        html,
+        url=f"https://example{auth_endpoint}",
+        headers={
+            "Content-Type": "text/html; charset=utf-8",
+            "X-SP-CRID": "13005083566:3",
+            "Set-Cookie": "secret-cookie=abc",
+        },
+    )
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(ServicePipeBlockError) as exc_info:
+            await http_client.get(auth_endpoint)
+
+    err = exc_info.value
+    rendered = f"{caplog.text}\n{err!s}\n{err!r}"
+    for forbidden in (
+        "198.51.100.42",
+        "2026-11-26T12:00:00Z",
+        "REQUEST-ID",
+        "ServicePipe Protection",
+        "sp-req-1234567890ab",
+        "+79991112233",
+        "EXPIRED_BEARER_TOKEN",
+        "secret-cookie",
+    ):
+        assert forbidden not in rendered, f"Утечка {forbidden!r} в логи/исключение"
+
+    ours = [
+        r for r in caplog.records
+        if r.name.startswith("custom_components.elektronny_gorod")
+        and "ServicePipe WAF" in r.msg
+    ]
+    assert len(ours) == 1
+    assert ours[0].levelno == logging.DEBUG
+    assert "/auth/v2/login/***" in ours[0].getMessage()
+    assert "sp-r...90ab" in ours[0].getMessage()
+
+
+def test_servicepipe_error_str_without_request_id() -> None:
+    """str(ServicePipeBlockError) без request_id безопасен и не хранит ClientResponse."""
+    err = ServicePipeBlockError(403)
+    assert str(err) == "ServicePipe WAF block (status=403)"
+    assert error_status(err) == 403
+    assert all(not isinstance(arg, ClientResponse) for arg in err.args)
+
+
+async def test_non_servicepipe_html_error_raises_plain_client_error(
+    http_client, fake_session
+) -> None:
+    """Обычная 502 Bad Gateway HTML (без маркеров ServicePipe) → обычный ClientError."""
+    resp = _html_response(
+        502,
+        b"<html><head><title>502 Bad Gateway</title></head><body>nginx</body></html>",
+    )
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ClientError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert not is_service_pipe_block(exc_info.value)
+    assert error_status(exc_info.value) == 502
+
+
+async def test_200_json_with_x_sp_crid_does_not_inspect_body(
+    http_client, fake_session
+) -> None:
+    """200 OK JSON с заголовком X-SP-CRID не читает тело и возвращает response."""
+    resp = MagicMock(spec=ClientResponse)
+    resp.status = 200
+    resp.ok = True
+    resp.reason = "OK"
+    resp.method = "GET"
+    resp.url = "https://example/rest/v3/subscriber-places"
+    resp.headers = {"Content-Type": "application/json", "X-SP-CRID": "13005083566:3"}
+    resp.read = AsyncMock(side_effect=AssertionError("JSON body must not be read"))
+    fake_session.get = AsyncMock(return_value=resp)
+
+    result = await http_client.get("/rest/v3/subscriber-places")
+    assert result is resp
+
+
+async def test_servicepipe_detected_from_chunked_stream_reader(
+    http_client, fake_session
+) -> None:
+    """Чтение чанков из реального aiohttp.StreamReader ограничено и собирает полный HTML."""
+    import asyncio
+    from aiohttp import StreamReader
+    from aiohttp.base_protocol import BaseProtocol
+
+    html = (_FIXTURES / "servicepipe_shape1.html").read_bytes()
+    mid = len(html) // 2
+    stream = StreamReader(
+        MagicMock(spec=BaseProtocol),
+        limit=2**16,
+        loop=asyncio.get_running_loop(),
+    )
+    stream.feed_data(html[:mid])
+    stream.feed_data(html[mid:])
+    stream.feed_eof()
+
+    resp = MagicMock(spec=ClientResponse)
+    resp.status = 403
+    resp.ok = False
+    resp.reason = "Forbidden"
+    resp.method = "GET"
+    resp.url = "https://example/rest/v3/subscriber-places"
+    resp.headers = {"Content-Type": "text/html; charset=utf-8"}
+    resp.content = stream
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ServicePipeBlockError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert exc_info.value.request_id == "sp-r...90ab"
+
+
+async def test_servicepipe_detected_from_content_read_mock(
+    http_client, fake_session
+) -> None:
+    """response.content.read (AsyncMock) тоже поддерживается."""
+    html = (_FIXTURES / "servicepipe_shape2.html").read_bytes()
+    resp = MagicMock(spec=ClientResponse)
+    resp.status = 403
+    resp.ok = False
+    resp.reason = "Forbidden"
+    resp.method = "GET"
+    resp.url = "https://example/rest/v3/subscriber-places"
+    resp.headers = {"Content-Type": "text/html"}
+    resp.content = MagicMock()
+    resp.content.read = AsyncMock(return_value=html)
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ServicePipeBlockError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert exc_info.value.request_id == "sp-i...3210"
+
+
+async def test_servicepipe_body_read_error_falls_back_gracefully(
+    http_client, fake_session
+) -> None:
+    """Сбой чтения HTML-тела (ClientError/TimeoutError) не роняет обработку ошибки."""
+    resp = MagicMock(spec=ClientResponse)
+    resp.status = 502
+    resp.ok = False
+    resp.reason = "Bad Gateway"
+    resp.method = "GET"
+    resp.url = "https://example/rest/v3/subscriber-places"
+    resp.headers = {"Content-Type": "text/html"}
+    resp.read = AsyncMock(side_effect=ClientError("stream broken"))
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ClientError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert not is_service_pipe_block(exc_info.value)
+    assert error_status(exc_info.value) == 502
+
+
+async def test_non_2xx_json_with_x_sp_crid_does_not_drain_stream(
+    http_client, fake_session
+) -> None:
+    """F-01: 400 application/json с X-SP-CRID не читает StreamReader — тело остаётся целым."""
+    import asyncio
+    from aiohttp import StreamReader
+    from aiohttp.base_protocol import BaseProtocol
+
+    payload = b'{"errorCode": "11005"}'
+    stream = StreamReader(
+        MagicMock(spec=BaseProtocol),
+        limit=2**16,
+        loop=asyncio.get_running_loop(),
+    )
+    stream.feed_data(payload)
+    stream.feed_eof()
+
+    resp = MagicMock(spec=ClientResponse)
+    resp.status = 400
+    resp.ok = False
+    resp.reason = "Bad Request"
+    resp.method = "GET"
+    resp.url = "https://example/rest/v1/forpost/events/3001/downloads?container=mp4"
+    resp.headers = {"Content-Type": "application/json", "X-SP-CRID": "13005083566:3"}
+    resp.content = stream
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ClientError) as exc_info:
+        await http_client.get("/rest/v1/forpost/events/3001/downloads?container=mp4")
+
+    assert not is_service_pipe_block(exc_info.value)
+    assert error_status(exc_info.value) == 400
+    assert await exc_info.value.args[0].content.read() == payload
+
+
+async def test_servicepipe_bounded_read_stops_at_64kib(
+    http_client, fake_session
+) -> None:
+    """F-02: _read_bounded_body читает максимум 65536 байт и не идёт дальше 64 KiB."""
+    import asyncio
+    from aiohttp import StreamReader
+    from aiohttp.base_protocol import BaseProtocol
+    from custom_components.elektronny_gorod.http import _MAX_BLOCK_BODY_BYTES
+
+    assert _MAX_BLOCK_BODY_BYTES == 65536
+    html = (_FIXTURES / "servicepipe_shape1.html").read_bytes()
+
+    # 1) Маркер после 64 KiB не должен читаться и распознаваться.
+    stream_late = StreamReader(
+        MagicMock(spec=BaseProtocol),
+        limit=2**17,
+        loop=asyncio.get_running_loop(),
+    )
+    padding = b"x" * 70000
+    stream_late.feed_data(padding[:32768])
+    stream_late.feed_data(padding[32768:])
+    stream_late.feed_data(html)
+    stream_late.feed_eof()
+
+    resp_late = MagicMock(spec=ClientResponse)
+    resp_late.status = 403
+    resp_late.ok = False
+    resp_late.reason = "Forbidden"
+    resp_late.method = "GET"
+    resp_late.url = "https://example/rest/v3/subscriber-places"
+    resp_late.headers = {"Content-Type": "text/html; charset=utf-8"}
+    resp_late.content = stream_late
+    fake_session.get = AsyncMock(return_value=resp_late)
+
+    with pytest.raises(ClientError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert not is_service_pipe_block(exc_info.value)
+    remaining_late = await stream_late.read()
+    assert len(remaining_late) == (len(padding) + len(html)) - _MAX_BLOCK_BODY_BYTES
+
+    # 2) Маркер в первых 64 KiB + хвост > 64 KiB распознаётся, не читая хвост.
+    stream_early = StreamReader(
+        MagicMock(spec=BaseProtocol),
+        limit=2**17,
+        loop=asyncio.get_running_loop(),
+    )
+    tail = b"z" * 70000
+    stream_early.feed_data(html)
+    stream_early.feed_data(tail)
+    stream_early.feed_eof()
+
+    resp_early = MagicMock(spec=ClientResponse)
+    resp_early.status = 403
+    resp_early.ok = False
+    resp_early.reason = "Forbidden"
+    resp_early.method = "GET"
+    resp_early.url = "https://example/rest/v3/subscriber-places"
+    resp_early.headers = {"Content-Type": "text/html; charset=utf-8"}
+    resp_early.content = stream_early
+    fake_session.get = AsyncMock(return_value=resp_early)
+
+    with pytest.raises(ServicePipeBlockError) as waf_exc:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert waf_exc.value.request_id == "sp-r...90ab"
+    remaining_early = await stream_early.read()
+    assert len(remaining_early) == (len(html) + len(tail)) - _MAX_BLOCK_BODY_BYTES
+
+
+async def test_binary_200_text_html_servicepipe_raises(
+    http_client, fake_session
+) -> None:
+    """F-03: 200 text/html ServicePipe на binary=True бросает ServicePipeBlockError, а не возвращает HTML."""
+    html = (_FIXTURES / "servicepipe_shape1.html").read_bytes()
+    resp = _html_response(200, html, headers={"Content-Type": "text/html; charset=utf-8"})
+    fake_session.get = AsyncMock(return_value=resp)
+
+    with pytest.raises(ServicePipeBlockError) as exc_info:
+        await http_client.get("/rest/v1/forpost/cameras/1/snapshots", binary=True)
+
+    assert exc_info.value.status == 200
+    assert exc_info.value.request_id == "sp-r...90ab"
+
+
+async def test_403_bot_challenge_without_content_type_and_generic_403_with_sp_crid(
+    http_client, fake_session
+) -> None:
+    """ServicePipe определяется по телу: 403 без Content-Type ловится, обычный 403 HTML с X-SP-CRID — нет."""
+    bot_html = (_FIXTURES / "servicepipe_403_bot.html").read_bytes()
+    resp_bot = _html_response(
+        403,
+        bot_html,
+        headers={"X-SP-CRID": "13005083566:3"},
+    )
+    fake_session.get = AsyncMock(return_value=resp_bot)
+
+    with pytest.raises(ServicePipeBlockError) as exc_info:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert exc_info.value.status == 403
+    assert exc_info.value.request_id == "1300...66:3"
+
+    # Обычная HTML-страница 403 с X-SP-CRID, но без маркеров ServicePipe — это обычный отказ, не WAF.
+    generic_html = b"<html><body><h1>403 Forbidden</h1><hr>nginx</body></html>"
+    resp_generic = _html_response(
+        403,
+        generic_html,
+        headers={"Content-Type": "text/html; charset=utf-8", "X-SP-CRID": "13005083566:3"},
+    )
+    fake_session.get = AsyncMock(return_value=resp_generic)
+
+    with pytest.raises(ClientError) as plain_exc:
+        await http_client.get("/rest/v3/subscriber-places")
+
+    assert not is_service_pipe_block(plain_exc.value)
+    assert error_status(plain_exc.value) == 403
+
+
+async def test_real_aiohttp_binary_text_html_preserves_bytes_and_block_closes_response(
+    hass, monkeypatch, aiohttp_client, socket_enabled
+) -> None:
+    """Реальный aiohttp: 200 text/html JPEG (633 и 70633 байт) возвращается целым, 403 JSON читается, блок закрывает response."""
+    import asyncio
+    from aiohttp import web
+
+    payloads = {
+        "633": b"\xff\xd8\xff\xe0" + b"\x41" * 629,
+        "70633": b"\xff\xd8\xff\xe0" + b"\x42" * 70629,
+    }
+    json_err = b'{"errorCode": "11005"}'
+
+    async def handle_jpg(request: web.Request) -> web.Response:
+        body = payloads[request.query["size"]]
+        return web.Response(status=200, content_type="text/html", body=body)
+
+    async def handle_json_403(request: web.Request) -> web.Response:
+        ct = (
+            'application/json; profile="https://example.invalid/text/html"'
+            if request.query.get("param") == "1"
+            else "application/json"
+        )
+        return web.Response(
+            status=403,
+            headers={"Content-Type": ct, "X-SP-CRID": "13005083566:3"},
+            body=json_err,
+        )
+
+    async def handle_slow_block(request: web.Request) -> web.StreamResponse:
+        resp = web.StreamResponse(
+            status=403,
+            headers={"Content-Type": "text/html", "X-SP-CRID": "13005083566:3"},
+        )
+        await resp.prepare(request)
+        await resp.write((_FIXTURES / "servicepipe_shape1.html").read_bytes())
+        await resp.write(b"x" * 70000)
+        try:
+            await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            return resp
+        return resp
+
+    app = web.Application()
+    app.router.add_get("/jpg", handle_jpg)
+    app.router.add_get("/json403", handle_json_403)
+    app.router.add_get("/block", handle_slow_block)
+
+    test_client = await aiohttp_client(app)
+    session = test_client.session
+    captured_responses: list[ClientResponse] = []
+    orig_get = session.get
+
+    async def _tracked_get(url, **kwargs):
+        resp = await orig_get(url, **kwargs)
+        captured_responses.append(resp)
+        return resp
+
+    monkeypatch.setattr(session, "get", _tracked_get)
+    monkeypatch.setattr(
+        "custom_components.elektronny_gorod.http.async_get_clientsession",
+        lambda _hass: session,
+    )
+    ua = MagicMock()
+    ua.__str__ = lambda self: "test-ua"
+    client = HTTP(hass, ua, access_token="T", refresh_token=None, operator="1")
+    client._base_url = str(test_client.make_url("")).rstrip("/")
+
+    # 1) Снимок 633 и 70633 байт с 200 text/html возвращается побайтно целым.
+    for size_key, expected in payloads.items():
+        got = await client.get(f"/jpg?size={size_key}", binary=True)
+        assert got == expected
+
+    # 2) 403 application/json (голый и с параметром, содержащим text/html) с X-SP-CRID
+    #    остаётся обычным ClientError и читается целиком.
+    for path in ("/json403", "/json403?param=1"):
+        with pytest.raises(ClientError) as json_exc:
+            await client.get(path)
+        assert not is_service_pipe_block(json_exc.value)
+        assert await json_exc.value.args[0].json() == {"errorCode": "11005"}
+
+    # 3) Подтверждённый ServicePipe 403 с медленным хвостом закрывает соединение.
+    with pytest.raises(ServicePipeBlockError) as waf_exc:
+        await client.get("/block")
+    assert waf_exc.value.status == 403
+    assert waf_exc.value.request_id == "sp-r...90ab"
+    assert all(not isinstance(a, ClientResponse) for a in waf_exc.value.args)
+    assert captured_responses[-1].closed is True

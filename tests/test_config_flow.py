@@ -786,3 +786,98 @@ async def test_reauth_fixes_entry_even_if_operator_renamed_account(
     assert entry.data[CONF_ACCESS_TOKEN] == "FRESH_AT"
     assert entry.data[CONF_NAME] == "Иван Петров (1131686)"
 
+
+# ─── ServicePipe / WAF (A-92) ───────────────────────────────────────────────
+
+
+async def test_waf_blocked_shown_on_login_phone(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """WAF на вводе телефона показывает ошибку waf_blocked."""
+    mock_api.query_contracts = AsyncMock(side_effect=ValueError("waf_blocked"))
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PHONE: "+79990000000"}
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {CONF_PHONE: "waf_blocked"}
+
+
+async def test_waf_blocked_shown_on_access_token(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """WAF на вводе токена (query_profile) показывает ошибку waf_blocked."""
+    mock_api.query_profile = AsyncMock(side_effect=ValueError("waf_blocked"))
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": SOURCE_USER, "show_advanced_options": True}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_ADVANCED: {CONF_ACCESS_TOKEN: "PASTED_TOKEN"}}
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "user"
+    assert result["errors"] == {CONF_PHONE: "waf_blocked"}
+
+
+async def test_waf_blocked_shown_on_password_step(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """WAF на шаге пароля показывает ошибку waf_blocked."""
+    mock_api.verify_password = AsyncMock(side_effect=ValueError("waf_blocked"))
+
+    result = await _to_password_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PASSWORD: "secret"}
+    )
+
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "password"
+    assert result["errors"] == {CONF_PASSWORD: "waf_blocked"}
+
+
+async def test_waf_blocked_shown_on_contract_and_sms_steps(
+    hass: HomeAssistant, mock_api: MagicMock
+) -> None:
+    """WAF при запросе SMS и при проверке SMS-кода показывает waf_blocked."""
+    mock_api.request_sms_code = AsyncMock(side_effect=ValueError("waf_blocked"))
+    result = await _to_contract_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_CONTRACT: "2104659"}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "contract"
+    assert result["errors"] == {CONF_CONTRACT: "waf_blocked"}
+
+    mock_api.request_sms_code = AsyncMock(return_value=None)
+    mock_api.verify_sms_code = AsyncMock(side_effect=ValueError("waf_blocked"))
+    result = await _to_sms_step(hass, mock_api)
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_SMS: "1234"}
+    )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "sms"
+    assert result["errors"] == {CONF_SMS: "waf_blocked"}
+
+
+def test_waf_blocked_key_is_translated() -> None:
+    """Ключ waf_blocked переведён во всех трёх файлах переводов."""
+    import json
+    import pathlib
+
+    base = (
+        pathlib.Path(__file__).resolve().parent.parent
+        / "custom_components/elektronny_gorod"
+    )
+    for name in ("strings.json", "translations/ru.json", "translations/en.json"):
+        data = json.loads((base / name).read_text(encoding="utf-8"))
+        assert data["config"]["error"].get("waf_blocked"), (
+            f"{name}: отсутствует перевод waf_blocked"
+        )
+

@@ -45,7 +45,8 @@
       "unknown_status": "Received an unknown response. Please create an issue.",
       "unauthorized": "Authorization error",
       "unknown": "Unexpected error",
-      "invalid_contract": "Selected contract is no longer available. Start over and pick again."
+      "invalid_contract": "Selected contract is no longer available. Start over and pick again.",
+      "waf_blocked": "Request was blocked by the operator's anti-bot protection (ServicePipe / WAF). Make sure Home Assistant is not using a VPN or foreign IP and try again later."
     },
     "step": {
       "user": {

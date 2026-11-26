@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (4.0.1 FCM hotfix published and verified; A-97 review lifecycle accepted)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-11-26 (A-92 note updated for branch fix/a92-servicepipe-block; pending merge)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -88,7 +88,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - FCM остаётся на приватных Google API и неофициальном operator push-контракте. Зафиксированный production-дефект исправлен локальной нормализацией и bounded recovery, но долгосрочная совместимость внешней зависимости не гарантируется (A-80).
 - go2rtc persistent-config bloat частично mitigated PATCH-only path, но требует live persistence check (A-84).
 - `api.py` — `e.args[0]` antipattern + широкий `except Exception` (A-19/A-20).
-- HTML service-pipe/VPN block пока превращается в generic `ClientError` (A-92; подтверждается HAR или живой пробой, иначе static-only по ADR-0006). Пустым списком камер он больше не притворяется — отказ доходит до координатора и виден в журнале.
+- HTML service-pipe/VPN block (A-92): классификация `ServicePipeBlockError`, ошибка входа `waf_blocked` и `last_waf_block` в diagnostics реализованы в ветке `fix/a92-servicepipe-block` (ожидает review и merge в `master`).
 - Cold-start go2rtc warmup (A-67), lock fake-state cosmetic-cycle (A-15 — `asyncio.sleep` уже убран).
 
 ### Mobile-app parity backlog
