@@ -3,7 +3,8 @@
   "common": {
     "duration_min_sec": "{minutes} мин {seconds} сек",
     "duration_min": "{minutes} мин",
-    "duration_sec": "{seconds} сек"
+    "duration_sec": "{seconds} сек",
+    "recording_in_progress": "Идёт запись"
   },
   "issues": {
     "fcm_receiver_unavailable": {
