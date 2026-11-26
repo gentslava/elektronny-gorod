@@ -1677,6 +1677,7 @@ async def test_stop_archive_streams_aborts_in_flight_wait_and_awaits_background_
             )
             while not (hass.data.get(_ARCHIVE_IN_FLIGHT_KEY) or {}).get(entry.entry_id):
                 await asyncio.sleep(0)
+            entry.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
             unload_stop = asyncio.create_task(
                 async_stop_archive_streams(hass, entry.entry_id)
             )
@@ -1684,10 +1685,10 @@ async def test_stop_archive_streams_aborts_in_flight_wait_and_awaits_background_
             assert not unload_stop.done()
             stop_release.set()
             await unload_stop
-            play = await resolve
+            with pytest.raises(Unresolvable):
+                await resolve
 
-        camera_resolve.assert_awaited_once()
-        assert play.url == _LIVE_PLAY_URL
+        camera_resolve.assert_not_awaited()
         assert ha_streams[0].outputs() == {}
     finally:
         stop_release.set()

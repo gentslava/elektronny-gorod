@@ -327,6 +327,10 @@ class ElektronnyGorodMediaSource(MediaSource):
             play = await self._archive_play_media(
                 coordinator, entry_id, camera_id, event
             )
+            # Запись могли выгрузить или перезагрузить, пока ждали поток архива:
+            # уходящей/сменившейся записи нельзя отдавать ни поток, ни новый эфир.
+            if self._coordinator(entry_id) is not coordinator:
+                raise Unresolvable("Unknown media item")
             if play is not None:
                 return play
             return await self._live_play_media(item, camera_id)
