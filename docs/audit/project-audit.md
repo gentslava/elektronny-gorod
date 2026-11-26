@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-11-26 (A-92 marked resolved-in-branch on fix/a92-servicepipe-block; pending merge)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-11-26 (A-92 merged in PR #108)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -931,12 +931,12 @@ Quality gates:
 
 ### A-92. HTML service-pipe/VPN block маскируется под обычную API-ошибку
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `fix/a92-servicepipe-block`, pending review & merge.
+- **Status:** ✅ **RESOLVED** — PR #108 в `master` (`baf296a`). Автор #107 подтвердил штатную работу `pr-108`. Распознавание блокировки проверено на локальных ответах.
 - **Severity:** P2 — diagnostics/reliability, не regression текущего happy path.
 - **Area:** `http.py`, `api.py`, `coordinator.py`, `diagnostics.py`, `strings.json` / `translations/*.json`.
 - **Evidence (static APK 9.9.0 `ve/c.java`/`ve/d.java` + issue #107/#102):** stock client распознаёт HTML block-page по `<p id="REQUEST-ID">` либо блоку `id="info"` с `datetime:`/`ip:`, бросает отдельный `ServicePipeBlockException` и открывает `VpnWarningActivity`. Пользовательский текст явно связывает блокировку с работой вне РФ/VPN; в #107/#102 также зафиксированы ответы `403` с bot-challenge («if you are not a bot») и заголовком `X-SP-CRID`. В снятых HAR happy-path block page не встречался — формат подтверждён по статике APK и внешним репортам (ADR-0006).
 - **Было:** `HTTP.__request` превращал любой non-2xx в generic `ClientError`; часть методов ловила широкий `Exception` и возвращала пустые коллекции (в [A-115](project-audit.md) это уже убрали для `query_cameras`/`query_public_cameras`/`query_screens_settings`/`query_dnd_settings`, но оставались `query_sections`, `query_old_cameras`, а также typed-классификация block-page, ошибка входа и request-id в diagnostics).
-- **Как закрыто (`fix/a92-servicepipe-block`):**
+- **Реализация**
   - `http.py`: `_raise_if_service_pipe_block` проверяет ответы с HTML `Content-Type` (`200 text/html` и non-2xx, включая `binary=True`) либо non-2xx без `Content-Type` при наличии `X-SP-CRID` (не трогая `application/json`), сохраняет uncached prefix для не-блоковых `binary=True` потоков; `_read_bounded_body` читает не более `_MAX_BLOCK_BODY_BYTES` (64 KiB) через `content.read`/`read`/`text`; `_detect_service_pipe` распознаёт по телу 3 формы (`REQUEST-ID`, `id="info"` + `datetime:` + `ip:`, `403` с `"if you are not a bot"`), при подтверждённом блоке закрывает `response` (`close()`) и поднимает `ServicePipeBlockError(ClientError)` только с `status` и redacted `request_id` (`redact_request_id`: оставляет ASCII `[A-Za-z0-9:._-]` и маскирует середину при длине >8, иначе `***`), без сохранения `ClientResponse` и без IP, datetime, полного HTML, заголовков и auth-контекста в `str`/`repr` и `DEBUG`-логе (`redact_path(endpoint)`).
   - `api.py`: auth/profile методы (`query_contracts`, `verify_password`, `request_sms_code`, `verify_sms_code`, `query_profile`) мапят `is_service_pipe_block(e)` в `ValueError("waf_blocked")` с переводами `config.error.waf_blocked` в `strings.json` и `translations/{ru,en}.json`; `query_sections`, `query_old_cameras` и `query_event_download` явно пробрасывают `ServicePipeBlockError`; bool/optional-хелперы (`post_dnd_settings`, `query_camera_stream`, `register_push_device`, `unregister_push_device`) сохраняют контракт `bool`/`None`.
   - `coordinator.py` и `diagnostics.py`: при `ServicePipeBlockError` на `query_places` координатор записывает `last_waf_block` (`at` в UTC ISO и masked `request_id`) и поднимает `UpdateFailed("places: ServicePipeBlockError")` без ложного `ConfigEntryAuthFailed`/reauth; в per-place подзапросах `_note_failure` также фиксирует `last_waf_block`, а чистый тик (и пустой `places`) сбрасывает `last_waf_block = None`. `diagnostics.py` отдаёт `coordinator.last_waf_block` (через `redact_request_id`) рядом со счётчиками.
@@ -1385,7 +1385,7 @@ Quality gates:
 | ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
 | ✅ A-87 (ring/idle watchdog, PR #68) + ✅ A-88 (video anti-churn) + ✅ A-90 (FCM-ended guard), merged PR #69 | Итерация 4 (UI + надёжность видео/жизненного цикла вызова) |
 | ✅ A-89 (смена звонящего домофона во время held) + ✅ A-91 (штатная pre-answer SIP-модель подтверждена PCAP), merged PR #69 | Итерация 4 (мульти-вызов + production diagnostics) |
-| 🟢 A-92 (ServicePipe/WAF detection + `waf_blocked` + diagnostics `last_waf_block`, resolved-in-branch `fix/a92-servicepipe-block`) | backlog (P2 reliability; pending review & merge) |
+| ✅ A-92 (ServicePipe/WAF detection + `waf_blocked` + diagnostics `last_waf_block`, merged PR #108) | P2 reliability |
 | A-50 + остаток A-58 + A-59 | mobile-app parity: durable history/archive + Media Source |
 | ✅ A-93 (home invitation response action, resolved-in-branch `feat/guest-invite`) | mobile-app parity |
 | A-94 | mobile-app parity: access keys (enabled-account evidence gate: HAR or live probe, else static-only) |

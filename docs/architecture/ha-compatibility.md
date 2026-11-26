@@ -167,7 +167,7 @@ History `EventEntity` additive и не требует config-entry migration: st
 | FCM Repairs issue | ✅ source/ru/en, placeholder содержит только entry title; persistent PII duplication принято без расширения authenticated HA audience, а diagnostics redacts `title` перед export (S-23) |
 | History event types | ✅ `call_accepted`, `call_missed`, `motion` в source/ru/en |
 | External RTSP | ✅ options + `go2rtc_rtsp_urls` sensor name в source/ru/en |
-| ServicePipe / WAF (`waf_blocked`) | ✅ `config.error.waf_blocked` в source/ru/en (`fix/a92-servicepipe-block`) |
+| ServicePipe / WAF (`waf_blocked`) | ✅ `config.error.waf_blocked` в source/ru/en |
 
 ## Платформы и manifest dependencies
 

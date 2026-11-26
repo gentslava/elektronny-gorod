@@ -1,4 +1,4 @@
-Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-11-26 (A-92 http/diagnostics/tests entries synced for fix/a92-servicepipe-block)
+Status: Active Owner: Project Cartographer Agent Last reviewed: 2026-11-26 (A-92 HTTP, diagnostics and tests)
 
 Source files:
 - `custom_components/elektronny_gorod/**`

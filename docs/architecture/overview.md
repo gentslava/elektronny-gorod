@@ -1,4 +1,4 @@
-Status: Active Owner: Architecture Agent Last reviewed: 2026-11-26 (ServicePipe / WAF error flow synced for A-92 on fix/a92-servicepipe-block)
+Status: Active Owner: Architecture Agent Last reviewed: 2026-11-26 (ServicePipe / WAF error flow synced for A-92)
 
 Source files:
 - `custom_components/elektronny_gorod/__init__.py`
