@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (A-97 merged-state reconciliation completed after release PR #80)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-11-26 (A-92 merged in PR #108)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -347,6 +347,7 @@ Quality gates:
 - **Каверзы:** в HAR содержимое STOMP-фреймов **не зафиксировано**. WebSocket может нести **не все** события — часть может идти через SIP (см. A-49) или FCM. До получения HAR или живой пробы с активным сценарием (реальный звонок в домофон с записью WS-фреймов) — **не строить spec**.
 - **Recommended first step:** записать HAR со сценарием звонка через альтернативный capture (mitmproxy с WebSocket-decode опциями, либо `mitmdump --mode reverse:` для расшифровки). Когда фреймы будут на руках — отдельный feature folder с PRD.
 - **НЕ делать:** не «угадывать» STOMP topics и схему сообщений (нарушение ADR-0006).
+- **Новое наблюдение (HAR/flow «Мой Дом» 9.11.0, 2026-10-26):** кадры STOMP расшифрованы. `CONNECT` без credentials, `CONNECTED` с `user-name:<subscriber_id>` и heart-beat 10000,10000, `SUBSCRIBE /user/queue`; сразу приходит `MESSAGE {"type":"availableFeatures","payload":{placeId, featuresCodes, featuresParams}}`, хотя REST `stomp/available-features` в тех же сессиях отдаёт `data:null`. Других типов сообщений в сценариях обхода (камеры, события, вызовы из ленты) не было. Вывод «STOMP-фичи системно выключены» неточен — канал живой и несёт как минимум список фич; события вызова по-прежнему идут через FCM (ADR-0011). Нужен захват именно в момент звонка, чтобы закрыть вопрос. Подробности — [`api-reference.md`](../architecture/api-reference.md), раздел STOMP.
 
 ### A-48. Snapshot домофона (`accesscontrols/{ac}/snapshots`) не реализован
 
@@ -930,12 +931,16 @@ Quality gates:
 
 ### A-92. HTML service-pipe/VPN block маскируется под обычную API-ошибку
 
+- **Status:** ✅ **RESOLVED** — PR #108 в `master` (`baf296a`). Автор #107 подтвердил штатную работу `pr-108`. Распознавание блокировки проверено на локальных ответах.
 - **Severity:** P2 — diagnostics/reliability, не regression текущего happy path.
-- **Area:** `http.py` + широкие fallback-ветки `api.py`.
-- **Evidence (static APK diff 9.9.0, 2026-07-15):** stock client распознаёт HTML block-page по `REQUEST-ID` либо блоку `id="info"` с `datetime:`/`ip:`, бросает отдельный `ServicePipeBlockException` и открывает `VpnWarningActivity`. Пользовательский текст явно связывает блокировку с работой вне РФ/VPN. В снятых HAR happy-path block page не встречался — формат подтверждён static, сам runtime-trigger пока не воспроизведён.
-- **Current behavior:** `HTTP.__request` превращает любой non-2xx в generic `ClientError`; часть методов ловит широкий `Exception` и возвращает пустые коллекции. **Частично снято** веткой `feat/silver-coverage` ([A-115](project-audit.md)): `query_cameras`, `query_public_cameras`, `query_screens_settings` и `query_dnd_settings` отказ пробрасывают. Остались `query_sections` и `query_old_cameras` — у них нет production-вызывающих, — а также typed-классификация block-page и request-id в diagnostics. Геоблок/WAF может выглядеть как «у аккаунта нет камер», а diagnostics не даст операторский request-id.
-- **Recommended fix:** отдельная безопасная классификация block-page без логирования IP/body; сохранять только redacted correlation/request-id и поднимать typed error в coordinator/diagnostics вместо empty-data fallback. Формат block-page подтверждать HAR или живой пробой из-под VPN исследовательским аккаунтом; иначе static-only по ADR-0006 — формат уже виден в коде приложения. Наблюдённое закрепить HTML fixture без реальных идентификаторов.
-- **Не делать:** не логировать полный HTML, IP, headers или auth context.
+- **Area:** `http.py`, `api.py`, `coordinator.py`, `diagnostics.py`, `strings.json` / `translations/*.json`.
+- **Evidence (static APK 9.9.0 `ve/c.java`/`ve/d.java` + issue #107/#102):** stock client распознаёт HTML block-page по `<p id="REQUEST-ID">` либо блоку `id="info"` с `datetime:`/`ip:`, бросает отдельный `ServicePipeBlockException` и открывает `VpnWarningActivity`. Пользовательский текст явно связывает блокировку с работой вне РФ/VPN; в #107/#102 также зафиксированы ответы `403` с bot-challenge («if you are not a bot») и заголовком `X-SP-CRID`. В снятых HAR happy-path block page не встречался — формат подтверждён по статике APK и внешним репортам (ADR-0006).
+- **Было:** `HTTP.__request` превращал любой non-2xx в generic `ClientError`; часть методов ловила широкий `Exception` и возвращала пустые коллекции (в [A-115](project-audit.md) это уже убрали для `query_cameras`/`query_public_cameras`/`query_screens_settings`/`query_dnd_settings`, но оставались `query_sections`, `query_old_cameras`, а также typed-классификация block-page, ошибка входа и request-id в diagnostics).
+- **Реализация**
+  - `http.py`: `_raise_if_service_pipe_block` проверяет ответы с HTML `Content-Type` (`200 text/html` и non-2xx, включая `binary=True`) либо non-2xx без `Content-Type` при наличии `X-SP-CRID` (не трогая `application/json`), сохраняет uncached prefix для не-блоковых `binary=True` потоков; `_read_bounded_body` читает не более `_MAX_BLOCK_BODY_BYTES` (64 KiB) через `content.read`/`read`/`text`; `_detect_service_pipe` распознаёт по телу 3 формы (`REQUEST-ID`, `id="info"` + `datetime:` + `ip:`, `403` с `"if you are not a bot"`), при подтверждённом блоке закрывает `response` (`close()`) и поднимает `ServicePipeBlockError(ClientError)` только с `status` и redacted `request_id` (`redact_request_id`: оставляет ASCII `[A-Za-z0-9:._-]` и маскирует середину при длине >8, иначе `***`), без сохранения `ClientResponse` и без IP, datetime, полного HTML, заголовков и auth-контекста в `str`/`repr` и `DEBUG`-логе (`redact_path(endpoint)`).
+  - `api.py`: auth/profile методы (`query_contracts`, `verify_password`, `request_sms_code`, `verify_sms_code`, `query_profile`) мапят `is_service_pipe_block(e)` в `ValueError("waf_blocked")` с переводами `config.error.waf_blocked` в `strings.json` и `translations/{ru,en}.json`; `query_sections`, `query_old_cameras` и `query_event_download` явно пробрасывают `ServicePipeBlockError`; bool/optional-хелперы (`post_dnd_settings`, `query_camera_stream`, `register_push_device`, `unregister_push_device`) сохраняют контракт `bool`/`None`.
+  - `coordinator.py` и `diagnostics.py`: при `ServicePipeBlockError` на `query_places` координатор записывает `last_waf_block` (`at` в UTC ISO и masked `request_id`) и поднимает `UpdateFailed("places: ServicePipeBlockError")` без ложного `ConfigEntryAuthFailed`/reauth; в per-place подзапросах `_note_failure` также фиксирует `last_waf_block`, а чистый тик (и пустой `places`) сбрасывает `last_waf_block = None`. `diagnostics.py` отдаёт `coordinator.last_waf_block` (через `redact_request_id`) рядом со счётчиками.
+  - Регрессии и санитизированные RFC 5737 HTML-фикстуры (`tests/fixtures/servicepipe_shape1.html`, `servicepipe_shape2.html`, `servicepipe_403_bot.html`) добавлены в `tests/test_http.py`, `tests/test_api_auth.py`, `tests/test_config_flow.py`, `tests/test_operator_failures.py`, `tests/test_diagnostics.py`.
 
 ### A-93. Guest invitation есть в приложении, но нет HA action
 
@@ -1390,7 +1395,7 @@ Quality gates:
 | ✅ A-73 (config_flow/миграции — тесты, `3a60b15`) + ✅ A-74 (helpers golden vectors, `362237b`) + 🟡 A-21 (ClientTimeout, `3885bb0`; retry — follow-up) | Итерация 3 (test-debt + reliability; closed 2026-07-07) |
 | ✅ A-87 (ring/idle watchdog, PR #68) + ✅ A-88 (video anti-churn) + ✅ A-90 (FCM-ended guard), merged PR #69 | Итерация 4 (UI + надёжность видео/жизненного цикла вызова) |
 | ✅ A-89 (смена звонящего домофона во время held) + ✅ A-91 (штатная pre-answer SIP-модель подтверждена PCAP), merged PR #69 | Итерация 4 (мульти-вызов + production diagnostics) |
-| A-92 (typed diagnostics для HTML service-pipe/VPN block; HAR или живая проба, иначе static-only) | backlog (P2 reliability; не блокирует happy path 9.9.0) |
+| ✅ A-92 (ServicePipe/WAF detection + `waf_blocked` + diagnostics `last_waf_block`, merged PR #108) | P2 reliability |
 | A-50 + остаток A-58 + A-59 | mobile-app parity: durable history/archive + Media Source |
 | ✅ A-93 (home invitation response action, resolved-in-branch `feat/guest-invite`) | mobile-app parity |
 | A-94 | mobile-app parity: access keys (enabled-account evidence gate: HAR or live probe, else static-only) |
