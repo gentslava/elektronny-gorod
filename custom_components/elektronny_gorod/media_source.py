@@ -11,13 +11,10 @@ Opaque IDs only — signed URLs are never logged or persisted
 from __future__ import annotations
 
 import asyncio
-import logging
-from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 
 from homeassistant.components import media_source as ha_media_source
-from homeassistant.components.camera import DynamicStreamSettings
 from homeassistant.components.media_player import (
     BrowseError,
     BrowseMedia,
@@ -30,14 +27,24 @@ from homeassistant.components.media_source.models import (
     MediaSourceItem,
     PlayMedia,
 )
-from homeassistant.components.stream import HLS_PROVIDER, Stream, create_stream
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import translation
 from homeassistant.util import dt as dt_util
 
-from ._logging import UrlPathRedactFilter
+from .archive_hls import (
+    ARCHIVE_STREAMS_KEY,
+    ArchiveHlsSession,
+    archive_sessions_by_id,
+    archive_streams,
+    async_register_archive_view,
+    detach_archive_session,
+    enforce_active_session_limit,
+    pop_entry_sessions_by_id,
+    pop_entry_stop_tasks,
+    stop_archive_session_in_background,
+)
 from .clip_proxy import async_register_clip_view, clip_proxy_url
 from .coordinator import async_get_coordinator
 from .const import DOMAIN, LOGGER
@@ -64,27 +71,19 @@ _MOTION_EVENT_SUBJECT_ID = 126
 # (A-124, прод 2026-10-26). Завершённые события не меняются.
 _LIVE_GRACE_SEC = 15
 
-# Ожидание готовности архивного HLS перед откатом на эфир (A-124).
-# HA `HlsMasterPlaylistView` ждёт минимум две sequences (вторая может быть
-# незавершённой), а `stream.available` ставится в `True` до `av.open`.
-# На штатном HA LL-HLS (`min_segment_duration=5.9`, `part_target_duration=1.0`)
-# поток с начала события в 1x укладывается в ~7–11 с; 12 с пропускает
-# исправные потоки и режет зависший `av.open` заметно раньше `SOURCE_TIMEOUT` (30 с).
-# Отказ открытия (`_set_state(False)`) прерывает ожидание сразу, не дожидаясь бюджета.
+# Ожидание готовности архивного EVENT HLS перед откатом на эфир (A-124).
+# Первый 2-секундный сегмент в 1x укладывается в ~2–3 с; 12 с пропускает
+# медленный старт и режет зависший upstream open заметно раньше 30 с.
+# Отказ upstream или worker-а прерывает ожидание сразу.
 _ARCHIVE_READY_TIMEOUT_SEC = 12.0
-_MIN_READY_SEGMENTS = 2
 
-# Потоки архива идущих событий: (entry_id, camera_id, event_id) → Stream.
-# Живой поток переиспользуется повторным resolve; остановленный (idle HLS,
-# отказ worker-а, выгрузка записи) выбрасывается — ссылка оператора выдаётся
-# заново на каждый запрос, поэтому новый resolve берёт свежую.
-_ARCHIVE_STREAMS_KEY = f"{DOMAIN}_archive_streams"
+# Сессии архива идущих событий: (entry_id, camera_id, event_id) → ArchiveHlsSession.
+# Живая сессия переиспользуется повторным resolve; остановленная (idle,
+# отказ worker-а, вытеснение по лимиту, выгрузка записи) выбрасывается —
+# ссылка оператора выдаётся заново на каждый запрос, поэтому новый resolve берёт свежую.
+_ARCHIVE_STREAMS_KEY = ARCHIVE_STREAMS_KEY
 _ARCHIVE_LOCK_KEY = f"{DOMAIN}_archive_streams_lock"
 _ARCHIVE_IN_FLIGHT_KEY = f"{DOMAIN}_archive_in_flight"
-_ARCHIVE_STOP_TASKS_KEY = f"{DOMAIN}_archive_stop_tasks"
-# Логгер, в который HA Stream пишет источник потока с меткой `stream_label`
-# (`homeassistant/components/stream/__init__.py`, `Stream.__init__`).
-_STREAM_LOGGER_PREFIX = "homeassistant.components.stream.stream"
 
 # EN-fallback для подписей событий (длительность, «идёт запись»);
 # переопределяются категорией `common` translations (hass.config.language).
@@ -112,75 +111,10 @@ def _tz_offset(timestamp: int) -> int:
     return int(offset.total_seconds()) if offset is not None else 0
 
 
-def _archive_streams(hass: HomeAssistant) -> dict[tuple[str, str, str], Stream]:
-    return hass.data.setdefault(_ARCHIVE_STREAMS_KEY, {})
-
-
 def _archive_lock(hass: HomeAssistant, entry_id: str) -> asyncio.Lock:
     """Per-entry lock: независимые записи не блокируют resolve и выгрузку друг друга."""
     locks: dict[str, asyncio.Lock] = hass.data.setdefault(_ARCHIVE_LOCK_KEY, {})
     return locks.setdefault(entry_id, asyncio.Lock())
-
-
-def _stream_alive(stream: Stream) -> bool:
-    """Поток жив, пока доступен и не снят провайдер HLS (`Stream.stop`)."""
-    return stream.available and HLS_PROVIDER in stream.outputs()
-
-
-def _cleanup_stream_outputs(stream: Stream) -> None:
-    """Снять idle-таймеры и разбудить ожидающих `track.recv()` до `Stream.stop()`."""
-    for provider in stream.outputs().values():
-        provider.cleanup()
-
-
-def _stop_archive_stream(
-    hass: HomeAssistant, entry_id: str, stream: Stream
-) -> asyncio.Task[None]:
-    """Остановить поток в фоне, не блокируя откат на 30-секундном `av.open`.
-
-    `hass.async_create_task` с `eager_start=True` синхронно чистит outputs и
-    access token и ставит `_thread_quit`, не ожидая `_thread.join()`. Задача
-    регистрируется за `entry_id`, чтобы выгрузка записи дождалась её завершения.
-    """
-    _cleanup_stream_outputs(stream)
-    stop_tasks: dict[str, set[asyncio.Task[None]]] = hass.data.setdefault(
-        _ARCHIVE_STOP_TASKS_KEY, {}
-    )
-    entry_tasks = stop_tasks.setdefault(entry_id, set())
-
-    async def _run_stop() -> None:
-        try:
-            await stream.stop()
-        except Exception as ex:  # noqa: BLE001 - background cleanup
-            LOGGER.debug(
-                "Media source archive stream stop failed for entry_id=%s (%s)",
-                entry_id,
-                type(ex).__name__,
-            )
-
-    task = hass.async_create_task(
-        _run_stop(), name=f"{DOMAIN}_archive_stream_stop"
-    )
-    if not task.done():
-        entry_tasks.add(task)
-        task.add_done_callback(entry_tasks.discard)
-    return task
-
-
-def _archive_stream_label(camera_id: str) -> str:
-    """Метка потока для логгера HA Stream; фильтр ставится один раз.
-
-    Метка на камеру, а не на событие: логгеры модуля `logging` живут до
-    конца процесса, и метка на событие копила бы их без предела.
-    """
-    label = f"{DOMAIN}_archive_{camera_id}"
-    stream_logger = logging.getLogger(f"{_STREAM_LOGGER_PREFIX}.{label}")
-    if not any(
-        isinstance(existing, UrlPathRedactFilter)
-        for existing in stream_logger.filters
-    ):
-        stream_logger.addFilter(UrlPathRedactFilter())
-    return label
 
 
 async def async_stop_archive_streams(hass: HomeAssistant, entry_id: str) -> None:
@@ -198,18 +132,21 @@ async def async_stop_archive_streams(hass: HomeAssistant, entry_id: str) -> None
     for fail_event in in_flight.get(entry_id, ()):
         fail_event.set()
     async with _archive_lock(hass, entry_id):
-        streams: dict[tuple[str, str, str], Stream] = (
-            hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
-        )
+        streams = hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
+        to_stop: list[Any] = []
         for key in [key for key in streams if key[0] == entry_id]:
-            stream = streams.pop(key, None)
-            if stream is not None:
-                _cleanup_stream_outputs(stream)
-                await stream.stop()
-        stop_tasks: dict[str, set[asyncio.Task[None]]] = (
-            hass.data.get(_ARCHIVE_STOP_TASKS_KEY) or {}
-        )
-        pending = list(stop_tasks.pop(entry_id, ()))
+            session = streams.pop(key, None)
+            if session is not None:
+                if isinstance(session, ArchiveHlsSession):
+                    detach_archive_session(hass, session)
+                to_stop.append(session)
+        for sess in pop_entry_sessions_by_id(hass, entry_id):
+            if sess not in to_stop:
+                detach_archive_session(hass, sess)
+                to_stop.append(sess)
+        for session in to_stop:
+            await session.stop()
+        pending = pop_entry_stop_tasks(hass, entry_id)
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
 
@@ -241,6 +178,7 @@ def _uri(identifier: str = "") -> str:
 async def async_get_media_source(hass: HomeAssistant) -> ElektronnyGorodMediaSource:
     """Register the Elektronny Gorod archive as a HA media source."""
     async_register_clip_view(hass)
+    async_register_archive_view(hass)
     return ElektronnyGorodMediaSource(hass)
 
 
@@ -354,56 +292,76 @@ class ElektronnyGorodMediaSource(MediaSource):
     async def _archive_play_media(
         self, coordinator: Any, entry_id: str, camera_id: str, event: Any
     ) -> PlayMedia | None:
-        """Идущее событие с начала: поток архива оператора → HA Stream → HLS.
+        """Идущее событие с начала: поток архива оператора → EVENT HLS.
 
-        `None` — поток недоступен (ссылки нет, stream не загружен, worker не
-        стартовал, отказал или не успел отдать два сегмента); вызывающий
-        открывает эфир. Подписанная ссылка уходит только в HA Stream: в логах,
-        состоянии и ответе фронтенду её нет — фронтенд получает HLS-endpoint HA
-        со своим токеном.
+        `None` — поток недоступен (ссылки нет, worker отказал до первого
+        сегмента или не успел в бюджет); вызывающий открывает эфир. Подписанная
+        ссылка оператора остаётся строго на сервере (в `aiohttp`); в логах,
+        ошибках, состоянии и ответе фронтенду её нет — фронтенд получает
+        локальный `playlist.m3u8` с непрозрачным `session_id` и HMAC-токеном.
         """
-        streams = _archive_streams(self._hass)
+        streams = archive_streams(self._hass)
         key = (entry_id, camera_id, event.id)
         async with _archive_lock(self._hass, entry_id):
             if self._coordinator(entry_id) is not coordinator:
                 raise Unresolvable("Unknown media item")
-            for stale in [
+            for stale_key in [
                 k
                 for k, found in streams.items()
-                if k[0] == entry_id and not _stream_alive(found)
+                if k[0] == entry_id and not found.alive
             ]:
-                del streams[stale]
-            stream = streams.get(key)
-            is_new = stream is None
-            if stream is None:
-                created = await self._create_archive_stream(
-                    coordinator, entry_id, camera_id, event
+                stale = streams.pop(stale_key)
+                detach_archive_session(self._hass, stale)
+            session = streams.get(key)
+            if session is not None and session.alive and session.ready:
+                session.touch()
+                return PlayMedia(
+                    url=session.playlist_url(self._hass),
+                    mime_type=_MIME_HLS_FRONTEND,
                 )
-                if created is None:
-                    return None
-                stream, fail_event = created
-            else:
-                fail_event = asyncio.Event()
+            if session is not None:
+                stop_archive_session_in_background(self._hass, session)
+                session = None
+
+            source = await coordinator.api.query_camera_archive_stream(
+                camera_id, event.timestamp, _tz_offset(event.timestamp)
+            )
+            if self._coordinator(entry_id) is not coordinator:
+                raise Unresolvable("Unknown media item")
+            if not source:
+                LOGGER.debug(
+                    "Media source archive stream unavailable for camera_id=%s "
+                    "event_id=%s; live view",
+                    camera_id,
+                    event.id,
+                )
+                return None
+
+            enforce_active_session_limit(self._hass)
+            session = ArchiveHlsSession(
+                self._hass,
+                entry_id=entry_id,
+                camera_id=camera_id,
+                event_id=event.id,
+                coordinator=coordinator,
+            )
+            archive_sessions_by_id(self._hass)[session.session_id] = session
+            streams[key] = session
             try:
-                stream.add_provider(HLS_PROVIDER)
-                await stream.start()
-                if not await self._wait_archive_stream_ready(
-                    entry_id, stream, fail_event
-                ):
+                session.start(source)
+                if not await self._wait_archive_session_ready(entry_id, session):
                     LOGGER.debug(
                         "Media source archive stream not ready for "
                         "camera_id=%s event_id=%s; live view",
                         camera_id,
                         event.id,
                     )
-                    streams.pop(key, None)
-                    _stop_archive_stream(self._hass, entry_id, stream)
+                    stop_archive_session_in_background(self._hass, session)
                     return None
                 if self._coordinator(entry_id) is not coordinator:
-                    streams.pop(key, None)
-                    _stop_archive_stream(self._hass, entry_id, stream)
+                    stop_archive_session_in_background(self._hass, session)
                     raise Unresolvable("Unknown media item")
-                url = stream.endpoint_url(HLS_PROVIDER)
+                url = session.playlist_url(self._hass)
             except (HomeAssistantError, RuntimeError, ValueError) as ex:
                 LOGGER.debug(
                     "Media source archive stream failed to start for "
@@ -412,148 +370,54 @@ class ElektronnyGorodMediaSource(MediaSource):
                     event.id,
                     type(ex).__name__,
                 )
-                streams.pop(key, None)
-                _stop_archive_stream(self._hass, entry_id, stream)
+                stop_archive_session_in_background(self._hass, session)
                 return None
             except BaseException:
-                if is_new:
-                    streams.pop(key, None)
-                    _stop_archive_stream(self._hass, entry_id, stream)
+                stop_archive_session_in_background(self._hass, session)
                 raise
-            streams[key] = stream
         return PlayMedia(url=url, mime_type=_MIME_HLS_FRONTEND)
 
-    async def _create_archive_stream(
-        self, coordinator: Any, entry_id: str, camera_id: str, event: Any
-    ) -> tuple[Stream, asyncio.Event] | None:
-        """Свежая ссылка архива с начала события → новый HA Stream."""
-        source = await coordinator.api.query_camera_archive_stream(
-            camera_id, event.timestamp, _tz_offset(event.timestamp)
-        )
-        if self._coordinator(entry_id) is not coordinator:
-            raise Unresolvable("Unknown media item")
-        if not source:
-            LOGGER.debug(
-                "Media source archive stream unavailable for camera_id=%s "
-                "event_id=%s; live view",
-                camera_id,
-                event.id,
-            )
-            return None
-        try:
-            stream = create_stream(
-                self._hass,
-                source,
-                options={},
-                dynamic_stream_settings=DynamicStreamSettings(),
-                stream_label=_archive_stream_label(camera_id),
-            )
-        except HomeAssistantError as ex:
-            # Интеграция stream не загружена или отвергла параметры.
-            LOGGER.debug(
-                "Media source archive stream not created for camera_id=%s "
-                "event_id=%s (%s); live view",
-                camera_id,
-                event.id,
-                type(ex).__name__,
-            )
-            return None
-        fail_event = asyncio.Event()
-        stream.set_update_callback(
-            self._archive_stream_watchdog(entry_id, stream, fail_event)
-        )
-        return stream, fail_event
-
-    def _archive_stream_watchdog(
-        self, entry_id: str, stream: Stream, fail_event: asyncio.Event
-    ) -> Callable[[], None]:
-        """Отказ worker-а — остановить поток, а не повторять его вечно.
-
-        HA Stream повторяет тот же источник, пока жив провайдер, а idle-таймер
-        HLS заводится только первым сегментом: поток с истёкшей ссылкой или
-        вне срока хранения иначе жил бы до перезапуска HA и писал ошибку на
-        каждом круге. Повтор и не нужен: оператор выдаёт новую ссылку на
-        каждый запрос, и следующий resolve возьмёт свежую.
-        """
-
-        @callback
-        def _on_state_change() -> None:
-            if not stream.available:
-                fail_event.set()
-                _stop_archive_stream(self._hass, entry_id, stream)
-
-        return _on_state_change
-
-    async def _wait_archive_stream_ready(
+    async def _wait_archive_session_ready(
         self,
         entry_id: str,
-        stream: Stream,
-        fail_event: asyncio.Event,
+        session: ArchiveHlsSession,
     ) -> bool:
-        """Ограниченное ожидание двух HLS-сегментов или отказа worker-а.
-
-        `Stream.start()` запускает рабочий поток асинхронно, а `stream.available`
-        выставляется в `True` ещё до открытия источника. `HlsMasterPlaylistView`
-        ждёт две sequences (вторая может быть незавершённой), поэтому готовность
-        подтверждается появлением `len(track.sequences) >= 2`, а отказ открытия
-        — переводом `stream.available` в `False` (`_set_state(False)`).
-        """
-        if (
-            fail_event.is_set()
-            or not stream.available
-            or HLS_PROVIDER not in stream.outputs()
-        ):
-            return False
-        track = stream.outputs()[HLS_PROVIDER]
-        if len(track.sequences) >= _MIN_READY_SEGMENTS:
+        """Ограниченное ожидание первого сегмента EVENT HLS или отказа worker-а."""
+        if session.ready:
             return True
-
-        async def _wait_segments() -> bool:
-            while len(track.sequences) < _MIN_READY_SEGMENTS:
-                if (
-                    fail_event.is_set()
-                    or not stream.available
-                    or HLS_PROVIDER not in stream.outputs()
-                ):
-                    return False
-                if not await track.recv():
-                    return False
-            return (
-                not fail_event.is_set()
-                and stream.available
-                and HLS_PROVIDER in stream.outputs()
-            )
+        if not session.alive or session.fail_event.is_set():
+            return False
 
         in_flight_map: dict[str, set[asyncio.Event]] = self._hass.data.setdefault(
             _ARCHIVE_IN_FLIGHT_KEY, {}
         )
         entry_in_flight = in_flight_map.setdefault(entry_id, set())
-        entry_in_flight.add(fail_event)
-        seg_task = asyncio.create_task(
-            _wait_segments(), name=f"{DOMAIN}_archive_wait_segments"
+        entry_in_flight.add(session.fail_event)
+        ready_task = asyncio.create_task(
+            session.ready_event.wait(), name=f"{DOMAIN}_archive_wait_ready"
         )
         fail_task = asyncio.create_task(
-            fail_event.wait(), name=f"{DOMAIN}_archive_wait_fail"
+            session.fail_event.wait(), name=f"{DOMAIN}_archive_wait_fail"
         )
         try:
             async with asyncio.timeout(_ARCHIVE_READY_TIMEOUT_SEC):
                 done, _ = await asyncio.wait(
-                    {seg_task, fail_task},
+                    {ready_task, fail_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-            if fail_event.is_set() or fail_task in done:
+            if session.fail_event.is_set() or fail_task in done:
                 return False
-            return bool(seg_task.result())
+            return session.ready
         except TimeoutError:
             return False
         finally:
-            entry_in_flight.discard(fail_event)
+            entry_in_flight.discard(session.fail_event)
             if not entry_in_flight:
                 in_flight_map.pop(entry_id, None)
-            for task in (seg_task, fail_task):
+            for task in (ready_task, fail_task):
                 if not task.done():
                     task.cancel()
-            await asyncio.gather(seg_task, fail_task, return_exceptions=True)
+            await asyncio.gather(ready_task, fail_task, return_exceptions=True)
 
     async def _live_play_media(
         self, item: MediaSourceItem, camera_id: str

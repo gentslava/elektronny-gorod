@@ -1,0 +1,751 @@
+"""Same-origin EVENT HLS proxy for in-progress archive playback (A-124).
+
+HA native Stream HLS uses a rolling window (`MAX_SEGMENTS=5`) and hardcodes
+`#EXT-X-START:TIME-OFFSET=-2.000`, so in-progress archive playback jumps near
+the live edge instead of starting from segment 0. This module remuxes the
+operator's `video/x-flv` stream (H.264 + optional AAC/MP3) into MPEG-TS
+segments via PyAV and serves a growing `#EXT-X-PLAYLIST-TYPE:EVENT` playlist
+anchored at sequence 0 (`#EXT-X-START:TIME-OFFSET=0.000,PRECISE=YES`).
+
+The operator's signed URL stays strictly server-side inside `aiohttp` (`av`
+reads from an in-memory `_BytePipe`, so even `libav.*` logs never see the
+operator URL). Client requests use opaque session IDs and HMAC-signed tokens
+scoped to `"archive"` and bound to `(session_id, entry_id, camera_id, event_id)`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+from collections import deque
+from collections.abc import Callable
+import concurrent.futures
+import contextlib
+import importlib
+import io
+import math
+import secrets
+import threading
+import time
+from typing import Any
+
+from aiohttp import ClientError, ClientTimeout, web
+from homeassistant.components.http import HomeAssistantView
+from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+from homeassistant.helpers.event import async_call_later
+
+from .clip_proxy import sign_scoped_token, verify_scoped_token
+from .const import DOMAIN, LOGGER
+from .coordinator import async_get_coordinator
+
+_ARCHIVE_VIEW_REGISTERED = f"{DOMAIN}_archive_view_registered"
+ARCHIVE_STREAMS_KEY = f"{DOMAIN}_archive_streams"
+_ARCHIVE_BY_ID_KEY = f"{DOMAIN}_archive_sessions_by_id"
+_ARCHIVE_STOP_TASKS_KEY = f"{DOMAIN}_archive_stop_tasks"
+
+_ARCHIVE_TOKEN_SCOPE = "archive"
+_ARCHIVE_TOKEN_TTL = 600.0
+
+_SEGMENT_DURATION_SEC = 2.0
+_CHUNK_SIZE = 32 * 1024
+_PIPE_MAX_BYTES = 2 * 1024 * 1024
+_MAX_SESSION_BYTES = 64 * 1024 * 1024
+_MAX_SESSION_SEGMENTS = 600
+_MAX_ACTIVE_SESSIONS = 4
+_SESSION_IDLE_TIMEOUT_SEC = 60.0
+
+_UPSTREAM_TIMEOUT = ClientTimeout(total=None, sock_connect=10.0, sock_read=30.0)
+_AUDIO_CODECS = frozenset({"aac", "mp3"})
+
+
+def _import_av() -> Any:
+    """Lazy import of PyAV so environments without `av` can still import."""
+    return importlib.import_module("av")
+
+
+def sign_archive_token(
+    hass: HomeAssistant,
+    session_id: str,
+    entry_id: str,
+    camera_id: str,
+    event_id: str,
+    *,
+    now: float | None = None,
+) -> str:
+    """Sign one archive HLS token bound to session, entry, camera and event."""
+    return sign_scoped_token(
+        hass,
+        _ARCHIVE_TOKEN_SCOPE,
+        f"{session_id}:{entry_id}:{camera_id}:{event_id}",
+        _ARCHIVE_TOKEN_TTL,
+        now=now,
+    )
+
+
+def verify_archive_token(
+    hass: HomeAssistant,
+    token: str,
+    session_id: str,
+    entry_id: str,
+    camera_id: str,
+    event_id: str,
+    *,
+    now: float | None = None,
+) -> bool:
+    """Verify an archive HLS token in constant time."""
+    return verify_scoped_token(
+        hass,
+        token,
+        _ARCHIVE_TOKEN_SCOPE,
+        f"{session_id}:{entry_id}:{camera_id}:{event_id}",
+        now=now,
+    )
+
+
+class _BytePipe:
+    """Thread-safe bounded pipe fed by asyncio upstream and read by PyAV.
+
+    `close()` wakes both blocked `read()` in the PyAV executor and any awaiting
+    `put()` on the event loop immediately, independent of upstream progress.
+    """
+
+    def __init__(
+        self, loop: asyncio.AbstractEventLoop, max_bytes: int = _PIPE_MAX_BYTES
+    ) -> None:
+        self._loop = loop
+        self._max_bytes = max_bytes
+        self._chunks: deque[bytes] = deque()
+        self._buffered = 0
+        self._eof = False
+        self._closed = False
+        self._cond = threading.Condition()
+        self._space_event = asyncio.Event()
+        self._space_event.set()
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return False
+
+    async def put(self, chunk: bytes) -> bool:
+        """Append bytes to the pipe, applying backpressure at `max_bytes`."""
+        if not chunk:
+            return not self._closed
+        while True:
+            with self._cond:
+                if self._closed:
+                    return False
+                if self._buffered < self._max_bytes:
+                    self._chunks.append(chunk)
+                    self._buffered += len(chunk)
+                    if self._buffered >= self._max_bytes:
+                        self._space_event.clear()
+                    self._cond.notify_all()
+                    return True
+                self._space_event.clear()
+            await self._space_event.wait()
+
+    def finish(self) -> None:
+        """Signal normal upstream EOF so PyAV drains buffered bytes and ends."""
+        with self._cond:
+            self._eof = True
+            self._cond.notify_all()
+
+    def close(self) -> None:
+        """Abort the pipe immediately, dropping buffered bytes and waking waiters."""
+        with self._cond:
+            self._closed = True
+            self._eof = True
+            self._chunks.clear()
+            self._buffered = 0
+            self._cond.notify_all()
+        self._space_event.set()
+
+    def read(self, size: int = _CHUNK_SIZE) -> bytes:
+        """Blocking read for PyAV executor; returns `b""` on EOF or `close()`."""
+        if size == 0:
+            return b""
+        with self._cond:
+            while not self._chunks and not self._eof and not self._closed:
+                self._cond.wait()
+            if self._closed or (not self._chunks and self._eof):
+                return b""
+            head = self._chunks.popleft()
+            if size > 0 and len(head) > size:
+                out, rest = head[:size], head[size:]
+                self._chunks.appendleft(rest)
+            else:
+                out = head
+            self._buffered -= len(out)
+            if self._buffered < self._max_bytes:
+                with contextlib.suppress(RuntimeError):
+                    self._loop.call_soon_threadsafe(self._space_event.set)
+            return out
+
+
+def _is_supported_audio(stream: Any) -> bool:
+    """Return True if the FLV audio stream can be remuxed into browser MPEG-TS."""
+    codec_desc = getattr(stream, "codec_descriptor", None)
+    codec_name = getattr(codec_desc, "name", None) or getattr(stream, "name", None)
+    if codec_name not in _AUDIO_CODECS:
+        return False
+    codec_ctx = getattr(stream, "codec_context", None)
+    if codec_ctx is not None and getattr(codec_ctx, "sample_rate", 1) <= 0:
+        return False
+    if codec_name == "aac":
+        extradata = (
+            getattr(codec_ctx, "extradata", None) if codec_ctx is not None else None
+        )
+        if getattr(stream, "profile", None) is None and not extradata:
+            return False
+    return True
+
+
+def _remux_flv_to_mpegts(
+    pipe: _BytePipe,
+    on_segment: Callable[[float, bytes], bool],
+    *,
+    segment_duration: float = _SEGMENT_DURATION_SEC,
+) -> int:
+    """Remux FLV stream from `pipe` into continuous MPEG-TS segments via PyAV.
+
+    Returns total emitted segments; raises if video stream is missing or invalid.
+    """
+    av = _import_av()
+    inp = av.open(pipe, mode="r", format="flv")
+    emitted = 0
+    try:
+        video_streams = inp.streams.video
+        if not video_streams:
+            raise ValueError("Archive stream has no video")
+        vs = video_streams[0]
+        if getattr(vs, "name", None) != "h264":
+            raise ValueError(f"Unsupported archive video codec: {getattr(vs, 'name', None)}")
+        audio_streams = inp.streams.audio
+        as_ = audio_streams[0] if audio_streams else None
+        if as_ is not None and not _is_supported_audio(as_):
+            as_ = None
+        streams_to_demux = (vs, as_) if as_ is not None else (vs,)
+
+        def _open_segment() -> tuple[io.BytesIO, Any, Any, Any]:
+            bio = io.BytesIO()
+            out = av.open(
+                bio,
+                mode="w",
+                format="mpegts",
+                container_options={"mpegts_copyts": "1"},
+            )
+            ovs = out.add_stream_from_template(vs)
+            oas = out.add_stream_from_template(as_) if as_ is not None else None
+            return bio, out, ovs, oas
+
+        cur_bio, cur_out, cur_vs, cur_as = _open_segment()
+        base_sec: float | None = None
+        seg_start_dts: int | None = None
+        last_v_dts: int | None = None
+        last_v_dur = 0
+        prev_dts: dict[int, int] = {}
+        aborted = False
+
+        def _rebase(pkt: Any, offset_sec: float) -> bool:
+            shift = int(round(offset_sec / float(pkt.time_base)))
+            dts = pkt.dts - shift
+            if dts < 0:
+                return False
+            stream_idx = pkt.stream.index
+            prev = prev_dts.get(stream_idx)
+            if prev is not None and dts <= prev:
+                return False
+            prev_dts[stream_idx] = dts
+            pkt.dts = dts
+            if pkt.pts is not None:
+                pkt.pts = max(dts, pkt.pts - shift)
+            return True
+
+        try:
+            for pkt in inp.demux(*streams_to_demux):
+                if pkt.dts is None:
+                    continue
+                if base_sec is None:
+                    if pkt.stream != vs or not pkt.is_keyframe:
+                        continue
+                    base_sec = float(pkt.dts * vs.time_base)
+                if pkt.stream == vs:
+                    if seg_start_dts is None:
+                        seg_start_dts = pkt.dts
+                    elapsed = float((pkt.dts - seg_start_dts) * vs.time_base)
+                    if pkt.is_keyframe and elapsed >= segment_duration:
+                        cur_out.close()
+                        seg_bytes = cur_bio.getvalue()
+                        if seg_bytes:
+                            if not on_segment(elapsed, seg_bytes):
+                                aborted = True
+                                break
+                            emitted += 1
+                        cur_bio, cur_out, cur_vs, cur_as = _open_segment()
+                        seg_start_dts = pkt.dts
+                    last_v_dts = pkt.dts
+                    if pkt.duration:
+                        last_v_dur = pkt.duration
+                    if not _rebase(pkt, base_sec):
+                        continue
+                    pkt.stream = cur_vs
+                    cur_out.mux(pkt)
+                elif cur_as is not None:
+                    if not _rebase(pkt, base_sec):
+                        continue
+                    pkt.stream = cur_as
+                    cur_out.mux(pkt)
+        except BaseException:
+            with contextlib.suppress(Exception):
+                cur_out.close()
+            raise
+        cur_out.close()
+
+        if not aborted and seg_start_dts is not None and last_v_dts is not None:
+            tail = float(((last_v_dts - seg_start_dts) + last_v_dur) * vs.time_base)
+            tail_bytes = cur_bio.getvalue()
+            if tail_bytes and on_segment(max(tail, 0.1), tail_bytes):
+                emitted += 1
+    finally:
+        inp.close()
+    return emitted
+
+
+def render_event_playlist(
+    segments: list[tuple[float, bytes]],
+    token: str,
+    *,
+    ended: bool,
+) -> str:
+    """Render an HLS MPEG-TS EVENT playlist anchored at sequence 0, offset 0."""
+    target = max((math.ceil(dur) for dur, _ in segments), default=2)
+    lines = [
+        "#EXTM3U",
+        "#EXT-X-VERSION:3",
+        "#EXT-X-PLAYLIST-TYPE:EVENT",
+        "#EXT-X-MEDIA-SEQUENCE:0",
+        "#EXT-X-START:TIME-OFFSET=0.000,PRECISE=YES",
+        f"#EXT-X-TARGETDURATION:{max(target, 1)}",
+    ]
+    for idx, (dur, _) in enumerate(segments):
+        lines.append(f"#EXTINF:{dur:.3f},")
+        lines.append(f"{idx}.ts?t={token}")
+    if ended:
+        lines.append("#EXT-X-ENDLIST")
+    return "\n".join(lines) + "\n"
+
+
+def archive_sessions_by_id(hass: HomeAssistant) -> dict[str, ArchiveHlsSession]:
+    return hass.data.setdefault(_ARCHIVE_BY_ID_KEY, {})
+
+
+def archive_streams(hass: HomeAssistant) -> dict[tuple[str, str, str], Any]:
+    return hass.data.setdefault(ARCHIVE_STREAMS_KEY, {})
+
+
+def _stop_tasks_map(hass: HomeAssistant) -> dict[str, set[asyncio.Task[None]]]:
+    return hass.data.setdefault(_ARCHIVE_STOP_TASKS_KEY, {})
+
+
+def pop_entry_stop_tasks(
+    hass: HomeAssistant, entry_id: str
+) -> list[asyncio.Task[None]]:
+    """Pop and return pending background stop tasks for `entry_id`."""
+    stop_tasks: dict[str, set[asyncio.Task[None]]] = (
+        hass.data.get(_ARCHIVE_STOP_TASKS_KEY) or {}
+    )
+    return list(stop_tasks.pop(entry_id, ()))
+
+
+def pop_entry_sessions_by_id(
+    hass: HomeAssistant, entry_id: str
+) -> list[ArchiveHlsSession]:
+    """Pop and return active archive sessions by ID for `entry_id`."""
+    by_id: dict[str, ArchiveHlsSession] = (
+        hass.data.get(_ARCHIVE_BY_ID_KEY) or {}
+    )
+    popped: list[ArchiveHlsSession] = []
+    for sid in [sid for sid, sess in by_id.items() if sess.entry_id == entry_id]:
+        sess = by_id.pop(sid, None)
+        if sess is not None:
+            popped.append(sess)
+    return popped
+
+
+class ArchiveHlsSession:
+    """One in-progress archive EVENT HLS remux session."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        *,
+        entry_id: str,
+        camera_id: str,
+        event_id: str,
+        coordinator: Any,
+        max_bytes: int = _MAX_SESSION_BYTES,
+        max_segments: int = _MAX_SESSION_SEGMENTS,
+        idle_timeout: float = _SESSION_IDLE_TIMEOUT_SEC,
+    ) -> None:
+        self.hass = hass
+        self.session_id = secrets.token_urlsafe(16)
+        self.entry_id = entry_id
+        self.camera_id = camera_id
+        self.event_id = event_id
+        self.coordinator = coordinator
+        self.key = (entry_id, camera_id, event_id)
+        self._max_bytes = max_bytes
+        self._max_segments = max_segments
+        self._idle_timeout = idle_timeout
+        self._segments: list[tuple[float, bytes]] = []
+        self._total_bytes = 0
+        self.ended = False
+        self.failed = False
+        self._closed = False
+        self.ready_event = asyncio.Event()
+        self.fail_event = asyncio.Event()
+        self.last_access = time.monotonic()
+        self._idle_unsub: CALLBACK_TYPE | None = None
+        self._pipe = _BytePipe(hass.loop)
+        self._upstream_task: asyncio.Task[None] | None = None
+        self._worker_task: asyncio.Task[None] | None = None
+
+    @property
+    def alive(self) -> bool:
+        return not self._closed and not self.failed
+
+    @property
+    def ready(self) -> bool:
+        return bool(self._segments) and self.alive
+
+    @property
+    def segment_count(self) -> int:
+        return len(self._segments)
+
+    def get_segment(self, index: int) -> bytes | None:
+        if 0 <= index < len(self._segments):
+            return self._segments[index][1]
+        return None
+
+    def playlist_url(self, hass: HomeAssistant) -> str:
+        token = sign_archive_token(
+            hass, self.session_id, self.entry_id, self.camera_id, self.event_id
+        )
+        return f"/api/elektronny_gorod/archive/{self.session_id}/playlist.m3u8?t={token}"
+
+    def render_playlist(self, token: str) -> str:
+        return render_event_playlist(self._segments, token, ended=self.ended)
+
+    def touch(self) -> None:
+        """Reset inactivity timer on client playback or reuse."""
+        if self._closed:
+            return
+        self.last_access = time.monotonic()
+        self._cancel_idle_timer()
+        self._idle_unsub = async_call_later(
+            self.hass, self._idle_timeout, self._on_idle_timeout
+        )
+
+    def _cancel_idle_timer(self) -> None:
+        if self._idle_unsub is not None:
+            self._idle_unsub()
+            self._idle_unsub = None
+
+    @callback
+    def _on_idle_timeout(self, _now: Any) -> None:
+        self._idle_unsub = None
+        if not self._closed:
+            stop_archive_session_in_background(self.hass, self)
+
+    def add_segment(self, duration: float, data: bytes) -> bool:
+        """Append one MPEG-TS segment without ever removing published ones."""
+        if self._closed or self.failed or self.ended:
+            return False
+        if (
+            self._total_bytes + len(data) > self._max_bytes
+            or len(self._segments) >= self._max_segments
+        ):
+            # Cap reached: preserve already-published segments and finalize EVENT.
+            if not self._segments:
+                self.mark_failed()
+            else:
+                self.ended = True
+                self._stop_upstream_only()
+            return False
+        self._segments.append((duration, data))
+        self._total_bytes += len(data)
+        self.ready_event.set()
+        return True
+
+    def mark_ended(self) -> None:
+        if self._closed:
+            return
+        if not self._segments:
+            self.mark_failed()
+            return
+        self.ended = True
+
+    def mark_failed(self) -> None:
+        if not self.failed:
+            self.failed = True
+            self.fail_event.set()
+        self._stop_upstream_only()
+
+    def _stop_upstream_only(self) -> None:
+        self._pipe.close()
+        current = asyncio.current_task()
+        if (
+            self._upstream_task is not None
+            and not self._upstream_task.done()
+            and self._upstream_task is not current
+        ):
+            self._upstream_task.cancel()
+
+    def start(self, source_url: str) -> None:
+        """Start asynchronous HTTP upstream reader and PyAV remux worker."""
+        self.touch()
+        self._upstream_task = self.hass.async_create_task(
+            self._read_upstream(source_url),
+            name=f"{DOMAIN}_archive_upstream_{self.camera_id}",
+        )
+        self._worker_task = self.hass.async_create_task(
+            self._run_worker(),
+            name=f"{DOMAIN}_archive_worker_{self.camera_id}",
+        )
+
+    async def _read_upstream(self, source_url: str) -> None:
+        http_session = async_get_clientsession(self.hass)
+        try:
+            async with http_session.get(
+                source_url, timeout=_UPSTREAM_TIMEOUT
+            ) as resp:
+                if resp.status != 200:
+                    LOGGER.debug(
+                        "Archive HLS upstream rejected camera_id=%s event_id=%s status=%s",
+                        self.camera_id,
+                        self.event_id,
+                        resp.status,
+                    )
+                    if not self._segments:
+                        self.mark_failed()
+                    else:
+                        self._pipe.finish()
+                    return
+                async for chunk in resp.content.iter_chunked(_CHUNK_SIZE):
+                    if not await self._pipe.put(chunk):
+                        return
+                self._pipe.finish()
+        except asyncio.CancelledError:
+            self._pipe.close()
+            raise
+        except (ClientError, ConnectionResetError, TimeoutError, ValueError) as ex:
+            LOGGER.debug(
+                "Archive HLS upstream error camera_id=%s event_id=%s (%s)",
+                self.camera_id,
+                self.event_id,
+                type(ex).__name__,
+            )
+            if not self._segments:
+                self.mark_failed()
+            else:
+                self._pipe.finish()
+
+    async def _run_worker(self) -> None:
+        def _thread_main() -> int:
+            def _emit(duration: float, data: bytes) -> bool:
+                if self._closed:
+                    return False
+                try:
+                    fut = asyncio.run_coroutine_threadsafe(
+                        self._async_emit(duration, data), self.hass.loop
+                    )
+                    return fut.result(timeout=5.0)
+                except (
+                    RuntimeError,
+                    TimeoutError,
+                    concurrent.futures.CancelledError,
+                ):
+                    return False
+
+            return _remux_flv_to_mpegts(self._pipe, _emit)
+
+        try:
+            emitted = await self.hass.async_add_executor_job(_thread_main)
+            if self._closed:
+                return
+            if emitted <= 0 and not self._segments:
+                self.mark_failed()
+            else:
+                self.mark_ended()
+        except Exception as ex:  # noqa: BLE001 - worker boundary
+            LOGGER.debug(
+                "Archive HLS remux failed camera_id=%s event_id=%s (%s)",
+                self.camera_id,
+                self.event_id,
+                type(ex).__name__,
+            )
+            if not self._segments:
+                self.mark_failed()
+            else:
+                self.mark_ended()
+
+    async def _async_emit(self, duration: float, data: bytes) -> bool:
+        return self.add_segment(duration, data)
+
+    async def stop(self) -> None:
+        """Stop session, cancel upstream/worker, clear segments and idle timer."""
+        if self._closed:
+            return
+        self._closed = True
+        self._cancel_idle_timer()
+        self.fail_event.set()
+        self._stop_upstream_only()
+        tasks = [
+            task
+            for task in (self._upstream_task, self._worker_task)
+            if task is not None and not task.done()
+        ]
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._segments.clear()
+        self._total_bytes = 0
+
+
+def detach_archive_session(hass: HomeAssistant, session: ArchiveHlsSession) -> None:
+    """Remove `session` from lookup maps atomically on the event loop."""
+    streams = archive_streams(hass)
+    if streams.get(session.key) is session:
+        streams.pop(session.key, None)
+    by_id = archive_sessions_by_id(hass)
+    if by_id.get(session.session_id) is session:
+        by_id.pop(session.session_id, None)
+
+
+def stop_archive_session_in_background(
+    hass: HomeAssistant, session: ArchiveHlsSession
+) -> asyncio.Task[None]:
+    """Detach session and stop it in a tracked per-entry background task."""
+    detach_archive_session(hass, session)
+    stop_tasks = _stop_tasks_map(hass)
+    entry_tasks = stop_tasks.setdefault(session.entry_id, set())
+
+    async def _run_stop() -> None:
+        try:
+            await session.stop()
+        except Exception as ex:  # noqa: BLE001 - background cleanup
+            LOGGER.debug(
+                "Archive HLS stop failed for entry_id=%s (%s)",
+                session.entry_id,
+                type(ex).__name__,
+            )
+
+    task = hass.async_create_task(
+        _run_stop(), name=f"{DOMAIN}_archive_stream_stop"
+    )
+    if not task.done():
+        entry_tasks.add(task)
+        task.add_done_callback(entry_tasks.discard)
+    return task
+
+
+def enforce_active_session_limit(hass: HomeAssistant) -> None:
+    """Evict least-recently-used sessions if active count hits `_MAX_ACTIVE_SESSIONS`."""
+    by_id = archive_sessions_by_id(hass)
+    for sid in [sid for sid, sess in by_id.items() if not sess.alive]:
+        stop_archive_session_in_background(hass, by_id[sid])
+    while len(by_id) >= _MAX_ACTIVE_SESSIONS:
+        oldest = min(by_id.values(), key=lambda sess: sess.last_access)
+        stop_archive_session_in_background(hass, oldest)
+
+
+@callback
+def async_register_archive_view(hass: HomeAssistant) -> None:
+    """Register the archive EVENT HLS views once per HA instance."""
+    if hass.data.get(_ARCHIVE_VIEW_REGISTERED) or hass.http is None:
+        return
+    hass.http.register_view(ArchivePlaylistView())
+    hass.http.register_view(ArchiveSegmentView())
+    hass.data[_ARCHIVE_VIEW_REGISTERED] = True
+
+
+class _BaseArchiveView(HomeAssistantView):
+    """Shared authorization and idle-refresh logic for archive HLS views."""
+
+    requires_auth = False
+
+    def _authorize(
+        self, request: web.Request, session_id: str
+    ) -> tuple[ArchiveHlsSession, str] | web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        session = archive_sessions_by_id(hass).get(session_id)
+        if session is None or not session.alive:
+            return self.json_message("Unknown media item", 404)
+        token = request.query.get("t", "")
+        if not verify_archive_token(
+            hass,
+            token,
+            session_id,
+            session.entry_id,
+            session.camera_id,
+            session.event_id,
+        ):
+            return self.json_message("Invalid or expired archive link", 403)
+        if async_get_coordinator(hass, session.entry_id) is not session.coordinator:
+            stop_archive_session_in_background(hass, session)
+            return self.json_message("Unknown media item", 404)
+        session.touch()
+        return session, token
+
+
+class ArchivePlaylistView(_BaseArchiveView):
+    """Serve the growing `#EXT-X-PLAYLIST-TYPE:EVENT` playlist."""
+
+    url = "/api/elektronny_gorod/archive/{session_id}/playlist.m3u8"
+    name = "api:elektronny_gorod:archive_playlist"
+
+    async def get(
+        self, request: web.Request, session_id: str
+    ) -> web.StreamResponse:
+        auth = self._authorize(request, session_id)
+        if isinstance(auth, web.Response):
+            return auth
+        session, token = auth
+        if not session.segment_count:
+            return self.json_message("Archive stream is not ready", 404)
+        return web.Response(
+            text=session.render_playlist(token),
+            content_type="application/vnd.apple.mpegurl",
+            headers={"Cache-Control": "private, no-store"},
+        )
+
+
+class ArchiveSegmentView(_BaseArchiveView):
+    """Serve one MPEG-TS segment of an active EVENT playlist."""
+
+    url = r"/api/elektronny_gorod/archive/{session_id}/{segment:\d+}.ts"
+    name = "api:elektronny_gorod:archive_segment"
+
+    async def get(
+        self, request: web.Request, session_id: str, segment: str
+    ) -> web.StreamResponse:
+        auth = self._authorize(request, session_id)
+        if isinstance(auth, web.Response):
+            return auth
+        session, _token = auth
+        if not (segment.isascii() and segment.isdigit()):
+            return self.json_message("Unknown media segment", 404)
+        data = session.get_segment(int(segment))
+        if data is None:
+            return self.json_message("Unknown media segment", 404)
+        resp = web.StreamResponse(status=200)
+        resp.headers["Content-Type"] = "video/mp2t"
+        resp.headers["Content-Length"] = str(len(data))
+        resp.headers["Cache-Control"] = "private, no-store"
+        try:
+            await resp.prepare(request)
+            await resp.write(data)
+        except (ClientError, ConnectionResetError):
+            return resp
+        return resp
