@@ -3,7 +3,7 @@
 Browse: account entry → place → camera → day → events.
 Resolve: one signed mp4 per event, fetched on demand and discarded;
 an event still being recorded plays from its start as the operator archive
-stream through HA Stream (HLS), falling back to the camera live view (A-124).
+stream through same-origin EVENT HLS, falling back to the camera live view (A-124).
 Opaque IDs only — signed URLs are never logged or persisted
 (spec: docs/specs/2026-08-29-media-source-design.md).
 """
@@ -11,8 +11,10 @@ Opaque IDs only — signed URLs are never logged or persisted
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Coroutine
 from datetime import date, datetime, timedelta
-from typing import Any
+import time
+from typing import Any, Literal, TypeVar
 
 from homeassistant.components import media_source as ha_media_source
 from homeassistant.components.media_player import (
@@ -34,10 +36,12 @@ from homeassistant.helpers import translation
 from homeassistant.util import dt as dt_util
 
 from .archive_hls import (
+    ARCHIVE_IN_FLIGHT_KEY,
     ARCHIVE_STREAMS_KEY,
     ArchiveHlsSession,
     archive_sessions_by_id,
     archive_streams,
+    async_ensure_archive_pyav,
     async_register_archive_view,
     detach_archive_session,
     enforce_active_session_limit,
@@ -49,6 +53,8 @@ from .clip_proxy import async_register_clip_view, clip_proxy_url
 from .coordinator import async_get_coordinator
 from .const import DOMAIN, LOGGER
 from .history import place_display_name
+
+_T = TypeVar("_T")
 
 _SOURCE_TITLE = "Электронный город"
 
@@ -83,7 +89,7 @@ _ARCHIVE_READY_TIMEOUT_SEC = 12.0
 # ссылка оператора выдаётся заново на каждый запрос, поэтому новый resolve берёт свежую.
 _ARCHIVE_STREAMS_KEY = ARCHIVE_STREAMS_KEY
 _ARCHIVE_LOCK_KEY = f"{DOMAIN}_archive_streams_lock"
-_ARCHIVE_IN_FLIGHT_KEY = f"{DOMAIN}_archive_in_flight"
+_ARCHIVE_IN_FLIGHT_KEY = ARCHIVE_IN_FLIGHT_KEY
 
 # EN-fallback для подписей событий (длительность, «идёт запись»);
 # переопределяются категорией `common` translations (hass.config.language).
@@ -289,21 +295,58 @@ class ElektronnyGorodMediaSource(MediaSource):
             mime_type=_MIME_MP4,
         )
 
+    async def _await_budgeted(
+        self,
+        coro: Coroutine[Any, Any, _T],
+        cancel_event: asyncio.Event,
+        deadline: float,
+    ) -> tuple[Literal["ok", "aborted", "timeout"], _T | None]:
+        """Run `coro` within `deadline`, aborting immediately on `cancel_event`."""
+        remaining = deadline - time.monotonic()
+        if cancel_event.is_set():
+            coro.close()
+            return ("aborted", None)
+        if remaining <= 0:
+            coro.close()
+            return ("timeout", None)
+        work_task = asyncio.create_task(coro)
+        abort_task = asyncio.create_task(cancel_event.wait())
+        try:
+            async with asyncio.timeout(remaining):
+                done, _ = await asyncio.wait(
+                    {work_task, abort_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            if cancel_event.is_set() or abort_task in done:
+                return ("aborted", None)
+            return ("ok", work_task.result())
+        except TimeoutError:
+            return ("timeout", None)
+        finally:
+            for task in (work_task, abort_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(work_task, abort_task, return_exceptions=True)
+
     async def _archive_play_media(
         self, coordinator: Any, entry_id: str, camera_id: str, event: Any
     ) -> PlayMedia | None:
         """Идущее событие с начала: поток архива оператора → EVENT HLS.
 
-        `None` — поток недоступен (ссылки нет, worker отказал до первого
-        сегмента или не успел в бюджет); вызывающий открывает эфир. Подписанная
-        ссылка оператора остаётся строго на сервере (в `aiohttp`); в логах,
-        ошибках, состоянии и ответе фронтенду её нет — фронтенд получает
-        локальный `playlist.m3u8` с непрозрачным `session_id` и HMAC-токеном.
+        `None` — поток недоступен (PyAV отсутствует, ссылки нет, worker отказал
+        до первого сегмента или не успел в общий бюджет); вызывающий открывает
+        эфир. Подписанная ссылка оператора остаётся строго на сервере (в
+        `aiohttp`); в логах, ошибках, состоянии и ответе фронтенду её нет —
+        фронтенд получает локальный `playlist.m3u8` с непрозрачным `session_id`
+        и HMAC-токеном.
         """
         streams = archive_streams(self._hass)
         key = (entry_id, camera_id, event.id)
         async with _archive_lock(self._hass, entry_id):
-            if self._coordinator(entry_id) is not coordinator:
+            if (
+                self._coordinator(entry_id) is not coordinator
+                or getattr(self._hass, "is_stopping", False)
+            ):
                 raise Unresolvable("Unknown media item")
             for stale_key in [
                 k
@@ -323,19 +366,53 @@ class ElektronnyGorodMediaSource(MediaSource):
                 stop_archive_session_in_background(self._hass, session)
                 session = None
 
-            source = await coordinator.api.query_camera_archive_stream(
-                camera_id, event.timestamp, _tz_offset(event.timestamp)
+            deadline = time.monotonic() + _ARCHIVE_READY_TIMEOUT_SEC
+            cancel_event = asyncio.Event()
+            in_flight_map: dict[str, set[asyncio.Event]] = (
+                self._hass.data.setdefault(_ARCHIVE_IN_FLIGHT_KEY, {})
             )
-            if self._coordinator(entry_id) is not coordinator:
-                raise Unresolvable("Unknown media item")
-            if not source:
-                LOGGER.debug(
-                    "Media source archive stream unavailable for camera_id=%s "
-                    "event_id=%s; live view",
-                    camera_id,
-                    event.id,
+            entry_in_flight = in_flight_map.setdefault(entry_id, set())
+            entry_in_flight.add(cancel_event)
+            try:
+                pyav_status, pyav_ok = await self._await_budgeted(
+                    async_ensure_archive_pyav(self._hass), cancel_event, deadline
                 )
-                return None
+                if pyav_status == "aborted" or (
+                    self._coordinator(entry_id) is not coordinator
+                ):
+                    raise Unresolvable("Unknown media item")
+                if pyav_status != "ok" or not pyav_ok:
+                    LOGGER.debug(
+                        "Media source archive PyAV unavailable for camera_id=%s "
+                        "event_id=%s; live view",
+                        camera_id,
+                        event.id,
+                    )
+                    return None
+
+                mint_status, source = await self._await_budgeted(
+                    coordinator.api.query_camera_archive_stream(
+                        camera_id, event.timestamp, _tz_offset(event.timestamp)
+                    ),
+                    cancel_event,
+                    deadline,
+                )
+                if mint_status == "aborted" or (
+                    self._coordinator(entry_id) is not coordinator
+                ):
+                    raise Unresolvable("Unknown media item")
+                if mint_status != "ok" or not source:
+                    LOGGER.debug(
+                        "Media source archive stream unavailable for camera_id=%s "
+                        "event_id=%s; live view",
+                        camera_id,
+                        event.id,
+                    )
+                    return None
+            finally:
+                entry_in_flight.discard(cancel_event)
+                if not entry_in_flight:
+                    in_flight_map.pop(entry_id, None)
 
             enforce_active_session_limit(self._hass)
             session = ArchiveHlsSession(
@@ -349,7 +426,9 @@ class ElektronnyGorodMediaSource(MediaSource):
             streams[key] = session
             try:
                 session.start(source)
-                if not await self._wait_archive_session_ready(entry_id, session):
+                if not await self._wait_archive_session_ready(
+                    entry_id, session, deadline
+                ):
                     LOGGER.debug(
                         "Media source archive stream not ready for "
                         "camera_id=%s event_id=%s; live view",
@@ -358,7 +437,10 @@ class ElektronnyGorodMediaSource(MediaSource):
                     )
                     stop_archive_session_in_background(self._hass, session)
                     return None
-                if self._coordinator(entry_id) is not coordinator:
+                if (
+                    self._coordinator(entry_id) is not coordinator
+                    or getattr(self._hass, "is_stopping", False)
+                ):
                     stop_archive_session_in_background(self._hass, session)
                     raise Unresolvable("Unknown media item")
                 url = session.playlist_url(self._hass)
@@ -381,11 +463,15 @@ class ElektronnyGorodMediaSource(MediaSource):
         self,
         entry_id: str,
         session: ArchiveHlsSession,
+        deadline: float,
     ) -> bool:
         """Ограниченное ожидание первого сегмента EVENT HLS или отказа worker-а."""
         if session.ready:
             return True
         if not session.alive or session.fail_event.is_set():
+            return False
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
             return False
 
         in_flight_map: dict[str, set[asyncio.Event]] = self._hass.data.setdefault(
@@ -400,7 +486,7 @@ class ElektronnyGorodMediaSource(MediaSource):
             session.fail_event.wait(), name=f"{DOMAIN}_archive_wait_fail"
         )
         try:
-            async with asyncio.timeout(_ARCHIVE_READY_TIMEOUT_SEC):
+            async with asyncio.timeout(remaining):
                 done, _ = await asyncio.wait(
                     {ready_task, fail_task},
                     return_when=asyncio.FIRST_COMPLETED,

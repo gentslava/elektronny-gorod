@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 from fractions import Fraction
 import io
 import logging
-from pathlib import Path
 import sys
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -25,7 +25,9 @@ from custom_components.elektronny_gorod.archive_hls import (
     _remux_flv_to_mpegts,
     archive_sessions_by_id,
     archive_streams,
+    async_ensure_archive_pyav,
     async_register_archive_view,
+    async_stop_all_archive_sessions,
     enforce_active_session_limit,
     pop_entry_sessions_by_id,
     pop_entry_stop_tasks,
@@ -45,26 +47,6 @@ _ENTRY_ID = "entry-1"
 _CAMERA_ID = "111"
 _EVENT_ID = "3001"
 _OPERATOR_URL = "https://forpost-1.example:18081/rtsp/STREAM-ID/SECRET-TOKEN/d=1"
-
-_BENCH_DIR = Path("/tmp/eg-a92-merge.rVuFfZAG")
-_BENCH_LIBS = _BENCH_DIR / "stream-test-libs"
-_FLV_VIDEO_ONLY = _BENCH_DIR / "a124-test-pattern.flv"
-_FLV_AV = _BENCH_DIR / "a124-timecoded-av.flv"
-
-
-def _load_real_av():
-    """Import real PyAV if available (installed or in local bench libs)."""
-    try:
-        return __import__("av")
-    except ModuleNotFoundError:
-        if _BENCH_LIBS.is_dir():
-            if str(_BENCH_LIBS) not in sys.path:
-                sys.path.insert(0, str(_BENCH_LIBS))
-            try:
-                return __import__("av")
-            except ModuleNotFoundError:
-                return None
-        return None
 
 
 def _coordinator() -> SimpleNamespace:
@@ -96,20 +78,22 @@ def test_render_event_playlist_anchors_sequence_zero_and_preserves_first_segment
     assert "#EXT-X-PLAYLIST-TYPE:EVENT" in first
     assert "#EXT-X-MEDIA-SEQUENCE:0" in first
     assert "#EXT-X-START:TIME-OFFSET=0.000,PRECISE=YES" in first
-    assert "#EXT-X-TARGETDURATION:2" in first
+    assert "#EXT-X-TARGETDURATION:6" in first
     assert "0.ts?t=TOK" in first
     assert "#EXT-X-ENDLIST" not in first
 
-    segs.extend([(2.1, b"seg1"), (1.9, b"seg2")])
+    # Growing playlist with irregular segment durations MUST keep TARGETDURATION fixed.
+    segs.extend([(3.2, b"seg1"), (1.9, b"seg2")])
     grown = render_event_playlist(segs, "TOK", ended=False)
     assert "#EXT-X-MEDIA-SEQUENCE:0" in grown
-    assert "#EXT-X-TARGETDURATION:3" in grown
+    assert "#EXT-X-TARGETDURATION:6" in grown
     assert ["0.ts?t=TOK", "1.ts?t=TOK", "2.ts?t=TOK"] == [
         line for line in grown.splitlines() if line.endswith(".ts?t=TOK")
     ]
     assert "#EXT-X-ENDLIST" not in grown
 
     finished = render_event_playlist(segs, "TOK", ended=True)
+    assert "#EXT-X-TARGETDURATION:6" in finished
     assert finished.splitlines()[-1] == "#EXT-X-ENDLIST"
 
 
@@ -742,30 +726,492 @@ async def test_hung_upstream_stops_immediately_without_waiting_for_network(
     release.set()
 
 
-@pytest.mark.usefixtures("socket_enabled")
-@pytest.mark.parametrize(
-    ("flv_path", "expect_audio"),
-    [
-        (_FLV_VIDEO_ONLY, False),
-        (_FLV_AV, True),
-    ],
-)
-async def test_real_pyav_synthetic_flv_end_to_end_event_playlist(
-    hass, archive_client, flv_path: Path, expect_audio: bool
-) -> None:
-    """Real PyAV remuxing of synthetic FLV fixtures into growing EVENT HLS."""
-    av = _load_real_av()
-    if av is None or not flv_path.is_file():
-        pytest.skip("Real PyAV or synthetic FLV bench fixture not present")
+def _build_synthetic_flv(
+    av: Any,
+    *,
+    frame_times_ms: list[int],
+    keyframe_ms: set[int],
+    with_audio: bool = False,
+    width: int = 64,
+    height: int = 64,
+) -> bytes:
+    """Build a small reproducible FLV fixture in memory (H.264 + optional AAC)."""
+    bio = io.BytesIO()
+    out = av.open(bio, mode="w", format="flv")
+    vs = out.add_stream("libx264", rate=10)
+    vs.width = width
+    vs.height = height
+    vs.pix_fmt = "yuv420p"
+    vs.time_base = Fraction(1, 1000)
+    vs.options = {"g": "1000", "keyint_min": "1000", "tune": "zerolatency"}
 
+    as_ = out.add_stream("aac", rate=44100) if with_audio else None
+
+    total_samples = 0
+    for idx, ts_ms in enumerate(frame_times_ms):
+        frame = av.VideoFrame(width, height, "yuv420p")
+        # Vary luma slightly so compressed size is deterministic and non-trivial.
+        for plane in frame.planes:
+            plane.update(bytes([((idx * 17) & 0xFF)]) * plane.buffer_size)
+        frame.pts = ts_ms
+        frame.pict_type = (
+            av.video.frame.PictureType.I
+            if ts_ms in keyframe_ms
+            else av.video.frame.PictureType.P
+        )
+        for pkt in vs.encode(frame):
+            pkt.time_base = Fraction(1, 1000)
+            pkt.pts = ts_ms
+            pkt.dts = ts_ms
+            if ts_ms in keyframe_ms:
+                pkt.is_keyframe = True
+            out.mux(pkt)
+        if as_ is not None:
+            while total_samples * 1000 // 44100 <= ts_ms:
+                af = av.AudioFrame(
+                    format=as_.format.name, layout=as_.layout.name, samples=1024
+                )
+                af.sample_rate = as_.sample_rate
+                af.pts = total_samples
+                for plane in af.planes:
+                    plane.update(b"\x00" * plane.buffer_size)
+                total_samples += 1024
+                for pkt in as_.encode(af):
+                    out.mux(pkt)
+
+    for pkt in vs.encode():
+        out.mux(pkt)
+    if as_ is not None:
+        for pkt in as_.encode():
+            out.mux(pkt)
+
+    out.close()
+    return bio.getvalue()
+
+
+async def test_remux_enforces_byte_and_duration_budgets_independently(
+    hass, monkeypatch
+) -> None:
+    """Byte cap stops mid-segment before overshoot; duration cap stops long GOPs independently."""
+    from custom_components.elektronny_gorod import archive_hls as h
+
+    tb = Fraction(1, 1000)
+    vs = SimpleNamespace(index=0, type="video", name="h264", time_base=tb)
+
+    # 1) Byte cap: TrackedBytesIO must never exceed remaining budget on segment 1.
+    max_written = 0
+
+    class _TrackedBytesIO(io.BytesIO):
+        def write(self, data):
+            nonlocal max_written
+            n = super().write(data)
+            max_written = max(max_written, self.tell())
+            return n
+
+    monkeypatch.setattr(h, "io", SimpleNamespace(BytesIO=_TrackedBytesIO))
+    # Each packet writes ~26 bytes; seg0 fits (<50 bytes), seg1 exceeds remaining budget (60-len(seg0)).
+    packets_bytes = [
+        _pkt(vs, 0, keyframe=True),
+        _pkt(vs, 1000),
+        _pkt(vs, 2000, keyframe=True),
+        _pkt(vs, 3000),
+        _pkt(vs, 3500),
+    ]
+    fake_av, _, _ = _fake_av_module(
+        video_streams=[vs], audio_streams=[], packets=packets_bytes
+    )
+    emitted: list[tuple[float, bytes]] = []
+    with patch(
+        "custom_components.elektronny_gorod.archive_hls._import_av",
+        return_value=fake_av,
+    ):
+        count = _remux_flv_to_mpegts(
+            _BytePipe(hass.loop),
+            lambda d, b: emitted.append((d, b)) or True,
+            max_bytes=55,
+            max_segment_duration=6.0,
+        )
+    assert count == 1
+    assert len(emitted[0][1]) <= 55
+    assert max_written <= 55
+
+    # Tight byte cap on segment 0 fails before publishing anything.
+    emitted0: list[tuple[float, bytes]] = []
+    with patch(
+        "custom_components.elektronny_gorod.archive_hls._import_av",
+        return_value=fake_av,
+    ):
+        count0 = _remux_flv_to_mpegts(
+            _BytePipe(hass.loop),
+            lambda d, b: emitted0.append((d, b)) or True,
+            max_bytes=10,
+            max_segment_duration=6.0,
+        )
+    assert count0 == 0
+    assert emitted0 == []
+
+    # 2) Duration cap with huge byte cap: 0 -> 2s -> 6.5s (no keyframe) aborts mid-segment.
+    packets_dur = [
+        _pkt(vs, 0, keyframe=True),
+        _pkt(vs, 2000, keyframe=True),  # emits seg 0 (2.0s)
+        _pkt(vs, 5000),
+        _pkt(vs, 8500),  # elapsed = 6.5s > 6.0s -> aborted before keyframe
+    ]
+    fake_dur, _, _ = _fake_av_module(
+        video_streams=[vs], audio_streams=[], packets=packets_dur
+    )
+    emitted_dur: list[tuple[float, bytes]] = []
+    with patch(
+        "custom_components.elektronny_gorod.archive_hls._import_av",
+        return_value=fake_dur,
+    ):
+        count_dur = _remux_flv_to_mpegts(
+            _BytePipe(hass.loop),
+            lambda d, b: emitted_dur.append((d, b)) or True,
+            max_bytes=64 * 1024 * 1024,
+            max_segment_duration=6.0,
+        )
+    assert count_dur == 1
+
+    # Tail exceeding max_segment_duration is not emitted.
+    packets_tail = [
+        _pkt(vs, 0, keyframe=True),
+        _pkt(vs, 2000, keyframe=True),
+        _pkt(vs, 7500, duration=1000),  # tail = 6.5s > 6.0s
+    ]
+    fake_tail, _, _ = _fake_av_module(
+        video_streams=[vs], audio_streams=[], packets=packets_tail
+    )
+    emitted_tail: list[tuple[float, bytes]] = []
+    with patch(
+        "custom_components.elektronny_gorod.archive_hls._import_av",
+        return_value=fake_tail,
+    ):
+        count_tail = _remux_flv_to_mpegts(
+            _BytePipe(hass.loop),
+            lambda d, b: emitted_tail.append((d, b)) or True,
+            max_segment_duration=6.0,
+        )
+    assert count_tail == 1
+
+    # Direct `_LimitedBytesWriter` methods & exact byte-cap exhaustion on next segment.
+    from custom_components.elektronny_gorod.archive_hls import _LimitedBytesWriter
+
+    raw_buf = io.BytesIO()
+    lim_writer = _LimitedBytesWriter(raw_buf, 10)
+    assert lim_writer.writable() is True
+    assert lim_writer.seekable() is True
+    assert lim_writer.write(b"12345") == 5
+    assert lim_writer.tell() == 5
+    assert lim_writer.seek(0) == 0
+
+    def _mk_exact_pkts():
+        return [
+            _pkt(vs, 0, keyframe=True),
+            _pkt(vs, 2000, keyframe=True),
+        ]
+
+    fake_exact1, _, _ = _fake_av_module(
+        video_streams=[vs], audio_streams=[], packets=_mk_exact_pkts()
+    )
+    probe_exact: list[tuple[float, bytes]] = []
+    with patch(
+        "custom_components.elektronny_gorod.archive_hls._import_av",
+        return_value=fake_exact1,
+    ):
+        _remux_flv_to_mpegts(
+            _BytePipe(hass.loop),
+            lambda d, b: probe_exact.append((d, b)) or True,
+        )
+    exact_bytes = len(probe_exact[0][1])
+    fake_exact2, _, _ = _fake_av_module(
+        video_streams=[vs], audio_streams=[], packets=_mk_exact_pkts()
+    )
+    emitted_exact: list[tuple[float, bytes]] = []
+    with patch(
+        "custom_components.elektronny_gorod.archive_hls._import_av",
+        return_value=fake_exact2,
+    ):
+        assert (
+            _remux_flv_to_mpegts(
+                _BytePipe(hass.loop),
+                lambda d, b: emitted_exact.append((d, b)) or True,
+                max_bytes=exact_bytes,
+            )
+            == 1
+        )
+
+    # Direct add_segment duration cap also protects session invariants.
     entry = _loaded_entry(hass)
-    flv_bytes = flv_path.read_bytes()
+    sess = ArchiveHlsSession(
+        hass,
+        entry_id=entry.entry_id,
+        camera_id=_CAMERA_ID,
+        event_id="dur-cap",
+        coordinator=entry.runtime_data,
+        target_duration=4,
+    )
+    assert sess.add_segment(5.0, b"TOO_LONG") is False
+    assert sess.failed is True
+    await sess.stop()
+
+
+async def test_worker_clogged_pipe_timeout_and_cancel_cleanup(hass) -> None:
+    """Post-ready mux failure, fut.result timeout, and cancel all close pipe & upstream."""
+    entry = _loaded_entry(hass)
+
+    # 1) Clogged 2 MiB pipe + remux exception after seg0 preserves seg0 and drains upstream.
+    sess = ArchiveHlsSession(
+        hass,
+        entry_id=entry.entry_id,
+        camera_id=_CAMERA_ID,
+        event_id="clogged",
+        coordinator=entry.runtime_data,
+    )
+
+    async def _clogged_upstream() -> None:
+        while await sess._pipe.put(b"x" * 32768):
+            pass
+
+    def _emit_then_fail(_pipe, emit):
+        assert emit(2.0, b"SEG0") is True
+        raise RuntimeError("mux failure after seg0")
+
+    sess._upstream_task = asyncio.create_task(_clogged_upstream())
+    with patch(
+        "custom_components.elektronny_gorod.archive_hls._remux_flv_to_mpegts",
+        side_effect=_emit_then_fail,
+    ):
+        await asyncio.wait_for(sess._run_worker(), timeout=2.0)
+    await asyncio.sleep(0)
+    assert sess.ended is True
+    assert sess.ready is True
+    assert sess.get_segment(0) == b"SEG0"
+    assert sess._pipe._closed is True
+    assert sess._pipe._buffered == 0
+    assert sess._upstream_task.done() is True
+    await sess.stop()
+
+    # 2) Simulated fut.result TimeoutError prevents late _async_emit publication.
+    sess_to = ArchiveHlsSession(
+        hass,
+        entry_id=entry.entry_id,
+        camera_id=_CAMERA_ID,
+        event_id="emit-timeout",
+        coordinator=entry.runtime_data,
+    )
+    captured_coros: list[Any] = []
+
+    class _TimeoutFut:
+        def result(self, timeout=None):
+            raise TimeoutError
+
+        def cancel(self):
+            return True
+
+    def _fake_rcts(coro, _loop):
+        captured_coros.append(coro)
+        return _TimeoutFut()
+
+    def _emit_on_timeout(_pipe, emit):
+        assert emit(2.0, b"LATE") is False
+        return 0
+
+    with (
+        patch(
+            "custom_components.elektronny_gorod.archive_hls.asyncio.run_coroutine_threadsafe",
+            side_effect=_fake_rcts,
+        ),
+        patch(
+            "custom_components.elektronny_gorod.archive_hls._remux_flv_to_mpegts",
+            side_effect=_emit_on_timeout,
+        ),
+    ):
+        await sess_to._run_worker()
+    assert len(captured_coros) == 1
+    assert await captured_coros[0] is False
+    assert sess_to.segment_count == 0
+    await sess_to.stop()
+
+    # 3) Worker CancelledError closes pipe and cancels upstream cleanly.
+    sess_cancel = ArchiveHlsSession(
+        hass,
+        entry_id=entry.entry_id,
+        camera_id=_CAMERA_ID,
+        event_id="worker-cancel",
+        coordinator=entry.runtime_data,
+    )
+    worker_started = asyncio.Event()
+
+    def _blocking_remux(pipe, _emit):
+        hass.loop.call_soon_threadsafe(worker_started.set)
+        pipe.read(16)
+        return 0
+
+    sess_cancel._upstream_task = asyncio.create_task(_clogged_upstream())
+    with patch(
+        "custom_components.elektronny_gorod.archive_hls._remux_flv_to_mpegts",
+        side_effect=_blocking_remux,
+    ):
+        wt = asyncio.create_task(sess_cancel._run_worker())
+        await worker_started.wait()
+        wt.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await wt
+    assert sess_cancel._pipe._closed is True
+    await sess_cancel.stop()
+
+
+async def test_hass_stop_cleans_stalled_session_without_entry_unload(
+    hass, caplog
+) -> None:
+    """Real HA async_stop() shuts down active sessions & idle timers without lingering-task warnings."""
+    caplog.set_level(logging.WARNING)
+    entry = _loaded_entry(hass)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _hung_aenter():
+        started.set()
+        await release.wait()
+
+    cm_hung = MagicMock()
+    cm_hung.__aenter__ = AsyncMock(side_effect=_hung_aenter)
+    cm_hung.__aexit__ = AsyncMock(return_value=False)
+    http_session = MagicMock()
+    http_session.get = MagicMock(return_value=cm_hung)
+
+    fake_av, _, _ = _fake_av_module(video_streams=[], audio_streams=[], packets=[])
+
+    def _blocking_open(pipe: _BytePipe, *_args: Any, **_kwargs: Any):
+        pipe.read(16)
+        raise EOFError("pipe closed")
+
+    fake_av.open = _blocking_open
+
+    sess = ArchiveHlsSession(
+        hass,
+        entry_id=entry.entry_id,
+        camera_id=_CAMERA_ID,
+        event_id="ha-stop",
+        coordinator=entry.runtime_data,
+    )
+    archive_sessions_by_id(hass)[sess.session_id] = sess
+    archive_streams(hass)[sess.key] = sess
+    with (
+        patch(
+            "custom_components.elektronny_gorod.archive_hls.async_get_clientsession",
+            return_value=http_session,
+        ),
+        patch(
+            "custom_components.elektronny_gorod.archive_hls._import_av",
+            return_value=fake_av,
+        ),
+    ):
+        sess.start(_OPERATOR_URL)
+        await asyncio.wait_for(started.wait(), timeout=1.0)
+        # Note: NO async_unload_entry called — simulate HA core shutdown directly.
+        await hass.async_stop()
+
+    release.set()
+    assert sess.alive is False
+    assert sess._idle_unsub is None
+    assert not archive_sessions_by_id(hass)
+    assert not archive_streams(hass)
+    assert "was still running after final writes" not in caplog.text
+    # Idempotent second call is a safe no-op.
+    await async_stop_all_archive_sessions(hass)
+
+
+async def test_async_ensure_archive_pyav_paths(hass) -> None:
+    """PyAV requirement resolution uses HA requirements off the loop and degrades safely."""
+    # 1) Already in sys.modules -> no HA requirements call.
+    with (
+        patch.dict(sys.modules, {"av": SimpleNamespace()}),
+        patch(
+            "custom_components.elektronny_gorod.archive_hls.async_get_integration_with_requirements"
+        ) as req_mock,
+    ):
+        assert await async_ensure_archive_pyav(hass) is True
+        req_mock.assert_not_awaited()
+
+    saved_av = sys.modules.pop("av", None)
+    try:
+        # 2) Not in sys.modules yet, but importable in executor -> no requirements call.
+        with (
+            patch(
+                "custom_components.elektronny_gorod.archive_hls._import_av",
+                return_value=SimpleNamespace(),
+            ),
+            patch(
+                "custom_components.elektronny_gorod.archive_hls.async_get_integration_with_requirements"
+            ) as req_mock,
+        ):
+            assert await async_ensure_archive_pyav(hass) is True
+            req_mock.assert_not_awaited()
+
+        # 3) Missing initially -> calls async_get_integration_with_requirements(hass, 'stream') without setting up stream.
+        import_attempts = 0
+
+        def _fake_import_av():
+            nonlocal import_attempts
+            import_attempts += 1
+            if import_attempts == 1:
+                raise ModuleNotFoundError("no av yet")
+            return SimpleNamespace()
+
+        with (
+            patch(
+                "custom_components.elektronny_gorod.archive_hls._import_av",
+                side_effect=_fake_import_av,
+            ),
+            patch(
+                "custom_components.elektronny_gorod.archive_hls.async_get_integration_with_requirements",
+                AsyncMock(return_value=MagicMock()),
+            ) as req_mock,
+        ):
+            assert await async_ensure_archive_pyav(hass) is True
+            req_mock.assert_awaited_once_with(hass, "stream")
+            assert "stream" not in hass.config.components
+
+        # 3) Requirement installation failure -> returns False safely.
+        with (
+            patch(
+                "custom_components.elektronny_gorod.archive_hls._import_av",
+                side_effect=ModuleNotFoundError("no av"),
+            ),
+            patch(
+                "custom_components.elektronny_gorod.archive_hls.async_get_integration_with_requirements",
+                AsyncMock(side_effect=RuntimeError("pip offline")),
+            ),
+        ):
+            assert await async_ensure_archive_pyav(hass) is False
+    finally:
+        if saved_av is not None:
+            sys.modules["av"] = saved_av
+
+
+@pytest.mark.usefixtures("socket_enabled")
+@pytest.mark.parametrize("with_audio", [False, True])
+async def test_real_pyav_hermetic_flv_decodes_frames_and_pts(
+    hass, archive_client, with_audio: bool
+) -> None:
+    """Hermetic real-PyAV remuxing decodes actual video/audio frames and PTS from MPEG-TS."""
+    av = pytest.importorskip("av")
+
+    frame_times = [t * 200 for t in range(30)]  # 0..5.8s at 5fps
+    flv_bytes = _build_synthetic_flv(
+        av,
+        frame_times_ms=frame_times,
+        keyframe_ms={0, 2000, 4000},
+        with_audio=with_audio,
+    )
 
     async def _fake_stream(request: web.Request) -> web.StreamResponse:
         resp = web.StreamResponse(headers={"Content-Type": "video/x-flv"})
         await resp.prepare(request)
-        for off in range(0, len(flv_bytes), 16384):
-            await resp.write(flv_bytes[off : off + 16384])
+        for off in range(0, len(flv_bytes), 4096):
+            await resp.write(flv_bytes[off : off + 4096])
             await asyncio.sleep(0)
         return resp
 
@@ -777,6 +1223,7 @@ async def test_real_pyav_synthetic_flv_end_to_end_event_playlist(
     await site.start()
     port = site._server.sockets[0].getsockname()[1]  # type: ignore[union-attr]
 
+    entry = _loaded_entry(hass)
     sess = ArchiveHlsSession(
         hass,
         entry_id=entry.entry_id,
@@ -791,39 +1238,148 @@ async def test_real_pyav_synthetic_flv_end_to_end_event_playlist(
         pl_url = sess.playlist_url(hass)
         tok = pl_url.split("?t=", 1)[1]
 
-        # Poll until worker finishes remuxing the synthetic FLV.
         for _ in range(100):
             if sess.ended:
                 break
             await asyncio.sleep(0.02)
         assert sess.ended is True
-        assert sess.segment_count >= 6
+        assert sess.segment_count == 3
 
-        pl_resp = await archive_client.get(pl_url)
-        assert pl_resp.status == 200
-        pl_text = await pl_resp.text()
+        pl_text = await (await archive_client.get(pl_url)).text()
         assert "#EXT-X-PLAYLIST-TYPE:EVENT" in pl_text
         assert "#EXT-X-MEDIA-SEQUENCE:0" in pl_text
         assert "#EXT-X-START:TIME-OFFSET=0.000,PRECISE=YES" in pl_text
-        assert f"0.ts?t={tok}" in pl_text
-        assert f"{sess.segment_count - 1}.ts?t={tok}" in pl_text
+        assert "#EXT-X-TARGETDURATION:6" in pl_text
         assert "#EXT-X-ENDLIST" in pl_text
 
-        # Segment 0 and last segment decode cleanly as MPEG-TS with expected streams.
-        for idx in (0, sess.segment_count - 1):
-            seg_resp = await archive_client.get(
-                f"/api/elektronny_gorod/archive/{sess.session_id}/{idx}.ts?t={tok}"
-            )
-            assert seg_resp.status == 200
-            seg_bytes = await seg_resp.read()
+        total_video_frames = 0
+        total_audio_frames = 0
+        prev_v_pts: int | None = None
+        for idx in range(sess.segment_count):
+            seg_bytes = await (
+                await archive_client.get(
+                    f"/api/elektronny_gorod/archive/{sess.session_id}/{idx}.ts?t={tok}"
+                )
+            ).read()
             c = av.open(io.BytesIO(seg_bytes), format="mpegts")
-            types = {s.type for s in c.streams}
-            assert "video" in types
-            assert ("audio" in types) is expect_audio
+            streams = (
+                (c.streams.video[0], c.streams.audio[0])
+                if with_audio
+                else (c.streams.video[0],)
+            )
+            seg_v = 0
+            seg_a = 0
+            for decoded in c.decode(*streams):
+                if isinstance(decoded, av.VideoFrame):
+                    assert decoded.width == 64 and decoded.height == 64
+                    assert decoded.pts is not None
+                    if prev_v_pts is not None:
+                        assert decoded.pts > prev_v_pts
+                    prev_v_pts = decoded.pts
+                    seg_v += 1
+                else:
+                    assert decoded.samples > 0 and decoded.pts is not None
+                    seg_a += 1
+            assert seg_v > 0
+            if with_audio:
+                assert seg_a > 0
+            total_video_frames += seg_v
+            total_audio_frames += seg_a
             c.close()
+
+        assert total_video_frames == len(frame_times)
+        if with_audio:
+            assert total_audio_frames > 0
     finally:
         await sess.stop()
         await runner.cleanup()
+
+
+async def test_real_pyav_irregular_gop_and_independent_limits(hass, monkeypatch) -> None:
+    """Real PyAV: irregular 0/2/5.2/7.2s keeps TARGETDURATION fixed; >6s and >max_bytes stop cleanly."""
+    av = pytest.importorskip("av")
+    from custom_components.elektronny_gorod import archive_hls as h
+
+    # 1) Irregular GOP: 0, 2.0, 5.2, 7.2 -> durations 2.0, 3.2, 2.0, 0.8 (all <= 6.0).
+    times_irr = [t * 200 for t in range(40)]  # 0..7.8s
+    flv_irr = _build_synthetic_flv(
+        av, frame_times_ms=times_irr, keyframe_ms={0, 2000, 5200, 7200}
+    )
+    pipe_irr = _BytePipe(hass.loop)
+    await pipe_irr.put(flv_irr)
+    pipe_irr.finish()
+    segs_irr: list[tuple[float, bytes]] = []
+    targets: list[str] = []
+
+    def _on_irr(dur: float, data: bytes) -> bool:
+        segs_irr.append((dur, data))
+        pl = render_event_playlist(segs_irr, "TOK", ended=False)
+        targets.append(
+            next(l for l in pl.splitlines() if l.startswith("#EXT-X-TARGETDURATION:"))
+        )
+        return True
+
+    assert _remux_flv_to_mpegts(pipe_irr, _on_irr) == 4
+    assert targets == ["#EXT-X-TARGETDURATION:6"] * 4
+
+    # 2) Duration overflow: keys at 0, 2.0, 9.0 -> seg 1 exceeds 6.0s -> only seg 0 published.
+    times_long = [t * 500 for t in range(20)]  # 0..9.5s
+    flv_long = _build_synthetic_flv(
+        av, frame_times_ms=times_long, keyframe_ms={0, 2000, 9000}
+    )
+    pipe_long = _BytePipe(hass.loop)
+    await pipe_long.put(flv_long)
+    pipe_long.finish()
+    segs_long: list[tuple[float, bytes]] = []
+    assert (
+        _remux_flv_to_mpegts(
+            pipe_long,
+            lambda d, b: segs_long.append((d, b)) or True,
+            max_bytes=64 * 1024 * 1024,
+            max_segment_duration=6.0,
+        )
+        == 1
+    )
+    assert len(segs_long) == 1
+
+    # 3) Byte overflow on short 2s GOPs: cap stops mid-write before exceeding remaining budget.
+    peak_written = 0
+
+    class _TrackedBytesIO(io.BytesIO):
+        def write(self, data):
+            nonlocal peak_written
+            n = super().write(data)
+            peak_written = max(peak_written, self.tell())
+            return n
+
+    monkeypatch.setattr(h, "io", SimpleNamespace(BytesIO=_TrackedBytesIO))
+    flv_short = _build_synthetic_flv(
+        av,
+        frame_times_ms=[t * 200 for t in range(30)],
+        keyframe_ms={0, 2000, 4000},
+    )
+    pipe_short = _BytePipe(hass.loop)
+    await pipe_short.put(flv_short)
+    pipe_short.finish()
+    segs_short: list[tuple[float, bytes]] = []
+    # Measure seg 0 size first, then allow seg 0 + half of seg 1.
+    probe_segs: list[tuple[float, bytes]] = []
+    probe_pipe = _BytePipe(hass.loop)
+    await probe_pipe.put(flv_short)
+    probe_pipe.finish()
+    _remux_flv_to_mpegts(probe_pipe, lambda d, b: probe_segs.append((d, b)) or True)
+    budget = len(probe_segs[0][1]) + len(probe_segs[1][1]) // 2
+    peak_written = 0
+    assert (
+        _remux_flv_to_mpegts(
+            pipe_short,
+            lambda d, b: segs_short.append((d, b)) or True,
+            max_bytes=budget,
+            max_segment_duration=6.0,
+        )
+        == 1
+    )
+    assert peak_written <= max(len(segs_short[0][1]), budget - len(segs_short[0][1]))
 
 
 async def test_session_worker_with_fake_av_runs_upstream_and_remux(hass) -> None:
@@ -918,9 +1474,7 @@ async def test_media_source_progressive_event_hls_keeps_segment_zero(
     hass, archive_client
 ) -> None:
     """End-to-end MediaSource + real PyAV progressive FLV keeps segment 0 in EVENT playlist."""
-    av = _load_real_av()
-    if av is None or not _FLV_AV.is_file():
-        pytest.skip("Real PyAV or synthetic FLV bench fixture not present")
+    av = pytest.importorskip("av")
 
     from homeassistant.components.media_source.models import MediaSourceItem
 
@@ -930,8 +1484,14 @@ async def test_media_source_progressive_event_hls_keeps_segment_zero(
         async_stop_archive_streams,
     )
 
-    flv_bytes = _FLV_AV.read_bytes()
-    split_point = len(flv_bytes) // 3
+    frame_times = [t * 200 for t in range(70)]  # 0..13.8s -> 7 segments
+    flv_bytes = _build_synthetic_flv(
+        av,
+        frame_times_ms=frame_times,
+        keyframe_ms={0, 2000, 4000, 6000, 8000, 10000, 12000},
+        with_audio=True,
+    )
+    split_point = (len(flv_bytes) * 2) // 3
     allow_rest = asyncio.Event()
 
     async def _progressive_stream(request: web.Request) -> web.StreamResponse:
@@ -1001,6 +1561,7 @@ async def test_media_source_progressive_event_hls_keeps_segment_zero(
         pl_early = await (await archive_client.get(play.url)).text()
         assert "#EXT-X-MEDIA-SEQUENCE:0" in pl_early
         assert "#EXT-X-START:TIME-OFFSET=0.000,PRECISE=YES" in pl_early
+        assert "#EXT-X-TARGETDURATION:6" in pl_early
         assert "#EXT-X-ENDLIST" not in pl_early
         early_segs = [l for l in pl_early.splitlines() if ".ts?t=" in l]
         assert early_segs[0].startswith("0.ts?t=")
@@ -1019,6 +1580,7 @@ async def test_media_source_progressive_event_hls_keeps_segment_zero(
             await asyncio.sleep(0.02)
         assert "#EXT-X-ENDLIST" in pl_late
         assert "#EXT-X-MEDIA-SEQUENCE:0" in pl_late
+        assert "#EXT-X-TARGETDURATION:6" in pl_late
         late_segs = [l for l in pl_late.splitlines() if ".ts?t=" in l]
         assert len(late_segs) > len(early_segs)
         assert late_segs[0] == early_segs[0]

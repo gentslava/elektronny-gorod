@@ -1162,6 +1162,8 @@ def _patch_archive_start(
     created: list | None = None,
 ):
     """Синтетический старт `ArchiveHlsSession` без сети и PyAV."""
+    from contextlib import ExitStack
+
     from custom_components.elektronny_gorod.archive_hls import ArchiveHlsSession
 
     async def _noop_stop(self) -> None:
@@ -1182,11 +1184,17 @@ def _patch_archive_start(
         for idx in range(ready_segments):
             self.add_segment(2.0, f"SEG{idx}".encode())
 
-    return patch.multiple(
-        ArchiveHlsSession,
-        start=_fake_start,
-        stop=_noop_stop,
+    stack = ExitStack()
+    stack.enter_context(
+        patch.multiple(ArchiveHlsSession, start=_fake_start, stop=_noop_stop)
     )
+    stack.enter_context(
+        patch(
+            "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+            AsyncMock(return_value=True),
+        )
+    )
+    return stack
 
 
 def _archive_entry(hass, *, url: str | None = _ARCHIVE_URL):
@@ -1515,6 +1523,10 @@ async def test_resolve_archive_ready_timeout_falls_back_without_waiting_for_bloc
                 ArchiveHlsSession, "stop", autospec=True, side_effect=_slow_stop
             ),
             patch.object(ArchiveHlsSession, "start", lambda self, _url: self.touch()),
+            patch(
+                "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+                AsyncMock(return_value=True),
+            ),
             _patch_camera_resolve() as camera_resolve,
         ):
             play = await source.async_resolve_media(
@@ -1547,6 +1559,7 @@ async def test_resolve_archive_cancellation_propagates_without_live_fallback(
 
     stop_started = asyncio.Event()
     stop_release = asyncio.Event()
+    session_started = asyncio.Event()
 
     async def _slow_stop(self) -> None:
         self._closed = True
@@ -1555,12 +1568,20 @@ async def test_resolve_archive_cancellation_propagates_without_live_fallback(
         stop_started.set()
         await stop_release.wait()
 
+    def _start_and_signal(self, _url: str) -> None:
+        self.touch()
+        session_started.set()
+
     try:
         with (
             patch.object(
                 ArchiveHlsSession, "stop", autospec=True, side_effect=_slow_stop
             ),
-            patch.object(ArchiveHlsSession, "start", lambda self, _url: self.touch()),
+            patch.object(ArchiveHlsSession, "start", _start_and_signal),
+            patch(
+                "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+                AsyncMock(return_value=True),
+            ),
             _patch_camera_resolve() as camera_resolve,
         ):
             task = asyncio.create_task(
@@ -1568,6 +1589,7 @@ async def test_resolve_archive_cancellation_propagates_without_live_fallback(
                     _resolve_item(hass, entry, day_str=day_str)
                 )
             )
+            await session_started.wait()
             await asyncio.sleep(0)
             t0 = time.monotonic()
             task.cancel()
@@ -1601,6 +1623,7 @@ async def test_stop_archive_streams_aborts_in_flight_wait_and_awaits_background_
 
     stop_started = asyncio.Event()
     stop_release = asyncio.Event()
+    session_started = asyncio.Event()
 
     async def _slow_stop(self) -> None:
         self._closed = True
@@ -1609,12 +1632,20 @@ async def test_stop_archive_streams_aborts_in_flight_wait_and_awaits_background_
         stop_started.set()
         await stop_release.wait()
 
+    def _start_and_signal(self, _url: str) -> None:
+        self.touch()
+        session_started.set()
+
     try:
         with (
             patch.object(
                 ArchiveHlsSession, "stop", autospec=True, side_effect=_slow_stop
             ),
-            patch.object(ArchiveHlsSession, "start", lambda self, _url: self.touch()),
+            patch.object(ArchiveHlsSession, "start", _start_and_signal),
+            patch(
+                "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+                AsyncMock(return_value=True),
+            ),
             _patch_camera_resolve() as camera_resolve,
         ):
             resolve = asyncio.create_task(
@@ -1622,6 +1653,7 @@ async def test_stop_archive_streams_aborts_in_flight_wait_and_awaits_background_
                     _resolve_item(hass, entry, day_str=day_str)
                 )
             )
+            await session_started.wait()
             while not (hass.data.get(_ARCHIVE_IN_FLIGHT_KEY) or {}).get(entry.entry_id):
                 await asyncio.sleep(0)
             entry.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
@@ -1886,8 +1918,9 @@ async def test_archive_stream_is_not_shared_between_events_of_one_camera(
 async def test_stop_archive_streams_waits_for_resolve_holding_the_lock(
     hass, freezer
 ) -> None:
-    """Выгрузка во время resolve: ни KeyError, ни сессии у выгруженной записи."""
+    """Выгрузка при задержанном mint прерывает ожидание без блокировки 30с и без сессии/эфира."""
     import asyncio
+    import time
 
     from custom_components.elektronny_gorod.media_source import (
         _ARCHIVE_STREAMS_KEY,
@@ -1898,31 +1931,239 @@ async def test_stop_archive_streams_waits_for_resolve_holding_the_lock(
     requested = asyncio.Event()
     release = asyncio.Event()
 
-    async def _held_archive(*_args):
+    async def _hung_mint(*_args):
         requested.set()
         await release.wait()
         return _ARCHIVE_URL
 
-    coordinator.api.query_camera_archive_stream = AsyncMock(
-        side_effect=_held_archive
-    )
+    coordinator.api.query_camera_archive_stream = AsyncMock(side_effect=_hung_mint)
     freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
     created: list = []
 
-    with _patch_archive_start(created=created):
-        resolve = asyncio.ensure_future(
-            _source(hass).async_resolve_media(_resolve_item(hass, entry))
-        )
-        await requested.wait()
-        stop = asyncio.ensure_future(
-            async_stop_archive_streams(hass, entry.entry_id)
-        )
-        for _ in range(5):
-            await asyncio.sleep(0)
-        release.set()
-        await resolve
-        await stop
+    try:
+        with (
+            _patch_archive_start(created=created),
+            _patch_camera_resolve() as camera_resolve,
+        ):
+            resolve = asyncio.ensure_future(
+                _source(hass).async_resolve_media(_resolve_item(hass, entry))
+            )
+            await requested.wait()
+            entry.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
+            t0 = time.monotonic()
+            await asyncio.wait_for(
+                async_stop_archive_streams(hass, entry.entry_id), timeout=1.0
+            )
+            assert time.monotonic() - t0 < 0.5
+            with pytest.raises(Unresolvable):
+                await resolve
 
-    streams = hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
-    assert not [key for key in streams if key[0] == entry.entry_id]
-    assert created[0][0].alive is False
+        camera_resolve.assert_not_awaited()
+        assert created == []
+        streams = hass.data.get(_ARCHIVE_STREAMS_KEY) or {}
+        assert not [key for key in streams if key[0] == entry.entry_id]
+    finally:
+        release.set()
+
+
+async def test_delayed_mint_respects_readiness_budget_and_falls_back(
+    hass, monkeypatch
+) -> None:
+    """Задержанный mint (30с REST) укладывается в общий бюджет readiness и отдаёт эфир."""
+    import asyncio
+    import time
+
+    monkeypatch.setattr(
+        "custom_components.elektronny_gorod.media_source._ARCHIVE_READY_TIMEOUT_SEC",
+        0.05,
+    )
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    release = asyncio.Event()
+
+    async def _slow_mint(*_args):
+        await release.wait()
+        return _ARCHIVE_URL
+
+    coordinator.api.query_camera_archive_stream = AsyncMock(side_effect=_slow_mint)
+    created: list = []
+    try:
+        with (
+            _patch_archive_start(created=created),
+            _patch_camera_resolve() as camera_resolve,
+        ):
+            t0 = time.monotonic()
+            play = await _source(hass).async_resolve_media(
+                _resolve_item(hass, entry, day_str=day_str)
+            )
+            assert time.monotonic() - t0 < 0.5
+
+        camera_resolve.assert_awaited_once()
+        assert play.url == _LIVE_PLAY_URL
+        assert created == []
+    finally:
+        release.set()
+
+
+async def test_missing_pyav_requirement_failure_falls_back_to_live_view(
+    hass, freezer
+) -> None:
+    """Если HA не может обеспечить PyAV (`stream` requirements), безопасный fallback на эфир."""
+    coordinator, entry = _archive_entry(hass)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+
+    with (
+        patch(
+            "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+            AsyncMock(return_value=False),
+        ),
+        _patch_camera_resolve() as camera_resolve,
+    ):
+        play = await _source(hass).async_resolve_media(_resolve_item(hass, entry))
+
+    assert play.url == _LIVE_PLAY_URL
+    camera_resolve.assert_awaited_once()
+    coordinator.api.query_camera_archive_stream.assert_not_awaited()
+    assert "stream" not in hass.config.components
+
+
+async def test_pyav_ensure_abort_and_budget_exhaustion(hass, monkeypatch) -> None:
+    """Выгрузка при проверке PyAV даёт Unresolvable; исчерпанный бюджет уходит в эфир."""
+    import asyncio
+
+    from custom_components.elektronny_gorod.media_source import (
+        async_stop_archive_streams,
+    )
+
+    # 1) Unload while awaiting PyAV requirements -> Unresolvable without mint/live.
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    pyav_started = asyncio.Event()
+    pyav_release = asyncio.Event()
+
+    async def _slow_pyav(_hass):
+        pyav_started.set()
+        await pyav_release.wait()
+        return True
+
+    try:
+        with (
+            patch(
+                "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+                side_effect=_slow_pyav,
+            ),
+            _patch_camera_resolve() as camera_resolve,
+        ):
+            resolve = asyncio.create_task(
+                _source(hass).async_resolve_media(
+                    _resolve_item(hass, entry, day_str=day_str)
+                )
+            )
+            await pyav_started.wait()
+            entry.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
+            await async_stop_archive_streams(hass, entry.entry_id)
+            with pytest.raises(Unresolvable):
+                await resolve
+        camera_resolve.assert_not_awaited()
+        coordinator.api.query_camera_archive_stream.assert_not_awaited()
+    finally:
+        pyav_release.set()
+
+    # 2) PyAV consumes full readiness budget -> falls back without minting.
+    monkeypatch.setattr(
+        "custom_components.elektronny_gorod.media_source._ARCHIVE_READY_TIMEOUT_SEC",
+        0.02,
+    )
+    coordinator2, entry2, day_str2 = _realtime_archive_entry(hass)
+
+    async def _budget_eating_pyav(_hass):
+        await asyncio.sleep(0.03)
+        return True
+
+    with (
+        patch(
+            "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+            side_effect=_budget_eating_pyav,
+        ),
+        _patch_camera_resolve() as camera_resolve2,
+    ):
+        play = await _source(hass).async_resolve_media(
+            _resolve_item(hass, entry2, day_str=day_str2)
+        )
+    assert play.url == _LIVE_PLAY_URL
+    camera_resolve2.assert_awaited_once()
+    coordinator2.api.query_camera_archive_stream.assert_not_awaited()
+
+
+async def test_media_source_budget_helpers_stopping_and_by_id_cleanup(
+    hass, freezer
+) -> None:
+    """Граничные ветки `_await_budgeted`, `is_stopping`, неготовой сессии и `by_id` stop."""
+    import asyncio
+    import time
+
+    from custom_components.elektronny_gorod.archive_hls import (
+        ArchiveHlsSession,
+        archive_sessions_by_id,
+    )
+    from custom_components.elektronny_gorod.media_source import (
+        _ARCHIVE_STREAMS_KEY,
+        async_stop_archive_streams,
+    )
+
+    source = _source(hass)
+
+    # 1) `_await_budgeted` with pre-set cancel_event or expired deadline closes coro cleanly.
+    preset = asyncio.Event()
+    preset.set()
+
+    async def _never():
+        return 1
+
+    assert await source._await_budgeted(_never(), preset, time.monotonic() + 5.0) == (
+        "aborted",
+        None,
+    )
+    assert await source._await_budgeted(
+        _never(), asyncio.Event(), time.monotonic() - 1.0
+    ) == ("timeout", None)
+
+    # 2) Unready alive session in `streams` is detached/stopped before fresh mint.
+    coordinator, entry = _archive_entry(hass)
+    freezer.move_to(dt_util.utc_from_timestamp(_LIVE_EVENT_END - 5))
+    unready = ArchiveHlsSession(
+        hass,
+        entry_id=entry.entry_id,
+        camera_id=_INTERCOM_ID,
+        event_id="3001",
+        coordinator=coordinator,
+    )
+    hass.data.setdefault(_ARCHIVE_STREAMS_KEY, {})[unready.key] = unready
+
+    created: list = []
+    with _patch_archive_start(created=created):
+        play = await source.async_resolve_media(_resolve_item(hass, entry))
+    assert play.url.startswith("/api/elektronny_gorod/archive/")
+    assert unready.alive is False
+    await created[0][0].stop()
+
+    # 3) `async_stop_archive_streams` also stops sessions present only in `by_id`.
+    orphan = ArchiveHlsSession(
+        hass,
+        entry_id=entry.entry_id,
+        camera_id=_INTERCOM_ID,
+        event_id="orphan",
+        coordinator=coordinator,
+    )
+    archive_sessions_by_id(hass)[orphan.session_id] = orphan
+    await async_stop_archive_streams(hass, entry.entry_id)
+    assert orphan.alive is False
+
+    # 4) Stopping HA rejects new archive resolve without live fallback.
+    with (
+        patch.object(
+            type(hass), "is_stopping", new_callable=lambda: property(lambda _s: True)
+        ),
+        _patch_camera_resolve() as camera_resolve,
+        pytest.raises(Unresolvable, match="Unknown media item"),
+    ):
+        await source.async_resolve_media(_resolve_item(hass, entry))
+    camera_resolve.assert_not_awaited()
