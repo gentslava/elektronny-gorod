@@ -23,7 +23,7 @@ UA — load-bearing fingerprint). Поэтому ВЕСЬ refresh идёт **п�
 """
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping, Sequence
 from datetime import timedelta
 import json
 from typing import Any, TypeVar
@@ -727,13 +727,15 @@ def _collect_intercom_cameras(
 def _append_camera_entries(
     cameras: list[dict[str, Any]],
     place_id: str,
-    raw_cameras: list[dict[str, Any]],
+    raw_cameras: Sequence[object],
     *,
     source: str,
     hidden_ids: set[str] | None = None,
 ) -> None:
-    """Append place or public camera payloads using their shared normalized shape."""
+    """Normalize place or public camera records and skip malformed rows."""
     for cam in raw_cameras:
+        if not isinstance(cam, dict):
+            continue
         cid = cam.get("externalCameraId") or cam.get("id")
         cameras.append({
             "id": cid,

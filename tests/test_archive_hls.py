@@ -288,6 +288,37 @@ def test_remux_fake_av_rebases_grows_and_handles_audio_variants(hass) -> None:
     assert emitted[1][1].startswith(b"video:2000:2000;video:3000:3000;")
 
 
+def test_remux_rotates_only_at_an_accepted_video_keyframe(hass, monkeypatch) -> None:
+    from custom_components.elektronny_gorod import archive_hls
+
+    video = SimpleNamespace(
+        index=0, type="video", name="h264", time_base=Fraction(1, 1000)
+    )
+    packets = [
+        _pkt(video, 1000, keyframe=True),
+        _pkt(video, 3000),
+        _pkt(video, 3000, keyframe=True),  # Duplicate DTS. Discard this keyframe.
+        _pkt(video, 3200),
+        _pkt(video, 3500, keyframe=True),
+        _pkt(video, 4000),
+    ]
+    fake_av, _, _ = _fake_av_module(
+        video_streams=[video], audio_streams=[], packets=packets
+    )
+    monkeypatch.setattr(archive_hls, "_import_av", lambda: fake_av)
+    emitted: list[tuple[float, bytes]] = []
+
+    def collect_segment(duration: float, data: bytes) -> bool:
+        emitted.append((duration, data))
+        return True
+
+    assert _remux_flv_to_mpegts(_BytePipe(hass.loop), collect_segment) == 2
+    assert emitted == [
+        (2.5, b"video:0:0;video:2000:2000;video:2200:2200;"),
+        (1.5, b"video:2500:2500;video:3000:3000;"),
+    ]
+
+
 def test_remux_fake_av_mp3_and_unsupported_codecs(hass) -> None:
     tb = Fraction(1, 1000)
     vs = SimpleNamespace(
@@ -442,6 +473,54 @@ def test_remux_fake_av_rejects_missing_or_non_h264_video_and_handles_abort(hass)
         _remux_flv_to_mpegts(_BytePipe(hass.loop), lambda _d, _b: True)
     assert fake_in.closed is True
     assert outs[0].closed is True
+
+
+@pytest.mark.parametrize("fail_at", ["open", "video", "audio"])
+def test_remux_releases_output_resources_after_setup_fails(
+    hass, monkeypatch, fail_at
+) -> None:
+    from custom_components.elektronny_gorod import archive_hls
+
+    buffer = io.BytesIO()
+    monkeypatch.setattr(archive_hls, "io", SimpleNamespace(BytesIO=lambda: buffer))
+    time_base = Fraction(1, 1000)
+    video = SimpleNamespace(type="video", name="h264", time_base=time_base)
+    audio = SimpleNamespace(type="audio", name="mp3", time_base=time_base)
+    input_container = MagicMock(streams=SimpleNamespace(video=[video], audio=[audio]))
+    setup_error = ValueError("MPEG-TS output setup failed")
+
+    def add_stream_from_template(stream):
+        if stream.type == fail_at:
+            raise setup_error
+        return SimpleNamespace(template=stream)
+
+    output = SimpleNamespace(
+        add_stream_from_template=add_stream_from_template,
+        close=MagicMock(side_effect=RuntimeError("MPEG-TS output close failed")),
+    )
+
+    def open_container(_target, mode, **_kwargs):
+        if mode == "r":
+            return input_container
+        if fail_at == "open":
+            raise setup_error
+        return output
+
+    fake_av = SimpleNamespace(open=open_container)
+    monkeypatch.setattr(archive_hls, "_import_av", lambda: fake_av)
+    try:
+        with pytest.raises(ValueError) as raised:
+            _remux_flv_to_mpegts(_BytePipe(hass.loop), MagicMock())
+
+        assert raised.value is setup_error
+        input_container.close.assert_called_once_with()
+        assert buffer.closed
+        if fail_at == "open":
+            output.close.assert_not_called()
+        else:
+            output.close.assert_called_once_with()
+    finally:
+        buffer.close()
 
 
 @pytest.mark.parametrize("rotate", [True, False], ids=["rotation", "tail"])

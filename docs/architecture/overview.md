@@ -218,11 +218,12 @@ async_unload_entry:
 | Слой | Файлы | Ответственность |
 |---|---|---|
 | **HA integration interface** | `__init__.py`, `config_flow.py` | вход и выход в HA, миграции, регистрация сервисов, синхронизация видимости сущностей |
-| **Domain coordinator** | `coordinator.py` | построение `coordinator.data`, границы ошибок запросов по адресу и сохранение доступных данных при частичном сбое |
+| **Domain coordinator** | `coordinator.py` | построение `coordinator.data`, границы ошибок запросов по адресу и пропуск некорректных строк в списках личных и общедомовых камер |
 | **Entity migration** | `entity_migration.py` | stable `unique_id` для camera/lock (legacy → new) |
 | **API client** | `api.py` | REST-обёртка над `myhome.proptech.ru`: coordinator polling, typed/sanitized history, H264 live stream, push bind и `mint_sip_device` (A-81) |
 | **History subsystem** | `history.py` | отдельный 5-minute poll: page-0 baseline на каждый source, bounded per-stream dedup, Store schema v1, config-entry-scoped dispatcher, opt-in camera polling и форматы постоянных ID для регистрации, миграции и выбора источника |
 | **History browse** | `history_ws.py`, `frontend/src/eg-event-history-card.ts` | авторизованный read-only browse предыдущих accepted/missed calls по выбранной EventEntity; on-demand pagination без replay в state/automation; partial refresh сохраняет недоступные feeds |
+| **Archive playback** | `media_source.py`, `archive_hls.py`, `clip_proxy.py` | подготовка архива и подписанные ссылки на медиа. Media Source проверяет регистрацию архивной сессии после ожидания сегмента и использует эфир при вытеснении. Remux владеет контейнером и буфером MPEG-TS от открытия до освобождения ресурсов |
 | **Transport** | `http.py` | shared HA `ClientSession`, headers, conditional Bearer с узким pre-auth allowlist |
 | **Logging redaction** | `_logging.py` | `redact()` для headers/dict, `redact_path()` для auth URLs |
 | **External integration** | `go2rtc.py` | `Go2RtcClient` для sanitized stream/preload API, producer health и RTSP URL; raw producer source не пересекает read/diagnostic boundary; validation/audio helpers остаются отдельными контрактами |
