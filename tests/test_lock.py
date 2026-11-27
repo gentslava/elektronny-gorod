@@ -146,6 +146,7 @@ async def test_unlock_reports_opened_door(hass: HomeAssistant, mock_api):
         "lock", "unlock", {"entity_id": eid}, blocking=True
     )
 
+    await hass.async_block_till_done()
     assert received == [str(AC_ID)]
 
 
@@ -161,6 +162,7 @@ async def test_failed_unlock_does_not_report(hass: HomeAssistant, mock_api):
             "lock", "unlock", {"entity_id": eid}, blocking=True
         )
 
+    await hass.async_block_till_done()
     assert received == []
 
 

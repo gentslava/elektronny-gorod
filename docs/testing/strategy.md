@@ -1,4 +1,4 @@
-Status: Active Owner: QA / Testing Agent Last reviewed: 2026-11-26 (добавлено покрытие ServicePipe / WAF block A-92; живые счётчики по-прежнему в CI — ADR-0015 §7)
+Status: Active Owner: QA / Testing Agent Last reviewed: 2026-11-27 (Ruff, отчёт по ветвям и совместимость ID истории)
 
 Source files:
 - `tests/**` (test-модули + `conftest.py`)
@@ -55,6 +55,8 @@ Quality gates:
 | CI | `python-tests.yaml`: pytest matrix для минимальной и текущей HA-линии + coverage artifact |
 | Website CI | `website.yml`: typecheck + Vitest + production build перед GitHub Pages deploy |
 | Coverage | Каждый модуль пакета выше 95% — это держит шаг CI «Enforce the per-module coverage floor» (порог `FLOOR` в `python-tests.yaml`): агрегатного было бы мало — модуль, упавший до нуля, прячется за общей цифрой. Текущие проценты — в отчёте coverage последнего CI-прогона (лог шага и artifact `coverage-*`) или канонической командой ниже |
+
+Два сценария таймаута EVENT HLS в `test_media_source.py` задают истечение бюджета явно. Они проверяют откат на эфир до завершения фонового останова и отсутствие второго запроса URL архива после ожидания общей блокировки.
 
 Остающиеся gap-и: нет полностью автоматизированного live-теста против оператора и физического домофона; часть широкого REST API покрыта точечными контрактными тестами. Live/PCAP evidence хранится отдельно в `research/intercom-call-probe/`.
 
@@ -162,6 +164,7 @@ External RTSP options (`test_config_flow_keep_warm.py`): both flags default fals
 - `HistoryManager` persists only ID lists, cancels interval on unload and skips overlapping ticks instead of queueing API cycles.
 - Access/camera EventEntity routing uses config-entry-scoped signals, stable IDs, allowlisted state attrs and ru/en translations for every declared event type.
 - Browse WebSocket verifies EventEntity read permission, config-entry/source binding, page bounds and exact sanitized previous-page response.
+- The entity registered by HA setup can be browsed under its existing ID. The address and the visible events stay scoped to that entity.
 - Frontend model tests exact command shape, untrusted/cross-entity response rejection, overlap dedup, partial-refresh feed preservation, date groups, time formatting and RU/EN labels.
 
 ### 7. go2rtc and external RTSP manager
@@ -209,6 +212,7 @@ Mocked tests prove policy and orchestration, not end-to-end playback. Before mer
 - Call-ID guards, held caller switching, FCM-ended во время живого разговора.
 - Отбой на панели (A-120): держимый вызов `200 OK` → `ACK` → `BYE`, `BYE` уходит и без `ACK` и при отмене/сбое; повтор `200 OK` с удвоением интервала (T1, 2·T1, …; снимается с таймаутов ожидания, не с часов); ACK чужого Call-ID ответ не подтверждает; `487` не уходит на CANCEL после нашего `200 OK`. Тихий release — при выгрузке, FCM `ended`, смене звонящего и держимом плече без вызова.
 - Открытие двери (A-120): успешный `lock.unlock` через `SIGNAL_DOOR_OPENED` гасит вызов той же панели, другой панели и отказ оператора — не трогает; открытие, дождавшееся лока при звонке другой панели, ничего не меняет; звонок другой панели во время ожидания ACK не теряется, дубль `ring` снимаемого вызова его не оживляет; сбой сети при отбое не оставляет экран звонить. Hold, завершившийся после звонка другой панели или FCM `ended`, отпускает устаревшее плечо тихо и не мешает hold нового вызова; ответ без held-плеча оставляет разговор за принятым вызовом. Hold, завершившийся после истечения окна ответа, тоже отпускает плечо тихо. `ring` во время ответа (подъём моста, `accept`, fallback) игнорируется: принимаемое плечо не отвязывается и не снимается, «Разговор» идёт с идентификаторами принятого вызова; после прерванного ответа звонки снова принимаются.
+- При проверке сигнала открытия замка `test_lock.py` дожидается обработчиков HA после вызова сервиса. Проверка учитывает и отправленный сигнал, и его отсутствие при отказе оператора.
 - RTP G.711, AudioBridge downlink, UplinkSink/WebSocket uplink.
 - One-build-per-call, concurrent first-open dedup, shared producer и teardown.
 
@@ -234,7 +238,9 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 - **turbojpeg mock** в `tests/conftest.py` — `pytest-homeassistant-custom-component` не тянет optional HA-extras, нужно для `homeassistant.components.camera.img_util`.
 - **Path-filter на push и pull_request** — docs-only коммиты CI не запускают.
 - **Отдельный job `pyright`** — статический анализ не смешан с прогоном тестов: у него своя установка (HA-типы берутся из ядра, поэтому нужна та же PHC, что в current-job) и своё условие падения. pyright ставится через pip, а не сторонним экшеном.
-- **Coverage artifact** с уникальным именем `coverage-py<v>-phc<v>` (artifact@v4 требует уникальности в matrix).
+- **Ruff** отдельным job проверяет production-код на изменяемые значения аргументов по умолчанию, замыкания на переменные цикла и отдельные блокирующие вызовы в async-функциях. Точный набор и версия закреплены в workflow.
+- **Проверка сложности Python** внутри Ruff job сравнивает точный head PR с merge-base. Новый C901 от 10 или рост существующей функции до этого уровня и выше дают ошибку. Высокая функция с прежней или меньшей оценкой проходит. Сценарии самого гейта проверяются на временных Git-репозиториях.
+- **Coverage artifact** `coverage-py<v>-phc<v>` содержит XML и HTML. В `htmlcov/index.html` видны непокрытые переходы. Помодульный порог по-прежнему проверяет `line-rate`; покрытие ветвей используется при ревью.
 
 ## Mock-стратегия
 

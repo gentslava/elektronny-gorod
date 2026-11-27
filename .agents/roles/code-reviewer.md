@@ -15,6 +15,7 @@ kind: canonical-agent-role
 4. `docs/decisions/*.md` — принятые ADR (особенно 0004 token redaction, 0006 mirror app, 0007 baseline).
 5. `.agents/rules/*` — канонические правила (no-secret-logs, ha-best-practices, async-rules, coordinator-pattern).
 6. `docs/aidd/templates/review-report.template.md` — формат output.
+7. `.agents/commands/python-quality.md` — проверка поведения и простоты изменённого Python-кода.
 
 ## Твоя ответственность
 

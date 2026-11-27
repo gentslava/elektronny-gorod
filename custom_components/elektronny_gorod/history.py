@@ -34,6 +34,21 @@ def history_signal(entry_id: str) -> str:
     return f"{SIGNAL_HISTORY_EVENT}_{entry_id}"
 
 
+def account_history_unique_id(account_id: str, subscriber_id: str) -> str:
+    """Return the stable registry ID for the legacy account history stream."""
+    return f"{DOMAIN}_event_history_account_{account_id}_{subscriber_id}"
+
+
+def place_history_unique_id(account_id: str, subscriber_id: str, place_id: str) -> str:
+    """Return the stable registry ID for one place-history stream."""
+    return f"{DOMAIN}_event_history_place_{account_id}_{subscriber_id}_{place_id}"
+
+
+def access_history_unique_id(place_id: str, access_control_id: str) -> str:
+    """Return the stable registry ID for one intercom-history stream."""
+    return f"{DOMAIN}_event_history_access_{place_id}_{access_control_id}"
+
+
 def camera_history_unique_id(camera_id: str) -> str:
     """Return the stable registry ID for one camera-history stream."""
     return f"{DOMAIN}_event_history_camera_{camera_id}"

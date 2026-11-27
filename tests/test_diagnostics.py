@@ -247,6 +247,7 @@ async def test_diagnostics_exposes_last_waf_block_alongside_counts(
 )
 async def test_diagnostics_redacts_go2rtc_base_url_secrets(
     hass: HomeAssistant,
+    freezer,
     location: str,
     raw_url: str | int,
     privacy_sentinels: tuple[str, ...],
@@ -259,7 +260,11 @@ async def test_diagnostics_redacts_go2rtc_base_url_secrets(
     else:
         options["go2rtc_base_url"] = raw_url
 
-    entry = MockConfigEntry(domain=DOMAIN, title="t", data=data, options=options)
+    # Numeric sentinels must not match generated metadata in the full report.
+    freezer.move_to("2026-01-01T00:00:00Z")
+    entry = MockConfigEntry(
+        domain=DOMAIN, entry_id="redaction-test", title="t", data=data, options=options
+    )
     entry.add_to_hass(hass)
 
     diag = await async_get_config_entry_diagnostics(hass, entry)

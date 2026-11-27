@@ -221,7 +221,7 @@ async_unload_entry:
 | **Domain coordinator** | `coordinator.py` | оркестрация refresh, snapshot `coordinator.data` |
 | **Entity migration** | `entity_migration.py` | stable `unique_id` для camera/lock (legacy → new) |
 | **API client** | `api.py` | REST-обёртка над `myhome.proptech.ru`: coordinator polling, typed/sanitized history, H264 live stream, push bind и `mint_sip_device` (A-81) |
-| **History subsystem** | `history.py` | отдельный 5-minute poll: page-0 baseline на каждый source, bounded per-stream dedup, Store schema v1, config-entry-scoped dispatcher и opt-in camera polling |
+| **History subsystem** | `history.py` | отдельный 5-minute poll: page-0 baseline на каждый source, bounded per-stream dedup, Store schema v1, config-entry-scoped dispatcher, opt-in camera polling и форматы постоянных ID для регистрации, миграции и выбора источника |
 | **History browse** | `history_ws.py`, `frontend/src/eg-event-history-card.ts` | авторизованный read-only browse предыдущих accepted/missed calls по выбранной EventEntity; on-demand pagination без replay в state/automation; partial refresh сохраняет недоступные feeds |
 | **Transport** | `http.py` | shared HA `ClientSession`, headers, conditional Bearer с узким pre-auth allowlist |
 | **Logging redaction** | `_logging.py` | `redact()` для headers/dict, `redact_path()` для auth URLs |

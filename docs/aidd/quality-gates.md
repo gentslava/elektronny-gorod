@@ -1,4 +1,4 @@
-Status: Active Owner: Validator Agent Last reviewed: 2026-08-14 (gate owners and commands linked to canonical `.agents/**` contracts)
+Status: Active Owner: Validator Agent Last reviewed: 2026-11-27 (UB-mode для Python review и Ruff в CI)
 
 Source files:
 - весь репозиторий
@@ -109,7 +109,7 @@ Used by agents:
 
 | Поле | Значение |
 |---|---|
-| Purpose | Diff проверен по 5 осям |
+| Purpose | Diff проверен по 5 осям. Для Python применять [проверку поведения и простоты](../../.agents/commands/python-quality.md#при-независимом-ревью). |
 | Owner | независимый от implementer-а code-reviewer agent / human reviewer |
 | Required evidence | `CANDIDATE_FROZEN`; reviewer identity/independence; base/head/tree; read-only report; новая candidate-bound аттестация каждого обязательного HA/security/QA reviewer-а по routing matrix |
 | Pass | correctness ✓ readability ✓ architecture ✓ security ✓ performance ✓; Critical/Important findings закрыты; все обязательные verdicts относятся к одному текущему tuple |
@@ -145,7 +145,7 @@ Used by agents:
 |---|---|
 | Purpose | Remote checks подтвердили уже опубликованный и одобренный candidate |
 | Owner | Validator / DevOps Agent |
-| Required evidence | Required GitHub checks текущего head SHA: Python Tests, pyright (static analysis), Validate with hassfest, HACS Action; PR Pre-Release — когда workflow применим. Публикация пререлиза вынесена в `prerelease-publish.yaml` на событии `workflow_run` и **в PR checks не отображается** — её исход проверяется отдельно во вкладке Actions |
+| Required evidence | Required GitHub checks текущего head SHA: Python Tests (pytest, Ruff с проверкой сложности в PR, pyright), Validate with hassfest, HACS Action; PR Pre-Release — когда workflow применим. Публикация пререлиза вынесена в `prerelease-publish.yaml` на событии `workflow_run` и **в PR checks не отображается** — её исход проверяется отдельно во вкладке Actions |
 | Pass | все применимые required jobs success; корректно skipped conditional job допустим |
 | Fail | failure/cancelled/pending required job; checks относятся к старому head |
 | Stop | не merge-ить и не релизить до зелёного CI текущего candidate |

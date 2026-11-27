@@ -10,6 +10,7 @@ on:
       - 'pytest.ini'
       - 'requirements_test.txt'
       - 'pyrightconfig.json'
+      - '.agents/hooks/check-python-complexity.py'
       - '.github/workflows/python-tests.yaml'
   pull_request:
     paths:
@@ -18,6 +19,7 @@ on:
       - 'pytest.ini'
       - 'requirements_test.txt'
       - 'pyrightconfig.json'
+      - '.agents/hooks/check-python-complexity.py'
       - '.github/workflows/python-tests.yaml'
   workflow_dispatch:
 
@@ -28,8 +30,8 @@ on:
 env:
   PHC_CURRENT: '0.13.362'
 
-# На уровне workflow, а не одного job: тесты и pyright одинаково делают
-# checkout и ставят зависимости с PyPI, и обоим нужен только read. Умолчание
+# На уровне workflow, а не одного job: все job-ы делают checkout и ставят
+# зависимости с PyPI, и всем нужен только read. Умолчание
 # в настройках репозитория стоит на запись, а на `push: master` и
 # `workflow_dispatch` read-only токен ничем не форсируется — то есть пакет,
 # исполнившийся на установке, получил бы право писать в репозиторий.
@@ -37,6 +39,39 @@ permissions:
   contents: read
 
 jobs:
+  ruff:
+    name: ruff (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python 3.14
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+
+      - name: Install Ruff
+        run: python -m pip install ruff==0.17.5
+
+      - name: Run Ruff
+        run: |
+          ruff check --isolated --target-version py314 \
+            --select B006,B023,ASYNC221,ASYNC230,ASYNC251 \
+            custom_components/elektronny_gorod
+
+      - name: Test Python complexity gate
+        run: python tests/test_python_complexity_gate.py
+
+      - name: Check Python complexity delta
+        if: github.event_name == 'pull_request'
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: python .agents/hooks/check-python-complexity.py "$PR_BASE_SHA" "$PR_HEAD_SHA"
+
   pytest:
     name: pytest (py${{ matrix.python-version }}, HA ${{ matrix.ha-label }})
     runs-on: ubuntu-latest
@@ -70,14 +105,17 @@ jobs:
         run: |
           pytest tests/ -v \
             --cov=custom_components.elektronny_gorod \
+            --cov-branch \
             --cov-report=term-missing \
-            --cov-report=xml
+            --cov-report=xml \
+            --cov-report=html:htmlcov
 
       # Правило Silver `test-coverage` читается помодульно: «above 95% for all
       # integration modules». Агрегатного порога для него мало — модуль, упавший
       # до нуля, прячется за общей цифрой, и заявка в манифесте становится
       # ложной молча. ADR-0010 D-05 требует не заявлять уровень выше
       # подтверждённого гейтами, поэтому гейт проверяет ровно то, что заявлено.
+      # Ветви видны в отчётах, порог по-прежнему проверяет только строки.
       - name: Enforce the per-module coverage floor
         run: |
           python - <<'PY'
@@ -117,7 +155,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: coverage-py${{ matrix.python-version }}-phc${{ matrix.phc-version }}
-          path: coverage.xml
+          path: |
+            coverage.xml
+            htmlcov/
           if-no-files-found: ignore
           retention-days: 14
 

@@ -67,7 +67,7 @@ test "$PR_HEAD_SHA" = "$CANDIDATE_SHA"
 gh pr checks --watch
 ```
 
-В итоговом отчёте отдельно подтвердить оба Python Tests jobs, hassfest, HACS и применимый PR Pre-Release вместе с его стадией публикации. SHA mismatch, pending, failure или cancelled не закрывают `CI_GREEN`.
+В итоговом отчёте отдельно подтвердить каждую применимую проверку из `CI_GREEN` в `docs/aidd/quality-gates.md`, включая стадию публикации пререлиза. SHA mismatch, pending, failure или cancelled не закрывают `CI_GREEN`.
 
 ### 4. Migration
 
