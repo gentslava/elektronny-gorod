@@ -23,10 +23,10 @@ UA — load-bearing fingerprint). Поэтому ВЕСЬ refresh идёт **п�
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
 from datetime import timedelta
 import json
-from typing import Any
+from typing import Any, TypeVar
 
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry, ConfigEntryState
@@ -49,6 +49,8 @@ from .const import (
 )
 from .helpers import dedupe_by_id
 from .user_agent import UserAgent
+
+_T = TypeVar("_T")
 
 UPDATE_INTERVAL = timedelta(minutes=5)
 
@@ -221,26 +223,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         ⚠️ Race-safety: serial по places (см. module docstring).
         """
         self._waf_blocked_this_tick = False
-        try:
-            places = await self._api.query_places()
-        except Exception as ex:  # noqa: BLE001
-            if isinstance(ex, ServicePipeBlockError):
-                self._record_waf_block(ex)
-                raise UpdateFailed("places: ServicePipeBlockError") from ex
-            # 401 повтором не лечится: токен отозван, и ждать нечего. Home
-            # Assistant по этому исключению сам предложит войти заново, а
-            # раньше запись просто уходила в «недоступна» без объяснения.
-            if is_unauthorized(ex):
-                LOGGER.warning("Оператор отверг токен — нужна повторная авторизация")
-                raise ConfigEntryAuthFailed("token rejected by operator") from ex
-            # Своего лога здесь быть не должно: ядро само пишет об отказе
-            # один раз на переходе и о возвращении данных
-            # (`Error fetching … data` / `Fetching … data recovered` в
-            # `update_coordinator.py`). Прежний `LOGGER.exception` дублировал
-            # его трейсбеком на КАЖДОМ цикле — под три сотни за сутки молчания
-            # оператора, ровно против правила Silver `log-when-unavailable`.
-            # Тип, а не текст: в тексте оператора может быть адрес или id.
-            raise UpdateFailed(f"places: {type(ex).__name__}") from ex
+        places = await self._fetch_places()
 
         if not places:
             # Тоже один раз: у заблокированного аккаунта список пуст сутками.
@@ -257,81 +240,14 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         screens_failed_places: set[str] = set()
 
         for _, place_id in self._iter_place_ids(places):
-            # Установка `place_id` в shared UA — критично сделать ДО любого
-            # запроса для этого place. Поскольку refresh serial — race нет.
-            self._api.http.user_agent.place_id = place_id
-
-            try:
-                balance = await self._fetch_balance(place_id)
-            except Exception as ex:  # noqa: BLE001
-                self._note_failure("Баланс", place_id, ex)
-            else:
-                self._note_success("Баланс", place_id)
-                if balance:
-                    balances.append(balance)
-
-            # Pre-fetch shared per-place data (A-61): screens + access_controls
-            # нужны и для cameras (для hidden), и для locks. Раньше каждый
-            # collector делал свой fetch — двойной HTTP. Теперь один раз per
-            # place, передаём в collectors как параметры.
-            # Разбор — под тем же фронтом, что и запрос: настройки видимости
-            # приходят от оператора, и форма, на которой разбор бросает,
-            # должна садиться на этот фронт, а не улетать наружу — обработчик
-            # неожиданных исключений в ядре пишет трейсбек безусловно, без
-            # ограничения по фронту. Остальные отклонения формы
-            # `_extract_hidden_ids` вытягивает сам, отмечая на `debug`: по
-            # строке на запрошенный раздел на каждый цикл, дедупа там нет.
-            try:
-                screens = await self._api.query_screens_settings(place_id)
-                hidden_cam_ids, cam_usable = self._extract_hidden_ids(
-                    screens, "PUBLIC_CAMERAS"
-                )
-                hidden_entrance_ids, ent_usable = self._extract_hidden_ids(
-                    screens, "ACCESS_CONTROLS"
-                )
-            except Exception as ex:  # noqa: BLE001
-                self._note_failure("Настройки экранов", place_id, ex)
-                screens_failed_places.add(str(place_id))
-                hidden_cam_ids, hidden_entrance_ids = set(), set()
-            else:
-                if cam_usable and ent_usable:
-                    self._note_success("Настройки экранов", place_id)
-                else:
-                    screens_failed_places.add(str(place_id))
-            try:
-                access_controls = await self._api.query_access_controls(place_id)
-            except Exception as ex:  # noqa: BLE001
-                self._note_failure("Домофоны", place_id, ex)
-                access_controls = []
-            else:
-                self._note_success("Домофоны", place_id)
-
-            try:
-                cameras.extend(await self._collect_cameras_for_place(
-                    place_id, access_controls, hidden_cam_ids, hidden_entrance_ids
-                ))
-            except Exception as ex:  # noqa: BLE001
-                self._note_failure("Сборка камер", place_id, ex)
-            else:
-                self._note_success("Сборка камер", place_id)
-
-            try:
-                locks.extend(self._collect_locks_for_place(
-                    place_id, access_controls, hidden_entrance_ids
-                ))
-            except Exception as ex:  # noqa: BLE001
-                self._note_failure("Замки", place_id, ex)
-            else:
-                self._note_success("Замки", place_id)
-
-            try:
-                dnd_items = await self._api.query_dnd_settings(place_id)
-            except Exception as ex:  # noqa: BLE001
-                self._note_failure("Режим «не беспокоить»", place_id, ex)
-            else:
-                self._note_success("Режим «не беспокоить»", place_id)
-                if dnd_items:
-                    dnd[str(place_id)] = dnd_items
+            await self._refresh_place(
+                place_id,
+                balances=balances,
+                cameras=cameras,
+                locks=locks,
+                dnd=dnd,
+                screens_failed_places=screens_failed_places,
+            )
 
         cameras = dedupe_by_id(cameras) if cameras else []
         if not self._waf_blocked_this_tick:
@@ -352,6 +268,133 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         if screens_failed_places:
             result["screens_failed_places"] = sorted(screens_failed_places)
         return result
+
+    async def _fetch_places(self) -> list[dict[str, Any]]:
+        """Fetch top-level subscriber places and classify fatal tick failures."""
+        try:
+            return await self._api.query_places()
+        except Exception as ex:  # noqa: BLE001
+            if isinstance(ex, ServicePipeBlockError):
+                self._record_waf_block(ex)
+                raise UpdateFailed("places: ServicePipeBlockError") from ex
+            # 401 повтором не лечится: токен отозван, и ждать нечего. Home
+            # Assistant по этому исключению сам предложит войти заново, а
+            # раньше запись просто уходила в «недоступна» без объяснения.
+            if is_unauthorized(ex):
+                LOGGER.warning("Оператор отверг токен — нужна повторная авторизация")
+                raise ConfigEntryAuthFailed("token rejected by operator") from ex
+            # Своего лога здесь быть не должно: ядро само пишет об отказе
+            # один раз на переходе и о возвращении данных
+            # (`Error fetching … data` / `Fetching … data recovered` в
+            # `update_coordinator.py`). Прежний `LOGGER.exception` дублировал
+            # его трейсбеком на КАЖДОМ цикле — под три сотни за сутки молчания
+            # оператора, ровно против правила Silver `log-when-unavailable`.
+            # Тип, а не текст: в тексте оператора может быть адрес или id.
+            raise UpdateFailed(f"places: {type(ex).__name__}") from ex
+
+    async def _run_place_step(
+        self,
+        what: str,
+        place_id: str,
+        coro: Awaitable[_T],
+        default: _T,
+    ) -> _T:
+        """Run one per-place async fetch/collect step and update failure state."""
+        try:
+            result = await coro
+        except Exception as ex:  # noqa: BLE001
+            self._note_failure(what, place_id, ex)
+            return default
+        self._note_success(what, place_id)
+        return result
+
+    async def _fetch_place_screens(
+        self, place_id: str
+    ) -> tuple[set[str], set[str], bool]:
+        """Fetch `/settings/screens` once per place (A-61) and track drift/failure."""
+        # Разбор — под тем же фронтом, что и запрос: настройки видимости
+        # приходят от оператора, и форма, на которой разбор бросает,
+        # должна садиться на этот фронт, а не улетать наружу — обработчик
+        # неожиданных исключений в ядре пишет трейсбек безусловно, без
+        # ограничения по фронту.
+        try:
+            screens = await self._api.query_screens_settings(place_id)
+            hidden_cam_ids, cam_usable = self._extract_hidden_ids(
+                screens, "PUBLIC_CAMERAS"
+            )
+            hidden_entrance_ids, ent_usable = self._extract_hidden_ids(
+                screens, "ACCESS_CONTROLS"
+            )
+        except Exception as ex:  # noqa: BLE001
+            self._note_failure("Настройки экранов", place_id, ex)
+            return set(), set(), True
+        if cam_usable and ent_usable:
+            self._note_success("Настройки экранов", place_id)
+            return hidden_cam_ids, hidden_entrance_ids, False
+        return hidden_cam_ids, hidden_entrance_ids, True
+
+    async def _refresh_place(
+        self,
+        place_id: str,
+        *,
+        balances: list[dict[str, Any]],
+        cameras: list[dict[str, Any]],
+        locks: list[dict[str, Any]],
+        dnd: dict[str, list[dict[str, Any]]],
+        screens_failed_places: set[str],
+    ) -> None:
+        """Fetch and collect all per-place entities serially."""
+        # Установка `place_id` в shared UA — критично сделать ДО любого
+        # запроса для этого place. Поскольку refresh serial — race нет.
+        self._api.http.user_agent.place_id = place_id
+
+        balance = await self._run_place_step(
+            "Баланс", place_id, self._fetch_balance(place_id), None
+        )
+        if balance:
+            balances.append(balance)
+
+        # Pre-fetch shared per-place data (A-61): screens + access_controls
+        # нужны и для cameras (для hidden), и для locks. Раньше каждый
+        # collector делал свой fetch — двойной HTTP.
+        hidden_cam_ids, hidden_entrance_ids, screens_failed = (
+            await self._fetch_place_screens(place_id)
+        )
+        if screens_failed:
+            screens_failed_places.add(str(place_id))
+
+        access_controls = await self._run_place_step(
+            "Домофоны", place_id, self._api.query_access_controls(place_id), []
+        )
+        cameras.extend(
+            await self._run_place_step(
+                "Сборка камер",
+                place_id,
+                self._collect_cameras_for_place(
+                    place_id, access_controls, hidden_cam_ids, hidden_entrance_ids
+                ),
+                [],
+            )
+        )
+        try:
+            locks.extend(
+                self._collect_locks_for_place(
+                    place_id, access_controls, hidden_entrance_ids
+                )
+            )
+        except Exception as ex:  # noqa: BLE001
+            self._note_failure("Замки", place_id, ex)
+        else:
+            self._note_success("Замки", place_id)
+
+        dnd_items = await self._run_place_step(
+            "Режим «не беспокоить»",
+            place_id,
+            self._api.query_dnd_settings(place_id),
+            None,
+        )
+        if dnd_items:
+            dnd[str(place_id)] = dnd_items
 
     @callback
     def _record_waf_block(self, err: ServicePipeBlockError) -> None:
@@ -478,86 +521,40 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         — тот механизм отменён (сущность должна существовать и работать,
         скрыт только показ).
         """
-        cameras: list[dict[str, Any]] = []
-
         # 1. Access controls (домофоны).
         # hidden для intercom-камеры берётся из ACCESS_CONTROLS.hidden — если
         # user скрыл entrance в приложении, и lock и camera этого entrance
         # будут скрыты через `hidden_by=INTEGRATION`.
-        for ac in access_controls:
-            ac_id = ac.get("id")
-            entrances = ac.get("entrances") or []
-            if entrances:
-                # Каждая entrance со своим externalCameraId → отдельная intercom-камера.
-                for entrance in entrances:
-                    eid = entrance.get("externalCameraId")
-                    if not eid:
-                        continue
-                    entrance_id = entrance.get("id")
-                    cameras.append({
-                        "id": eid,
-                        "name": entrance.get("name"),
-                        "place_id": place_id,
-                        "access_control_id": ac_id,
-                        "entrance_id": entrance_id,
-                        "source": "intercom",
-                        "hidden": str(entrance_id) in hidden_entrance_ids,
-                    })
-            else:
-                # AC без entrances — сам по себе door. Используем ac.externalCameraId.
-                cid = ac.get("externalCameraId")
-                if cid:
-                    cameras.append({
-                        "id": cid,
-                        "name": ac.get("name"),
-                        "place_id": place_id,
-                        "access_control_id": ac_id,
-                        "entrance_id": None,
-                        "source": "intercom",
-                        "hidden": False,  # AC без entrance не отображается в screens
-                    })
+        cameras = _collect_intercom_cameras(
+            place_id, access_controls, hidden_entrance_ids
+        )
 
         # 2. Place-cameras (личные подписочные камеры).
         # Идут ВТОРЫМИ чтобы dedupe_by_id отдал приоритет intercom > place > public.
         # Каждый источник — под своим фронтом: отказ одного не должен уносить
         # камеры остальных. Домофонные уже собраны выше и от этого запроса не
         # зависят.
-        try:
-            place_cameras = await self._api.query_cameras(place_id)
-        except Exception as ex:  # noqa: BLE001
-            self._note_failure("Камеры места", place_id, ex)
-            place_cameras = []
-        else:
-            self._note_success("Камеры места", place_id)
-        for cam in place_cameras:
-            cid = cam.get("externalCameraId") or cam.get("id")
-            cameras.append({
-                "id": cid,
-                "name": cam.get("name"),
-                "place_id": place_id,
-                "source": "place",
-                "hidden": False,  # личные камеры всегда видимы по дефолту
-            })
+        place_cameras = await self._run_place_step(
+            "Камеры места", place_id, self._api.query_cameras(place_id), []
+        )
+        _append_camera_entries(cameras, place_id, place_cameras, source="place")
 
         # 3. Public cameras (общедомовые + городские, API не разделяет).
         # Видимость берётся из /settings/screens — user в приложении сам решает
         # какие camera ему интересны, какие скрыть.
-        try:
-            public_cameras = await self._api.query_public_cameras(place_id)
-        except Exception as ex:  # noqa: BLE001
-            self._note_failure("Общедомовые камеры", place_id, ex)
-            public_cameras = []
-        else:
-            self._note_success("Общедомовые камеры", place_id)
-        for cam in public_cameras:
-            cid = cam.get("externalCameraId") or cam.get("id")
-            cameras.append({
-                "id": cid,
-                "name": cam.get("name"),
-                "place_id": place_id,
-                "source": "public",
-                "hidden": str(cid) in hidden_cam_ids,
-            })
+        public_cameras = await self._run_place_step(
+            "Общедомовые камеры",
+            place_id,
+            self._api.query_public_cameras(place_id),
+            [],
+        )
+        _append_camera_entries(
+            cameras,
+            place_id,
+            public_cameras,
+            source="public",
+            hidden_ids=hidden_cam_ids,
+        )
 
         return cameras
 
@@ -577,53 +574,12 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         """
         result: set[str] = set()
         drift: set[str] = set()
-        raw_screens: Any
-        if not isinstance(screens, dict):
-            drift.add(f"корень {type(screens).__name__}")
-            raw_screens = []
-        elif not screens:
+        raw_screens, empty_snapshot = _extract_screens_list(screens, drift)
+        if empty_snapshot:
             return result, True
-        elif "screens" not in screens:
-            drift.add("нет ключа screens")
-            raw_screens = []
-        else:
-            raw_screens = screens["screens"]
-            if not isinstance(raw_screens, list):
-                if not isinstance(raw_screens, (dict, str)) and raw_screens is not None:
-                    # Неитерируемый `screens` (например, int 5) пробрасывается в
-                    # TypeError на фронт «Настройки экранов».
-                    iter(raw_screens)
-                drift.add("поле screens не список")
-                raw_screens = []
 
         for screen in raw_screens:
-            if not isinstance(screen, dict):
-                drift.add("запись раздела не словарь")
-                continue
-            stype = screen.get("type")
-            if not isinstance(stype, str) or not stype:
-                drift.add("раздел без type")
-                continue
-            if stype != screen_type:
-                continue
-            if "hidden" in screen and not isinstance(screen["hidden"], list):
-                drift.add("hidden не список")
-                continue
-            for item in screen.get("hidden") or []:
-                if not isinstance(item, dict):
-                    drift.add("скрытый элемент не словарь")
-                    continue
-                iid = item.get("id")
-                if iid is None:
-                    # `id` — обязательный ключ каждого элемента. Его пропажа
-                    # это переименование поля, самый вероятный дрейф, и
-                    # последствие у него то же: скрытое вернётся в панель.
-                    drift.add("элемент без id")
-                    continue
-                if isinstance(iid, bool) or not isinstance(iid, (int, str)) or iid == "":
-                    drift.add("элемент с некорректным id")
-                    continue
-                result.add(str(iid))
+            _collect_screen_hidden_items(screen, screen_type, drift, result)
         if drift:
             # Молчать нельзя: иначе дрейф схемы оператора неотличим от
             # «пользователь ничего не прятал», а последствие видимое —
@@ -726,3 +682,126 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             place_id, access_control_id, entrance_id,
         )
         await self._api.open_lock(place_id, access_control_id, entrance_id)
+
+
+def _collect_intercom_cameras(
+    place_id: str,
+    access_controls: list[dict[str, Any]],
+    hidden_entrance_ids: set[str],
+) -> list[dict[str, Any]]:
+    """Build intercom camera entries grouped by entrance (or AC without entrances)."""
+    cameras: list[dict[str, Any]] = []
+    for ac in access_controls:
+        ac_id = ac.get("id")
+        entrances = ac.get("entrances") or []
+        if entrances:
+            # Каждая entrance со своим externalCameraId → отдельная intercom-камера.
+            for entrance in entrances:
+                eid = entrance.get("externalCameraId")
+                if not eid:
+                    continue
+                entrance_id = entrance.get("id")
+                cameras.append({
+                    "id": eid,
+                    "name": entrance.get("name"),
+                    "place_id": place_id,
+                    "access_control_id": ac_id,
+                    "entrance_id": entrance_id,
+                    "source": "intercom",
+                    "hidden": str(entrance_id) in hidden_entrance_ids,
+                })
+        elif cid := ac.get("externalCameraId"):
+            # AC без entrances — сам по себе door. Используем ac.externalCameraId.
+            cameras.append({
+                "id": cid,
+                "name": ac.get("name"),
+                "place_id": place_id,
+                "access_control_id": ac_id,
+                "entrance_id": None,
+                "source": "intercom",
+                "hidden": False,  # AC без entrance не отображается в screens
+            })
+    return cameras
+
+
+def _append_camera_entries(
+    cameras: list[dict[str, Any]],
+    place_id: str,
+    raw_cameras: list[dict[str, Any]],
+    *,
+    source: str,
+    hidden_ids: set[str] | None = None,
+) -> None:
+    """Append place or public camera payloads using their shared normalized shape."""
+    for cam in raw_cameras:
+        cid = cam.get("externalCameraId") or cam.get("id")
+        cameras.append({
+            "id": cid,
+            "name": cam.get("name"),
+            "place_id": place_id,
+            "source": source,
+            "hidden": bool(hidden_ids is not None and str(cid) in hidden_ids),
+        })
+
+
+def _extract_screens_list(screens: Any, drift: set[str]) -> tuple[list[Any], bool]:
+    """Extract raw `/settings/screens` sections or report top-level schema drift."""
+    if not isinstance(screens, dict):
+        drift.add(f"корень {type(screens).__name__}")
+        return [], False
+    if not screens:
+        return [], True
+    if "screens" not in screens:
+        drift.add("нет ключа screens")
+        return [], False
+    raw_screens = screens["screens"]
+    if not isinstance(raw_screens, list):
+        if not isinstance(raw_screens, (dict, str)) and raw_screens is not None:
+            # Неитерируемый `screens` (например, int 5) пробрасывается в
+            # TypeError на фронт «Настройки экранов».
+            iter(raw_screens)
+        drift.add("поле screens не список")
+        return [], False
+    return raw_screens, False
+
+
+def _extract_screen_item_id(item: Any, drift: set[str]) -> str | None:
+    """Validate and stringify one hidden-item ID from a `/settings/screens` entry."""
+    if not isinstance(item, dict):
+        drift.add("скрытый элемент не словарь")
+        return None
+    iid = item.get("id")
+    if iid is None:
+        # `id` — обязательный ключ каждого элемента. Его пропажа
+        # это переименование поля, самый вероятный дрейф, и
+        # последствие у него то же: скрытое вернётся в панель.
+        drift.add("элемент без id")
+        return None
+    if isinstance(iid, bool) or not isinstance(iid, (int, str)) or iid == "":
+        drift.add("элемент с некорректным id")
+        return None
+    return str(iid)
+
+
+def _collect_screen_hidden_items(
+    screen: Any,
+    screen_type: str,
+    drift: set[str],
+    result: set[str],
+) -> None:
+    """Validate one section record and collect hidden item IDs for `screen_type`."""
+    if not isinstance(screen, dict):
+        drift.add("запись раздела не словарь")
+        return
+    stype = screen.get("type")
+    if not isinstance(stype, str) or not stype:
+        drift.add("раздел без type")
+        return
+    if stype != screen_type:
+        return
+    if "hidden" in screen and not isinstance(screen["hidden"], list):
+        drift.add("hidden не список")
+        return
+    for item in screen.get("hidden") or []:
+        if (item_id := _extract_screen_item_id(item, drift)) is not None:
+            result.add(item_id)
