@@ -469,3 +469,24 @@ async def test_broken_cleanup_at_removal_is_reported(
         await async_remove_entry(hass, entry)
 
     assert "Push-токен не отвязан при удалении записи" in caplog.text
+
+
+def test_package_import_does_not_pull_media_source() -> None:
+    """A-124: `media_source` тянет camera/stream/media_player — только лениво.
+
+    Модуль пакета импортируется при каждой загрузке интеграции; поток архива
+    нужен только при выгрузке записи, поэтому импорт — внутри
+    `async_unload_entry`, а не на верхнем уровне.
+    """
+    import ast
+    from pathlib import Path
+
+    import custom_components.elektronny_gorod as package
+
+    tree = ast.parse(Path(package.__file__).read_text(encoding="utf-8"))
+    top_level = [
+        node.module
+        for node in tree.body
+        if isinstance(node, ast.ImportFrom) and node.module
+    ]
+    assert "media_source" not in top_level

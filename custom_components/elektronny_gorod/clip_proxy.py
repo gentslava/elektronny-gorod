@@ -222,6 +222,48 @@ def _get_secret(hass: HomeAssistant) -> str:
     return secret
 
 
+def sign_scoped_token(
+    hass: HomeAssistant,
+    scope: str,
+    subject: str,
+    ttl: float,
+    *,
+    now: float | None = None,
+) -> str:
+    """Sign one scoped HMAC token over `scope`, `subject` and expiry."""
+    exp = int((time.time() if now is None else now) + ttl)
+    payload = f"{scope}:{subject}:{exp}"
+    digest = hmac.new(
+        _get_secret(hass).encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    return f"{exp}.{digest}"
+
+
+def verify_scoped_token(
+    hass: HomeAssistant,
+    token: str,
+    scope: str,
+    subject: str,
+    *,
+    now: float | None = None,
+) -> bool:
+    """Constant-time verification of a scoped HMAC token against its payload."""
+    try:
+        exp_str, digest = token.split(".", 1)
+        exp = int(exp_str)
+    except (AttributeError, ValueError):
+        return False
+    payload = f"{scope}:{subject}:{exp}"
+    expected = hmac.new(
+        _get_secret(hass).encode(), payload.encode(), hashlib.sha256
+    ).hexdigest()
+    # bytes-compare: str-версия бросает TypeError на non-ASCII digest
+    # (unauthenticated 500 — security-auditor I-1, 2026-08-30).
+    if not hmac.compare_digest(digest.encode(), expected.encode()):
+        return False
+    return (time.time() if now is None else now) < exp
+
+
 def sign_clip_token(
     hass: HomeAssistant,
     entry_id: str,
@@ -230,12 +272,9 @@ def sign_clip_token(
     now: float | None = None,
 ) -> str:
     """Sign one clip token: HMAC over entry, event and expiry."""
-    exp = int((time.time() if now is None else now) + _TOKEN_TTL)
-    payload = f"clip:{entry_id}:{event_id}:{exp}"
-    digest = hmac.new(
-        _get_secret(hass).encode(), payload.encode(), hashlib.sha256
-    ).hexdigest()
-    return f"{exp}.{digest}"
+    return sign_scoped_token(
+        hass, "clip", f"{entry_id}:{event_id}", _TOKEN_TTL, now=now
+    )
 
 
 def verify_clip_token(
@@ -247,20 +286,9 @@ def verify_clip_token(
     now: float | None = None,
 ) -> bool:
     """Constant-time verification of a clip token against its payload."""
-    try:
-        exp_str, digest = token.split(".", 1)
-        exp = int(exp_str)
-    except (AttributeError, ValueError):
-        return False
-    payload = f"clip:{entry_id}:{event_id}:{exp}"
-    expected = hmac.new(
-        _get_secret(hass).encode(), payload.encode(), hashlib.sha256
-    ).hexdigest()
-    # bytes-compare: str-версия бросает TypeError на non-ASCII digest
-    # (unauthenticated 500 — security-auditor I-1, 2026-08-30).
-    if not hmac.compare_digest(digest.encode(), expected.encode()):
-        return False
-    return (time.time() if now is None else now) < exp
+    return verify_scoped_token(
+        hass, token, "clip", f"{entry_id}:{event_id}", now=now
+    )
 
 
 def clip_proxy_url(hass: HomeAssistant, entry_id: str, event_id: str) -> str:

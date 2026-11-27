@@ -60,6 +60,7 @@ custom_components/elektronny_gorod/
 ├── history.py             # durable REST history: baseline, dedup, Store lifecycle
 ├── history_ws.py          # entity-scoped browse старых событий для Lovelace
 ├── media_source.py        # HA Media Source: archive clips place → camera → day → event
+├── archive_hls.py         # same-origin EVENT HLS remux & views для идущих событий (A-124)
 ├── clip_proxy.py          # same-origin signed clip streaming view (ORB workaround)
 ├── fcm.py                 # FCM listener для события вызова (ADR-0011)
 ├── sip/                   # SIP-стек two-way audio, register-on-ring (ADR-0012, A-81)

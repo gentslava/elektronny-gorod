@@ -978,6 +978,12 @@ async def async_unload_entry(
     """
     # Клипы этого entry больше не нужны — не ждём истечения TTL.
     async_release_clip_cache(hass, entry.entry_id)
+    # Потоки архива идущих событий этого entry (A-124) — не ждём idle HLS.
+    # Импорт ленивый: `media_source` тянет camera, stream и media_player, а
+    # нужен здесь только при выгрузке.
+    from .media_source import async_stop_archive_streams  # noqa: PLC0415
+
+    await async_stop_archive_streams(hass, entry.entry_id)
     fcm_listener = hass.data.get(_FCM_DATA, {}).get(entry.entry_id)
     if fcm_listener is not None:
         # Как и в двух других точках остановки: текст исключения зависимости

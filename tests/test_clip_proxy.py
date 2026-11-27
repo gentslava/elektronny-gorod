@@ -101,6 +101,15 @@ async def test_token_roundtrip_and_rejection(hass) -> None:
     assert verify_clip_token(hass, other, _ENTRY_ID, _EVENT_ID, now=1001.0)
     assert not verify_clip_token(hass, "1000000.non-ascii-dаgеst", _ENTRY_ID, _EVENT_ID)
 
+    from custom_components.elektronny_gorod.clip_proxy import (
+        sign_scoped_token,
+        verify_scoped_token,
+    )
+
+    scoped = sign_scoped_token(hass, "archive", f"{_ENTRY_ID}:{_EVENT_ID}", 60.0, now=1000.0)
+    assert verify_scoped_token(hass, scoped, "archive", f"{_ENTRY_ID}:{_EVENT_ID}", now=1001.0)
+    assert not verify_clip_token(hass, scoped, _ENTRY_ID, _EVENT_ID, now=1001.0)
+
 
 def test_clip_proxy_url_shape(hass) -> None:
     url = clip_proxy_url(hass, _ENTRY_ID, _EVENT_ID)
