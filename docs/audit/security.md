@@ -125,7 +125,7 @@ Quality gates:
 ### S-16. go2rtc credentials в `entry.data` plaintext
 
 - **Status:** 🟡 **MITIGATED** — `go2rtc_username`/`go2rtc_password` в `TO_REDACT` → больше **не утекают** в diagnostics-выгрузку (S-08 RESOLVED). Остаётся plaintext в `.storage`/backup (HA-storage limitation) — полное шифрование (`Store`/pin) в backlog, не блокер.
-- **Файлы:** `config_flow.py:ElektronnyGorodConfigFlow.async_step_go2rtc`, `ElektronnyGorodOptionsFlowHandler.async_step_init`, `camera.py:_get_go2rtc_cfg`
+- **Файлы:** `config_flow.py:ElektronnyGorodConfigFlow.async_step_go2rtc`, `ElektronnyGorodOptionsFlowHandler.async_step_init`, `go2rtc.py:read_go2rtc_entry_settings`, `camera.py:async_setup_entry`
 - **Severity:** P1 → P3 (после mitigation)
 - **Impact:** `go2rtc_password` (Basic Auth) хранится в `entry.data` без шифрования. ~~Попадёт в diagnostics-выгрузку (S-08)~~ — закрыто redaction.
 - **Fix:** ✅ ключи в `TO_REDACT`. Долгосрочно — рассмотреть HA `Store` с pin-кодом.
