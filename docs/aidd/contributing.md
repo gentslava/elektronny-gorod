@@ -1,4 +1,4 @@
-Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-08-14 (contributor routing linked to canonical roles and command procedures)
+Status: Active Owner: Documentation / AIDD Agent Last reviewed: 2026-11-27 (UB-mode для Python и проверки в CI)
 
 Source files:
 - весь репозиторий (это процессный документ)
@@ -74,9 +74,9 @@ ASSUMPTIONS:
 
 ### 4. Enforce simplicity
 
-- Можно ли это в меньше строк?
-- Платят ли абстракции за свою сложность?
-- Не делать «попутный рефакторинг» в одном PR с фиксом.
+Для изменений Python применяй [.agents/commands/python-quality.md](../../.agents/commands/python-quality.md).
+Процедура помогает закрепить поведение, убрать повтор решения и дать ревьюеру воспроизводимые проверки.
+Состав автоматических проверок описан в [стратегии тестирования](../testing/strategy.md#ci-workflow).
 
 ### 5. Scope discipline
 

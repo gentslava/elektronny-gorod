@@ -299,7 +299,7 @@ elektronny-gorod/
 |---|---|---|
 | [`hassfest.yaml`](../../.github/workflows/hassfest.yaml) | push / PR | manifest validation |
 | [`hacs.yaml`](../../.github/workflows/hacs.yaml) | push / PR / dispatch | HACS validation |
-| [`python-tests.yaml`](../../.github/workflows/python-tests.yaml) | push / PR | pytest matrix: минимальная и текущая HA |
+| [`python-tests.yaml`](../../.github/workflows/python-tests.yaml) | push / PR | pytest на минимальной и текущей HA, покрытие строк и ветвей, Pyright и узкий Ruff |
 | [`prerelease.yaml`](../../.github/workflows/prerelease.yaml) | PR opened / sync | сборка pre-release ZIP в артефакт; релиз не создаёт (для форка токен read-only) |
 | [`prerelease-publish.yaml`](../../.github/workflows/prerelease-publish.yaml) | завершение `PR Pre-Release` | публикует pre-release `pr-N`; запуск для внешнего fork-PR требует одобрения |
 | [`prerelease-cleanup.yaml`](../../.github/workflows/prerelease-cleanup.yaml) | PR closed | удаляет pre-release и тег `pr-N` |

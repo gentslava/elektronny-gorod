@@ -1,4 +1,4 @@
-Status: Active Owner: QA / Testing Agent Last reviewed: 2026-11-26 (добавлено покрытие ServicePipe / WAF block A-92; живые счётчики по-прежнему в CI — ADR-0015 §7)
+Status: Active Owner: QA / Testing Agent Last reviewed: 2026-11-27 (Ruff, отчёт по ветвям и совместимость ID истории)
 
 Source files:
 - `tests/**` (test-модули + `conftest.py`)
@@ -162,6 +162,7 @@ External RTSP options (`test_config_flow_keep_warm.py`): both flags default fals
 - `HistoryManager` persists only ID lists, cancels interval on unload and skips overlapping ticks instead of queueing API cycles.
 - Access/camera EventEntity routing uses config-entry-scoped signals, stable IDs, allowlisted state attrs and ru/en translations for every declared event type.
 - Browse WebSocket verifies EventEntity read permission, config-entry/source binding, page bounds and exact sanitized previous-page response.
+- The entity registered by HA setup can be browsed under its existing ID. The address and the visible events stay scoped to that entity.
 - Frontend model tests exact command shape, untrusted/cross-entity response rejection, overlap dedup, partial-refresh feed preservation, date groups, time formatting and RU/EN labels.
 
 ### 7. go2rtc and external RTSP manager
@@ -234,7 +235,8 @@ PYTHONPATH=. .venv/bin/pytest tests/ \
 - **turbojpeg mock** в `tests/conftest.py` — `pytest-homeassistant-custom-component` не тянет optional HA-extras, нужно для `homeassistant.components.camera.img_util`.
 - **Path-filter на push и pull_request** — docs-only коммиты CI не запускают.
 - **Отдельный job `pyright`** — статический анализ не смешан с прогоном тестов: у него своя установка (HA-типы берутся из ядра, поэтому нужна та же PHC, что в current-job) и своё условие падения. pyright ставится через pip, а не сторонним экшеном.
-- **Coverage artifact** с уникальным именем `coverage-py<v>-phc<v>` (artifact@v4 требует уникальности в matrix).
+- **Ruff** отдельным job проверяет production-код на изменяемые значения аргументов по умолчанию, замыкания на переменные цикла и отдельные блокирующие вызовы в async-функциях. Точный набор и версия закреплены в workflow.
+- **Coverage artifact** `coverage-py<v>-phc<v>` содержит XML и HTML. В `htmlcov/index.html` видны непокрытые переходы. Помодульный порог по-прежнему проверяет `line-rate`; покрытие ветвей используется при ревью.
 
 ## Mock-стратегия
 
