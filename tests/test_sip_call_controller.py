@@ -332,9 +332,7 @@ async def test_answer_tears_down_bridge_when_accept_returns_false():
     # accept держимого вернул False (malformed SDP degrade) → мост закрыт, не течёт.
     c = _go2rtc_controller()
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(return_value=False)
     c._manager = held
 
@@ -359,9 +357,7 @@ async def test_answer_tears_down_bridge_when_accept_raises():
     # контроллер не должен утечь ffmpeg + HTTP-сервер AudioBridge.
     c = _go2rtc_controller()
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(side_effect=ValueError("malformed SDP"))
     c._manager = held
 
@@ -459,9 +455,7 @@ async def test_answer_accepts_held_invite_without_reregister():
     api.mint_sip_device = AsyncMock(return_value={"login": "l", "password": "p", "realm": "r"})
     c = DoorbellCallController(_hass(), api, lambda: "TOK")
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(return_value=True)
     c._manager = held  # имитируем поднятый hold
     ok = await c.async_answer()
@@ -633,9 +627,7 @@ async def test_uplink_sink_cleared_when_accept_fails():
     # accept вернул False → sink снят (не течёт в следующий вызов).
     c = _go2rtc_controller()
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(return_value=False)
     c._manager = held
 
@@ -701,9 +693,7 @@ async def test_call_state_ended_on_hangup(controller):
 async def test_call_state_error_emitted_when_accept_raises():
     c = _go2rtc_controller()
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(side_effect=ValueError("malformed SDP"))
     c._manager = held
     with patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
@@ -1622,6 +1612,33 @@ async def test_answer_cancel_during_bridge_setup_releases_held_manager_and_watch
     assert c._hold_timeout is None
     assert c._ring_timeout is None
     assert c._active is None
+    assert _call_states(c._hass)[-1] == CALL_STATE_ERROR
+    assert not c._answer_lock.locked()
+
+
+async def test_answer_bridge_oserror_releases_held_manager_and_returns_false():
+    """A-122: OSError в _setup_audio_bridge до accept освобождает held_manager и не делает remote DELETE."""
+    c, tasks = _collecting_controller()
+    c._go2rtc = MagicMock(base_url="http://127.0.0.1:1984", headers={})
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    held = _manager_mock(holding=True, in_call=False)
+    c._manager = held
+    c._schedule_hold_timeout()
+    assert c._hold_timeout is not None
+
+    with (
+        patch(f"{_CC}.detect_lan_ip", side_effect=OSError("no udp socket")),
+        patch(f"{_CC}.remove_audio_stream", new=AsyncMock()) as remove_stream,
+    ):
+        assert await c.async_answer() is False
+
+    held.detach.assert_called_once()
+    held.async_hangup.assert_awaited_once()
+    remove_stream.assert_not_awaited()
+    assert c._manager is None
+    assert c._hold_timeout is None
+    assert c._uplink_sink is None
     assert _call_states(c._hass)[-1] == CALL_STATE_ERROR
     assert not c._answer_lock.locked()
 

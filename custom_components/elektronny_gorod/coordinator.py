@@ -274,8 +274,9 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 screens_failed_places.add(str(place_id))
                 hidden_cam_ids, hidden_entrance_ids = set(), set()
             else:
-                self._note_success("Настройки экранов", place_id)
-                if not (cam_usable and ent_usable):
+                if cam_usable and ent_usable:
+                    self._note_success("Настройки экранов", place_id)
+                else:
                     screens_failed_places.add(str(place_id))
             try:
                 access_controls = await self._api.query_access_controls(place_id)
@@ -567,8 +568,12 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raw_screens = []
         else:
             raw_screens = screens["screens"]
-            if raw_screens is None:
-                drift.add("поле screens null")
+            if not isinstance(raw_screens, list):
+                if not isinstance(raw_screens, (dict, str)) and raw_screens is not None:
+                    # Неитерируемый `screens` (например, int 5) пробрасывается в
+                    # TypeError на фронт «Настройки экранов».
+                    iter(raw_screens)
+                drift.add("поле screens не список")
                 raw_screens = []
 
         for screen in raw_screens:

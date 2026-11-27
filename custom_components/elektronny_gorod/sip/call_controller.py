@@ -26,7 +26,6 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-import inspect
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
@@ -362,16 +361,14 @@ class DoorbellCallController:
                 if self._manager is not None and self._manager.holding
                 else None
             )
-            accept_started = False
 
-            # accept/async_answer парсят SDP-offer из сети (untrusted). Если accept
-            # регрессирует и кинет — мост (ffmpeg + HTTP-сервер) обязан быть снят,
-            # иначе течёт (P1-1). При отмене задачи (CancelledError) тоже снимаем
-            # мост, uplink_sink и потреблённый held-менеджер, затем пробрасываем отмену (A-122).
+            # accept/async_answer парсят SDP-offer из сети (untrusted). При сбое, отказе или
+            # отмене на любом шаге откатываем только ресурсы этой попытки (локальный stop
+            # непубликованного моста без remote DELETE, sink, принадлежащий held-менеджер)
+            # и выводим фазу из `connecting` в `error` (P1-1 / A-122).
             try:
                 bridge, on_downlink = await self._setup_audio_bridge(call)
                 if held_manager is not None:
-                    accept_started = True
                     ok = await held_manager.accept(on_downlink=on_downlink)  # быстрый путь
                 else:
                     # Fallback: held не поднялся → register-on-answer (приём не регрессирует).
@@ -392,42 +389,23 @@ class DoorbellCallController:
                         # его не вытесняют (как в `handle_signal` при разговоре).
                         self._manager = manager
                         self._active = call
-            except Exception:  # noqa: BLE001 — degrade: мост снять, экран живёт от FCM
+            except Exception:  # noqa: BLE001 — degrade: мост и held снять, экран живёт от FCM
                 LOGGER.warning("SIP answer: accept/register упал — снимаю мост (degrade)",
                                exc_info=True)
-                if accept_started and self._manager is held_manager:
-                    self._manager = None
                 # Контракт `error` (review P2): терминальное состояние неудачного
                 # ответа. Естественно сбрасывается следующим `ended`/CANCEL/новым
                 # `ring`; карточка вызова (Slice 3b) сама гасит error по таймеру —
                 # авто-переход в `ended` намеренно отложен до появления потребителя.
                 self._emit_call_state(CALL_STATE_ERROR)
-                self._clear_uplink_sink()
-                await self._stop_unpublished_bridge(bridge)
+                await self._rollback_aborted_answer(bridge, held_manager)
                 return False
             except BaseException:
-                # Отмена задачи ответа: снимаем только ресурсы этой прерванной
-                # попытки (непубликованный мост локально без go2rtc DELETE, sink,
-                # ещё-наш held_manager) и выводим фазу из `connecting`.
-                mgr_to_release = (
-                    held_manager
-                    if held_manager is not None and self._manager is held_manager
-                    else None
-                )
-                if mgr_to_release is not None:
-                    self._manager = None
-                    mgr_to_release.detach()
-                self._clear_uplink_sink()
                 if self._active is call:
                     self._emit_call_state(CALL_STATE_ERROR)
                     self._active = None
                 elif self._call_state == CALL_STATE_CONNECTING:
                     self._emit_call_state(CALL_STATE_ERROR)
-                try:
-                    await self._stop_unpublished_bridge(bridge)
-                finally:
-                    if mgr_to_release is not None:
-                        await self._release_aborted_manager(mgr_to_release)
+                await self._rollback_aborted_answer(bridge, held_manager)
                 raise
 
             if ok:
@@ -436,11 +414,8 @@ class DoorbellCallController:
                 self._fire_call_state(True)
                 self._schedule_call_timeout()
             else:
-                if accept_started and self._manager is held_manager:
-                    self._manager = None
                 self._emit_call_state(CALL_STATE_ERROR)
-                self._clear_uplink_sink()
-                await self._stop_unpublished_bridge(bridge)
+                await self._rollback_aborted_answer(bridge, held_manager)
             return ok
 
     @callback
@@ -757,16 +732,25 @@ class DoorbellCallController:
         LOGGER.info("Аудио-мост поднят (стрим вызова соберёт camera.intercom_call)")
         return bridge, bridge.feed_downlink
 
-    async def _stop_unpublished_bridge(self, bridge: AudioBridge | None) -> None:
-        """Локально остановить непубликованный в go2rtc мост (без remote DELETE)."""
-        if bridge is not None:
-            await bridge.stop()
-
-    async def _release_aborted_manager(self, manager: SipManager) -> None:
-        """Тихо освободить SIP-плечо прерванного answer (поддержка mock и SipManager)."""
-        hangup = manager.async_hangup()
-        if inspect.isawaitable(hangup):
-            await hangup
+    async def _rollback_aborted_answer(
+        self, bridge: AudioBridge | None, held_manager: SipManager | None,
+    ) -> None:
+        """Локально откатить неудачный/отменённый answer без remote DELETE."""
+        mgr_to_release = (
+            held_manager
+            if held_manager is not None and self._manager is held_manager
+            else None
+        )
+        if mgr_to_release is not None:
+            self._manager = None
+            mgr_to_release.detach()
+        self._clear_uplink_sink()
+        try:
+            if bridge is not None:
+                await bridge.stop()
+        finally:
+            if mgr_to_release is not None:
+                await mgr_to_release.async_hangup()
 
     async def _teardown_audio_bridge(self, bridge: AudioBridge | None) -> None:
         """Остановить мост + снять go2rtc-стрим вызова (best-effort)."""

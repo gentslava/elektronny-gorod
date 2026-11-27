@@ -463,6 +463,9 @@ async def test_screens_failure_in_place_a_does_not_block_verified_place_b(
         None,
         [],
         {"screens": None},
+        {"screens": {}},
+        {"screens": ""},
+        {"screens": "drift"},
         {"screens": [{}]},
         {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": "drift"}]},
         {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": None}]},
@@ -544,3 +547,53 @@ async def test_valid_mixed_known_unknown_sections_and_empty_hidden_sync_cleanly(
     )
     assert registry.async_get(zero_eid).hidden_by == er.RegistryEntryHider.INTEGRATION
     assert registry.async_get(visible_eid).hidden_by is None
+
+
+@pytest.mark.parametrize("invalid_screens", [{"screens": {}}, {"screens": ""}])
+async def test_invalid_screens_shape_does_not_mark_front_recovered(
+    hass: HomeAssistant, mock_api, caplog, invalid_screens
+):
+    """A-116: невалидный снимок screens ({} / "") после сбоя не помечает фронт восстановленным."""
+    import logging
+    from aiohttp import ClientError, ClientResponse
+    from unittest.mock import MagicMock
+    from custom_components.elektronny_gorod.api import ElektronnyGorodAPI
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    coordinator = entry.runtime_data
+    inst = mock_api.return_value
+
+    inst.query_screens_settings = AsyncMock(side_effect=ClientError("offline"))
+    await coordinator._async_update_data()
+
+    # После сбоя оператор прислал битый payload через реальный API — фронт не восстановлен.
+    response = MagicMock(spec=ClientResponse)
+    response.json = AsyncMock(return_value=invalid_screens)
+    inst.http.get = AsyncMock(return_value=response)
+    inst.query_screens_settings = ElektronnyGorodAPI.query_screens_settings.__get__(inst)
+
+    with caplog.at_level(logging.INFO):
+        data = await coordinator._async_update_data()
+
+    assert "P1" in data.get("screens_failed_places", [])
+    assert not [
+        r for r in caplog.records
+        if "Настройки экранов: данные снова приходят" in r.getMessage()
+    ]
+
+    # И только валидный {} восстанавливает фронт.
+    valid_resp = MagicMock(spec=ClientResponse)
+    valid_resp.json = AsyncMock(return_value={})
+    inst.http.get = AsyncMock(return_value=valid_resp)
+    with caplog.at_level(logging.INFO):
+        ok_data = await coordinator._async_update_data()
+
+    assert "screens_failed_places" not in ok_data
+    assert [
+        r for r in caplog.records
+        if "Настройки экранов: данные снова приходят" in r.getMessage()
+    ]
