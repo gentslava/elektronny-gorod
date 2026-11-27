@@ -16,7 +16,13 @@ from homeassistant.helpers import entity_registry as er
 
 from .coordinator import async_get_coordinator
 from .const import CONF_ACCOUNT_ID, CONF_SUBSCRIBER_ID, DOMAIN, LOGGER
-from .history import map_general_event_type, place_display_name
+from .history import (
+    access_history_unique_id,
+    account_history_unique_id,
+    map_general_event_type,
+    place_display_name,
+    place_history_unique_id,
+)
 
 
 _WS_REGISTERED = f"{DOMAIN}_history_ws_registered"
@@ -72,9 +78,7 @@ def _resolve_target(
     if entry is not None:
         account_id = str(entry.data.get(CONF_ACCOUNT_ID) or "")
         subscriber_id = str(entry.data.get(CONF_SUBSCRIBER_ID) or "")
-        account_unique_id = (
-            f"{DOMAIN}_event_history_account_{account_id}_{subscriber_id}"
-        )
+        account_unique_id = account_history_unique_id(account_id, subscriber_id)
         if (
             account_id
             and subscriber_id
@@ -93,9 +97,8 @@ def _resolve_target(
 
         if account_id and subscriber_id:
             for place_id in sorted({key[0] for key in source_locks}):
-                place_unique_id = (
-                    f"{DOMAIN}_event_history_place_"
-                    f"{account_id}_{subscriber_id}_{place_id}"
+                place_unique_id = place_history_unique_id(
+                    account_id, subscriber_id, place_id
                 )
                 if registry_entry.unique_id != place_unique_id:
                     continue
@@ -113,9 +116,7 @@ def _resolve_target(
                 )
 
     for (place_id, access_control_id), lock_info in source_locks.items():
-        expected_unique_id = (
-            f"{DOMAIN}_event_history_access_{place_id}_{access_control_id}"
-        )
+        expected_unique_id = access_history_unique_id(place_id, access_control_id)
         if registry_entry.unique_id == expected_unique_id:
             return HistoryBrowseTarget(
                 coordinator=coordinator,

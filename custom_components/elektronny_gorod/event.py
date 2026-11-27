@@ -39,9 +39,12 @@ from .const import (
 from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 from .device import linked_to_place, place_device_id, place_identifier
 from .history import (
+    access_history_unique_id,
+    account_history_unique_id,
     camera_history_unique_id,
     history_signal,
     place_display_name,
+    place_history_unique_id,
 )
 
 # Сущности не опрашивают оператора поодиночке: данные приходят из
@@ -67,18 +70,6 @@ EVENT_MOTION = "motion"
 _AUTO_END_FALLBACK_SEC = DOORBELL_CALL_WINDOW_FALLBACK_SEC
 
 
-def _place_history_unique_id(
-    account_id: str,
-    subscriber_id: str,
-    place_id: str,
-) -> str:
-    """Return the stable registry ID for one place-history stream."""
-    return (
-        f"{DOMAIN}_event_history_place_"
-        f"{account_id}_{subscriber_id}_{place_id}"
-    )
-
-
 def _place_history_entity_id(account_id: str, place_id: str) -> str:
     """Return an explicit account/place-scoped default entity ID."""
     return f"event.{slugify(f'account_{account_id}_place_{place_id}_event_history')}"
@@ -95,9 +86,7 @@ def _migrate_single_place_account_history_entity(
     if len(place_ids) != 1:
         return
     registry = er.async_get(hass)
-    legacy_unique_id = (
-        f"{DOMAIN}_event_history_account_{account_id}_{subscriber_id}"
-    )
+    legacy_unique_id = account_history_unique_id(account_id, subscriber_id)
     legacy_entity_id = registry.async_get_entity_id(
         "event", DOMAIN, legacy_unique_id
     )
@@ -105,11 +94,7 @@ def _migrate_single_place_account_history_entity(
         return
 
     place_id = place_ids[0]
-    new_unique_id = _place_history_unique_id(
-        account_id,
-        subscriber_id,
-        place_id,
-    )
+    new_unique_id = place_history_unique_id(account_id, subscriber_id, place_id)
     if registry.async_get_entity_id("event", DOMAIN, new_unique_id) is not None:
         return
 
@@ -241,7 +226,7 @@ class ElektronnyGorodPlaceHistoryEvent(
             )
             for lock in locks
         }
-        self._attr_unique_id = _place_history_unique_id(
+        self._attr_unique_id = place_history_unique_id(
             account_id,
             subscriber_id,
             place_id,
@@ -320,9 +305,7 @@ class ElektronnyGorodAccessHistoryEvent(
         self._access_control_id = access_control_id
         self._history_signal = history_dispatch_signal
         entrance_id = lock_info.get("entrance_id")
-        self._attr_unique_id = (
-            f"{DOMAIN}_event_history_access_{place_id}_{access_control_id}"
-        )
+        self._attr_unique_id = access_history_unique_id(place_id, access_control_id)
         device_uid = (
             f"entrance_{place_id}_{access_control_id}_{entrance_id or 'main'}"
         )
