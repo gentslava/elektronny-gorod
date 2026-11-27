@@ -1,5 +1,6 @@
-import hashlib
 import base64
+import hashlib
+import math
 from collections.abc import Callable
 
 
@@ -45,3 +46,20 @@ def hash_password_timestamp(login: str, password: str, time: str) -> str:
     raw_string = f"{prefix}{login}{password}{time}{secret}"
     md5_encoded = hashlib.md5(raw_string.encode()).hexdigest()
     return md5_encoded
+
+
+def capped_exponential_backoff(
+    step: int,
+    initial: float,
+    maximum: float,
+    *,
+    max_exponent: int | None = None,
+) -> float:
+    """Compute `min(initial * 2**step, maximum)` without float overflow."""
+    cap = (
+        max(0, math.ceil(math.log2(maximum / initial)))
+        if max_exponent is None
+        else max(0, max_exponent)
+    )
+    exponent = min(max(step, 0), cap)
+    return min(initial * 2**exponent, maximum)

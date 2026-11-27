@@ -31,7 +31,11 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from custom_components.elektronny_gorod.const import DOMAIN
-from custom_components.elektronny_gorod.device import linked_to_place, place_device_id
+from custom_components.elektronny_gorod.device import (
+    dedupe_access_controls,
+    linked_to_place,
+    place_device_id,
+)
 
 _PLACE_A = "1001"
 _PLACE_B = "1002"
@@ -327,3 +331,15 @@ async def test_setup_does_not_use_deprecated_via_device(hass, mock_api, caplog) 
     ]
 
     assert not deprecated, deprecated
+
+
+def test_dedupe_access_controls_skips_incomplete_and_picks_min_entrance() -> None:
+    """Incomplete lock rows are skipped; multi-entrance ACs pick the lowest entrance_id."""
+    result = dedupe_access_controls([
+        {"place_id": None, "access_control_id": "2001", "entrance_id": "1"},
+        {"place_id": "1001", "access_control_id": "", "entrance_id": "1"},
+        {"place_id": "1001", "access_control_id": "2001", "entrance_id": "20", "name": "B"},
+        {"place_id": "1001", "access_control_id": "2001", "entrance_id": "10", "name": "A"},
+    ])
+    assert list(result) == [("1001", "2001")]
+    assert result[("1001", "2001")]["name"] == "A"

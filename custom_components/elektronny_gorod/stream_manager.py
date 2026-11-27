@@ -29,6 +29,7 @@ from .const import (
     LOGGER,
 )
 from .go2rtc import Go2RtcClient, Go2RtcRequestError, Go2RtcStreamInfo
+from .helpers import capped_exponential_backoff
 
 
 BACKGROUND_REFRESH_INTERVAL = timedelta(minutes=28, seconds=30)
@@ -678,10 +679,11 @@ class CameraStreamManager:
             and self.keep_warm
             and self.is_camera_eligible(state.camera_id)
         ):
-            exponent = min(state.failure_count - 1, RETRY_MAX_EXPONENT)
-            retry_delay = min(
-                RETRY_INITIAL_SECONDS * 2**exponent,
+            retry_delay = capped_exponential_backoff(
+                state.failure_count - 1,
+                RETRY_INITIAL_SECONDS,
                 RETRY_MAX_SECONDS,
+                max_exponent=RETRY_MAX_EXPONENT,
             )
             self._schedule_due(state.camera_id, retry_delay)
         self._notify_listeners()

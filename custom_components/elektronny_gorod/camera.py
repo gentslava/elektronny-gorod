@@ -25,8 +25,6 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    DEFAULT_SNAPSHOT_WIDTH,
-    AREA_INTERCOM,
     AREA_INDOOR_CAM,
     AREA_PUBLIC_CAM,
     CONF_GO2RTC_BASE_URL,
@@ -39,9 +37,14 @@ from .const import (
     STREAM_MANAGER_DATA,
 )
 from .call_camera import ElektronnyGorodCallCamera
-from .device import linked_to_place, place_device_id
-from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
+from .device import MANUFACTURER, intercom_device_info, place_device_id
+from .coordinator import (
+    ElektronnyGorodConfigEntry,
+    ElektronnyGorodUpdateCoordinator,
+    snapshot_dimensions,
+)
 from .go2rtc import go2rtc_auth_headers
+from .helpers import capped_exponential_backoff
 from .stream_manager import CameraStreamManager
 
 if TYPE_CHECKING:
@@ -138,13 +141,6 @@ GO2RTC_HEALTH_POLL_INTERVAL = timedelta(seconds=30)
 # recovery latency (<1с) + 100x client jitter (~800мс) — race-window закрыт.
 # Если v3 пропустит (network blip) — v1/v2 поймают.
 GO2RTC_PROACTIVE_REFRESH_INTERVAL = timedelta(minutes=28, seconds=30)
-
-
-def _snapshot_size(width: int | None, height: int | None) -> tuple[int, int]:
-    """Размер, который реально уйдёт оператору (та же нормализация)."""
-    w = width or DEFAULT_SNAPSHOT_WIDTH
-    h = height or round(w / 16 * 9)
-    return (w, h)
 
 
 def _get_go2rtc_cfg(
@@ -319,15 +315,11 @@ class ElektronnyGorodCamera(
         self._snapshot_task: asyncio.Task[None] | None = None
         self._attr_unique_id = f"{DOMAIN}_camera_{self._id}"
         if is_intercom:
-            device_uid = f"entrance_{place_id}_{ac_id}_{entrance_id or 'main'}"
-            self._attr_device_info = linked_to_place(
-                DeviceInfo(
-                    identifiers={(DOMAIN, device_uid)},
-                    name=self._name,
-                    manufacturer="Электронный город",
-                    model="Intercom",
-                    suggested_area=AREA_INTERCOM,
-                ),
+            self._attr_device_info = intercom_device_info(
+                place_id,
+                ac_id,
+                entrance_id,
+                self._name,
                 via_device_id,
             )
         else:
@@ -344,7 +336,7 @@ class ElektronnyGorodCamera(
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"camera_{self._id}")},
                 name=self._name,
-                manufacturer="Электронный город",
+                manufacturer=MANUFACTURER,
                 model=model,
                 suggested_area=area,
             )
@@ -457,7 +449,7 @@ class ElektronnyGorodCamera(
         # ширину по умолчанию, поэтому `(None, None)` и `(300, 169)` — один и
         # тот же запрос к оператору, и держать их в разных ячейках значило бы
         # ходить за одинаковым кадром дважды.
-        size = _snapshot_size(width, height)
+        size = snapshot_dimensions(width, height)
         cached = self._snapshots.get(size)
         if cached is not None:
             image, taken = cached
@@ -532,7 +524,7 @@ class ElektronnyGorodCamera(
         """
         if self._is_hidden() or not self.available:
             return None
-        return await self._async_fetch_snapshot(_snapshot_size(width, height))
+        return await self._async_fetch_snapshot(snapshot_dimensions(width, height))
 
     async def _async_fetch_snapshot(self, size: tuple[int, int]) -> bytes | None:
         """Сходить к оператору за кадром и запомнить его.
@@ -612,10 +604,11 @@ class ElektronnyGorodCamera(
         # весь `/snapshots` камеры, и успех любого размера значит, что камера
         # снова отвечает.
         self._snapshot_failures += 1
-        exponent = min(self._snapshot_failures - 1, SNAPSHOT_RETRY_MAX_EXPONENT)
-        self._snapshot_retry_after = time.monotonic() + min(
-            SNAPSHOT_RETRY_INITIAL_SECONDS * 2**exponent,
+        self._snapshot_retry_after = time.monotonic() + capped_exponential_backoff(
+            self._snapshot_failures - 1,
+            SNAPSHOT_RETRY_INITIAL_SECONDS,
             SNAPSHOT_RETRY_MAX_SECONDS,
+            max_exponent=SNAPSHOT_RETRY_MAX_EXPONENT,
         )
 
         # Кадра нет — и подставлять здесь нечего. Вызывающий с карточки уже
@@ -823,10 +816,11 @@ class ElektronnyGorodCamera(
         """
         if not self._recovery_failures:
             return STREAM_RECOVERY_COOLDOWN
-        exponent = min(self._recovery_failures, STREAM_RECOVERY_MAX_EXPONENT)
-        return min(
-            STREAM_RECOVERY_COOLDOWN * 2**exponent,
+        return capped_exponential_backoff(
+            self._recovery_failures,
+            STREAM_RECOVERY_COOLDOWN,
             STREAM_RECOVERY_BACKOFF_MAX,
+            max_exponent=STREAM_RECOVERY_MAX_EXPONENT,
         )
 
     @callback

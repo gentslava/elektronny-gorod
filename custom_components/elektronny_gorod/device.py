@@ -11,7 +11,7 @@ HA 2026.8 объявил `via_device` устаревшим, а 2026.9 убрал
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from homeassistant.config_entries import ConfigEntry
@@ -19,13 +19,61 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 
-from .const import DOMAIN
+from .const import AREA_INTERCOM, DOMAIN
 from .history import place_display_name
 
 MANUFACTURER = "Электронный город"
 
 
 _PLACE_PREFIX = "place_"
+
+
+def entrance_identifier(
+    place_id: Any,
+    access_control_id: Any,
+    entrance_id: Any,
+) -> tuple[str, str]:
+    """Стабильный identifier устройства точки входа / домофона."""
+    return (DOMAIN, f"entrance_{place_id}_{access_control_id}_{entrance_id or 'main'}")
+
+
+def intercom_device_info(
+    place_id: Any,
+    access_control_id: Any,
+    entrance_id: Any,
+    name: str,
+    via_device_id: str | None,
+) -> DeviceInfo:
+    """Собрать `DeviceInfo` домофона, привязанного к устройству адреса."""
+    return linked_to_place(
+        DeviceInfo(
+            identifiers={entrance_identifier(place_id, access_control_id, entrance_id)},
+            name=name,
+            manufacturer=MANUFACTURER,
+            model="Intercom",
+            suggested_area=AREA_INTERCOM,
+        ),
+        via_device_id,
+    )
+
+
+def dedupe_access_controls(
+    locks: Iterable[Mapping[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Вернуть по одному стабильному представителю на пару `(place_id, access_control_id)`."""
+    by_ac: dict[tuple[str, str], dict[str, Any]] = {}
+    for lock_info in locks:
+        place_id = str(lock_info.get("place_id") or "")
+        access_control_id = str(lock_info.get("access_control_id") or "")
+        if not place_id or not access_control_id:
+            continue
+        key = (place_id, access_control_id)
+        current = by_ac.get(key)
+        if current is None or str(lock_info.get("entrance_id") or "") < str(
+            current.get("entrance_id") or ""
+        ):
+            by_ac[key] = dict(lock_info) if not isinstance(lock_info, dict) else lock_info
+    return by_ac
 
 
 def place_identifier(place_id: str) -> tuple[str, str]:

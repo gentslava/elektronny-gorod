@@ -23,7 +23,7 @@ UA — load-bearing fingerprint). Поэтому ВЕСЬ refresh идёт **п�
 """
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from datetime import timedelta
 import json
 from typing import Any
@@ -57,6 +57,26 @@ UPDATE_INTERVAL = timedelta(minutes=5)
 # забыть подчистить его невозможно — в отличие от `hass.data[DOMAIN][entry_id]`,
 # который снимался вручную.
 type ElektronnyGorodConfigEntry = ConfigEntry[ElektronnyGorodUpdateCoordinator]
+
+
+def snapshot_dimensions(
+    width: int | None, height: int | None
+) -> tuple[int, int]:
+    """Normalize snapshot width/height to the dimensions sent to the operator."""
+    w = width or DEFAULT_SNAPSHOT_WIDTH
+    h = height or round(w / 16 * 9)
+    return (w, h)
+
+
+def balance_info_for_place(
+    data: Mapping[str, Any] | None,
+    place_id: str,
+) -> dict[str, Any] | None:
+    """Find the cached balance entry for `place_id` in coordinator data."""
+    for entry in (data or {}).get("balances") or []:
+        if entry.get("place_id") == place_id:
+            return entry
+    return None
 
 
 @callback
@@ -690,8 +710,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         height: int | None,
     ) -> bytes:
         """Fetch camera snapshot bytes. On-demand action."""
-        w = width or DEFAULT_SNAPSHOT_WIDTH
-        h = height or round(w / 16 * 9)
+        w, h = snapshot_dimensions(width, height)
         LOGGER.debug("Fetching camera %s snapshot %sx%s", camera_id, w, h)
         return await self._api.query_camera_snapshot(camera_id, w, h)
 

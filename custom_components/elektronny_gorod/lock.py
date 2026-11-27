@@ -19,14 +19,13 @@ from aiohttp import ClientError
 from homeassistant.components.lock import LockEntity, LockState
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_call_later
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import AREA_INTERCOM, DOMAIN, LOGGER, SIGNAL_DOOR_OPENED
-from .device import linked_to_place, place_device_id
+from .const import DOMAIN, LOGGER, SIGNAL_DOOR_OPENED
+from .device import intercom_device_info, place_device_id
 from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
 from .entity_migration import lock_unique_id
 
@@ -100,18 +99,11 @@ class ElektronnyGorodLock(
         # entrance.externalCameraId — первичный источник связи camera↔lock
         # (см. api-reference §Access controls). На уровне access_control в API
         # бывают рассогласования; entrance — точнее.
-        device_uid = (
-            f"entrance_{self._place_id}_{self._access_control_id}_"
-            f"{self._entrance_id or 'main'}"
-        )
-        self._attr_device_info = linked_to_place(
-            DeviceInfo(
-                identifiers={(DOMAIN, device_uid)},
-                name=self._name,
-                manufacturer="Электронный город",
-                model="Intercom",
-                suggested_area=AREA_INTERCOM,
-            ),
+        self._attr_device_info = intercom_device_info(
+            self._place_id,
+            self._access_control_id,
+            self._entrance_id,
+            self._name,
             via_device_id,
         )
 
