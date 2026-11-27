@@ -334,46 +334,6 @@ class ElektronnyGorodMediaSource(MediaSource):
                     task.cancel()
             await asyncio.gather(work_task, abort_task, return_exceptions=True)
 
-    async def _acquire_archive_lock_budgeted(
-        self,
-        lock: asyncio.Lock,
-        cancel_event: asyncio.Event,
-        deadline: float,
-    ) -> Literal["ok", "aborted", "timeout"]:
-        """Acquire per-entry lock within `deadline`, aborting cleanly on `cancel_event`."""
-        remaining = deadline - time.monotonic()
-        if cancel_event.is_set():
-            return "aborted"
-        if remaining <= 0:
-            return "timeout"
-        lock_task = asyncio.create_task(lock.acquire())
-        abort_task = asyncio.create_task(cancel_event.wait())
-        handed_off = False
-        try:
-            async with asyncio.timeout(remaining):
-                done, _ = await asyncio.wait(
-                    {lock_task, abort_task},
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-            if cancel_event.is_set() or abort_task in done:
-                return "aborted"
-            handed_off = lock_task in done and not lock_task.cancelled()
-            return "ok"
-        except TimeoutError:
-            return "timeout"
-        finally:
-            for task in (lock_task, abort_task):
-                if not task.done():
-                    task.cancel()
-            await asyncio.gather(lock_task, abort_task, return_exceptions=True)
-            if (
-                not handed_off
-                and lock_task.done()
-                and not lock_task.cancelled()
-                and lock_task.result() is True
-            ):
-                lock.release()
-
     async def _archive_play_media(
         self, coordinator: Any, entry_id: str, camera_id: str, event: Any
     ) -> PlayMedia | None:
@@ -399,12 +359,12 @@ class ElektronnyGorodMediaSource(MediaSource):
         entry_in_flight.add(cancel_event)
         lock = _archive_lock(self._hass, entry_id)
         try:
-            lock_status = await self._acquire_archive_lock_budgeted(
-                lock, cancel_event, deadline
-            )
-            if lock_status == "aborted" or self._is_inactive(entry_id, coordinator):
-                raise Unresolvable("Unknown media item")
-            if lock_status != "ok":
+            try:
+                async with asyncio.timeout(max(deadline - time.monotonic(), 0.0)):
+                    await lock.acquire()
+            except TimeoutError:
+                if cancel_event.is_set() or self._is_inactive(entry_id, coordinator):
+                    raise Unresolvable("Unknown media item") from None
                 LOGGER.debug(
                     "Media source archive lock timed out for camera_id=%s "
                     "event_id=%s; live view",
@@ -413,6 +373,8 @@ class ElektronnyGorodMediaSource(MediaSource):
                 )
                 return None
             try:
+                if cancel_event.is_set() or self._is_inactive(entry_id, coordinator):
+                    raise Unresolvable("Unknown media item")
                 for stale_key in [
                     k
                     for k, found in streams.items()

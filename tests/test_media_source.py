@@ -2203,47 +2203,61 @@ async def test_unload_during_archive_lock_wait_raises_unresolvable_without_live(
         lock.release()
 
 
-async def test_acquire_archive_lock_budgeted_edge_cases(hass) -> None:
-    """Граничные ветки `_acquire_archive_lock_budgeted` и release на racing acquire."""
+async def test_lock_boundary_cancel_and_coordinator_swap_release_lock_cleanly(
+    hass,
+) -> None:
+    """Отмена или смена координатора на границе per-entry lock не протекают lock."""
     import asyncio
-    import time
 
+    from custom_components.elektronny_gorod.media_source import _archive_lock
+
+    # 1) Caller cancelled right as holder releases lock -> lock released, next resolve works.
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    _register_camera_entity(hass, entry)
+    lock = _archive_lock(hass, entry.entry_id)
     source = _source(hass)
 
-    # Pre-set cancel_event returns 'aborted' immediately without touching lock.
-    lock = asyncio.Lock()
-    preset = asyncio.Event()
-    preset.set()
-    assert (
-        await source._acquire_archive_lock_budgeted(
-            lock, preset, time.monotonic() + 5.0
-        )
-        == "aborted"
-    )
-    assert lock.locked() is False
-
-    # Already expired deadline returns 'timeout' immediately without touching lock.
-    assert (
-        await source._acquire_archive_lock_budgeted(
-            lock, asyncio.Event(), time.monotonic() - 1.0
-        )
-        == "timeout"
-    )
-    assert lock.locked() is False
-
-    # If abort triggers concurrently right as lock is acquired, lock is released cleanly.
     await lock.acquire()
-    cancel_ev = asyncio.Event()
-    task = asyncio.create_task(
-        source._acquire_archive_lock_budgeted(
-            lock, cancel_ev, time.monotonic() + 5.0
-        )
+    resolve_cancelled = asyncio.create_task(
+        source.async_resolve_media(_resolve_item(hass, entry, day_str=day_str))
     )
-    await asyncio.sleep(0)
-    cancel_ev.set()
+    # Yield until resolve_cancelled reaches `await lock.acquire()`.
+    for _ in range(5):
+        await asyncio.sleep(0)
+    # Release lock and cancel resolve_cancelled before it resumes.
     lock.release()
-    assert await task == "aborted"
+    resolve_cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await resolve_cancelled
     assert lock.locked() is False
+
+    # 2) Coordinator replaced while caller queued on lock -> Unresolvable + lock released.
+    await lock.acquire()
+    resolve_stale = asyncio.create_task(
+        source.async_resolve_media(_resolve_item(hass, entry, day_str=day_str))
+    )
+    for _ in range(5):
+        await asyncio.sleep(0)
+    new_coord = _coordinator(events=coordinator.api.query_camera_events.return_value)
+    new_coord.api.query_camera_archive_stream = AsyncMock(return_value=_ARCHIVE_URL)
+    entry.runtime_data = new_coord
+    lock.release()
+    with _patch_camera_resolve() as camera_resolve:
+        with pytest.raises(Unresolvable, match="Unknown media item"):
+            await resolve_stale
+    camera_resolve.assert_not_awaited()
+    coordinator.api.query_camera_archive_stream.assert_not_awaited()
+    assert lock.locked() is False
+
+    # Next resolve on the new coordinator acquires the lock normally.
+    created: list = []
+    with _patch_archive_start(created=created):
+        play = await source.async_resolve_media(
+            _resolve_item(hass, entry, day_str=day_str)
+        )
+    assert play.url.startswith("/api/elektronny_gorod/archive/")
+    assert lock.locked() is False
+    await created[0][0].stop()
 
 
 async def test_hass_stop_during_stalled_session_raises_unresolvable_without_live(
