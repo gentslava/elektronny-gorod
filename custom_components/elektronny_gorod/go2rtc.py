@@ -4,13 +4,24 @@ import asyncio
 import base64
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from yarl import URL
 
-from .const import GO2RTC_RTSP_PORT, LOGGER
+from .const import (
+    CONF_GO2RTC_BASE_URL,
+    CONF_GO2RTC_PASSWORD,
+    CONF_GO2RTC_RTSP_HOST,
+    CONF_GO2RTC_USERNAME,
+    CONF_USE_GO2RTC,
+    GO2RTC_RTSP_PORT,
+    LOGGER,
+)
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
 
 # G-7 / A-79: TCP-probe RTSP-порта go2rtc после успешной HTTP-валидации.
 # Если HTTP API открыт, а RTSP-порт закрыт (firewall, иной bind-address,
@@ -25,6 +36,40 @@ class Go2RtcValidationResult:
     ok: bool
     error: str = ""
     rtsp_host: str | None = None
+
+
+@dataclass(frozen=True)
+class Go2RtcEntrySettings:
+    """Resolved go2rtc configuration values from entry options and data."""
+
+    use_go2rtc: bool
+    base_url: str | None
+    rtsp_host: str | None
+    username: str | None
+    password: str | None
+
+
+def entry_option_or_data(entry: ConfigEntry, key: str, default: Any = None) -> Any:
+    """Read a config setting with explicit options precedence over data."""
+    options = getattr(entry, "options", {})
+    data = getattr(entry, "data", {})
+    return options.get(key, data.get(key, default))
+
+
+def read_go2rtc_entry_settings(entry: ConfigEntry) -> Go2RtcEntrySettings:
+    """Resolve go2rtc settings uniformly from entry options and data."""
+    use_go2rtc = bool(entry_option_or_data(entry, CONF_USE_GO2RTC, False))
+    base_url = entry_option_or_data(entry, CONF_GO2RTC_BASE_URL) or None
+    rtsp_host = entry_option_or_data(entry, CONF_GO2RTC_RTSP_HOST) or None
+    username = entry_option_or_data(entry, CONF_GO2RTC_USERNAME) or None
+    password = entry_option_or_data(entry, CONF_GO2RTC_PASSWORD) or None
+    return Go2RtcEntrySettings(
+        use_go2rtc=use_go2rtc,
+        base_url=str(base_url) if base_url is not None else None,
+        rtsp_host=str(rtsp_host) if rtsp_host is not None else None,
+        username=str(username) if username is not None else None,
+        password=str(password) if password is not None else None,
+    )
 
 
 @dataclass(frozen=True)

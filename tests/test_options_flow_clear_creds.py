@@ -18,6 +18,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.elektronny_gorod import _build_go2rtc_config
 from custom_components.elektronny_gorod.const import (
     DOMAIN,
     CONF_USE_GO2RTC,
@@ -26,7 +27,10 @@ from custom_components.elektronny_gorod.const import (
     CONF_GO2RTC_USERNAME,
     CONF_GO2RTC_PASSWORD,
 )
-from custom_components.elektronny_gorod.go2rtc import Go2RtcValidationResult
+from custom_components.elektronny_gorod.go2rtc import (
+    Go2RtcValidationResult,
+    read_go2rtc_entry_settings,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -175,3 +179,33 @@ async def test_change_creds_to_new_values(
     assert finish["type"] == "create_entry"
     assert mock_entry_with_creds.options.get(CONF_GO2RTC_USERNAME) == "newuser"
     assert mock_entry_with_creds.options.get(CONF_GO2RTC_PASSWORD) == "newpass"
+
+
+def test_cleared_go2rtc_creds_in_options_override_stale_data_creds() -> None:
+    """Cleared empty strings in options must not fall back to data credentials."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_USE_GO2RTC: True,
+            CONF_GO2RTC_BASE_URL: "http://127.0.0.1:1984",
+            CONF_GO2RTC_RTSP_HOST: "127.0.0.1",
+            CONF_GO2RTC_USERNAME: "old_user",
+            CONF_GO2RTC_PASSWORD: "old_password",
+        },
+        options={
+            CONF_USE_GO2RTC: True,
+            CONF_GO2RTC_BASE_URL: "http://127.0.0.1:1984",
+            CONF_GO2RTC_RTSP_HOST: "127.0.0.1",
+            CONF_GO2RTC_USERNAME: "",
+            CONF_GO2RTC_PASSWORD: "",
+        },
+    )
+
+    cfg = read_go2rtc_entry_settings(entry)
+    assert cfg.use_go2rtc is True
+    assert cfg.username is None
+    assert cfg.password is None
+
+    sip_go2rtc = _build_go2rtc_config(entry)
+    assert sip_go2rtc is not None
+    assert sip_go2rtc.headers == {}

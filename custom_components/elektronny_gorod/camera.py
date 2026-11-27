@@ -27,13 +27,9 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from .const import (
     AREA_INDOOR_CAM,
     AREA_PUBLIC_CAM,
-    CONF_GO2RTC_BASE_URL,
-    CONF_GO2RTC_PASSWORD,
-    CONF_GO2RTC_RTSP_HOST,
-    CONF_GO2RTC_USERNAME,
-    CONF_USE_GO2RTC,
     DOMAIN,
     LOGGER,
+    SIP_DATA,
     STREAM_MANAGER_DATA,
 )
 from .call_camera import ElektronnyGorodCallCamera
@@ -43,12 +39,13 @@ from .coordinator import (
     ElektronnyGorodUpdateCoordinator,
     snapshot_dimensions,
 )
-from .go2rtc import go2rtc_auth_headers
+from .go2rtc import go2rtc_auth_headers, read_go2rtc_entry_settings
 from .helpers import capped_exponential_backoff
 from .stream_manager import CameraStreamManager
 
 if TYPE_CHECKING:
     from homeassistant.components.stream import Stream
+    from .sip.call_controller import DoorbellCallController
 
 # Сколько кадр считается свежим. Пока свежий — отдаём из памяти, вообще не
 # беспокоя оператора; когда устарел, но ещё не протух — отдаём сразу, а
@@ -143,19 +140,24 @@ GO2RTC_HEALTH_POLL_INTERVAL = timedelta(seconds=30)
 GO2RTC_PROACTIVE_REFRESH_INTERVAL = timedelta(minutes=28, seconds=30)
 
 
-def _get_go2rtc_cfg(
-    entry: ElektronnyGorodConfigEntry,
-) -> tuple[bool, str | None, str | None, str | None, str | None]:
-    use_go2rtc = (
-        entry.options.get(CONF_USE_GO2RTC)
-        if CONF_USE_GO2RTC in entry.options
-        else entry.data.get(CONF_USE_GO2RTC, False)
-    )
-    base_url = entry.options.get(CONF_GO2RTC_BASE_URL) or entry.data.get(CONF_GO2RTC_BASE_URL)
-    rtsp_host = entry.options.get(CONF_GO2RTC_RTSP_HOST) or entry.data.get(CONF_GO2RTC_RTSP_HOST)
-    go2rtc_username = entry.options.get(CONF_GO2RTC_USERNAME) or entry.data.get(CONF_GO2RTC_USERNAME)
-    go2rtc_password = entry.options.get(CONF_GO2RTC_PASSWORD) or entry.data.get(CONF_GO2RTC_PASSWORD)
-    return bool(use_go2rtc), base_url, rtsp_host, go2rtc_username, go2rtc_password
+def _find_camera_entity(hass: HomeAssistant, camera_id: str) -> Camera | None:
+    """Find a loaded intercom camera entity by its operator camera ID."""
+    comp = hass.data.get("camera")
+    if comp is None:
+        return None
+    uid = f"{DOMAIN}_camera_{camera_id}"
+    for ent in comp.entities:
+        if getattr(ent, "unique_id", None) == uid:
+            return ent
+    return None
+
+
+def _find_sip_controller(
+    hass: HomeAssistant,
+    entry_id: str,
+) -> DoorbellCallController | None:
+    """Resolve the entry SIP call controller created later during entry setup."""
+    return hass.data.get(SIP_DATA, {}).get(entry_id)
 
 
 async def async_setup_entry(
@@ -169,7 +171,7 @@ async def async_setup_entry(
         STREAM_MANAGER_DATA, {}
     ).get(entry.entry_id)
 
-    use_go2rtc, base_url, rtsp_host, go2rtc_username, go2rtc_password = _get_go2rtc_cfg(entry)
+    go2rtc_cfg = read_go2rtc_entry_settings(entry)
 
     known_camera_ids: set[str] = set()
 
@@ -205,32 +207,17 @@ async def async_setup_entry(
     # Контроллер создаётся в __init__ ПОСЛЕ forward_entry_setups — резолвим лениво
     # через _controller_getter, чтобы не зависеть от timing setup. Регистрируется
     # всегда при наличии go2rtc-конфига, без проверки controller is not None.
-    if use_go2rtc and base_url and rtsp_host:
-        def _doorbell_lookup(camera_id: str):
-            """Найти camera-сущность домофона по unique_id в платформе camera."""
-            comp = hass.data.get("camera")
-            if comp is None:
-                return None
-            uid = f"{DOMAIN}_camera_{camera_id}"
-            for ent in comp.entities:
-                if getattr(ent, "unique_id", None) == uid:
-                    return ent
-            return None
-
-        entry_id = entry.entry_id
-
-        def _controller_getter():
-            # Контроллер создаётся в __init__ ПОСЛЕ forward_entry_setups — резолвим лениво.
-            return hass.data.get(f"{DOMAIN}_sip", {}).get(entry_id)
-
+    if go2rtc_cfg.use_go2rtc and go2rtc_cfg.base_url and go2rtc_cfg.rtsp_host:
         async_add_entities([
             ElektronnyGorodCallCamera(
-                controller_getter=_controller_getter,
-                go2rtc_base_url=base_url,
-                go2rtc_headers=go2rtc_auth_headers(go2rtc_username, go2rtc_password),
-                rtsp_host=rtsp_host,
-                doorbell_lookup=_doorbell_lookup,
-                entry_id=entry_id,
+                controller_getter=partial(_find_sip_controller, hass, entry.entry_id),
+                go2rtc_base_url=go2rtc_cfg.base_url,
+                go2rtc_headers=go2rtc_auth_headers(
+                    go2rtc_cfg.username, go2rtc_cfg.password
+                ),
+                rtsp_host=go2rtc_cfg.rtsp_host,
+                doorbell_lookup=partial(_find_camera_entity, hass),
+                entry_id=entry.entry_id,
             )
         ])
 

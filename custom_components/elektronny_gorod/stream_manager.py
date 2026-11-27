@@ -16,19 +16,20 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
 from .const import (
-    CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_KEEP_WARM,
     CONF_GO2RTC_KEEP_WARM_HIDDEN,
-    CONF_GO2RTC_PASSWORD,
-    CONF_GO2RTC_RTSP_HOST,
-    CONF_GO2RTC_USERNAME,
-    CONF_USE_GO2RTC,
     DEFAULT_GO2RTC_KEEP_WARM,
     DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
     DOMAIN,
     LOGGER,
 )
-from .go2rtc import Go2RtcClient, Go2RtcRequestError, Go2RtcStreamInfo
+from .go2rtc import (
+    Go2RtcClient,
+    Go2RtcRequestError,
+    Go2RtcStreamInfo,
+    entry_option_or_data,
+    read_go2rtc_entry_settings,
+)
 from .helpers import capped_exponential_backoff
 
 
@@ -195,20 +196,16 @@ class CameraStreamManager:
         """Apply publication-only options without reloading the config entry."""
         if not self._started:
             return False
-        use_go2rtc = bool(self._entry_value(CONF_USE_GO2RTC, False))
-        base_url = str(self._entry_value(CONF_GO2RTC_BASE_URL, "") or "")
-        rtsp_host = str(self._entry_value(CONF_GO2RTC_RTSP_HOST, "") or "")
-        username = self._entry_value(CONF_GO2RTC_USERNAME, None) or None
-        password = self._entry_value(CONF_GO2RTC_PASSWORD, None) or None
+        cfg = read_go2rtc_entry_settings(self.entry)
         if (
-            not use_go2rtc
-            or not base_url
-            or not rtsp_host
+            not cfg.use_go2rtc
+            or not cfg.base_url
+            or not cfg.rtsp_host
             or not self.client.matches_configuration(
-                base_url=base_url,
-                rtsp_host=rtsp_host,
-                username=username,
-                password=password,
+                base_url=cfg.base_url,
+                rtsp_host=cfg.rtsp_host,
+                username=cfg.username,
+                password=cfg.password,
             )
         ):
             return False
@@ -810,9 +807,7 @@ class CameraStreamManager:
             state.producer_active = False
 
     def _entry_value(self, key: str, default: Any) -> Any:
-        options = getattr(self.entry, "options", {})
-        data = getattr(self.entry, "data", {})
-        return options.get(key, data.get(key, default))
+        return entry_option_or_data(self.entry, key, default)
 
     def _camera_ids(self) -> list[str]:
         result: list[str] = []
