@@ -39,7 +39,7 @@ from .coordinator import (
     ElektronnyGorodUpdateCoordinator,
     snapshot_dimensions,
 )
-from .go2rtc import go2rtc_auth_headers, read_go2rtc_entry_settings
+from .go2rtc import go2rtc_auth_headers, read_go2rtc_call_settings
 from .helpers import capped_exponential_backoff
 from .stream_manager import CameraStreamManager
 
@@ -171,7 +171,7 @@ async def async_setup_entry(
         STREAM_MANAGER_DATA, {}
     ).get(entry.entry_id)
 
-    go2rtc_cfg = read_go2rtc_entry_settings(entry)
+    go2rtc_cfg = read_go2rtc_call_settings(entry)
 
     known_camera_ids: set[str] = set()
 

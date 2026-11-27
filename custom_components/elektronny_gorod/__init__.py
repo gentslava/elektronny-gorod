@@ -50,7 +50,12 @@ from .fcm import (
     async_create_fcm_repair_issue,
     async_delete_fcm_repair_issue,
 )
-from .go2rtc import Go2RtcClient, go2rtc_auth_headers, read_go2rtc_entry_settings
+from .go2rtc import (
+    Go2RtcClient,
+    go2rtc_auth_headers,
+    read_go2rtc_call_settings,
+    read_go2rtc_entry_settings,
+)
 from .device import async_register_place_devices, place_id_from_identifiers
 from .history import HistoryManager
 from .history_ws import async_register_history_ws_command
@@ -276,7 +281,7 @@ async def async_setup_entry(
 
 def _build_go2rtc_config(entry: ConfigEntry) -> Go2RtcConfig | None:
     """go2rtc-конфиг для аудио-моста (downlink) из entry. None если go2rtc выключен."""
-    cfg = read_go2rtc_entry_settings(entry)
+    cfg = read_go2rtc_call_settings(entry)
     if not cfg.use_go2rtc or not cfg.base_url:
         return None
     return Go2RtcConfig(

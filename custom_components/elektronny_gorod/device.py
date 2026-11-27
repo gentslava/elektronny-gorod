@@ -20,7 +20,6 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import AREA_INTERCOM, DOMAIN
-from .history import place_display_name
 
 MANUFACTURER = "Электронный город"
 
@@ -58,22 +57,43 @@ def intercom_device_info(
 
 
 def dedupe_access_controls(
-    locks: Iterable[Mapping[str, Any]],
-) -> dict[tuple[str, str], dict[str, Any]]:
-    """Вернуть по одному стабильному представителю на пару `(place_id, access_control_id)`."""
-    by_ac: dict[tuple[str, str], dict[str, Any]] = {}
+    locks: Iterable[dict[str, Any]],
+) -> dict[tuple[str, str | int], dict[str, Any]]:
+    """Выбрать точку входа для каждой пары исходных ID сущностей HA."""
+    by_ac: dict[tuple[str, str | int], dict[str, Any]] = {}
     for lock_info in locks:
-        place_id = str(lock_info.get("place_id") or "")
-        access_control_id = str(lock_info.get("access_control_id") or "")
-        if not place_id or not access_control_id:
+        place_id = lock_info.get("place_id")
+        access_control_id = lock_info.get("access_control_id")
+        if place_id is None or access_control_id is None:
             continue
         key = (place_id, access_control_id)
         current = by_ac.get(key)
         if current is None or str(lock_info.get("entrance_id") or "") < str(
             current.get("entrance_id") or ""
         ):
-            by_ac[key] = dict(lock_info) if not isinstance(lock_info, dict) else lock_info
+            by_ac[key] = lock_info
     return by_ac
+
+
+def place_label(place: Mapping[str, Any]) -> str | None:
+    """Вернуть читаемый адрес или имя места из ответа оператора."""
+    address = place.get("address")
+    if isinstance(address, dict):
+        address = address.get("visibleAddress")
+    if isinstance(address, str) and address:
+        return address
+    name = place.get("name")
+    return name if isinstance(name, str) and name else None
+
+
+def place_display_name(data: Mapping[str, Any] | None, place_id: str) -> str:
+    """Вернуть подпись места по строковому ID адреса."""
+    fallback = f"Place {place_id}"
+    for subscriber_place in (data or {}).get("places") or []:
+        place = subscriber_place.get("place") or {}
+        if str(place.get("id") or "") == place_id:
+            return place_label(place) or fallback
+    return fallback
 
 
 def place_identifier(place_id: str) -> tuple[str, str]:

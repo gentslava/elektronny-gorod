@@ -42,13 +42,13 @@ from .device import (
     intercom_device_info,
     place_device_id,
     place_identifier,
+    place_label,
 )
 from .coordinator import (
     ElektronnyGorodConfigEntry,
     ElektronnyGorodUpdateCoordinator,
     balance_info_for_place,
 )
-from .history import place_display_name
 from .stream_manager import (
     BACKGROUND_REFRESH_INTERVAL,
     CameraStreamManager,
@@ -218,8 +218,13 @@ class ElektronnyGorodBalanceSensor(
         )
 
     def _place_display_name(self) -> str:
-        """Достать читаемое имя места из coordinator.data.places."""
-        return place_display_name(self.coordinator.data, str(self._place_id))
+        """Вернуть подпись адреса для исходного ID балансового сенсора."""
+        fallback = f"Place {self._place_id}"
+        for subscriber_place in (self.coordinator.data or {}).get("places") or []:
+            place = subscriber_place.get("place") or {}
+            if place.get("id") == self._place_id:
+                return place_label(place) or fallback
+        return fallback
 
     @property
     def _balance_info(self) -> dict[str, Any] | None:

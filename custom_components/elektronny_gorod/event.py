@@ -41,6 +41,7 @@ from .device import (
     dedupe_access_controls,
     intercom_device_info,
     place_device_id,
+    place_display_name,
     place_identifier,
 )
 from .history import (
@@ -48,7 +49,6 @@ from .history import (
     account_history_unique_id,
     camera_history_unique_id,
     history_signal,
-    place_display_name,
     place_history_unique_id,
 )
 

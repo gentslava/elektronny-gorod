@@ -54,7 +54,7 @@ from .archive_hls import (
 from .clip_proxy import async_register_clip_view, clip_proxy_url
 from .coordinator import async_get_coordinator
 from .const import DOMAIN, LOGGER
-from .history import place_display_name
+from .device import place_display_name
 
 _T = TypeVar("_T")
 

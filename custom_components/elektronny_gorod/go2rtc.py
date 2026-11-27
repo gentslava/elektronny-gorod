@@ -58,7 +58,7 @@ def entry_option_or_data(entry: ConfigEntry, key: str, default: Any = None) -> A
 
 
 def read_go2rtc_entry_settings(entry: ConfigEntry) -> Go2RtcEntrySettings:
-    """Resolve go2rtc settings uniformly from entry options and data."""
+    """Resolve go2rtc settings with explicit options precedence over data."""
     use_go2rtc = bool(entry_option_or_data(entry, CONF_USE_GO2RTC, False))
     base_url = entry_option_or_data(entry, CONF_GO2RTC_BASE_URL) or None
     rtsp_host = entry_option_or_data(entry, CONF_GO2RTC_RTSP_HOST) or None
@@ -70,6 +70,19 @@ def read_go2rtc_entry_settings(entry: ConfigEntry) -> Go2RtcEntrySettings:
         rtsp_host=str(rtsp_host) if rtsp_host is not None else None,
         username=str(username) if username is not None else None,
         password=str(password) if password is not None else None,
+    )
+
+
+def read_go2rtc_call_settings(entry: ConfigEntry) -> Go2RtcEntrySettings:
+    """Keep the call path's fallback to stored endpoints and credentials."""
+    options = entry.options
+    data = entry.data
+    return Go2RtcEntrySettings(
+        use_go2rtc=bool(entry_option_or_data(entry, CONF_USE_GO2RTC, False)),
+        base_url=options.get(CONF_GO2RTC_BASE_URL) or data.get(CONF_GO2RTC_BASE_URL),
+        rtsp_host=options.get(CONF_GO2RTC_RTSP_HOST) or data.get(CONF_GO2RTC_RTSP_HOST),
+        username=options.get(CONF_GO2RTC_USERNAME) or data.get(CONF_GO2RTC_USERNAME),
+        password=options.get(CONF_GO2RTC_PASSWORD) or data.get(CONF_GO2RTC_PASSWORD),
     )
 
 

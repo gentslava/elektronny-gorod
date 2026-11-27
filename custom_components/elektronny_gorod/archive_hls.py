@@ -354,18 +354,13 @@ class _TsSegment:
         oas = out.add_stream_from_template(as_) if as_ is not None else None
         return cls(bio=bio, out=out, vs=ovs, as_=oas)
 
-    def close_and_take_bytes(self) -> bytes:
-        """Finalize muxer headers/trailers, extract bytes, and close buffer."""
-        self.out.close()
-        seg_bytes = self.bio.getvalue()
-        self.bio.close()
-        return seg_bytes
-
-    def discard(self) -> None:
-        """Close muxer and buffer while suppressing partial write errors."""
-        with contextlib.suppress(Exception):
+    def close(self, *, take_bytes: bool) -> bytes:
+        """Finalize the muxer and release the buffer even if its trailer fails."""
+        try:
             self.out.close()
-        self.bio.close()
+            return self.bio.getvalue() if take_bytes else b""
+        finally:
+            self.bio.close()
 
 
 class _FlvTsMuxer:
@@ -410,9 +405,12 @@ class _FlvTsMuxer:
 
     def discard_current(self) -> None:
         """Discard any open segment after an unhandled exception or budget overrun."""
-        if self._seg is not None:
-            self._seg.discard()
-            self._seg = None
+        with contextlib.suppress(Exception):
+            self._close_current(take_bytes=False)
+
+    def _close_current(self, *, take_bytes: bool) -> bytes:
+        seg, self._seg = self._seg, None
+        return seg.close(take_bytes=take_bytes) if seg is not None else b""
 
     def abort(self) -> None:
         """Mark the muxer aborted and drop the active segment."""
@@ -441,16 +439,19 @@ class _FlvTsMuxer:
         pkt.stream = target_stream
         self._seg.out.mux(pkt)
 
+    def _emit_current(self, duration: float | None) -> bool:
+        seg_bytes = self._close_current(take_bytes=duration is not None)
+        if duration is None or not seg_bytes:
+            return True
+        if not self._on_segment(duration, seg_bytes):
+            return False
+        self._published_bytes += len(seg_bytes)
+        self.emitted += 1
+        return True
+
     def _rotate_segment(self, elapsed: float) -> bool:
-        assert self._seg is not None
-        seg = self._seg
-        self._seg = None
-        seg_bytes = seg.close_and_take_bytes()
-        if seg_bytes:
-            if not self._on_segment(elapsed, seg_bytes):
-                return False
-            self._published_bytes += len(seg_bytes)
-            self.emitted += 1
+        if not self._emit_current(elapsed):
+            return False
         self.open_next_segment()
         return True
 
@@ -475,30 +476,21 @@ class _FlvTsMuxer:
 
     def finish(self) -> int:
         """Flush and optionally emit the trailing segment, returning emitted count."""
-        seg = self._seg
-        self._seg = None
-        if seg is None:
-            return self.emitted
         if self._aborted:
-            seg.discard()
+            self.discard_current()
             return self.emitted
-        seg.out.close()
-        try:
-            if self._seg_start_dts is not None and self._last_v_dts is not None:
-                tail = max(
-                    float(
-                        ((self._last_v_dts - self._seg_start_dts) + self._last_v_dur)
-                        * self._vs.time_base
-                    ),
-                    0.1,
-                )
-                if tail <= self._max_segment_duration:
-                    tail_bytes = seg.bio.getvalue()
-                    if tail_bytes and self._on_segment(tail, tail_bytes):
-                        self._published_bytes += len(tail_bytes)
-                        self.emitted += 1
-        finally:
-            seg.bio.close()
+        duration = None
+        if self._seg_start_dts is not None and self._last_v_dts is not None:
+            tail = max(
+                float(
+                    ((self._last_v_dts - self._seg_start_dts) + self._last_v_dur)
+                    * self._vs.time_base
+                ),
+                0.1,
+            )
+            if tail <= self._max_segment_duration:
+                duration = tail
+        self._emit_current(duration)
         return self.emitted
 
 

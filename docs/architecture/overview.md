@@ -217,8 +217,8 @@ async_unload_entry:
 
 | Слой | Файлы | Ответственность |
 |---|---|---|
-| **HA integration interface** | `__init__.py`, `config_flow.py` | вход/выход в HA, миграции, entity visibility sync |
-| **Domain coordinator** | `coordinator.py` | оркестрация refresh, snapshot `coordinator.data` |
+| **HA integration interface** | `__init__.py`, `config_flow.py` | вход и выход в HA, миграции, регистрация сервисов, синхронизация видимости сущностей |
+| **Domain coordinator** | `coordinator.py` | построение `coordinator.data`, границы ошибок запросов по адресу и сохранение доступных данных при частичном сбое |
 | **Entity migration** | `entity_migration.py` | stable `unique_id` для camera/lock (legacy → new) |
 | **API client** | `api.py` | REST-обёртка над `myhome.proptech.ru`: coordinator polling, typed/sanitized history, H264 live stream, push bind и `mint_sip_device` (A-81) |
 | **History subsystem** | `history.py` | отдельный 5-minute poll: page-0 baseline на каждый source, bounded per-stream dedup, Store schema v1, config-entry-scoped dispatcher, opt-in camera polling и форматы постоянных ID для регистрации, миграции и выбора источника |
@@ -233,7 +233,12 @@ async_unload_entry:
 | **FCM listener** | `fcm.py` | `DoorbellFcmListener` — FCM-триггер вызова → `SIGNAL_DOORBELL` → `DoorbellCallController.handle_signal`; per-entry circuit breaker ограничивает reconnect-loop паузами 15 мин / 1 ч / 6 ч / 24 ч и показывает persistent Repairs issue с названием затронутого аккаунта. Startup, watchdog и unload сериализованы; failed stop сохраняет owner и блокирует replacement. Owner claim/start выполняются после последнего fallible setup-await; surviving owner не заменяется, entry остаётся loaded без realtime FCM и без setup-retry loop. После failed unload removal повторяет stop; повторный failure требует restart и сохраняет owner до него |
 | **Auth crypto** | `helpers.py`, `time.py`, `user_agent.py` | reverse-engineered hashing, эмуляция мобильного клиента |
 | **Entities (HA platforms)** | `camera.py`, `lock.py`, `sensor.py`, `switch.py`, `event.py`, `binary_sensor.py` | UI представление; `event.py` — realtime doorbell (ADR-0011) и routed durable access/camera history |
+| **Device registry** | `device.py` | идентификаторы устройств адреса, подъезда и домофона, а также метаданные домофона для платформ HA |
 | **Constants & UI strings** | `const.py`, `strings.json`, `translations/*` | конфиг + локализация |
+
+Публикация потоков go2rtc учитывает явно сохранённые пустые значения из `entry.options`.
+Камера вызова и SIP при пустых настройках подключения используют значения из `entry.data`.
+В обеих ветках значение `use_go2rtc: false` в `entry.options` отключает go2rtc.
 
 ## State management
 

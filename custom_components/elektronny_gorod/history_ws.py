@@ -16,12 +16,11 @@ from homeassistant.helpers import entity_registry as er
 
 from .coordinator import async_get_coordinator
 from .const import CONF_ACCOUNT_ID, CONF_SUBSCRIBER_ID, DOMAIN, LOGGER
-from .device import dedupe_access_controls
+from .device import place_display_name
 from .history import (
     access_history_unique_id,
     account_history_unique_id,
     map_general_event_type,
-    place_display_name,
     place_history_unique_id,
 )
 
@@ -40,6 +39,25 @@ class HistoryBrowseTarget:
     aggregate: bool
 
 
+def _access_control_sources(
+    coordinator: Any,
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Return one stable representative per place/access-control pair."""
+    sources: dict[tuple[str, str], dict[str, Any]] = {}
+    for lock_info in (coordinator.data or {}).get("locks") or []:
+        place_id = str(lock_info.get("place_id") or "")
+        access_control_id = str(lock_info.get("access_control_id") or "")
+        if not place_id or not access_control_id:
+            continue
+        key = (place_id, access_control_id)
+        current = sources.get(key)
+        if current is None or str(lock_info.get("entrance_id") or "") < str(
+            current.get("entrance_id") or ""
+        ):
+            sources[key] = lock_info
+    return sources
+
+
 def _resolve_target(
     hass: HomeAssistant,
     entity_id: str,
@@ -55,7 +73,7 @@ def _resolve_target(
     coordinator = async_get_coordinator(hass, registry_entry.config_entry_id)
     if coordinator is None:
         return None
-    source_locks = dedupe_access_controls((coordinator.data or {}).get("locks") or [])
+    source_locks = _access_control_sources(coordinator)
     entry = hass.config_entries.async_get_entry(registry_entry.config_entry_id)
     if entry is not None:
         account_id = str(entry.data.get(CONF_ACCOUNT_ID) or "")

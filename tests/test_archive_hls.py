@@ -169,6 +169,7 @@ def _fake_av_module(
     audio_streams: list[Any],
     packets: list[Any],
     mux_side_effect: Exception | None = None,
+    trailer: bytes = b"",
 ):
     """Build a lightweight fake `av` module for PyAV-free CI runs."""
 
@@ -189,6 +190,8 @@ def _fake_av_module(
 
         def close(self) -> None:
             self.closed = True
+            if trailer:
+                self._bio.write(trailer)
 
     class _FakeIn:
         def __init__(self) -> None:
@@ -439,6 +442,48 @@ def test_remux_fake_av_rejects_missing_or_non_h264_video_and_handles_abort(hass)
         _remux_flv_to_mpegts(_BytePipe(hass.loop), lambda _d, _b: True)
     assert fake_in.closed is True
     assert outs[0].closed is True
+
+
+@pytest.mark.parametrize("rotate", [True, False], ids=["rotation", "tail"])
+def test_remux_closes_buffer_when_trailer_exceeds_byte_budget(
+    hass, monkeypatch, rotate
+) -> None:
+    from custom_components.elektronny_gorod import archive_hls
+
+    buffers: list[io.BytesIO] = []
+
+    def track_buffer() -> io.BytesIO:
+        buffer = io.BytesIO()
+        buffers.append(buffer)
+        return buffer
+
+    monkeypatch.setattr(archive_hls, "io", SimpleNamespace(BytesIO=track_buffer))
+    video = SimpleNamespace(
+        index=0, type="video", name="h264", time_base=Fraction(1, 1000)
+    )
+    packets = [_pkt(video, 0, keyframe=True)]
+    if rotate:
+        packets.append(_pkt(video, 2000, keyframe=True))
+    trailer = b"trailer"
+    fake_av, fake_in, outs = _fake_av_module(
+        video_streams=[video], audio_streams=[], packets=packets, trailer=trailer
+    )
+    monkeypatch.setattr(archive_hls, "_import_av", lambda: fake_av)
+    on_segment = MagicMock(return_value=True)
+    pipe = _BytePipe(hass.loop)
+    max_bytes = len(b"video:0:0;") + len(trailer) - 1
+
+    if rotate:
+        assert _remux_flv_to_mpegts(pipe, on_segment, max_bytes=max_bytes) == 0
+    else:
+        with pytest.raises(BufferError, match="Archive segment byte budget exceeded"):
+            _remux_flv_to_mpegts(pipe, on_segment, max_bytes=max_bytes)
+
+    on_segment.assert_not_called()
+    assert fake_in.closed
+    assert len(outs) == len(buffers) == 1
+    assert outs[0].closed
+    assert buffers[0].closed
 
 
 async def test_archive_views_security_headers_and_client_disconnect(
