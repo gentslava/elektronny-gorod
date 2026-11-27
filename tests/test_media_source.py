@@ -1488,26 +1488,55 @@ async def test_resolve_archive_waits_for_first_segment_and_handles_failure(
     assert not (hass.data.get("elektronny_gorod_archive_streams") or {})
 
 
+def _observe_archive_timeouts(monkeypatch, observe) -> None:
+    """Observe real timeout handles only in the archive resolver."""
+    import asyncio
+
+    from custom_components.elektronny_gorod import media_source
+
+    class _ObservedAsyncio:
+        def __getattr__(self, name):
+            return getattr(asyncio, name)
+
+        def timeout(self, delay):
+            timer = asyncio.timeout(delay)
+            observe(delay, timer)
+            return timer
+
+    monkeypatch.setattr(media_source, "asyncio", _ObservedAsyncio())
+
+
 async def test_resolve_archive_ready_timeout_falls_back_without_waiting_for_blocking_stop(
     hass, monkeypatch, caplog
 ) -> None:
     """Дедлайн ожидания не ждёт блокирующий `stop()` при зависшем upstream open."""
     import asyncio
     import logging
-    import time
 
-    from custom_components.elektronny_gorod.archive_hls import ArchiveHlsSession
+    from custom_components.elektronny_gorod import media_source
+    from custom_components.elektronny_gorod.archive_hls import (
+        ArchiveHlsSession,
+        archive_sessions_by_id,
+        archive_streams,
+    )
 
     caplog.set_level(logging.DEBUG)
-    monkeypatch.setattr(
-        "custom_components.elektronny_gorod.media_source._ARCHIVE_READY_TIMEOUT_SEC",
-        0.05,
-    )
     _coordinator_unused, entry, day_str = _realtime_archive_entry(hass)
     source = _source(hass)
 
+    session_started = False
+    readiness_timeout = hass.loop.create_future()
     stop_started = asyncio.Event()
     stop_release = asyncio.Event()
+
+    def _start(self, _url) -> None:
+        nonlocal session_started
+        self.touch()
+        session_started = True
+
+    def _observe(delay, timer) -> None:
+        if session_started and not readiness_timeout.done():
+            readiness_timeout.set_result((delay, timer))
 
     async def _slow_stop(self) -> None:
         self._closed = True
@@ -1516,29 +1545,39 @@ async def test_resolve_archive_ready_timeout_falls_back_without_waiting_for_bloc
         stop_started.set()
         await stop_release.wait()
 
-    started_at = time.monotonic()
+    _observe_archive_timeouts(monkeypatch, _observe)
     try:
         with (
             patch.object(
                 ArchiveHlsSession, "stop", autospec=True, side_effect=_slow_stop
             ),
-            patch.object(ArchiveHlsSession, "start", lambda self, _url: self.touch()),
+            patch.object(ArchiveHlsSession, "start", _start),
             patch(
                 "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
                 AsyncMock(return_value=True),
             ),
             _patch_camera_resolve() as camera_resolve,
         ):
-            play = await source.async_resolve_media(
-                _resolve_item(hass, entry, day_str=day_str)
-            )
-            elapsed = time.monotonic() - started_at
+            # The watchdog only bounds a broken test. Expire the production
+            # readiness timeout after it has armed instead of sleeping.
+            async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+                resolve = tasks.create_task(
+                    source.async_resolve_media(
+                        _resolve_item(hass, entry, day_str=day_str)
+                    )
+                )
+                delay, timer = await readiness_timeout
+                assert 0 < delay <= media_source._ARCHIVE_READY_TIMEOUT_SEC
+                timer.reschedule(hass.loop.time())
+                play = await resolve
+                await stop_started.wait()
 
-        assert elapsed < 0.5
+        assert timer.expired()
         camera_resolve.assert_awaited_once()
         assert play.url == _LIVE_PLAY_URL
-        assert stop_started.is_set()
-        assert not (hass.data.get("elektronny_gorod_archive_streams") or {})
+        assert not stop_release.is_set()
+        assert not archive_streams(hass)
+        assert not archive_sessions_by_id(hass)
         assert "SIGNED-TOKEN" not in caplog.text
     finally:
         stop_release.set()
@@ -2096,68 +2135,76 @@ async def test_pyav_ensure_abort_and_budget_exhaustion(hass, monkeypatch) -> Non
 async def test_parallel_stalled_resolves_share_single_budget_without_queue_stacking(
     hass, monkeypatch
 ) -> None:
-    """Два параллельных stalled resolve на одной записи укладываются в один бюджет.
-
-    Ожидание per-entry lock учитывается в общем deadline; второй запрос не
-    вызывает минт после истечения бюджета и не держит lock при откате на эфир.
-    """
+    """Ожидание per-entry lock расходует бюджет второго запроса."""
     import asyncio
-    import time
 
-    from custom_components.elektronny_gorod.media_source import _archive_lock
+    from custom_components.elektronny_gorod import media_source
 
-    budget_sec = 0.08
-    monkeypatch.setattr(
-        "custom_components.elektronny_gorod.media_source._ARCHIVE_READY_TIMEOUT_SEC",
-        budget_sec,
-    )
+    now = 0.0
+    budget = media_source._ARCHIVE_READY_TIMEOUT_SEC
+    monkeypatch.setattr(media_source, "time", SimpleNamespace(monotonic=lambda: now))
     coordinator, entry, day_str = _realtime_archive_entry(hass)
     _register_camera_entity(hass, entry, camera_id=_PUBLIC_ID)
 
-    release = asyncio.Event()
+    timeouts = []
+    mint_started = asyncio.Event()
+    queued_timeout = hass.loop.create_future()
     minted_cameras: list[str] = []
+
+    def _observe(delay, timer) -> None:
+        timeouts.append((delay, timer))
+        if mint_started.is_set() and not queued_timeout.done():
+            queued_timeout.set_result((delay, timer))
 
     async def _stalled_mint(camera_id: str, *_args):
         minted_cameras.append(camera_id)
-        await release.wait()
-        return _ARCHIVE_URL
+        if len(minted_cameras) == 1:
+            mint_started.set()
+            await asyncio.Future()
+        return None
 
+    _observe_archive_timeouts(monkeypatch, _observe)
     coordinator.api.query_camera_archive_stream = AsyncMock(side_effect=_stalled_mint)
     source = _source(hass)
+    lock = media_source._archive_lock(hass, entry.entry_id)
 
-    try:
-        with (
-            patch(
-                "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
-                AsyncMock(return_value=True),
-            ),
-            _patch_camera_resolve() as camera_resolve,
-        ):
-            t0 = time.monotonic()
-            play_1, play_2 = await asyncio.gather(
+    with (
+        patch(
+            "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+            AsyncMock(return_value=True),
+        ),
+        _patch_camera_resolve() as camera_resolve,
+    ):
+        async with asyncio.timeout(10), asyncio.TaskGroup() as tasks:
+            first = tasks.create_task(
                 source.async_resolve_media(
-                    _resolve_item(
-                        hass, entry, camera_id=_INTERCOM_ID, day_str=day_str
-                    )
-                ),
-                source.async_resolve_media(
-                    _resolve_item(
-                        hass, entry, camera_id=_PUBLIC_ID, day_str=day_str
-                    )
-                ),
+                    _resolve_item(hass, entry, camera_id=_INTERCOM_ID, day_str=day_str)
+                )
             )
-            elapsed = time.monotonic() - t0
+            await mint_started.wait()
+            mint_budget, mint_timeout = timeouts[-1]
+            assert lock.locked()
 
-        assert play_1.url == _LIVE_PLAY_URL
-        assert play_2.url == _LIVE_PLAY_URL
-        # Bounded to ONE budget window (no linear 2x stacking).
-        assert elapsed < budget_sec * 1.9
-        # Only the first caller minted; the second never started mint after timeout.
-        assert len(minted_cameras) == 1
-        assert camera_resolve.await_count == 2
-        assert _archive_lock(hass, entry.entry_id).locked() is False
-    finally:
-        release.set()
+            second = tasks.create_task(
+                source.async_resolve_media(
+                    _resolve_item(hass, entry, camera_id=_PUBLIC_ID, day_str=day_str)
+                )
+            )
+            lock_budget, lock_timeout = await queued_timeout
+            assert mint_budget == lock_budget == budget
+
+            now += budget
+            # Let the second resolve acquire the lock at its deadline. Expiring
+            # its lock timer instead would mask a renewed budget after acquire.
+            mint_timeout.reschedule(hass.loop.time())
+
+    assert mint_timeout.expired()
+    assert not lock_timeout.expired()
+    assert first.result().url == _LIVE_PLAY_URL
+    assert second.result().url == _LIVE_PLAY_URL
+    assert minted_cameras == [_INTERCOM_ID]
+    assert camera_resolve.await_count == 2
+    assert not lock.locked()
 
 
 async def test_unload_during_archive_lock_wait_raises_unresolvable_without_live(
