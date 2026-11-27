@@ -413,6 +413,68 @@ async def test_intercom_camera_is_taken_from_the_entrance(hass: HomeAssistant) -
     assert len(data["locks"]) == 1
 
 
+@pytest.mark.parametrize(
+    ("source", "malformed_row"),
+    [("place", None), ("public", "unexpected row")],
+    ids=["place-null", "public-string"],
+)
+async def test_malformed_camera_row_keeps_other_cameras(
+    hass: HomeAssistant, source: str, malformed_row: object
+) -> None:
+    """Координатор сохраняет валидные камеры, их приоритет и видимость."""
+    from custom_components.elektronny_gorod.coordinator import (
+        ElektronnyGorodUpdateCoordinator,
+    )
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    place_id = "1000000"
+    camera_rows: dict[str, list[object]] = {
+        "place": [
+            {"id": "intercom-camera", "name": "Duplicate intercom"},
+            {"externalCameraId": "place-camera", "name": "Place camera"},
+        ],
+        "public": [
+            {"id": "place-camera", "name": "Duplicate place camera"},
+            {"id": "public-camera", "name": "Public camera"},
+        ],
+    }
+    camera_rows[source].insert(1, malformed_row)
+
+    with patch(
+        "custom_components.elektronny_gorod.coordinator.ElektronnyGorodAPI"
+    ) as cls:
+        api = cls.return_value
+        api.query_places = AsyncMock(return_value=[{"place": {"id": place_id}}])
+        api.query_screens_settings = AsyncMock(return_value={
+            "screens": [{"type": "PUBLIC_CAMERAS", "hidden": [{"id": "public-camera"}]}],
+        })
+        api.query_access_controls = AsyncMock(return_value=[{
+            "id": "AC1",
+            "entrances": [{
+                "id": "E1", "externalCameraId": "intercom-camera", "allowOpen": True,
+            }],
+        }])
+        api.query_cameras = AsyncMock(return_value=camera_rows["place"])
+        api.query_public_cameras = AsyncMock(return_value=camera_rows["public"])
+        api.query_dnd_settings = AsyncMock(return_value=[])
+        api.query_balance = AsyncMock(return_value=None)
+
+        data = await ElektronnyGorodUpdateCoordinator(hass, entry=entry)._async_update_data()
+
+    cameras = [
+        (camera["id"], camera["source"], camera["hidden"])
+        for camera in data["cameras"]
+    ]
+    assert cameras == [
+        ("intercom-camera", "intercom", False),
+        ("place-camera", "place", False),
+        ("public-camera", "public", True),
+    ]
+    assert len(data["locks"]) == 1
+    api.query_public_cameras.assert_awaited_once_with(place_id)
+
+
 async def test_total_outage_is_not_logged_by_us_at_all(
     hass: HomeAssistant, caplog
 ) -> None:
