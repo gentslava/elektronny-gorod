@@ -1,4 +1,4 @@
-Status: Active Owner: Reverse Engineer Agent + HA Expert Agent Last reviewed: 2026-10-26 (Мой Дом 9.11.0: полный crawl HAR + STOMP-кадры сверены с документом; ранее — 2026-07-15, приложения 9.9.0: AVD screen inventory + APK/HAR/PCAP reconciliation)
+Status: Active Owner: Reverse Engineer Agent + HA Expert Agent Last reviewed: 2026-11-27 (static APK diff 9.11.0 → 9.12.0; последний runtime crawl HAR + STOMP — Мой Дом 9.11.0, 2026-10-26)
 
 Source files:
 - `custom_components/elektronny_gorod/api.py` (текущая реализация)
@@ -44,7 +44,7 @@ Reverse-engineered API reference для бэкенда `myhome.proptech.ru`, о�
 | 2026-10-26 | Мой Дом 9.11.0 | full app crawl: cold start, главная, камера подъезда (live, событие, «Скачать», скорость, пред./след., fullscreen), 3 камеры лифтов, 1 публичная городская камера без событий, вкладка «События» (фильтры, paging, вызов → камера на момент вызова), «Люди», «Кабинет», «Добавить гостя» | decrypted HAR (`full-app-crawl`) + mitmproxy `.flow` (STOMP-кадры); тела FLV (`research/api/streams/`, не коммитятся) — только проба контейнера/кодека |
 | 2026-10-26 | Мой Дом 9.11.0 | camera archive, второй прогон: вкладки, DND, онбординг «добавить камеру» | mitmproxy `.flow` (`event-in-progress-playback-2`), включая STOMP-кадры |
 
-Static diffs for both 9.9.0 flavours are summarized in [`research/apk/9.9.0-analysis.md`](../../research/apk/9.9.0-analysis.md).
+Static diffs for both 9.9.0 flavours are summarized in [`research/apk/9.9.0-analysis.md`](../../research/apk/9.9.0-analysis.md). Signed APK 9.12.0 was compared against 9.11.0 on 2026-11-27: no endpoint path changes; temporary-access DTO gained optional `openCount` (static-only), see [`9.12.0-analysis.md`](../../research/apk/9.12.0-analysis.md).
 
 Evidence labels in this reference:
 
@@ -134,7 +134,7 @@ Nothing A065 | Android 16 | erth | 9.9.0 (90900020)  | <account_id> | 1 | <uuid>
 - Для **WebSocket handshake** user-agent содержит `null` в полях account_id и place_id (поля пустые до выбора place).
 - Для **pre-auth** запросов (`device-installations`, `subscriberNotifications`-DELETE, public endpoints) — account_id пустой, place_id может быть пустым или текущим, operator_id может быть `null`.
 - UUID стабилен per-install (один на одно устройство).
-- Актуальная версия «Мой Дом»: **9.11.0 (91100000)** (HAR 9.11.0, 2026-10-26: UA `... | ntk | 9.11.0 (91100000) | ...`, `appVersion: "9.11.0"`, `appVersionCode: 91100000`); формат UA и набор стандартных headers не изменились. Runtime `APP_VERSION` синхронизирован с «Мой Дом» 9.11.0. «Умный Дом.ру» (`erth`) после 9.9.0 (90900020) не снимался.
+- Runtime `APP_VERSION`: **9.12.0 (91200000)** — подтверждено манифестом подписанного APK ([static-only разбор](../../research/apk/9.12.0-analysis.md), 2026-11-27). Последний HAR — **9.11.0**, 2026-10-26: UA `... | ntk | 9.11.0 (91100000) | ...`, `appVersion: "9.11.0"`, `appVersionCode: 91100000`; формат UA и набор стандартных headers в нём не изменились. HAR 9.12.0 не снимался. «Умный Дом.ру» (`erth`) после 9.9.0 (90900020) не снимался.
 
 ### `traceparent` header
 
@@ -542,6 +542,8 @@ DELETE /api/mh-temp-pass/mobile/v1/rest/v1/temp-passes/{id}
 ```
 
 `TempPassRaw {id, sharedLinkMessage, status, expiredAt, availableAccessControl:[{id,name,roleName}]}`. Ссылку несёт `sharedLinkMessage`.
+
+**9.12.0, static-only:** GET списка и POST создания используют общий `shared.sync.data.api.temppass.TempPassRaw`, в котором добавлено необязательное `openCount: null | {left:int, max:int}`. В клиентском Moshi-парсере отсутствие `openCount` и JSON `null` допустимы; внутри непустого объекта `left` / `max` обязательны и не допускают `null`. Ресурсы клиента показывают счётчик как «Осталось открытий» / «%1$d из %2$d». Это не подтверждение серверных значений, диапазонов или доступности услуги. Пути, query и тела пяти вызовов не изменились, нового поля лимита в POST нет. Интеграция принимает дополнительные поля ответа и не возвращает счётчик в действиях; runtime evidence и отдельный срез — T-044 / A-118. Источник: [`9.12.0-analysis.md`](../../research/apk/9.12.0-analysis.md).
 
 Реализовано в `feat/temporary-access` (A-118): действия `create_temporary_access` (`SupportsResponse.ONLY`, вернуть `message`/`expires_at`/`status`), `list_temporary_access` (состав без ссылки плюс объекты адреса с id для выдачи) и `revoke_temporary_access` (неизвестный id — ошибка ввода до DELETE, затем отзыв с подтверждением по повторному чтению). Все три — admin-only (выдача физического доступа), `ttl` валидируется против `time-to-life`, объекты — против `access-controls`, на 404 внятный отказ «услуга не подключена». Ссылка (`sharedLinkMessage`) в `SENSITIVE_KEYS`, в логи/состояние/список не попадает; остаётся сток `response_variable` → трассировка скрипта (S-26).
 

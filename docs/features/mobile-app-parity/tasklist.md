@@ -46,6 +46,8 @@ No task below authorizes code changes by itself; implementation starts after the
 - [x] **T-042** Add service schema, ru/en strings, docs and secret sentinel test. _Acceptance:_ no response persisted/logged by integration, pinned at the transport layer as well as through the action. _Audit:_ A-93.
 - [x] **T-043** Temporary access from the static `mh-temp-pass` contract (APK 9.10.0/9.11.0, ADR-0006 static-only). Live probes (2026-10-05) settled what they could: `time-to-life` = [3600, 14400, 43200, 86400] s, `access-controls` fields `{id, name, roleName, externalId}`, delete route reachable; create stays static-only (404 until the operator provisions `TEMP_PASS` on the address). Implemented in `feat/temporary-access`: `create_temporary_access` / `list_temporary_access` / `revoke_temporary_access`, admin-only, link redacted. _Acceptance:_ first live create confirmation — пользователь с подключённой услугой. _Audit:_ A-118.
 
+- [ ] **T-044** Confirm the optional `openCount: {left, max}` response from signed APK 9.12.0 (static-only) on an address with `TEMP_PASS`. _Acceptance:_ sanitized GET/create response and counter behaviour before/after an opening; absent/null handling and ranges established before a separate HA response extension. The five requests and create body stay unchanged; no client-side limit parameter was found. _Audit:_ A-118; [`9.12.0-analysis.md`](../../../research/apk/9.12.0-analysis.md).
+
 ## Slices 4-5 — keys
 
 - [ ] **T-050** Parse read-only key list and discard code at boundary. _Acceptance:_ sentinel cannot reach coordinator/entity/diagnostics. _Audit:_ A-94.

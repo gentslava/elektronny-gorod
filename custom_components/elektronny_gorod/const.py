@@ -116,8 +116,8 @@ FCM_BUNDLE_ID: Final = "ru.inetra.intercom"
 HOME_INVITE_APP_BY_OPERATOR: Final = {"1": 2}
 
 APP_VERSION: Final = {
-    "name": "9.11.0",
-    "code": "91100000"
+    "name": "9.12.0",
+    "code": "91200000"
 }
 
 ANDROID_OS_VER: Final = "16"
