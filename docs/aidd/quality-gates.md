@@ -111,9 +111,9 @@ Used by agents:
 |---|---|
 | Purpose | Diff проверен по 5 осям. Для Python применять [проверку поведения и простоты](../../.agents/commands/python-quality.md#при-независимом-ревью). |
 | Owner | независимый от implementer-а code-reviewer agent / human reviewer |
-| Required evidence | `CANDIDATE_FROZEN`; reviewer identity/independence; base/head/tree; read-only report; новая candidate-bound аттестация каждого обязательного HA/security/QA reviewer-а по routing matrix |
+| Required evidence | `CANDIDATE_FROZEN`; reviewer identity/independence; base/head/tree; read-only report, включая применимые доказательства [выбора реализации и ожидаемой нагрузки](../../.agents/commands/python-quality.md#выбор-реализации-и-ожидаемая-нагрузка) для Python; новая candidate-bound аттестация каждого обязательного HA/security/QA reviewer-а по routing matrix |
 | Pass | correctness ✓ readability ✓ architecture ✓ security ✓ performance ✓; Critical/Important findings закрыты; все обязательные verdicts относятся к одному текущему tuple |
-| Fail | только self-review; reviewer участвовал в implementation; хотя бы один verdict относится к старому/другому tuple; нет профильного review; хотя бы один Critical/Important открыт |
+| Fail | только self-review; reviewer участвовал в implementation; хотя бы один verdict относится к старому/другому tuple; нет профильного review или применимых доказательств Python-ревью; хотя бы один Critical/Important открыт |
 | Stop | не merge-ить и не релизить; обычный push/PR запрещён, кроме явно разрешённой review-only branch/draft с красным gate |
 
 ## SECURITY_OK
