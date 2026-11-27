@@ -287,3 +287,171 @@ async def test_user_in_ha_ui_hide_still_respected(
     assert registry.async_get(visible_eid).hidden_by == er.RegistryEntryHider.USER, (
         "USER hidden_by должен сохраниться через reload"
     )
+
+
+@pytest.mark.parametrize(
+    "bad_screens",
+    [
+        "client_error",
+        {"screens": 5},
+        ["unexpected-root"],
+        None,
+        {"unexpected": []},
+    ],
+)
+async def test_screens_failure_or_unusable_preserves_overrides_and_integration_state(
+    hass: HomeAssistant, mock_api, bad_screens
+):
+    """A-116: отказ или непригодный `/settings/screens` не стирает user_shown/we_set_integration."""
+    from aiohttp import ClientError
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    hidden_eid = registry.async_get_entity_id(
+        "camera", DOMAIN, f"{DOMAIN}_camera_{HIDDEN_CAMERA_ID}"
+    )
+    visible_eid = registry.async_get_entity_id(
+        "camera", DOMAIN, f"{DOMAIN}_camera_{VISIBLE_CAMERA_ID}"
+    )
+    assert hidden_eid is not None and visible_eid is not None
+
+    # Пользователь показал скрытую интеграцией камеру и скрыл видимую вручную.
+    registry.async_update_entity(hidden_eid, hidden_by=None)
+    registry.async_update_entity(visible_eid, hidden_by=er.RegistryEntryHider.USER)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get(hidden_eid).options.get(DOMAIN, {}).get("user_shown") is True
+    assert registry.async_get(hidden_eid).options.get(DOMAIN, {}).get("we_set_integration") is True
+    assert registry.async_get(visible_eid).hidden_by == er.RegistryEntryHider.USER
+
+    # Reload с отказом/битым /settings/screens (даже с spy на registry writes).
+    instance = mock_api.return_value
+    if bad_screens == "client_error":
+        instance.query_screens_settings = AsyncMock(
+            side_effect=ClientError("screens offline")
+        )
+    else:
+        instance.query_screens_settings = AsyncMock(return_value=bad_screens)
+
+    with (
+        patch.object(registry, "async_update_entity", wraps=registry.async_update_entity) as upd_ent,
+        patch.object(
+            registry,
+            "async_update_entity_options",
+            wraps=registry.async_update_entity_options,
+        ) as upd_opts,
+    ):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert upd_ent.call_count == 0
+    assert upd_opts.call_count == 0
+    assert registry.async_get(hidden_eid).options.get(DOMAIN, {}).get("user_shown") is True
+    assert registry.async_get(hidden_eid).options.get(DOMAIN, {}).get("we_set_integration") is True
+    assert registry.async_get(hidden_eid).hidden_by is None
+    assert registry.async_get(visible_eid).hidden_by == er.RegistryEntryHider.USER
+
+    # После восстановления /settings/screens user_shown по-прежнему уважается.
+    instance.query_screens_settings = AsyncMock(return_value=_screens_with_hidden())
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get(hidden_eid).hidden_by is None
+    assert registry.async_get(visible_eid).hidden_by == er.RegistryEntryHider.USER
+
+
+async def test_screens_valid_empty_dict_still_clears_integration_hidden_preserving_user(
+    hass: HomeAssistant, mock_api
+):
+    """A-116: валидный пустой `{}` по-прежнему снимает hidden_by=INTEGRATION, не трогая USER."""
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    hidden_eid = registry.async_get_entity_id(
+        "camera", DOMAIN, f"{DOMAIN}_camera_{HIDDEN_CAMERA_ID}"
+    )
+    visible_eid = registry.async_get_entity_id(
+        "camera", DOMAIN, f"{DOMAIN}_camera_{VISIBLE_CAMERA_ID}"
+    )
+    registry.async_update_entity(visible_eid, hidden_by=er.RegistryEntryHider.USER)
+    assert registry.async_get(hidden_eid).hidden_by == er.RegistryEntryHider.INTEGRATION
+
+    mock_api.return_value.query_screens_settings = AsyncMock(return_value={})
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    assert registry.async_get(hidden_eid).hidden_by is None
+    assert "we_set_integration" not in (registry.async_get(hidden_eid).options.get(DOMAIN) or {})
+    assert registry.async_get(visible_eid).hidden_by == er.RegistryEntryHider.USER
+
+
+async def test_screens_failure_in_place_a_does_not_block_verified_place_b(
+    hass: HomeAssistant, mock_api
+):
+    """A-116: сбой `/settings/screens` в месте A не мешает синхронизации видимости места B."""
+    from aiohttp import ClientError
+
+    instance = mock_api.return_value
+    instance.query_places = AsyncMock(return_value=[
+        {"subscriber": {"id": "S1", "accountId": "A1", "name": "Test"}, "place": {"id": "PA", "address": "A"}},
+        {"subscriber": {"id": "S1", "accountId": "A1", "name": "Test"}, "place": {"id": "PB", "address": "B"}},
+    ])
+
+    def _cams(place_id: str):
+        if place_id == "PA":
+            return [
+                {"id": 101, "externalCameraId": None, "name": "PA Visible"},
+                {"id": 102, "externalCameraId": None, "name": "PA Hidden"},
+            ]
+        return [
+            {"id": 201, "externalCameraId": None, "name": "PB Visible"},
+            {"id": 202, "externalCameraId": None, "name": "PB Hidden"},
+        ]
+
+    def _screens_initial(place_id: str):
+        if place_id == "PA":
+            return {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": [{"id": 102}]}]}
+        return {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": [{"id": 202}]}]}
+
+    instance.query_public_cameras = AsyncMock(side_effect=_cams)
+    instance.query_screens_settings = AsyncMock(side_effect=_screens_initial)
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    eid_pa_102 = registry.async_get_entity_id("camera", DOMAIN, f"{DOMAIN}_camera_102")
+    eid_pb_201 = registry.async_get_entity_id("camera", DOMAIN, f"{DOMAIN}_camera_201")
+    eid_pb_202 = registry.async_get_entity_id("camera", DOMAIN, f"{DOMAIN}_camera_202")
+
+    # Пользователь включил 102 в месте PA.
+    registry.async_update_entity(eid_pa_102, hidden_by=None)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert registry.async_get(eid_pa_102).options.get(DOMAIN, {}).get("user_shown") is True
+
+    # Теперь PA падает, а в PB изменилась видимость (201 стал hidden, 202 стал visible).
+    def _screens_partial_fail(place_id: str):
+        if place_id == "PA":
+            raise ClientError("PA screens down")
+        return {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": [{"id": 201}]}]}
+
+    instance.query_screens_settings = AsyncMock(side_effect=_screens_partial_fail)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+
+    # PA сохранил user_shown и we_set_integration, а PB применил новые правила.
+    assert registry.async_get(eid_pa_102).options.get(DOMAIN, {}).get("user_shown") is True
+    assert registry.async_get(eid_pa_102).options.get(DOMAIN, {}).get("we_set_integration") is True
+    assert registry.async_get(eid_pb_201).hidden_by == er.RegistryEntryHider.INTEGRATION
+    assert registry.async_get(eid_pb_202).hidden_by is None

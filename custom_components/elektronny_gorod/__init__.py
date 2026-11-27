@@ -813,20 +813,31 @@ def _sync_visibility(
     для logging — reload НЕ требуется (registry update live).
     """
     hidden_uids: set[str] = set()
+    uid_to_place: dict[str, str] = {}
+    failed_places: set[str] = {
+        str(place_id) for place_id in (data.get("screens_failed_places") or [])
+    }
 
     for cam in data.get("cameras") or []:
-        if cam.get("hidden") and cam.get("id"):
-            hidden_uids.add(f"{DOMAIN}_camera_{cam['id']}")
+        cid = cam.get("id")
+        if not cid:
+            continue
+        uid = f"{DOMAIN}_camera_{cid}"
+        if cam.get("place_id") is not None:
+            uid_to_place[uid] = str(cam["place_id"])
+        if cam.get("hidden"):
+            hidden_uids.add(uid)
 
     for lk in data.get("locks") or []:
+        uid = lock_unique_id(
+            lk.get("place_id"),
+            lk.get("access_control_id"),
+            lk.get("entrance_id"),
+        )
+        if lk.get("place_id") is not None:
+            uid_to_place[uid] = str(lk["place_id"])
         if lk.get("hidden"):
-            hidden_uids.add(
-                lock_unique_id(
-                    lk.get("place_id"),
-                    lk.get("access_control_id"),
-                    lk.get("entrance_id"),
-                )
-            )
+            hidden_uids.add(uid)
 
     ent_reg = er.async_get(hass)
     registry_changed = False
@@ -838,6 +849,11 @@ def _sync_visibility(
             continue
 
         uid = entity.unique_id
+        place_id = uid_to_place.get(uid)
+        if place_id in failed_places or (place_id is None and failed_places):
+            # Без валидного /settings/screens по этому месту (или если место
+            # не сопоставлено при сбое экрана) не трогаем hidden_by и override-маркеры (A-116).
+            continue
         api_hidden = uid in hidden_uids
         current = entity.hidden_by
         opts = dict(entity.options.get(DOMAIN) or {})

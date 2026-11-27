@@ -234,6 +234,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         cameras: list[dict[str, Any]] = []
         locks: list[dict[str, Any]] = []
         dnd: dict[str, list[dict[str, Any]]] = {}
+        screens_failed_places: set[str] = set()
 
         for _, place_id in self._iter_place_ids(places):
             # Установка `place_id` в shared UA — критично сделать ДО любого
@@ -268,9 +269,12 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 )
             except Exception as ex:  # noqa: BLE001
                 self._note_failure("Настройки экранов", place_id, ex)
+                screens_failed_places.add(str(place_id))
                 hidden_cam_ids, hidden_entrance_ids = set(), set()
             else:
                 self._note_success("Настройки экранов", place_id)
+                if not self._screens_snapshot_usable(screens):
+                    screens_failed_places.add(str(place_id))
             try:
                 access_controls = await self._api.query_access_controls(place_id)
             except Exception as ex:  # noqa: BLE001
@@ -315,13 +319,16 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             len(places), len(balances), len(cameras), len(locks), len(dnd),
         )
 
-        return {
+        result: dict[str, Any] = {
             "places": places,
             "balances": balances,
             "cameras": cameras,
             "locks": locks,
             "dnd": dnd,
         }
+        if screens_failed_places:
+            result["screens_failed_places"] = sorted(screens_failed_places)
+        return result
 
     @callback
     def _record_waf_block(self, err: ServicePipeBlockError) -> None:
@@ -530,6 +537,17 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             })
 
         return cameras
+
+    @staticmethod
+    def _screens_snapshot_usable(screens: Any) -> bool:
+        """Вернуть True, если `/settings/screens` пригоден как снимок видимости (в т.ч. `{}`)."""
+        if not isinstance(screens, dict):
+            return False
+        if not screens:
+            return True
+        if "screens" not in screens:
+            return False
+        return isinstance(screens.get("screens"), list)
 
     @staticmethod
     def _extract_hidden_ids(screens: Any, screen_type: str) -> set[str]:

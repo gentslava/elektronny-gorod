@@ -1146,9 +1146,10 @@ Quality gates:
 
 ### A-126. Diagnostics выгружает учётные данные из URL go2rtc
 
-- **Status:** 🔴 OPEN.
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — ремедиация на ревью в ветке `fix/backlog-a126-a122-a121-a116` (`6e70b43`, pending merge). Семантическое закрытие в `✅ RESOLVED` — после merge в `master`.
 - **Severity:** **P1** — если URL содержит учётные данные, они попадут в выгрузку diagnostics, которой пользователь может поделиться.
 - **Evidence:** OptionsFlow сохраняет нормализованный `go2rtc_base_url`, включая userinfo. Diagnostics применяет редакцию по ключам к `entry.as_dict()`. Ключ URL отсутствует в `TO_REDACT`. Две изолированные пробы с синтетическим URL воспроизвели дефект в `entry.data` и `entry.options`.
+- **Ремедиация (в ветке, pending merge):** `diagnostics.py` (`_sanitize_url_credentials`, `_redact_entry_urls`) через `yarl.URL` рекурсивно маскирует inline userinfo (`***`) и убирает query/fragment из `go2rtc_base_url` в `entry.data` и `entry.options`, не искажая чистые URL и подставляя `REDACTED` для невалидных/не-HTTP схем. Регрессии в `tests/test_diagnostics.py` (100% покрытие `diagnostics.py`) и пробы `test_backlog_go2rtc_diagnostics_probe.py` зелёные.
 - **Acceptance:** выгрузка маскирует URL в обоих хранилищах, включая уже настроенные записи. Настройки подключения сохраняются. См. [S-30](security.md#s-30-учётные-данные-в-url-go2rtc-попадают-в-diagnostics).
 
 ### A-124. Идущее событие в медиабраузере бесконечно грузится вместо просмотра
@@ -1183,22 +1184,22 @@ Quality gates:
 
 ### A-122. Отменённый ответ на вызов не освобождает SIP/RTP-порты и аудиомост
 
-- **Status:** 🔴 OPEN.
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — ремедиация на ревью в ветке `fix/backlog-a126-a122-a121-a116` (`f95284d`, pending merge). Семантическое закрытие в `✅ RESOLVED` — после merge в `master`.
 - **Severity:** **P1** — надёжность: после отменённого ответа следующие вызовы могут не подняться, пока HA не перезапущен. Триггер узкий (только внешняя отмена вызова `answer`; карточка вызывает его без ожидания), но последствие тяжёлое.
-- **Area:** `sip/call_controller.py:async_answer` (fallback register-on-answer и `_setup_audio_bridge`), `sip/manager.py:accept`.
+- **Area:** `sip/call_controller.py:async_answer` (fallback register-on-answer и `_setup_audio_bridge`), `sip/manager.py:register_and_hold` / `accept` / `async_answer`.
 - **Evidence (2026-10-26):** чтение кода при ревью PR #103. `async_answer` ловит `except Exception`, но не `CancelledError`. Если задачу ответа отменить (скрипт остановлен, автоматизация в `mode: restart`), уже поднятый `AudioBridge` остаётся на 40020 и не попадает в `self._bridge`. Fallback-путь: локальный `SipManager` при отмене внутри `register_and_hold` держит SIP-порт 5066 (RTP 40016 занимается только в `accept`) и не попадает в `self._manager`. Путь держимого вызова: `accept` первым делом забирает `_held`, поэтому отмена на `create_datagram_endpoint` оставляет SIP-транспорт на 5066, который `async_hangup` этого менеджера уже не видит.
-- **Сверка на текущем master:** синтетическая отмена держимого `accept` оставляет мост, а отмена или `OSError` при создании RTP-сокета оставляет держимый SIP-вызов без освобождения. Нужно покрыть оба пути и успешный следующий звонок.
+- **Сверка на текущем master:** синтетическая отмена держимого `accept` оставляет мост, а отмена или `OSError` при создании RTP-сокета оставляет держимый SIP-вызов без освобождения.
+- **Ремедиация (в ветке, pending merge):** `SipManager.register_and_hold`, `SipManager.accept` и `SipManager.async_answer` защищены `try/finally` до фиксации результата — закрывают `sip`/`sip_transport`/`rtp_transport` и освобождают потреблённый `_held` при `CancelledError`, `OSError` или некорректном SDP с пробросом отмены/исключения; `DoorbellCallController._setup_audio_bridge` останавливает мост при `BaseException`, а `async_answer` на `CancelledError` гасит мост, очищает `_uplink_sink` и сбрасывает потреблённый `_manager` перед пробросом `CancelledError` без вмешательства в уже следующий/независимый вызов. Регрессии в `tests/test_sip_manager.py`, `tests/test_sip_call_controller.py` и пробах `test_backlog_ha_repro.py` зелёные.
 - **Следствие:** следующий REGISTER или мост получают `OSError` на занятом порту и деградируют до отказа. `sensor.*_call_state` остаётся в `connecting`: ring-таймаут выходит, если фаза не `ringing`.
-- **Граница:** не исправлено. Гвард ответа из A-120 смотрит на занятость `_answer_lock`, поэтому после отмены он не залипает навсегда; но пока лок держит другой владелец (hold-таймаут, поставленный в очередь hold) при устаревшей фазе `connecting`, звонок может быть кратко отброшен.
+- **Граница:** гвард ответа из A-120 смотрит на занятость `_answer_lock`, поэтому после отмены он не залипает навсегда; поведение проброса `CancelledError` и деградации при `Exception` сохранено.
 
 ### A-121. После смены звонящего сенсор вытесненной панели остаётся в `ringing`
 
-- **Status:** 🔴 OPEN.
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — ремедиация на ревью в ветке `fix/backlog-a126-a122-a121-a116` (`f95284d`, pending merge). Семантическое закрытие в `✅ RESOLVED` — после merge в `master`.
 - **Severity:** **P2** — UX: автоматизации на `to: ringing` у вытесненной панели не срабатывают на её следующий звонок; экран вызова не страдает.
 - **Area:** `sip/call_controller.py:handle_signal` (ветка смены звонящего A-89), `_on_idle_reset`, `sensor.py:_handle_call_state`.
 - **Evidence (2026-10-26):** чтение кода `code-reviewer` при ревью PR #103. При смене звонящего (A-89) контроллер намеренно не эмитит `ended` за вытесненный вызов, чтобы единая карточка не мигала «Завершён», и сразу публикует `ringing` нового вызова. `sensor.*_call_state` фильтрует `EVENT_CALL_STATE` по своим `access_control_id`/`place_id`, поэтому сенсор вытесненной панели ни одного события больше не получает; `_on_idle_reset` эмитит `idle` с идентификаторами нового вызова и его тоже не возвращает.
-- **Следствие:** сенсор вытесненной панели остаётся `ringing` до её следующего события; её следующий звонок даёт переход `ringing` → `ringing` без смены состояния, и state-триггер `to: ringing` не срабатывает.
-- **Граница:** не исправлено; фикс должен закрыть фазу сенсора вытесненной панели, не возвращая мигание «Завершён» на карточке.
+- **Ремедиация (в ветке, pending merge):** при переключении `handle_signal` на другой `(place_id, access_control_id)` контроллер отправляет адресный `EVENT_CALL_STATE` со state `idle` (`call_id=None`, `started_at=None`) для вытесненной панели до публикации `ringing` нового вызова. `eg-intercom-call-card.ts` переходит сразу к новому звонящему без `_enterEnded`, а сенсор первой панели выходит в `idle` и снова переходит `idle → ringing` на следующем звонке. Регрессии в `tests/test_sip_call_controller.py`, `tests/test_sensor_call_state.py` и `test_backlog_ha_repro.py` зелёные.
 
 ### A-120. Открытие двери и «Отклонить» без ответа не завершают вызов на панели
 
@@ -1240,10 +1241,11 @@ Quality gates:
 
 ### A-116. Отказ настроек видимости на старте стирает пользовательский выбор
 
-- **Status:** 🔴 OPEN.
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — ремедиация на ревью в ветке `fix/backlog-a126-a122-a121-a116` (pending merge). Семантическое закрытие в `✅ RESOLVED` — после merge в `master`.
 - **Severity:** **P3** — потеря настройки, которую нечем восстановить.
 - **Area:** `__init__.py:_sync_visibility`, `coordinator.py` (фронт «Настройки экранов»).
 - **Evidence (2026-09-07):** найдено `ha-expert` при аттестации PR #96, механизм перепроверен по коду. Если `/settings/screens` недоступен в момент загрузки записи, фронт подставляет пустые множества скрытого, и для каждой сущности `api_hidden` становится `False`. Дальше в `_sync_visibility` за **один проход** срабатывают две ветки подряд: `not api_hidden and user_shown` снимает флаг `user_shown`, а следующая `elif not api_hidden` снимает `we_set_integration`. Оба признака стёрты.
+- **Ремедиация (в ветке, pending merge):** `coordinator.py` отмечает места с упавшим или непригодным ответом `/settings/screens` в `screens_failed_places` (валидный `{}` считается штатным снимком), не меняя существующий контракт ключей при успехе и пустом списке мест. `_sync_visibility` в `__init__.py` пропускает любые записи в entity registry (как `hidden_by`, так и `user_shown`/`we_set_integration`) для сущностей неверифицированных мест (и несопоставленных сущностей при наличии сбоев), не блокируя синхронизацию здоровых мест и сохраняя `hidden_by=USER` и снятие `hidden_by=INTEGRATION` на `{}`. Регрессии в `tests/test_visibility_user_override.py` и пробе `test_backlog_ha_repro.py` зелёные.
 - **Почему это дефект:** `user_shown` — это записанный факт «человек нажал «Показывать на панели» у сущности, которую спрятала интеграция». После стирания он неотличим от «никогда не нажимал»: когда настройки вернутся и оператор снова отдаст сущность скрытой, интеграция спрячет её заново. Выбор человека восстановить нечем — он нигде больше не хранится.
 - **Смежная половина, записанная раньше:** сущности, скрытые интеграцией и **не** переопределённые человеком, на том же проходе показываются снова. Это заметно, но само чинится следующим успешным обновлением; потеря override — нет.
 - **Чего это не касается:** скрытие, выставленное человеком вручную (`hidden_by=USER`), не трогается — снимается только своё.
