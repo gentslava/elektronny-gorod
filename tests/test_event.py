@@ -9,13 +9,14 @@ from __future__ import annotations
 
 import json
 from datetime import timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
     async_fire_time_changed,
 )
+from pytest_homeassistant_custom_component.typing import WebSocketGenerator
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr
@@ -23,7 +24,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.util import dt as dt_util
 
-from custom_components.elektronny_gorod.api import HistoryPage
+from custom_components.elektronny_gorod.api import HistoryEvent, HistoryPage
 from custom_components.elektronny_gorod.const import (
     CONF_ACCESS_TOKEN,
     CONF_OPERATOR_ID,
@@ -349,6 +350,76 @@ async def test_multiple_places_get_separate_history_entities(
     }
     assert devices.async_get(second_entity.device_id).identifiers == {
         (DOMAIN, "place_P2")
+    }
+
+
+async def test_registered_place_history_entity_browses_only_its_place(
+    hass: HomeAssistant, hass_ws_client: WebSocketGenerator, mock_api
+) -> None:
+    """A registered history entity opens its own place through Home Assistant."""
+    api = mock_api.return_value
+    api.query_places.return_value = [
+        {
+            "subscriber": {"id": "S1", "accountId": "A1", "name": "Test"},
+            "place": {"id": place_id, "address": {"visibleAddress": address}},
+        }
+        for place_id, address in (("1001", "First place"), ("1002", "Second place"))
+    ]
+    browse_page = HistoryPage(
+        events=tuple(
+            HistoryEvent(
+                id=event_id,
+                place_id=place_id,
+                event_type="accessControlCallMissed",
+                timestamp=1770000100,
+                source_type="accessControl",
+                source_id="AC1",
+            )
+            for event_id, place_id in (("own-event", "1001"), ("other-event", "1002"))
+        ),
+        number=2,
+        last=True,
+    )
+    # Startup polling may request page 0 while the WebSocket request runs.
+    pages = {0: api.query_events.return_value, 2: browse_page}
+    api.query_events.side_effect = lambda _place_ids, *, page: pages[page]
+
+    entry = _entry()
+    entry.add_to_hass(hass)
+    await _setup_entry(hass, entry)
+
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "event", DOMAIN, "elektronny_gorod_event_history_place_A1_S1_1001"
+    )
+    assert entity_id is not None
+
+    client = await hass_ws_client()
+    await client.send_json_auto_id({
+        "type": "elektronny_gorod/history",
+        "entity_id": entity_id,
+        "page": 2,
+    })
+    message = await client.receive_json()
+
+    browse_requests = [
+        request for request in api.query_events.await_args_list
+        if request.kwargs["page"] != 0
+    ]
+    assert browse_requests == [call([1001], page=2)]
+    assert message["success"]
+    assert message["result"] == {
+        "entity_id": entity_id,
+        "source_name": "First place",
+        "events": [{
+            "event_id": "own-event",
+            "event_type": "call_missed",
+            "occurred_at": 1770000100,
+            "place_id": "1001",
+            "source_id": "AC1",
+            "source_name": "Подъезд 1",
+        }],
+        "page": 2,
+        "last": True,
     }
 
 
