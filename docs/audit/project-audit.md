@@ -1137,7 +1137,7 @@ Quality gates:
 
 ### A-124. Идущее событие в медиабраузере бесконечно грузится вместо просмотра
 
-- **Status:** 🟢 **resolved-in-branch** — pending merge `feat/a124-archive-playback` (шаг 2: собственный same-origin EVENT HLS вместо нативного live HLS HA).
+- **Status:** ✅ **RESOLVED** — шаг 2 в `master` (`665b40c`, [PR #106](https://github.com/gentslava/elektronny-gorod/pull/106)). Старт с первого кадра подтверждён на синтетическом FLV через HA Media Source.
 - **Severity:** **P2** — UX: самое свежее событие, пока камера ещё видит движение, в HA не открывается; в приложении его можно смотреть с начала и переключиться на эфир.
 - **Area:** `media_source.py` (`_browse_day`, `async_resolve_media`, lifecycle архивных сессий), `archive_hls.py` (`ArchiveHlsSession`, `_BytePipe`, PyAV FLV→MPEG-TS remux, `ArchivePlaylistView`, `ArchiveSegmentView`), `clip_proxy.py` (`sign_scoped_token`/`verify_scoped_token`), `api.py` (`query_camera_archive_stream`), `__init__.py` (выгрузка).
 - **Diagnostic evidence (2026-10-26, прод):** два снимка `GET /rest/v2/forpost/cameras/{id}/events` с интервалом ~90 с. У идущих событий окончание `Time + Duration` лежит в будущем относительно момента запроса (на 2–19 с) и сдвигается, пока длится движение (30 → 70 с, 110 → 139 с); завершённые события не меняются. Флаги `isAvailable` и `IsGotoEnabled` у идущего события уже `true`/`1`, поэтому браузер показывает его как готовый клип. `downloads` отдаёт файл без индекса `moov` (A-123), прокси ждёт бюджет подготовки и отвечает `503` — для зрителя это бесконечная загрузка. Владелец: в «Мой Дом» то же событие можно включить с начала, пока оно идёт, и переключиться на эфир.
