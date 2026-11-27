@@ -200,6 +200,12 @@ class ElektronnyGorodMediaSource(MediaSource):
     def _coordinator(self, entry_id: str) -> Any | None:
         return async_get_coordinator(self._hass, entry_id)
 
+    def _is_inactive(self, entry_id: str, coordinator: Any) -> bool:
+        return (
+            self._coordinator(entry_id) is not coordinator
+            or bool(getattr(self._hass, "is_stopping", False))
+        )
+
     # Возвращаем `BrowseMedia`, тогда как база объявляет `BrowseMediaSource`.
     # Ядро читает только поля `BrowseMedia`, поэтому рантайм корректен, но
     # контракт шире базового — сужение это отдельный рефакторинг (A-101).
@@ -257,7 +263,7 @@ class ElektronnyGorodMediaSource(MediaSource):
                 type(ex).__name__,
             )
             raise Unresolvable("Archive is temporarily unavailable") from None
-        if self._coordinator(entry_id) is not coordinator:
+        if self._is_inactive(entry_id, coordinator):
             raise Unresolvable("Unknown media item")
         event = next(
             (found for found in events if found.id == event_id), None
@@ -275,9 +281,9 @@ class ElektronnyGorodMediaSource(MediaSource):
             play = await self._archive_play_media(
                 coordinator, entry_id, camera_id, event
             )
-            # Запись могли выгрузить или перезагрузить, пока ждали поток архива:
-            # уходящей/сменившейся записи нельзя отдавать ни поток, ни новый эфир.
-            if self._coordinator(entry_id) is not coordinator:
+            # Запись могли выгрузить/перезагрузить или HA начал остановку:
+            # уходящей/сменившейся среде нельзя отдавать ни поток, ни новый эфир.
+            if self._is_inactive(entry_id, coordinator):
                 raise Unresolvable("Unknown media item")
             if play is not None:
                 return play
@@ -381,10 +387,7 @@ class ElektronnyGorodMediaSource(MediaSource):
         и HMAC-токеном.
         """
         deadline = time.monotonic() + _ARCHIVE_READY_TIMEOUT_SEC
-        if (
-            self._coordinator(entry_id) is not coordinator
-            or getattr(self._hass, "is_stopping", False)
-        ):
+        if self._is_inactive(entry_id, coordinator):
             raise Unresolvable("Unknown media item")
         streams = archive_streams(self._hass)
         key = (entry_id, camera_id, event.id)
@@ -399,10 +402,7 @@ class ElektronnyGorodMediaSource(MediaSource):
             lock_status = await self._acquire_archive_lock_budgeted(
                 lock, cancel_event, deadline
             )
-            if lock_status == "aborted" or (
-                self._coordinator(entry_id) is not coordinator
-                or getattr(self._hass, "is_stopping", False)
-            ):
+            if lock_status == "aborted" or self._is_inactive(entry_id, coordinator):
                 raise Unresolvable("Unknown media item")
             if lock_status != "ok":
                 LOGGER.debug(
@@ -434,9 +434,7 @@ class ElektronnyGorodMediaSource(MediaSource):
                 pyav_status, pyav_ok = await self._await_budgeted(
                     async_ensure_archive_pyav(self._hass), cancel_event, deadline
                 )
-                if pyav_status == "aborted" or (
-                    self._coordinator(entry_id) is not coordinator
-                ):
+                if pyav_status == "aborted" or self._is_inactive(entry_id, coordinator):
                     raise Unresolvable("Unknown media item")
                 if pyav_status != "ok" or not pyav_ok:
                     LOGGER.debug(
@@ -454,9 +452,7 @@ class ElektronnyGorodMediaSource(MediaSource):
                     cancel_event,
                     deadline,
                 )
-                if mint_status == "aborted" or (
-                    self._coordinator(entry_id) is not coordinator
-                ):
+                if mint_status == "aborted" or self._is_inactive(entry_id, coordinator):
                     raise Unresolvable("Unknown media item")
                 if mint_status != "ok" or not source:
                     LOGGER.debug(
@@ -482,18 +478,17 @@ class ElektronnyGorodMediaSource(MediaSource):
                     if not await self._wait_archive_session_ready(
                         entry_id, session, deadline
                     ):
+                        stop_archive_session_in_background(self._hass, session)
+                        if self._is_inactive(entry_id, coordinator):
+                            raise Unresolvable("Unknown media item")
                         LOGGER.debug(
                             "Media source archive stream not ready for "
                             "camera_id=%s event_id=%s; live view",
                             camera_id,
                             event.id,
                         )
-                        stop_archive_session_in_background(self._hass, session)
                         return None
-                    if (
-                        self._coordinator(entry_id) is not coordinator
-                        or getattr(self._hass, "is_stopping", False)
-                    ):
+                    if self._is_inactive(entry_id, coordinator):
                         stop_archive_session_in_background(self._hass, session)
                         raise Unresolvable("Unknown media item")
                     url = session.playlist_url(self._hass)

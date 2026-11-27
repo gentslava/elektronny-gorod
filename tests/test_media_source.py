@@ -2246,6 +2246,74 @@ async def test_acquire_archive_lock_budgeted_edge_cases(hass) -> None:
     assert lock.locked() is False
 
 
+async def test_hass_stop_during_stalled_session_raises_unresolvable_without_live(
+    hass,
+) -> None:
+    """Реальный `hass.async_stop()` без выгрузки entry режет live fallback."""
+    import asyncio
+
+    from aiohttp import web
+
+    from custom_components.elektronny_gorod.archive_hls import (
+        ARCHIVE_STREAMS_KEY,
+        _ARCHIVE_BY_ID_KEY,
+    )
+
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    upstream_started = asyncio.Event()
+    upstream_release = asyncio.Event()
+
+    async def _stalled_get(*_args, **_kwargs):
+        upstream_started.set()
+        await upstream_release.wait()
+        raise web.HTTPBadGateway
+
+    http_session = MagicMock()
+    http_session.get = MagicMock(
+        return_value=MagicMock(
+            __aenter__=AsyncMock(side_effect=_stalled_get),
+            __aexit__=AsyncMock(return_value=False),
+        )
+    )
+
+    source = _source(hass)
+    try:
+        with (
+            patch(
+                "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+                AsyncMock(return_value=True),
+            ),
+            patch(
+                "custom_components.elektronny_gorod.archive_hls.async_get_clientsession",
+                return_value=http_session,
+            ),
+            patch(
+                "custom_components.elektronny_gorod.archive_hls._import_av",
+                side_effect=lambda: SimpleNamespace(
+                    open=lambda pipe, **_kw: pipe.read(16)
+                ),
+            ),
+            _patch_camera_resolve() as camera_resolve,
+        ):
+            resolve = asyncio.create_task(
+                source.async_resolve_media(
+                    _resolve_item(hass, entry, day_str=day_str)
+                )
+            )
+            await upstream_started.wait()
+            # Keep config entry LOADED: simulate real HA core stop directly.
+            assert entry.state is ConfigEntryState.LOADED
+            await hass.async_stop()
+            with pytest.raises(Unresolvable, match="Unknown media item"):
+                await resolve
+
+        camera_resolve.assert_not_awaited()
+        assert not (hass.data.get(ARCHIVE_STREAMS_KEY) or {})
+        assert not (hass.data.get(_ARCHIVE_BY_ID_KEY) or {})
+    finally:
+        upstream_release.set()
+
+
 async def test_media_source_budget_helpers_stopping_and_by_id_cleanup(
     hass, freezer
 ) -> None:
