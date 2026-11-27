@@ -10,6 +10,7 @@ Fix: schema без default'а для username/password, текущие знач�
 """
 from __future__ import annotations
 
+from base64 import b64encode
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,15 +19,24 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.elektronny_gorod import _build_go2rtc_config
+from custom_components.elektronny_gorod.call_camera import ElektronnyGorodCallCamera
+from custom_components.elektronny_gorod.camera import (
+    async_setup_entry as async_setup_camera,
+)
 from custom_components.elektronny_gorod.const import (
-    DOMAIN,
-    CONF_USE_GO2RTC,
     CONF_GO2RTC_BASE_URL,
+    CONF_GO2RTC_PASSWORD,
     CONF_GO2RTC_RTSP_HOST,
     CONF_GO2RTC_USERNAME,
-    CONF_GO2RTC_PASSWORD,
+    CONF_USE_GO2RTC,
+    DEFAULT_GO2RTC_RTSP_HOST,
+    DOMAIN,
 )
-from custom_components.elektronny_gorod.go2rtc import Go2RtcValidationResult
+from custom_components.elektronny_gorod.go2rtc import (
+    Go2RtcValidationResult,
+    read_go2rtc_entry_settings,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -175,3 +185,90 @@ async def test_change_creds_to_new_values(
     assert finish["type"] == "create_entry"
     assert mock_entry_with_creds.options.get(CONF_GO2RTC_USERNAME) == "newuser"
     assert mock_entry_with_creds.options.get(CONF_GO2RTC_PASSWORD) == "newpass"
+
+
+def test_empty_go2rtc_options_override_stored_publication_settings() -> None:
+    """Publication resolves explicit empty options before stored values."""
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_USE_GO2RTC: True,
+            CONF_GO2RTC_BASE_URL: "http://127.0.0.1:1984",
+            CONF_GO2RTC_RTSP_HOST: "127.0.0.1",
+            CONF_GO2RTC_USERNAME: "old_user",
+            CONF_GO2RTC_PASSWORD: "old_password",
+        },
+        options={
+            CONF_USE_GO2RTC: True,
+            CONF_GO2RTC_BASE_URL: "",
+            CONF_GO2RTC_RTSP_HOST: None,
+            CONF_GO2RTC_USERNAME: "",
+            CONF_GO2RTC_PASSWORD: "",
+        },
+    )
+
+    cfg = read_go2rtc_entry_settings(entry)
+    assert cfg.use_go2rtc is True
+    assert cfg.base_url is None
+    assert cfg.rtsp_host is None
+    assert cfg.username is None
+    assert cfg.password is None
+
+
+@pytest.mark.parametrize(
+    ("enabled", "stored_rtsp_host"),
+    [
+        (True, "stored-rtsp.example.invalid"),
+        (True, None),
+        (False, "stored-rtsp.example.invalid"),
+    ],
+    ids=["stored-endpoints", "sip-default-host", "disabled-option"],
+)
+async def test_go2rtc_call_consumers_use_stored_settings(
+    hass: HomeAssistant, enabled: bool, stored_rtsp_host: str | None
+) -> None:
+    """Setup keeps fallback for call settings and honors an explicitly disabled option."""
+    stored_url = "http://stored-go2rtc.example.invalid:1984"
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={
+            CONF_USE_GO2RTC: True,
+            CONF_GO2RTC_BASE_URL: stored_url,
+            CONF_GO2RTC_RTSP_HOST: stored_rtsp_host,
+            CONF_GO2RTC_USERNAME: "old_user",
+            CONF_GO2RTC_PASSWORD: "old_password",
+        },
+        options={
+            CONF_USE_GO2RTC: enabled,
+            CONF_GO2RTC_BASE_URL: "",
+            CONF_GO2RTC_RTSP_HOST: None,
+            CONF_GO2RTC_USERNAME: "",
+            CONF_GO2RTC_PASSWORD: "",
+        },
+    )
+    entry.runtime_data = MagicMock(data={"cameras": []})
+    entities: list[ElektronnyGorodCallCamera] = []
+    await async_setup_camera(hass, entry, entities.extend)
+    sip_go2rtc = _build_go2rtc_config(entry)
+
+    if not enabled:
+        assert sip_go2rtc is None
+        assert entities == []
+        return
+
+    encoded_credentials = b64encode(b"old_user:old_password").decode("ascii")
+    expected_headers = {"Authorization": f"Basic {encoded_credentials}"}
+    assert sip_go2rtc is not None
+    assert sip_go2rtc.base_url == stored_url
+    assert sip_go2rtc.rtsp_host == (stored_rtsp_host or DEFAULT_GO2RTC_RTSP_HOST)
+    assert sip_go2rtc.headers == expected_headers
+
+    if stored_rtsp_host is None:
+        assert entities == []
+        return
+
+    (call_camera,) = entities
+    assert isinstance(call_camera, ElektronnyGorodCallCamera)
+    assert call_camera._base_url == stored_url
+    assert call_camera._rtsp_host == stored_rtsp_host
+    assert call_camera._headers == expected_headers

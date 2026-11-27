@@ -3,14 +3,26 @@ from __future__ import annotations
 import asyncio
 import base64
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
 from aiohttp import ClientError, ClientSession, ClientTimeout
 from yarl import URL
 
-from .const import GO2RTC_RTSP_PORT, LOGGER
+from .const import (
+    CONF_GO2RTC_BASE_URL,
+    CONF_GO2RTC_PASSWORD,
+    CONF_GO2RTC_RTSP_HOST,
+    CONF_GO2RTC_USERNAME,
+    CONF_USE_GO2RTC,
+    GO2RTC_RTSP_PORT,
+    LOGGER,
+)
+
+if TYPE_CHECKING:
+    from homeassistant.config_entries import ConfigEntry
 
 # G-7 / A-79: TCP-probe RTSP-порта go2rtc после успешной HTTP-валидации.
 # Если HTTP API открыт, а RTSP-порт закрыт (firewall, иной bind-address,
@@ -25,6 +37,53 @@ class Go2RtcValidationResult:
     ok: bool
     error: str = ""
     rtsp_host: str | None = None
+
+
+@dataclass(frozen=True)
+class Go2RtcEntrySettings:
+    """Resolved go2rtc configuration values from entry options and data."""
+
+    use_go2rtc: bool
+    base_url: str | None
+    rtsp_host: str | None
+    username: str | None
+    password: str | None
+
+
+def entry_option_or_data(entry: ConfigEntry, key: str, default: Any = None) -> Any:
+    """Read a config setting with explicit options precedence over data."""
+    options = getattr(entry, "options", {})
+    data = getattr(entry, "data", {})
+    return options.get(key, data.get(key, default))
+
+
+def read_go2rtc_entry_settings(entry: ConfigEntry) -> Go2RtcEntrySettings:
+    """Resolve go2rtc settings with explicit options precedence over data."""
+    use_go2rtc = bool(entry_option_or_data(entry, CONF_USE_GO2RTC, False))
+    base_url = entry_option_or_data(entry, CONF_GO2RTC_BASE_URL) or None
+    rtsp_host = entry_option_or_data(entry, CONF_GO2RTC_RTSP_HOST) or None
+    username = entry_option_or_data(entry, CONF_GO2RTC_USERNAME) or None
+    password = entry_option_or_data(entry, CONF_GO2RTC_PASSWORD) or None
+    return Go2RtcEntrySettings(
+        use_go2rtc=use_go2rtc,
+        base_url=str(base_url) if base_url is not None else None,
+        rtsp_host=str(rtsp_host) if rtsp_host is not None else None,
+        username=str(username) if username is not None else None,
+        password=str(password) if password is not None else None,
+    )
+
+
+def read_go2rtc_call_settings(entry: ConfigEntry) -> Go2RtcEntrySettings:
+    """Keep the call path's fallback to stored endpoints and credentials."""
+    options = entry.options
+    data = entry.data
+    return Go2RtcEntrySettings(
+        use_go2rtc=bool(entry_option_or_data(entry, CONF_USE_GO2RTC, False)),
+        base_url=options.get(CONF_GO2RTC_BASE_URL) or data.get(CONF_GO2RTC_BASE_URL),
+        rtsp_host=options.get(CONF_GO2RTC_RTSP_HOST) or data.get(CONF_GO2RTC_RTSP_HOST),
+        username=options.get(CONF_GO2RTC_USERNAME) or data.get(CONF_GO2RTC_USERNAME),
+        password=options.get(CONF_GO2RTC_PASSWORD) or data.get(CONF_GO2RTC_PASSWORD),
+    )
 
 
 @dataclass(frozen=True)
@@ -127,24 +186,12 @@ class Go2RtcClient:
     async def async_patch_stream(self, name: str, src: str) -> None:
         """Create/update an in-memory stream without destructive PUT fallback."""
         query = urlencode({"name": name, "src": src})
-        url = f"{self.base_url}/api/streams?{query}"
-        try:
-            async with self._session.patch(
-                url,
-                headers=self._headers,
-                timeout=_STREAM_API_TIMEOUT,
-            ) as response:
-                if response.status in (200, 201, 204):
-                    return
-                raise Go2RtcRequestError(
-                    "patch", f"http_{response.status}"
-                ) from None
-        except Go2RtcRequestError:
-            raise
-        except asyncio.TimeoutError:
-            raise Go2RtcRequestError("patch", "timeout") from None
-        except ClientError:
-            raise Go2RtcRequestError("patch", "client_error") from None
+        await self._async_void_request(
+            self._session.patch,
+            f"{self.base_url}/api/streams?{query}",
+            operation="patch",
+            accepted=(200, 201, 204),
+        )
 
     async def async_list_streams(self) -> dict[str, Go2RtcStreamInfo]:
         """Return one sanitized snapshot of all go2rtc streams."""
@@ -199,24 +246,12 @@ class Go2RtcClient:
     async def async_delete_stream(self, name: str) -> None:
         """Delete a named stream; missing streams are already clean."""
         query = urlencode({"src": name})
-        url = f"{self.base_url}/api/streams?{query}"
-        try:
-            async with self._session.delete(
-                url,
-                headers=self._headers,
-                timeout=_STREAM_API_TIMEOUT,
-            ) as response:
-                if response.status in (200, 201, 204, 404):
-                    return
-                raise Go2RtcRequestError(
-                    "delete", f"http_{response.status}"
-                ) from None
-        except Go2RtcRequestError:
-            raise
-        except asyncio.TimeoutError:
-            raise Go2RtcRequestError("delete", "timeout") from None
-        except ClientError:
-            raise Go2RtcRequestError("delete", "client_error") from None
+        await self._async_void_request(
+            self._session.delete,
+            f"{self.base_url}/api/streams?{query}",
+            operation="delete",
+            accepted=(200, 201, 204, 404),
+        )
 
     def rtsp_url(self, name: str, *, include_credentials: bool) -> str:
         """Build a stable local RTSP URL, optionally with encoded credentials."""
@@ -237,11 +272,24 @@ class Go2RtcClient:
         """Enable/disable preload without leaking request or response data."""
         query = urlencode({"src": name})
         url = f"{self.base_url}/api/preload?{query}"
-        operation = "preload_enable" if enable else "preload_disable"
-        request = self._session.put if enable else self._session.delete
-        accepted = (200, 201, 204) if enable else (200, 201, 204, 404)
+        await self._async_void_request(
+            self._session.put if enable else self._session.delete,
+            url,
+            operation="preload_enable" if enable else "preload_disable",
+            accepted=(200, 201, 204) if enable else (200, 201, 204, 404),
+        )
+
+    async def _async_void_request(
+        self,
+        request_fn: Callable[..., Any],
+        url: str,
+        *,
+        operation: str,
+        accepted: tuple[int, ...],
+    ) -> None:
+        """Run one go2rtc mutation request and map transport/status failures."""
         try:
-            async with request(
+            async with request_fn(
                 url,
                 headers=self._headers,
                 timeout=_STREAM_API_TIMEOUT,
@@ -307,6 +355,49 @@ async def _probe_rtsp_port(host: str, port: int, timeout: float) -> bool:
     return True
 
 
+async def _check_go2rtc_api(
+    base_url: str,
+    rtsp_host: str,
+    session: ClientSession,
+    headers: dict[str, str],
+) -> Go2RtcValidationResult | None:
+    """Ping `GET {base_url}/api`, returning an error result on failure or None."""
+    try:
+        async with session.get(f"{base_url}/api", headers=headers) as resp:
+            if resp.status == 401:
+                return Go2RtcValidationResult(False, "go2rtc_auth_failed", rtsp_host)
+            if resp.status != 200:
+                return Go2RtcValidationResult(False, "go2rtc_unreachable", rtsp_host)
+    except ClientError:
+        return Go2RtcValidationResult(False, "go2rtc_unreachable", rtsp_host)
+    return None
+
+
+async def _check_go2rtc_streams_writable(
+    base_url: str,
+    rtsp_host: str,
+    session: ClientSession,
+    headers: dict[str, str],
+) -> Go2RtcValidationResult | None:
+    """Verify streams API is writable with PUT + best-effort DELETE cleanup."""
+    test_name = f"ha_check_{uuid.uuid4().hex[:8]}"
+    test_src = "rtsp://127.0.0.1:8554/does_not_exist"
+    put_qs = urlencode({"name": test_name, "src": test_src})
+    try:
+        async with session.put(f"{base_url}/api/streams?{put_qs}", headers=headers) as resp:
+            if resp.status == 401:
+                return Go2RtcValidationResult(False, "go2rtc_auth_failed", rtsp_host)
+            if resp.status not in (200, 201, 204):
+                body = await resp.text()
+                LOGGER.debug("go2rtc streams check failed: %s %s", resp.status, body)
+                return Go2RtcValidationResult(False, "go2rtc_streams_api_failed", rtsp_host)
+    except ClientError:
+        return Go2RtcValidationResult(False, "go2rtc_streams_api_failed", rtsp_host)
+    finally:
+        await cleanup_go2rtc_stream(base_url, test_name, session, headers)
+    return None
+
+
 async def validate_go2rtc(base_url: str, session: ClientSession, username: str | None = None, password: str | None = None) -> Go2RtcValidationResult:
     """
     Validate go2rtc HTTP API and that streams API is writable.
@@ -328,40 +419,19 @@ async def validate_go2rtc(base_url: str, session: ClientSession, username: str |
     if not rtsp_host:
         return Go2RtcValidationResult(False, "go2rtc_invalid_url", None)
 
-    headers = {}
-    if username and password:
-        userpass = f"{username}:{password}"
-        b64 = base64.b64encode(userpass.encode()).decode()
-        headers["Authorization"] = f"Basic {b64}"
+    headers = go2rtc_auth_headers(username, password)
 
     # 1) ping /api
-    try:
-        async with session.get(f"{base_url}/api", headers=headers) as resp:
-            if resp.status == 401:
-                return Go2RtcValidationResult(False, "go2rtc_auth_failed", rtsp_host)
-            if resp.status != 200:
-                return Go2RtcValidationResult(False, "go2rtc_unreachable", rtsp_host)
-    except ClientError:
-        return Go2RtcValidationResult(False, "go2rtc_unreachable", rtsp_host)
+    if (err := await _check_go2rtc_api(base_url, rtsp_host, session, headers)) is not None:
+        return err
 
-    # 2) streams PUT check
-    test_name = f"ha_check_{uuid.uuid4().hex[:8]}"
-    test_src = "rtsp://127.0.0.1:8554/does_not_exist"
-    put_qs = urlencode({"name": test_name, "src": test_src})
-
-    try:
-        async with session.put(f"{base_url}/api/streams?{put_qs}", headers=headers) as resp:
-            if resp.status == 401:
-                return Go2RtcValidationResult(False, "go2rtc_auth_failed", rtsp_host)
-            if resp.status not in (200, 201, 204):
-                body = await resp.text()
-                LOGGER.debug("go2rtc streams check failed: %s %s", resp.status, body)
-                return Go2RtcValidationResult(False, "go2rtc_streams_api_failed", rtsp_host)
-    except ClientError:
-        return Go2RtcValidationResult(False, "go2rtc_streams_api_failed", rtsp_host)
-    finally:
-        # 3) cleanup (best-effort)
-        await cleanup_go2rtc_stream(base_url, test_name, session, headers)
+    # 2-3) streams PUT check + best-effort cleanup
+    if (
+        err := await _check_go2rtc_streams_writable(
+            base_url, rtsp_host, session, headers
+        )
+    ) is not None:
+        return err
 
     # 4) TCP-probe RTSP-порта. HTTP API мог пройти, а RTSP-порт быть
     # недоступным (firewall / отдельный bind). Делаем отдельный error key,

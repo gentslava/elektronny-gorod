@@ -31,7 +31,12 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from custom_components.elektronny_gorod.const import DOMAIN
-from custom_components.elektronny_gorod.device import linked_to_place, place_device_id
+from custom_components.elektronny_gorod.device import (
+    dedupe_access_controls,
+    linked_to_place,
+    place_device_id,
+    place_display_name,
+)
 
 _PLACE_A = "1001"
 _PLACE_B = "1002"
@@ -327,3 +332,40 @@ async def test_setup_does_not_use_deprecated_via_device(hass, mock_api, caplog) 
     ]
 
     assert not deprecated, deprecated
+
+
+def test_balance_sensor_device_name_matches_raw_place_id() -> None:
+    """A numeric ID cannot provide the address for a distinct string ID."""
+    from custom_components.elektronny_gorod.sensor import ElektronnyGorodBalanceSensor
+
+    coordinator = MagicMock()
+    coordinator.data = {
+        "places": [
+            {"place": {"id": 1001, "address": "Numeric place"}},
+            {"place": {"id": "1001", "address": {"visibleAddress": "String place"}}},
+        ],
+    }
+
+    sensor = ElektronnyGorodBalanceSensor(coordinator, "1001")
+
+    assert sensor.device_info is not None
+    assert sensor.device_info["name"] == "String place"
+    assert place_display_name(coordinator.data, "1001") == "Numeric place"
+
+
+def test_dedupe_access_controls_preserves_raw_keys_and_picks_min_entrance() -> None:
+    """HA entity discovery keeps raw IDs and picks a stable entrance per key."""
+    result = dedupe_access_controls(
+        [
+            {"place_id": None, "access_control_id": "2001", "entrance_id": "1"},
+            {"place_id": "1001", "access_control_id": None, "entrance_id": "1"},
+            {"place_id": "1001", "access_control_id": 2001, "entrance_id": "20"},
+            {"place_id": "1001", "access_control_id": "2001", "entrance_id": "30"},
+            {"place_id": "1001", "access_control_id": "", "entrance_id": "1"},
+            {"place_id": "1001", "access_control_id": 0, "entrance_id": "1"},
+            {"place_id": "1001", "access_control_id": 2001, "entrance_id": "10"},
+        ]
+    )
+
+    assert list(result) == [("1001", 2001), ("1001", "2001"), ("1001", ""), ("1001", 0)]
+    assert result[("1001", 2001)]["entrance_id"] == "10"

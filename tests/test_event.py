@@ -157,6 +157,26 @@ async def test_doorbell_event_entity_created(hass: HomeAssistant, mock_api):
     assert hass.states.get(entity_id) is not None
 
 
+@pytest.mark.parametrize("access_control_id", [0, ""])
+async def test_intercom_entities_keep_existing_ids(
+    hass: HomeAssistant, mock_api, access_control_id: int | str
+) -> None:
+    """Keep the doorbell, history and call-state entities for existing backend IDs."""
+    mock_api.return_value.query_access_controls.return_value[0]["id"] = access_control_id
+    entry = _entry()
+    entry.add_to_hass(hass)
+    await _setup_entry(hass, entry)
+
+    registry = er.async_get(hass)
+    for platform, unique_id in (
+        ("event", f"{DOMAIN}_event_doorbell_P1_{access_control_id}"),
+        ("event", f"{DOMAIN}_event_history_access_P1_{access_control_id}"),
+        ("sensor", f"{DOMAIN}_call_state_P1_{access_control_id}"),
+        ("event", _HISTORY_PLACE_UID),
+    ):
+        assert registry.async_get_entity_id(platform, DOMAIN, unique_id) is not None
+
+
 async def test_history_event_entities_created(hass: HomeAssistant, mock_api):
     """Motion history exists but stays disabled until polling is requested."""
     await _setup(hass)

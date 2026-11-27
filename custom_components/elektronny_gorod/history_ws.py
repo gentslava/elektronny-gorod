@@ -16,11 +16,11 @@ from homeassistant.helpers import entity_registry as er
 
 from .coordinator import async_get_coordinator
 from .const import CONF_ACCOUNT_ID, CONF_SUBSCRIBER_ID, DOMAIN, LOGGER
+from .device import place_display_name
 from .history import (
     access_history_unique_id,
     account_history_unique_id,
     map_general_event_type,
-    place_display_name,
     place_history_unique_id,
 )
 

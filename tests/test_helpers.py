@@ -18,6 +18,7 @@ import pytest
 
 from custom_components.elektronny_gorod.helpers import (
     append_unique,
+    capped_exponential_backoff,
     contains,
     dedupe_by_id,
     find,
@@ -104,3 +105,12 @@ def test_append_unique_skips_existing_id() -> None:
     append_unique(target, {"id": 2})  # уже есть — no-op
     append_unique(target, {"id": 3})  # новый — добавится
     assert [d["id"] for d in target] == [1, 2, 3]
+
+
+def test_capped_exponential_backoff_avoids_overflow() -> None:
+    """Exponent is clamped before exponentiation and supports explicit or derived caps."""
+    assert capped_exponential_backoff(-1, 15.0, 300.0) == 15.0
+    assert capped_exponential_backoff(0, 15.0, 300.0) == 15.0
+    assert capped_exponential_backoff(2, 15.0, 300.0) == 60.0
+    assert capped_exponential_backoff(100_000, 15.0, 300.0) == 300.0
+    assert capped_exponential_backoff(100_000, 30.0, 1800.0, max_exponent=6) == 1800.0

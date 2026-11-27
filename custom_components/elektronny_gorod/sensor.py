@@ -25,7 +25,6 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    AREA_INTERCOM,
     CALL_STATE_ACTIVE,
     CALL_STATE_CONNECTING,
     CALL_STATE_ENDED,
@@ -37,8 +36,19 @@ from .const import (
     LOGGER,
     STREAM_MANAGER_DATA,
 )
-from .device import linked_to_place, place_device_id, place_identifier
-from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
+from .device import (
+    MANUFACTURER,
+    dedupe_access_controls,
+    intercom_device_info,
+    place_device_id,
+    place_identifier,
+    place_label,
+)
+from .coordinator import (
+    ElektronnyGorodConfigEntry,
+    ElektronnyGorodUpdateCoordinator,
+    balance_info_for_place,
+)
 from .stream_manager import (
     BACKGROUND_REFRESH_INTERVAL,
     CameraStreamManager,
@@ -80,14 +90,7 @@ async def async_setup_entry(
     # как event.py: FCM-payload несёт AccessControlId, не entrance). Push-driven
     # через EVENT_CALL_STATE (sip/call_controller.py) — единый источник фазы вызова.
     locks = (coordinator.data or {}).get("locks") or []
-    by_ac: dict[tuple, dict] = {}
-    for lk in locks:
-        key = (lk.get("place_id"), lk.get("access_control_id"))
-        if None in key:
-            continue
-        cur = by_ac.get(key)
-        if cur is None or str(lk.get("entrance_id") or "") < str(cur.get("entrance_id") or ""):
-            by_ac[key] = lk
+    by_ac = dedupe_access_controls(locks)
     entities.extend(
         ElektronnyGorodCallStateSensor(
             lk, place_device_id(hass, entry.entry_id, str(lk.get("place_id") or ""))
@@ -210,44 +213,23 @@ class ElektronnyGorodBalanceSensor(
         self._attr_device_info = DeviceInfo(
             identifiers={place_identifier(place_id)},
             name=self._place_display_name(),
-            manufacturer="Электронный город",
+            manufacturer=MANUFACTURER,
             model="Place",
         )
 
     def _place_display_name(self) -> str:
-        """Достать читаемое имя места из coordinator.data.places.
-
-        `place.address` от API оператора — это **dict** (regional structure),
-        не строка. DeviceInfo.name требует str; иначе HA молча отбрасывает
-        entity при регистрации в state machine. Поэтому достаём
-        `visibleAddress` (готовая строка) или собираем fallback.
-        """
-        places = (self.coordinator.data or {}).get("places") or []
-        for subscriber_place in places:
+        """Вернуть подпись адреса для исходного ID балансового сенсора."""
+        fallback = f"Place {self._place_id}"
+        for subscriber_place in (self.coordinator.data or {}).get("places") or []:
             place = subscriber_place.get("place") or {}
-            if place.get("id") != self._place_id:
-                continue
-            addr = place.get("address")
-            if isinstance(addr, dict):
-                visible = addr.get("visibleAddress")
-                if isinstance(visible, str) and visible:
-                    return visible
-            if isinstance(addr, str) and addr:
-                return addr
-            name = place.get("name")
-            if isinstance(name, str) and name:
-                return name
-            break
-        return f"Place {self._place_id}"
+            if place.get("id") == self._place_id:
+                return place_label(place) or fallback
+        return fallback
 
     @property
     def _balance_info(self) -> dict[str, Any] | None:
         """Найти balance для нашего place_id в текущем coordinator.data."""
-        balances = (self.coordinator.data or {}).get("balances") or []
-        for entry in balances:
-            if entry.get("place_id") == self._place_id:
-                return entry
-        return None
+        return balance_info_for_place(self.coordinator.data, self._place_id)
 
     @property
     def available(self) -> bool:
@@ -335,11 +317,7 @@ class ElektronnyGorodDaysToBlockSensor(
 
     @property
     def _balance_info(self) -> dict[str, Any] | None:
-        balances = (self.coordinator.data or {}).get("balances") or []
-        for entry in balances:
-            if entry.get("place_id") == self._place_id:
-                return entry
-        return None
+        return balance_info_for_place(self.coordinator.data, self._place_id)
 
     @property
     def available(self) -> bool:
@@ -398,18 +376,11 @@ class ElektronnyGorodCallStateSensor(SensorEntity):
             f"{DOMAIN}_call_state_{self._place_id}_{self._access_control_id}"
         )
         # Тот же device, что у lock/event/intercom-camera этого домофона (см. event.py).
-        device_uid = (
-            f"entrance_{self._place_id}_{self._access_control_id}_"
-            f"{self._entrance_id or 'main'}"
-        )
-        self._attr_device_info = linked_to_place(
-            DeviceInfo(
-                identifiers={(DOMAIN, device_uid)},
-                name=self._name,
-                manufacturer="Электронный город",
-                model="Intercom",
-                suggested_area=AREA_INTERCOM,
-            ),
+        self._attr_device_info = intercom_device_info(
+            self._place_id,
+            self._access_control_id,
+            self._entrance_id,
+            self._name,
             via_device_id,
         )
 

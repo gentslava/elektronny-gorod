@@ -16,19 +16,21 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 
 from .const import (
-    CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_KEEP_WARM,
     CONF_GO2RTC_KEEP_WARM_HIDDEN,
-    CONF_GO2RTC_PASSWORD,
-    CONF_GO2RTC_RTSP_HOST,
-    CONF_GO2RTC_USERNAME,
-    CONF_USE_GO2RTC,
     DEFAULT_GO2RTC_KEEP_WARM,
     DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
     DOMAIN,
     LOGGER,
 )
-from .go2rtc import Go2RtcClient, Go2RtcRequestError, Go2RtcStreamInfo
+from .go2rtc import (
+    Go2RtcClient,
+    Go2RtcRequestError,
+    Go2RtcStreamInfo,
+    entry_option_or_data,
+    read_go2rtc_entry_settings,
+)
+from .helpers import capped_exponential_backoff
 
 
 BACKGROUND_REFRESH_INTERVAL = timedelta(minutes=28, seconds=30)
@@ -63,6 +65,13 @@ HA_OPEN_REUSE_SECONDS = 10.0
 def _monotonic() -> float:
     """Patchable monotonic clock boundary for deterministic scheduler tests."""
     return time.monotonic()
+
+
+def _go2rtc_error_status(prefix: str, err: Exception) -> str:
+    """Build a sanitized go2rtc error status without retaining request details."""
+    if isinstance(err, Go2RtcRequestError):
+        return f"{prefix}_{err.category}"
+    return f"{prefix}_unexpected"
 
 
 @dataclass(frozen=True)
@@ -153,14 +162,7 @@ class CameraStreamManager:
         # Observe existing go2rtc state and clean ineligible streams without
         # bypassing the bounded per-camera startup jitter for missing streams.
         await self.async_reconcile(refresh_missing=False)
-        for camera_id in self._camera_ids():
-            state = self._state_for(camera_id)
-            state.eligible = self.is_camera_eligible(camera_id)
-            if state.eligible:
-                self._schedule_due(
-                    camera_id,
-                    self._startup_offset(camera_id),
-                )
+        self._schedule_eligible_cameras(lambda _idx, cid: self._startup_offset(cid))
 
     async def async_stop(self) -> None:
         """Idempotently cancel every listener, timer, and refresh owner."""
@@ -194,20 +196,16 @@ class CameraStreamManager:
         """Apply publication-only options without reloading the config entry."""
         if not self._started:
             return False
-        use_go2rtc = bool(self._entry_value(CONF_USE_GO2RTC, False))
-        base_url = str(self._entry_value(CONF_GO2RTC_BASE_URL, "") or "")
-        rtsp_host = str(self._entry_value(CONF_GO2RTC_RTSP_HOST, "") or "")
-        username = self._entry_value(CONF_GO2RTC_USERNAME, None) or None
-        password = self._entry_value(CONF_GO2RTC_PASSWORD, None) or None
+        cfg = read_go2rtc_entry_settings(self.entry)
         if (
-            not use_go2rtc
-            or not base_url
-            or not rtsp_host
+            not cfg.use_go2rtc
+            or not cfg.base_url
+            or not cfg.rtsp_host
             or not self.client.matches_configuration(
-                base_url=base_url,
-                rtsp_host=rtsp_host,
-                username=username,
-                password=password,
+                base_url=cfg.base_url,
+                rtsp_host=cfg.rtsp_host,
+                username=cfg.username,
+                password=cfg.password,
             )
         ):
             return False
@@ -254,16 +252,28 @@ class CameraStreamManager:
 
         self._ensure_background_tracking()
         await self.async_reconcile(refresh_missing=False)
-        activation_index = 0
+        self._schedule_eligible_cameras(
+            lambda idx, _cid: idx * POLICY_ENABLE_STAGGER_SECONDS,
+            skip_scheduled=True,
+        )
+
+    def _schedule_eligible_cameras(
+        self,
+        delay_fn: Callable[[int, str], float],
+        *,
+        skip_scheduled: bool = False,
+    ) -> None:
+        """Schedule background refreshes for eligible cameras with caller-supplied delays."""
+        scheduled_index = 0
         for camera_id in self._camera_ids():
             state = self._state_for(camera_id)
             state.eligible = self.is_camera_eligible(camera_id)
-            if state.eligible and camera_id not in self._due_unsubs:
-                self._schedule_due(
-                    camera_id,
-                    activation_index * POLICY_ENABLE_STAGGER_SECONDS,
-                )
-                activation_index += 1
+            if not state.eligible:
+                continue
+            if skip_scheduled and camera_id in self._due_unsubs:
+                continue
+            self._schedule_due(camera_id, delay_fn(scheduled_index, camera_id))
+            scheduled_index += 1
 
     def _ensure_background_tracking(self) -> None:
         """Install policy listeners and reconcile interval once."""
@@ -400,6 +410,35 @@ class CameraStreamManager:
             return None
         return registry_entry
 
+    def _reconcile_eligible_state(
+        self,
+        state: ManagedCameraState,
+        info: Go2RtcStreamInfo | None,
+        *,
+        refresh_missing: bool,
+    ) -> Any | None:
+        """Update state for an eligible camera and return a refresh coroutine if due."""
+        state.cleanup_pending = False
+        needs_recovery = (
+            info is None
+            or not state.preloaded
+            or not state.producer_active
+        )
+        if needs_recovery and refresh_missing:
+            if state.preloaded and not state.producer_active:
+                # Re-arm the existing preload after a fresh PATCH.
+                state.preloaded = False
+            return self.async_refresh(state.camera_id, "reconcile")
+        if info is None:
+            state.status = "missing"
+        elif not state.preloaded:
+            state.status = "preload_missing"
+        elif not state.producer_active:
+            state.status = "producer_inactive"
+        elif state.status == "idle":
+            state.status = "present"
+        return None
+
     async def async_reconcile(self, *, refresh_missing: bool = True) -> None:
         """Compare one complete go2rtc snapshot with registry desired state."""
         async with self._reconcile_lock:
@@ -408,8 +447,6 @@ class CameraStreamManager:
                 preloads = await self.client.async_list_preloads()
             except asyncio.CancelledError:
                 raise
-            except Go2RtcRequestError:
-                return
             except Exception:  # noqa: BLE001 - keep scheduler alive, details private
                 return
 
@@ -431,27 +468,12 @@ class CameraStreamManager:
                 )
 
                 if state.eligible:
-                    state.cleanup_pending = False
-                    needs_recovery = (
-                        info is None
-                        or not state.preloaded
-                        or not state.producer_active
-                    )
-                    if needs_recovery and refresh_missing:
-                        if state.preloaded and not state.producer_active:
-                            # Re-arm the existing preload after a fresh PATCH.
-                            state.preloaded = False
-                        refreshes.append(
-                            self.async_refresh(camera_id, "reconcile")
+                    if (
+                        refresh_coro := self._reconcile_eligible_state(
+                            state, info, refresh_missing=refresh_missing
                         )
-                    elif info is None:
-                        state.status = "missing"
-                    elif not state.preloaded:
-                        state.status = "preload_missing"
-                    elif not state.producer_active:
-                        state.status = "producer_inactive"
-                    elif state.status == "idle":
-                        state.status = "present"
+                    ) is not None:
+                        refreshes.append(refresh_coro)
                     continue
 
                 self._cancel_due(camera_id)
@@ -466,6 +488,63 @@ class CameraStreamManager:
                 await asyncio.gather(*refreshes)
             self._notify_listeners()
 
+    def _can_reuse_ha_open(
+        self, state: ManagedCameraState, reason: str
+    ) -> bool:
+        """Return whether a recent ready stream can satisfy `ha_open` without re-minting."""
+        return (
+            reason == "ha_open"
+            and state.present
+            # Без проверки статуса окно переиспользовало поток и после
+            # неудачной попытки: `last_success_monotonic` остаётся от
+            # прошлого успеха и десять секунд ещё выглядит свежим.
+            and state.status == "ready"
+            and state.last_success_monotonic is not None
+            and _monotonic() - state.last_success_monotonic < HA_OPEN_REUSE_SECONDS
+        )
+
+    async def _fetch_operator_source(
+        self, state: ManagedCameraState, camera_id: str
+    ) -> str | None:
+        """Fetch an operator stream URL or record sanitized operator failure state."""
+        try:
+            source_url = await self.coordinator.get_camera_stream(camera_id)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001 - sanitize operator boundary
+            self._record_failure(state, "operator_error")
+            return None
+        if not source_url:
+            self._record_failure(state, "empty_source")
+            return None
+        return source_url
+
+    def _mark_refresh_excluded(self, state: ManagedCameraState) -> StreamRefreshResult:
+        state.status = "excluded"
+        self._notify_listeners()
+        return self._proxied_result(state)
+
+    async def _async_patch_source(
+        self, state: ManagedCameraState, source_url: str
+    ) -> bool:
+        """PATCH go2rtc stream source and record sanitized errors if it fails."""
+        stream_source = (
+            f"ffmpeg:{source_url}"
+            "#video=copy#audio=aac#audio=opus"
+        )
+        try:
+            await self.client.async_patch_stream(
+                state.stream_name,
+                stream_source,
+            )
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 - keep unexpected details private
+            self._record_failure(state, _go2rtc_error_status("patch", err))
+            return False
+        state.present = True
+        return True
+
     async def _async_refresh_owner(
         self,
         camera_id: str,
@@ -477,116 +556,81 @@ class CameraStreamManager:
         state.eligible = self.is_camera_eligible(camera_id)
         try:
             if not publishable:
-                state.status = "excluded"
-                self._notify_listeners()
-                return self._proxied_result(state)
-            if (
-                reason == "ha_open"
-                and state.present
-                # Без проверки статуса окно переиспользовало поток и после
-                # неудачной попытки: `last_success_monotonic` остаётся от
-                # прошлого успеха и десять секунд ещё выглядит свежим.
-                and state.status == "ready"
-                and state.last_success_monotonic is not None
-                and _monotonic() - state.last_success_monotonic
-                < HA_OPEN_REUSE_SECONDS
-            ):
+                return self._mark_refresh_excluded(state)
+            if self._can_reuse_ha_open(state, reason):
                 # Поток уже поднят свежим источником — переиспользуем его.
                 return self._proxied_result(state)
-            try:
-                source_url = await self.coordinator.get_camera_stream(camera_id)
-            except asyncio.CancelledError:
-                raise
-            except Exception:  # noqa: BLE001 - sanitize operator boundary
-                self._record_failure(state, "operator_error")
-                return StreamRefreshResult(url=None, proxied=False)
-
-            if not source_url:
-                self._record_failure(state, "empty_source")
+            if (
+                source_url := await self._fetch_operator_source(state, camera_id)
+            ) is None:
                 return StreamRefreshResult(url=None, proxied=False)
 
             publishable = self._is_refresh_allowed(camera_id, reason)
             state.eligible = self.is_camera_eligible(camera_id)
-            if (
-                not publishable
-                or (
-                    reason in BACKGROUND_REFRESH_REASONS
-                    and not state.eligible
-                )
+            if not publishable or (
+                reason in BACKGROUND_REFRESH_REASONS and not state.eligible
             ):
-                state.status = "excluded"
-                self._notify_listeners()
-                return self._proxied_result(state)
+                return self._mark_refresh_excluded(state)
 
-            stream_source = (
-                f"ffmpeg:{source_url}"
-                "#video=copy#audio=aac#audio=opus"
-            )
-            try:
-                await self.client.async_patch_stream(
-                    state.stream_name,
-                    stream_source,
-                )
-            except Go2RtcRequestError as err:
-                self._record_failure(state, f"patch_{err.category}")
-                return StreamRefreshResult(url=source_url, proxied=False)
-            except asyncio.CancelledError:
-                raise
-            except Exception:  # noqa: BLE001 - keep unexpected details private
-                self._record_failure(state, "patch_unexpected")
+            if not await self._async_patch_source(state, source_url):
                 return StreamRefreshResult(url=source_url, proxied=False)
 
-            state.present = True
             state.eligible = self.is_camera_eligible(camera_id)
-            if (
-                reason in BACKGROUND_REFRESH_REASONS
-                and not state.eligible
-            ):
+            if reason in BACKGROUND_REFRESH_REASONS and not state.eligible:
                 await self._async_cleanup_stream(state)
                 self._notify_listeners()
                 return self._proxied_result(state)
 
-            needs_preload = state.eligible and not (
-                state.preloaded and state.producer_active
-            )
-            if needs_preload and reason == "ha_open":
-                # go2rtc отвечает на PUT /api/preload только когда реально
-                # поднимет поток: запустит ffmpeg, подключится к RTSP оператора
-                # и дождётся первых пакетов — замер на проде дал 2-6 секунд на
-                # камеру. HA ждал этот ответ внутри stream_source и не мог
-                # добавить следующую камеру, поэтому прогрев оплачивался
-                # временем старта интеграции. Самому HA ожидание не нужно:
-                # поток уже пропатчен свежим источником, а тёплым он должен
-                # быть для внешних потребителей.
-                self._schedule_preload(state)
-            elif needs_preload:
-                # Фоновый цикл ждёт прогрев: по его исходу вызывающий узнаёт,
-                # что go2rtc ненадёжен, и получает прямой операторский URL как
-                # fallback (см. camera.py: `if not result.proxied`).
-                if not await self._async_enable_preload(state):
-                    return StreamRefreshResult(url=source_url, proxied=False)
+            if not await self._async_ensure_refresh_preload(state, reason):
+                return StreamRefreshResult(url=source_url, proxied=False)
 
-            state.last_success = datetime.now(timezone.utc)
-            completed = _monotonic()
-            state.last_success_monotonic = completed
-            state.failure_count = 0
-            state.status = "ready"
-            if (
-                self._started
-                and self.keep_warm
-                and self.is_camera_eligible(camera_id)
-            ):
-                self._schedule_due(
-                    camera_id,
-                    BACKGROUND_REFRESH_INTERVAL.total_seconds(),
-                    base_monotonic=completed,
-                )
-            self._notify_listeners()
+            self._finalize_refresh_success(state, camera_id)
             return self._proxied_result(state)
         finally:
             current = asyncio.current_task()
             if self._inflight.get(camera_id) is current:
                 self._inflight.pop(camera_id, None)
+
+    async def _async_ensure_refresh_preload(
+        self, state: ManagedCameraState, reason: str
+    ) -> bool:
+        """Ensure go2rtc preload is armed asynchronously (`ha_open`) or synchronously."""
+        needs_preload = state.eligible and not (
+            state.preloaded and state.producer_active
+        )
+        if not needs_preload:
+            return True
+        if reason == "ha_open":
+            # go2rtc отвечает на PUT /api/preload только когда реально
+            # поднимет поток: запуская ffmpeg, подключаясь к RTSP и дожидаясь
+            # первых пакетов (2-6 с на проде). Ха-запрос уже получил свежий
+            # PATCH и не ждёт прогрев.
+            self._schedule_preload(state)
+            return True
+        # Фоновый цикл ждёт прогрев: по его исходу вызывающий узнаёт,
+        # что go2rtc ненадёжен, и получает прямой операторский URL как
+        # fallback (см. camera.py: `if not result.proxied`).
+        return await self._async_enable_preload(state)
+
+    def _finalize_refresh_success(
+        self, state: ManagedCameraState, camera_id: str
+    ) -> None:
+        state.last_success = datetime.now(timezone.utc)
+        completed = _monotonic()
+        state.last_success_monotonic = completed
+        state.failure_count = 0
+        state.status = "ready"
+        if (
+            self._started
+            and self.keep_warm
+            and self.is_camera_eligible(camera_id)
+        ):
+            self._schedule_due(
+                camera_id,
+                BACKGROUND_REFRESH_INTERVAL.total_seconds(),
+                base_monotonic=completed,
+            )
+        self._notify_listeners()
 
     async def _async_enable_preload(self, state: ManagedCameraState) -> bool:
         """Enable one go2rtc preload; False means the failure is recorded.
@@ -600,11 +644,8 @@ class CameraStreamManager:
             await self.client.async_enable_preload(state.stream_name)
         except asyncio.CancelledError:
             raise
-        except Go2RtcRequestError as err:
-            self._on_preload_failed(state, f"preload_{err.category}")
-            return False
-        except Exception:  # noqa: BLE001 - sanitize transport detail
-            self._on_preload_failed(state, "preload_unexpected")
+        except Exception as err:  # noqa: BLE001 - sanitize transport detail
+            self._on_preload_failed(state, _go2rtc_error_status("preload", err))
             return False
         state.preloaded = True
         state.producer_active = True
@@ -678,10 +719,11 @@ class CameraStreamManager:
             and self.keep_warm
             and self.is_camera_eligible(state.camera_id)
         ):
-            exponent = min(state.failure_count - 1, RETRY_MAX_EXPONENT)
-            retry_delay = min(
-                RETRY_INITIAL_SECONDS * 2**exponent,
+            retry_delay = capped_exponential_backoff(
+                state.failure_count - 1,
+                RETRY_INITIAL_SECONDS,
                 RETRY_MAX_SECONDS,
+                max_exponent=RETRY_MAX_EXPONENT,
             )
             self._schedule_due(state.camera_id, retry_delay)
         self._notify_listeners()
@@ -697,70 +739,59 @@ class CameraStreamManager:
                     type(err).__name__,
                 )
 
-    async def _async_delete_stream(self, state: ManagedCameraState) -> None:
-        try:
-            await self.client.async_delete_stream(state.stream_name)
-        except Go2RtcRequestError as err:
-            state.status = f"delete_{err.category}"
-            state.cleanup_pending = True
-            return
-        except asyncio.CancelledError:
-            raise
-        except Exception:  # noqa: BLE001 - sanitize unexpected transport detail
-            state.status = "delete_unexpected"
-            state.cleanup_pending = True
-            return
-        state.present = False
+    @staticmethod
+    def _mark_stream_excluded(
+        state: ManagedCameraState, *, clear_stream: bool = True
+    ) -> None:
+        if clear_stream:
+            state.present = False
+            state.preloaded = False
         state.consumer_count = 0
-        state.preloaded = False
         state.producer_active = False
         state.cleanup_pending = False
         state.status = "excluded"
+
+    async def _async_delete_stream(self, state: ManagedCameraState) -> None:
+        """Delete one idle integration-owned stream from go2rtc."""
+        try:
+            await self.client.async_delete_stream(state.stream_name)
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # noqa: BLE001 - sanitize unexpected transport detail
+            state.status = _go2rtc_error_status("delete", err)
+            state.cleanup_pending = True
+            return
+        self._mark_stream_excluded(state)
 
     async def _async_cleanup_stream(self, state: ManagedCameraState) -> None:
         """Remove manager preload, then preserve any external consumers."""
         if state.preloaded:
             try:
                 await self.client.async_disable_preload(state.stream_name)
-            except Go2RtcRequestError as err:
-                state.status = f"preload_disable_{err.category}"
-                state.cleanup_pending = True
-                return
             except asyncio.CancelledError:
                 raise
-            except Exception:  # noqa: BLE001 - sanitize transport detail
-                state.status = "preload_disable_unexpected"
+            except Exception as err:  # noqa: BLE001 - sanitize transport detail
+                state.status = _go2rtc_error_status("preload_disable", err)
                 state.cleanup_pending = True
                 return
             state.preloaded = False
             self._owned_preloads.discard(state.stream_name)
 
         if not state.present:
-            state.consumer_count = 0
-            state.producer_active = False
-            state.cleanup_pending = False
-            state.status = "excluded"
+            self._mark_stream_excluded(state, clear_stream=False)
             return
 
         try:
             info = await self.client.async_get_stream(state.stream_name)
-        except Go2RtcRequestError as err:
-            state.status = f"cleanup_get_{err.category}"
-            state.cleanup_pending = True
-            return
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - sanitize transport detail
-            state.status = "cleanup_get_unexpected"
+        except Exception as err:  # noqa: BLE001 - sanitize transport detail
+            state.status = _go2rtc_error_status("cleanup_get", err)
             state.cleanup_pending = True
             return
 
         if info is None:
-            state.present = False
-            state.consumer_count = 0
-            state.producer_active = False
-            state.cleanup_pending = False
-            state.status = "excluded"
+            self._mark_stream_excluded(state)
             return
 
         state.consumer_count = info.consumer_count
@@ -791,16 +822,11 @@ class CameraStreamManager:
         )
         try:
             await self.client.async_disable_preload(stream_name)
-        except Go2RtcRequestError as err:
-            if state is not None:
-                state.status = f"preload_disable_{err.category}"
-                state.cleanup_pending = True
-            return
         except asyncio.CancelledError:
             raise
-        except Exception:  # noqa: BLE001 - sanitize transport detail
+        except Exception as err:  # noqa: BLE001 - sanitize transport detail
             if state is not None:
-                state.status = "preload_disable_unexpected"
+                state.status = _go2rtc_error_status("preload_disable", err)
                 state.cleanup_pending = True
             return
         if state is not None:
@@ -808,9 +834,7 @@ class CameraStreamManager:
             state.producer_active = False
 
     def _entry_value(self, key: str, default: Any) -> Any:
-        options = getattr(self.entry, "options", {})
-        data = getattr(self.entry, "data", {})
-        return options.get(key, data.get(key, default))
+        return entry_option_or_data(self.entry, key, default)
 
     def _camera_ids(self) -> list[str]:
         result: list[str] = []

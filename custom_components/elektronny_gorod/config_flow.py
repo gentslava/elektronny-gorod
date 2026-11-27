@@ -48,7 +48,7 @@ from .api import ElektronnyGorodAPI
 from .helpers import find, hash_password, hash_password_timestamp
 from .user_agent import UserAgent
 from .time import Time
-from .go2rtc import validate_go2rtc, normalize_base_url
+from .go2rtc import entry_option_or_data, normalize_base_url, validate_go2rtc
 
 
 class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
@@ -108,27 +108,26 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             elif not phone:
                 errors[CONF_PHONE] = "invalid_phone"
             else:
-                if not errors:
-                    self.phone = phone
-                    LOGGER.debug("Phone captured (length=%d)", len(self.phone))
+                self.phone = phone
+                LOGGER.debug("Phone captured (length=%d)", len(self.phone))
 
-                    # Fetch contracts for the phone number
-                    try:
-                        res = await self.api.query_contracts(self.phone)
+                # Fetch contracts for the phone number
+                try:
+                    res = await self.api.query_contracts(self.phone)
 
-                        # If password is required, go to password step
-                        if res.get("password"):
-                            return await self.async_step_password()
+                    # If password is required, go to password step
+                    if res.get("password"):
+                        return await self.async_step_password()
 
-                        # Otherwise user must choose a contract and confirm via SMS
-                        contracts = res.get("contracts")
-                        if not contracts:
-                            errors[CONF_PHONE] = "no_contracts"
-                        else:
-                            self.contracts = contracts
-                            return await self.async_step_contract()
-                    except ValueError as e:
-                        errors[CONF_PHONE] = str(e)
+                    # Otherwise user must choose a contract and confirm via SMS
+                    contracts = res.get("contracts")
+                    if not contracts:
+                        errors[CONF_PHONE] = "no_contracts"
+                    else:
+                        self.contracts = contracts
+                        return await self.async_step_contract()
+                except ValueError as e:
+                    errors[CONF_PHONE] = str(e)
 
         return self.async_show_form(
             step_id="user",
@@ -177,6 +176,15 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             )
         return await self.async_step_user(user_input)
 
+    def _apply_auth_tokens(self, auth: dict[str, Any]) -> bool:
+        """Store tokens and operator id from an auth response; return whether a token was present."""
+        self.access_token = auth.get("accessToken")
+        self.refresh_token = auth.get("refreshToken")
+        operator_id = auth.get("operatorId")
+        self.operator_id = str(operator_id) if operator_id is not None else "null"
+        self.user_agent.operator_id = self.operator_id
+        return bool(self.access_token)
+
     async def async_step_password(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Ask for password and complete password-based authentication."""
         errors: dict[str, str] = {}
@@ -202,15 +210,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
             try:
                 auth = await self.api.verify_password(time.get_timestamp(), hash1, hash2)
-                self.access_token = auth.get("accessToken")
-                self.refresh_token = auth.get("refreshToken")
-
-                operator_id = auth.get("operatorId")
-                self.operator_id = str(operator_id) if operator_id is not None else "null"
-                self.user_agent.operator_id = self.operator_id
-
-                # If password is verified, proceed to account step
-                if self.access_token:
+                if self._apply_auth_tokens(auth):
                     return await self.get_account()
 
                 # Authentication failed
@@ -289,15 +289,7 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
 
             try:
                 auth = await self.api.verify_sms_code(contract, code)
-                self.access_token = auth.get("accessToken")
-                self.refresh_token = auth.get("refreshToken")
-
-                operator_id = auth.get("operatorId")
-                self.operator_id = str(operator_id) if operator_id is not None else "null"
-                self.user_agent.operator_id = self.operator_id
-
-                # If the code is verified, proceed to account step
-                if self.access_token:
+                if self._apply_auth_tokens(auth):
                     return await self.get_account()
 
                 # Authentication failed
@@ -353,9 +345,9 @@ class ElektronnyGorodConfigFlow(ConfigFlow, domain=DOMAIN):
             ):
                 LOGGER.info("Reauth entry %s", entry.entry_id)
 
-                prev_use_go2rtc = entry.options.get(CONF_USE_GO2RTC, entry.data.get(CONF_USE_GO2RTC))
-                prev_base_url = entry.options.get(CONF_GO2RTC_BASE_URL, entry.data.get(CONF_GO2RTC_BASE_URL))
-                prev_rtsp_host = entry.options.get(CONF_GO2RTC_RTSP_HOST, entry.data.get(CONF_GO2RTC_RTSP_HOST))
+                prev_use_go2rtc = entry_option_or_data(entry, CONF_USE_GO2RTC)
+                prev_base_url = entry_option_or_data(entry, CONF_GO2RTC_BASE_URL)
+                prev_rtsp_host = entry_option_or_data(entry, CONF_GO2RTC_RTSP_HOST)
 
                 merged_data: dict[str, Any] = {
                     **data,
@@ -518,34 +510,21 @@ class ElektronnyGorodOptionsFlowHandler(OptionsFlow):
                 }
                 return self.async_create_entry(title="", data=data)
 
-        use_go2rtc_default = self.entry.options.get(
-            CONF_USE_GO2RTC,
-            self.entry.data.get(CONF_USE_GO2RTC, False),
+        use_go2rtc_default = entry_option_or_data(self.entry, CONF_USE_GO2RTC, False)
+        go2rtc_host_default = entry_option_or_data(
+            self.entry, CONF_GO2RTC_BASE_URL, "127.0.0.1"
         )
-        go2rtc_host_default = self.entry.options.get(
-            CONF_GO2RTC_BASE_URL,
-            self.entry.data.get(CONF_GO2RTC_BASE_URL, "127.0.0.1"),
+        go2rtc_username_default = entry_option_or_data(
+            self.entry, CONF_GO2RTC_USERNAME, ""
         )
-        go2rtc_username_default = self.entry.options.get(
-            CONF_GO2RTC_USERNAME,
-            self.entry.data.get(CONF_GO2RTC_USERNAME, ""),
+        go2rtc_password_default = entry_option_or_data(
+            self.entry, CONF_GO2RTC_PASSWORD, ""
         )
-        go2rtc_password_default = self.entry.options.get(
-            CONF_GO2RTC_PASSWORD,
-            self.entry.data.get(CONF_GO2RTC_PASSWORD, ""),
+        keep_warm_default = entry_option_or_data(
+            self.entry, CONF_GO2RTC_KEEP_WARM, DEFAULT_GO2RTC_KEEP_WARM
         )
-        keep_warm_default = self.entry.options.get(
-            CONF_GO2RTC_KEEP_WARM,
-            self.entry.data.get(
-                CONF_GO2RTC_KEEP_WARM, DEFAULT_GO2RTC_KEEP_WARM
-            ),
-        )
-        keep_warm_hidden_default = self.entry.options.get(
-            CONF_GO2RTC_KEEP_WARM_HIDDEN,
-            self.entry.data.get(
-                CONF_GO2RTC_KEEP_WARM_HIDDEN,
-                DEFAULT_GO2RTC_KEEP_WARM_HIDDEN,
-            ),
+        keep_warm_hidden_default = entry_option_or_data(
+            self.entry, CONF_GO2RTC_KEEP_WARM_HIDDEN, DEFAULT_GO2RTC_KEEP_WARM_HIDDEN
         )
 
         # NB: username/password — vol.Optional WITHOUT default. voluptuous

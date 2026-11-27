@@ -48,7 +48,7 @@ Quality gates:
 | Android device pool | [`const.py:ANDROID_DEVICES`](../../custom_components/elektronny_gorod/const.py#L105) | разработчик | `user_agent.py` |
 | Coordinator state | `ElektronnyGorodUpdateCoordinator.data` | `_async_update_data` | все `CoordinatorEntity` |
 | Cameras/Locks/Balances данные | runtime snapshot в `coordinator.data` | API → coordinator | entity setup/update |
-| go2rtc config (runtime) | `entry.options ↑ entry.data` (fallback) | OptionsFlow → entry | `camera.py:_get_go2rtc_cfg` |
+| go2rtc config (runtime) | `entry.options` и `entry.data` | OptionsFlow → entry | `go2rtc.py:read_go2rtc_entry_settings` для публикации потоков, `go2rtc.py:read_go2rtc_call_settings` для камеры вызова и SIP |
 | UI-строки (source) | [`strings.json`](../../custom_components/elektronny_gorod/strings.json) | разработчик | HA, переводы |
 | Переводы | [`translations/*.json`](../../custom_components/elektronny_gorod/translations/) | разработчик / переводчик | HA UI |
 | Crypto-«соль» auth | [`helpers.py:43-44`](../../custom_components/elektronny_gorod/helpers.py#L43-L44) | reverse engineering | API verify_password |

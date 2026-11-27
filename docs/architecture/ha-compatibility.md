@@ -110,10 +110,10 @@ async_step_user
 
 | Критерий | Статус | Файл:строка |
 |---|---|---|
-| Использование `DataUpdateCoordinator` | ✅ | `coordinator.py:53` |
-| `name` задано | ✅ `name=DOMAIN` | `coordinator.py:78-83` |
-| `update_interval` задан | ✅ 5 минут | `coordinator.py:50,82` |
-| `_async_update_data` реализован | ✅ единый snapshot places/balances/cameras/locks/dnd | `coordinator.py:126+` |
+| Использование `DataUpdateCoordinator` | ✅ | `coordinator.py:ElektronnyGorodUpdateCoordinator` |
+| `name` задано | ✅ `name=DOMAIN` | `coordinator.py:ElektronnyGorodUpdateCoordinator.__init__` |
+| `update_interval` задан | ✅ 5 минут | `coordinator.py:UPDATE_INTERVAL` |
+| `_async_update_data` реализован | ✅ единый snapshot places/balances/cameras/locks/dnd | `coordinator.py:_async_update_data` |
 | Возвращаемое `data` используется entity | ✅ через `CoordinatorEntity` | `camera.py`, `lock.py`, `sensor.py`, `switch.py` |
 | `UpdateFailed` при ошибке | ✅ fatal places; per-place partial data | `coordinator.py:_async_update_data` |
 | Timeout per request | ✅ REST 30с / binary 60с / connect 10с | `http.py:15-22,120-126` |
@@ -121,7 +121,7 @@ async_step_user
 | Rate limiting | 🔴 нет | — |
 | Caching | 🔴 нет | — |
 | Никаких blocking ops в loop | ✅ async I/O; blocking subprocess не используется | integration code |
-| `async_unsubscribe` вызывается при unload | ✅ через `entry.async_on_unload` | `__init__.py:69-72` |
+| `async_unsubscribe` вызывается при unload | ✅ через `entry.async_on_unload` | `__init__.py:async_setup_entry` |
 | History interval cleanup | ✅ `HistoryManager.async_stop` через config-entry unload; overlapping tick пропускается | `history.py`, `__init__.py` |
 | Camera-history request bound | ✅ motion entities disabled-by-default; API poll выполняется только для enabled registry entries | `__init__.py`, `event.py`, `history.py` |
 | Использование `async_get_clientsession(hass)` | ✅ shared HA session | `http.py:96` |

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NoReturn
 from urllib.parse import urlencode
 
 from aiohttp import ClientError, ClientResponse
@@ -82,6 +82,50 @@ def _device_id(installation_id: str) -> str:
     return uuid.uuid5(uuid.NAMESPACE_DNS, f"eg-fcm-{installation_id}").hex[:16]
 
 
+def _require_client_response(response: Any) -> ClientResponse:
+    """Validate that `HTTP` returned a real aiohttp `ClientResponse`."""
+    if not isinstance(response, ClientResponse):
+        raise TypeError(f"Unexpected response type: {type(response)!r}")
+    return response
+
+
+def _raise_auth_error(
+    err: Exception,
+    *,
+    status_code: int,
+    error_key: str,
+    preserve_value_error: bool = False,
+) -> NoReturn:
+    """Map WAF/status transport exceptions into flow-level error codes."""
+    if is_service_pipe_block(err):
+        raise ValueError("waf_blocked") from err
+    if error_status(err) == status_code:
+        raise ValueError(error_key)
+    if preserve_value_error and isinstance(err, ValueError):
+        raise err
+    raise ValueError("unknown_status")
+
+
+async def _parse_forpost_error_code(err: ClientError) -> str | None:
+    """Extract a backend `errorCode`/`ErrorCode` string from an error response."""
+    if not (err.args and isinstance(err.args[0], ClientResponse)):
+        return None
+    try:
+        error_body = await err.args[0].json()
+    except Exception:  # noqa: BLE001 - non-JSON bodies degrade
+        return None
+    if not isinstance(error_body, dict):
+        return None
+    # Две runtime-формы: camelCase errorCode ("11005", retention) и
+    # PascalCase int ErrorCode (102, файл готовится к загрузке).
+    raw_code = error_body.get("errorCode")
+    if raw_code is None:
+        raw_code = error_body.get("ErrorCode")
+    if raw_code is not None and str(raw_code):
+        return str(raw_code)
+    return None
+
+
 class ElektronnyGorodAPI:
     """Elektronny Gorod HTTP API wrapper."""
 
@@ -114,10 +158,7 @@ class ElektronnyGorodAPI:
         api_url = f"/auth/v2/login/{phone}"
 
         try:
-            response = await self.http.get(api_url)
-
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
+            response = _require_client_response(await self.http.get(api_url))
 
             if response.status == 300:
                 contracts = await response.json()
@@ -132,13 +173,12 @@ class ElektronnyGorodAPI:
             raise ValueError("unknown_status")
 
         except Exception as e:
-            if is_service_pipe_block(e):
-                raise ValueError("waf_blocked") from e
-            if error_status(e) == 400:
-                raise ValueError("invalid_login")
-            if isinstance(e, ValueError):
-                raise
-            raise ValueError("unknown_status")
+            _raise_auth_error(
+                e,
+                status_code=400,
+                error_key="invalid_login",
+                preserve_value_error=True,
+            )
 
     async def verify_password(self, timestamp: str, hash1: str, hash2: str) -> dict[str, Any]:
         """Authenticate using password."""
@@ -153,19 +193,13 @@ class ElektronnyGorodAPI:
         }
 
         try:
-            response = await self.http.post(api_url, json.dumps(payload))
-
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
-
+            response = _require_client_response(
+                await self.http.post(api_url, json.dumps(payload))
+            )
             return await response.json()
 
         except Exception as e:
-            if is_service_pipe_block(e):
-                raise ValueError("waf_blocked") from e
-            if error_status(e) == 400:
-                raise ValueError("invalid_password")
-            raise ValueError("unknown_status")
+            _raise_auth_error(e, status_code=400, error_key="invalid_password")
 
     async def request_sms_code(self, contract: dict[str, Any]) -> None:
         """Request SMS code for the selected contract."""
@@ -181,19 +215,13 @@ class ElektronnyGorodAPI:
         }
 
         try:
-            response = await self.http.post(api_url, json.dumps(payload))
-
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
-
+            _require_client_response(
+                await self.http.post(api_url, json.dumps(payload))
+            )
             return
 
         except Exception as e:
-            if is_service_pipe_block(e):
-                raise ValueError("waf_blocked") from e
-            if error_status(e) == 429:
-                raise ValueError("limit_exceeded")
-            raise ValueError("unknown_status")
+            _raise_auth_error(e, status_code=429, error_key="limit_exceeded")
 
     async def verify_sms_code(self, contract: dict[str, Any], code: str) -> dict[str, Any]:
         """Verify the SMS code."""
@@ -210,47 +238,31 @@ class ElektronnyGorodAPI:
         }
 
         try:
-            response = await self.http.post(api_url, json.dumps(payload))
-
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
-
+            response = _require_client_response(
+                await self.http.post(api_url, json.dumps(payload))
+            )
             return await response.json()
 
         except Exception as e:
-            if is_service_pipe_block(e):
-                raise ValueError("waf_blocked") from e
-            if error_status(e) == 406:
-                raise ValueError("invalid_format")
-            raise ValueError("unknown_status")
+            _raise_auth_error(e, status_code=406, error_key="invalid_format")
 
     async def query_profile(self) -> dict[str, Any]:
         """Query the subscriber profile."""
         api_url = "/rest/v1/subscribers/profiles"
 
         try:
-            response = await self.http.get(api_url)
-
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
-
+            response = _require_client_response(await self.http.get(api_url))
             profile = await response.json()
             return profile.get("data") if profile else {}
 
         except Exception as e:
-            if is_service_pipe_block(e):
-                raise ValueError("waf_blocked") from e
-            if error_status(e) == 401:
-                raise ValueError("unauthorized")
-            raise ValueError("unknown_status")
+            _raise_auth_error(e, status_code=401, error_key="unauthorized")
 
     async def query_balance(self, place_id: str) -> dict[str, Any]:
         """Query the balance/finance info for a place."""
         api_url = f"/api/mh-payment/mobile/v1/finance?placeId={place_id}"
 
-        response = await self.http.get(api_url)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.get(api_url))
 
         finance = await response.json()
         return finance.get("data") if finance else {}
@@ -260,9 +272,7 @@ class ElektronnyGorodAPI:
         suffix = f"?placeId={place_id}" if place_id else ""
         api_url = f"/rest/v3/subscriber-places{suffix}"
 
-        response = await self.http.get(api_url)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.get(api_url))
 
         places = await response.json()
         data = places.get("data") if places else []
@@ -276,12 +286,12 @@ class ElektronnyGorodAPI:
     ) -> HistoryPage:
         """Query one page of sanitized durable events for the given places."""
         api_url = f"/rest/v1/events/search?page={page}&sort=occurredAt%2CDESC"
-        response = await self.http.post(
-            api_url,
-            json.dumps({"placeIds": place_ids}),
+        response = _require_client_response(
+            await self.http.post(
+                api_url,
+                json.dumps({"placeIds": place_ids}),
+            )
         )
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
         payload = await response.json()
         events = tuple(
@@ -317,11 +327,11 @@ class ElektronnyGorodAPI:
                 "orderByTime": "DESC",
             }
         )
-        response = await self.http.get(
-            f"/rest/v2/forpost/cameras/{camera_id}/events?{query}"
+        response = _require_client_response(
+            await self.http.get(
+                f"/rest/v2/forpost/cameras/{camera_id}/events?{query}"
+            )
         )
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
 
         payload = await response.json()
         return tuple(
@@ -342,7 +352,7 @@ class ElektronnyGorodAPI:
         """Query the signed mp4 download URL for one forpost event."""
         api_url = f"/rest/v1/forpost/events/{event_id}/downloads?container=mp4"
         try:
-            response = await self.http.get(api_url)
+            response = _require_client_response(await self.http.get(api_url))
         except ClientError as ex:
             if is_service_pipe_block(ex):
                 raise
@@ -350,23 +360,9 @@ class ElektronnyGorodAPI:
             # из JSON-тела. Транспортные сбои (timeout, 5xx-HTML) — это
             # транзиентные ошибки: пробрасываем исходный ClientError, чтобы
             # media source честно показал "temporarily unavailable".
-            if ex.args and isinstance(ex.args[0], ClientResponse):
-                try:
-                    error_body = await ex.args[0].json()
-                except Exception:  # noqa: BLE001 - non-JSON bodies degrade
-                    error_body = None
-                if isinstance(error_body, dict):
-                    # Две runtime-формы: camelCase errorCode ("11005",
-                    # retention) и PascalCase int ErrorCode (102, файл
-                    # готовится к загрузке; production 2026-08-30).
-                    raw_code = error_body.get("errorCode")
-                    if raw_code is None:
-                        raw_code = error_body.get("ErrorCode")
-                    if raw_code is not None and str(raw_code):
-                        raise ForpostDownloadError(str(raw_code)) from ex
+            if (code := await _parse_forpost_error_code(ex)) is not None:
+                raise ForpostDownloadError(code) from ex
             raise
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
         payload = await response.json()
         url = payload.get("data") if isinstance(payload, dict) else None
         if not isinstance(url, str) or not url:
@@ -377,9 +373,7 @@ class ElektronnyGorodAPI:
         """Query the list of access controls for a place."""
         api_url = f"/rest/v1/places/{place_id}/accesscontrols"
 
-        response = await self.http.get(api_url)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.get(api_url))
 
         access_controls = await response.json()
         data = access_controls.get("data") if access_controls else []
@@ -390,9 +384,7 @@ class ElektronnyGorodAPI:
         api_url = "/rest/v1/forpost/cameras"
 
         try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
+            response = _require_client_response(await self.http.get(api_url))
 
             cameras = await response.json()
             data = cameras.get("data") if cameras else []
@@ -411,9 +403,7 @@ class ElektronnyGorodAPI:
         # строки в журнале.
         api_url = f"/rest/v1/places/{place_id}/cameras"
 
-        response = await self.http.get(api_url)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.get(api_url))
 
         cameras = await response.json()
         data = cameras.get("data") if cameras else []
@@ -428,9 +418,7 @@ class ElektronnyGorodAPI:
         # строки в журнале.
         api_url = f"/rest/v2/places/{place_id}/public/cameras"
 
-        response = await self.http.get(api_url)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.get(api_url))
 
         cameras = await response.json()
         data = cameras.get("data") if cameras else []
@@ -441,9 +429,7 @@ class ElektronnyGorodAPI:
         api_url = f"/rest/v1/places/{place_id}/screen-sections"
 
         try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
+            response = _require_client_response(await self.http.get(api_url))
 
             cameras = await response.json()
             data = cameras.get("sections") if cameras else []
@@ -484,9 +470,7 @@ class ElektronnyGorodAPI:
         api_url = (
             f"/api/mh-customer/mobile/v1/customers/places/{place_id}/settings/screens"
         )
-        response = await self.http.get(api_url)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.get(api_url))
         data = await response.json()
         return data
 
@@ -509,9 +493,7 @@ class ElektronnyGorodAPI:
         api_url = (
             f"/api/mh-customer/mobile/v1/customers/places/{place_id}/settings/do_not_disturb"
         )
-        response = await self.http.get(api_url)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.get(api_url))
         data = await response.json()
         return (data or {}).get("do_not_disturb") or []
 
@@ -560,9 +542,7 @@ class ElektronnyGorodAPI:
         query = urlencode({"placeId": place_id, "app": app_id})
         api_url = f"/api/mh-auth/mobile/v1/guests/link?{query}"
 
-        response = await self.http.post(api_url, None)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.post(api_url, None))
 
         payload = await response.json()
         # Ответ-массив или скаляр на 200 иначе дал бы `AttributeError` —
@@ -633,9 +613,9 @@ class ElektronnyGorodAPI:
             "accessControlIds": access_control_ids,
         }
         api_url = "/api/mh-temp-pass/mobile/v1/rest/v1/temp-passes"
-        response = await self.http.post(api_url, json.dumps(body))
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(
+            await self.http.post(api_url, json.dumps(body))
+        )
 
         payload = await response.json()
         data = payload.get("data") if isinstance(payload, dict) and "data" in payload else payload
@@ -658,9 +638,7 @@ class ElektronnyGorodAPI:
         обёртка `{"data": [...]}`. Не-массив (отказ-объект, скаляр) даёт
         пустой список — разбор отказа по коду статуса делает транспорт.
         """
-        response = await self.http.get(api_url)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.get(api_url))
         payload = await response.json()
         if isinstance(payload, dict):
             payload = payload.get("data")
@@ -674,9 +652,7 @@ class ElektronnyGorodAPI:
         )
 
         try:
-            response = await self.http.get(api_url)
-            if not isinstance(response, ClientResponse):
-                raise TypeError(f"Unexpected response type: {type(response)!r}")
+            response = _require_client_response(await self.http.get(api_url))
 
             camera_stream = await response.json()
             return camera_stream["data"]["URL"] if camera_stream else None
@@ -764,9 +740,7 @@ class ElektronnyGorodAPI:
             f"/rest/v1/places/{place_id}/accesscontrols/{access_control_id}/sipdevices"
         )
         body = json.dumps({"installationId": self.http.user_agent.uuid})
-        response = await self.http.post(api_url, body)
-        if not isinstance(response, ClientResponse):
-            raise TypeError(f"Unexpected response type: {type(response)!r}")
+        response = _require_client_response(await self.http.post(api_url, body))
         payload = await response.json()
         # `or {}` (не `if payload`): защищает и от `{"data": null}` — иначе
         # None просочится в SipManager и упадёт TypeError на creds["realm"].

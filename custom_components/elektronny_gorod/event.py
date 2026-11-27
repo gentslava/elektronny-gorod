@@ -26,7 +26,6 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util, slugify
 
 from .const import (
-    AREA_INTERCOM,
     AREA_INDOOR_CAM,
     AREA_PUBLIC_CAM,
     CONF_ACCOUNT_ID,
@@ -37,13 +36,19 @@ from .const import (
     SIGNAL_DOORBELL,
 )
 from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
-from .device import linked_to_place, place_device_id, place_identifier
+from .device import (
+    MANUFACTURER,
+    dedupe_access_controls,
+    intercom_device_info,
+    place_device_id,
+    place_display_name,
+    place_identifier,
+)
 from .history import (
     access_history_unique_id,
     account_history_unique_id,
     camera_history_unique_id,
     history_signal,
-    place_display_name,
     place_history_unique_id,
 )
 
@@ -129,16 +134,7 @@ async def async_setup_entry(
     # Дедуп по (place_id, access_control_id) — одна event-сущность на домофон
     # (FCM-payload несёт AccessControlId, не entrance). При multi-entrance AC
     # берём lock с min entrance_id → стабильный intercom-device между рестартами.
-    by_ac: dict[tuple[str, str], dict] = {}
-    for lk in locks:
-        key = (lk.get("place_id"), lk.get("access_control_id"))
-        if None in key:
-            continue
-        cur = by_ac.get(key)
-        if cur is None or str(lk.get("entrance_id") or "") < str(
-            cur.get("entrance_id") or ""
-        ):
-            by_ac[key] = lk
+    by_ac = dedupe_access_controls(locks)
 
     entities: list[EventEntity] = []
     entry_history_signal = history_signal(entry.entry_id)
@@ -235,7 +231,7 @@ class ElektronnyGorodPlaceHistoryEvent(
         self._attr_device_info = DeviceInfo(
             identifiers={place_identifier(place_id)},
             name=place_display_name(coordinator.data, place_id),
-            manufacturer="Электронный город",
+            manufacturer=MANUFACTURER,
             model="Place",
         )
 
@@ -306,17 +302,11 @@ class ElektronnyGorodAccessHistoryEvent(
         self._history_signal = history_dispatch_signal
         entrance_id = lock_info.get("entrance_id")
         self._attr_unique_id = access_history_unique_id(place_id, access_control_id)
-        device_uid = (
-            f"entrance_{place_id}_{access_control_id}_{entrance_id or 'main'}"
-        )
-        self._attr_device_info = linked_to_place(
-            DeviceInfo(
-                identifiers={(DOMAIN, device_uid)},
-                name=lock_info["name"],
-                manufacturer="Электронный город",
-                model="Intercom",
-                suggested_area=AREA_INTERCOM,
-            ),
+        self._attr_device_info = intercom_device_info(
+            place_id,
+            access_control_id,
+            entrance_id,
+            lock_info["name"],
             via_device_id,
         )
 
@@ -380,17 +370,11 @@ class ElektronnyGorodCameraHistoryEvent(
         access_control_id = camera_info.get("access_control_id")
         entrance_id = camera_info.get("entrance_id")
         if source == "intercom" and place_id and access_control_id:
-            device_uid = (
-                f"entrance_{place_id}_{access_control_id}_{entrance_id or 'main'}"
-            )
-            self._attr_device_info = linked_to_place(
-                DeviceInfo(
-                    identifiers={(DOMAIN, device_uid)},
-                    name=camera_info.get("name") or camera_id,
-                    manufacturer="Электронный город",
-                    model="Intercom",
-                    suggested_area=AREA_INTERCOM,
-                ),
+            self._attr_device_info = intercom_device_info(
+                place_id,
+                access_control_id,
+                entrance_id,
+                camera_info.get("name") or camera_id,
                 via_device_id,
             )
         else:
@@ -399,7 +383,7 @@ class ElektronnyGorodCameraHistoryEvent(
             self._attr_device_info = DeviceInfo(
                 identifiers={(DOMAIN, f"camera_{camera_id}")},
                 name=camera_info.get("name") or camera_id,
-                manufacturer="Электронный город",
+                manufacturer=MANUFACTURER,
                 model=model,
                 suggested_area=area,
             )
@@ -466,18 +450,11 @@ class ElektronnyGorodDoorbellEvent(
             f"{DOMAIN}_event_doorbell_{self._place_id}_{self._access_control_id}"
         )
         # Тот же device, что у lock/intercom-camera этого entrance.
-        device_uid = (
-            f"entrance_{self._place_id}_{self._access_control_id}_"
-            f"{self._entrance_id or 'main'}"
-        )
-        self._attr_device_info = linked_to_place(
-            DeviceInfo(
-                identifiers={(DOMAIN, device_uid)},
-                name=self._name,
-                manufacturer="Электронный город",
-                model="Intercom",
-                suggested_area=AREA_INTERCOM,
-            ),
+        self._attr_device_info = intercom_device_info(
+            self._place_id,
+            self._access_control_id,
+            self._entrance_id,
+            self._name,
             via_device_id,
         )
 

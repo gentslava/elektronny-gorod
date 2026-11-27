@@ -20,7 +20,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN, LOGGER
 from .device import place_identifier
-from .coordinator import ElektronnyGorodConfigEntry, ElektronnyGorodUpdateCoordinator
+from .coordinator import (
+    ElektronnyGorodConfigEntry,
+    ElektronnyGorodUpdateCoordinator,
+    balance_info_for_place,
+)
 
 # Сущности не опрашивают оператора поодиночке: данные приходят из
 # координатора одним циклом на всю запись, поэтому ограничивать параллельные
@@ -70,11 +74,7 @@ class ElektronnyGorodBlockedBinarySensor(
 
     @property
     def _balance_info(self) -> dict[str, Any] | None:
-        balances = (self.coordinator.data or {}).get("balances") or []
-        for entry in balances:
-            if entry.get("place_id") == self._place_id:
-                return entry
-        return None
+        return balance_info_for_place(self.coordinator.data, self._place_id)
 
     @property
     def available(self) -> bool:

@@ -57,6 +57,7 @@ Quality gates:
 | Coverage | Каждый модуль пакета выше 95% — это держит шаг CI «Enforce the per-module coverage floor» (порог `FLOOR` в `python-tests.yaml`): агрегатного было бы мало — модуль, упавший до нуля, прячется за общей цифрой. Текущие проценты — в отчёте coverage последнего CI-прогона (лог шага и artifact `coverage-*`) или канонической командой ниже |
 
 Два сценария таймаута EVENT HLS в `test_media_source.py` задают истечение бюджета явно. Они проверяют откат на эфир до завершения фонового останова и отсутствие второго запроса URL архива после ожидания общей блокировки.
+`test_archive_hls.py` проверяет закрытие буфера, когда трейлер MPEG-TS превышает лимит байтов при ротации или завершении последнего сегмента.
 
 Остающиеся gap-и: нет полностью автоматизированного live-теста против оператора и физического домофона; часть широкого REST API покрыта точечными контрактными тестами. Live/PCAP evidence хранится отдельно в `research/intercom-call-probe/`.
 
@@ -163,19 +164,21 @@ External RTSP options (`test_config_flow_keep_warm.py`): both flags default fals
 - General/camera failures degrade independently; private camera source excluded; disabled camera-history entities make no camera API request.
 - `HistoryManager` persists only ID lists, cancels interval on unload and skips overlapping ticks instead of queueing API cycles.
 - Access/camera EventEntity routing uses config-entry-scoped signals, stable IDs, allowlisted state attrs and ru/en translations for every declared event type.
+- Access history and call-state entity setup preserve operator IDs when selecting one entrance per access control. The WebSocket browse target keeps its normalized string lookup.
 - Browse WebSocket verifies EventEntity read permission, config-entry/source binding, page bounds and exact sanitized previous-page response.
 - The entity registered by HA setup can be browsed under its existing ID. The address and the visible events stay scoped to that entity.
 - Frontend model tests exact command shape, untrusted/cross-entity response rejection, overlap dedup, partial-refresh feed preservation, date groups, time formatting and RU/EN labels.
 
 ### 7. go2rtc and external RTSP manager
 
-Files: `test_go2rtc_validate.py`, `test_go2rtc_upsert.py`, `test_go2rtc_client.py`, `test_go2rtc_audio.py`, `test_stream_manager.py`, `test_stream_manager_reconcile.py`, `test_stream_manager_scheduler.py`, `test_stream_manager_lifecycle.py`, `test_sensor_rtsp_urls.py`.
+Files: `test_go2rtc_validate.py`, `test_go2rtc_upsert.py`, `test_go2rtc_client.py`, `test_go2rtc_audio.py`, `test_options_flow_clear_creds.py`, `test_stream_manager.py`, `test_stream_manager_reconcile.py`, `test_stream_manager_scheduler.py`, `test_stream_manager_lifecycle.py`, `test_sensor_rtsp_urls.py`.
 
 - `test_validate_go2rtc_happy_path` — GET 200 + PUT 200 + DELETE cleanup.
 - `test_validate_go2rtc_unreachable` — connection error.
 - `test_validate_go2rtc_streams_api_failed` — PUT 500.
 - `test_normalize_base_url_strips_slash`.
 - `test_derive_rtsp_host`.
+- Explicitly empty options override stored values for stream publication. Call-camera setup and SIP retain their fallback to stored endpoints and credentials while honoring an explicitly disabled option.
 - Operator-camera source writes remain PATCH-only: errors never fall back to streams PUT. Dedicated preload list/PUT/DELETE stores only stable names; parsed producer snapshots strip the raw source URL.
 - Initial operator mint + PATCH + preload is deduplicated across HA-open/ background/recovery reasons and uses HA-managed task lifecycle.
 - Active-preload refresh performs mint+PATCH without replacing its consumer; preload failure retries only after minting another one-time URL.

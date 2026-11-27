@@ -1,8 +1,9 @@
 """The Elektronny Gorod integration."""
 
 from __future__ import annotations
+from collections.abc import Awaitable
 import json
-from typing import Any, Final, cast
+from typing import Any, Final, TypeVar, cast
 
 import voluptuous as vol
 from aiohttp import ClientError
@@ -35,8 +36,6 @@ from .const import (
     CONF_USE_GO2RTC,
     CONF_GO2RTC_BASE_URL,
     CONF_GO2RTC_RTSP_HOST,
-    CONF_GO2RTC_USERNAME,
-    CONF_GO2RTC_PASSWORD,
     DEFAULT_GO2RTC_BASE_URL,
     DEFAULT_GO2RTC_RTSP_HOST,
     STREAM_MANAGER_DATA,
@@ -51,7 +50,12 @@ from .fcm import (
     async_create_fcm_repair_issue,
     async_delete_fcm_repair_issue,
 )
-from .go2rtc import Go2RtcClient, go2rtc_auth_headers
+from .go2rtc import (
+    Go2RtcClient,
+    go2rtc_auth_headers,
+    read_go2rtc_call_settings,
+    read_go2rtc_entry_settings,
+)
 from .device import async_register_place_devices, place_id_from_identifiers
 from .history import HistoryManager
 from .history_ws import async_register_history_ws_command
@@ -59,6 +63,8 @@ from .sip.call_controller import DoorbellCallController, Go2RtcConfig
 from .stream_manager import CameraStreamManager
 from .uplink_ws import async_register_uplink_card, async_register_uplink_ws_command
 from .user_agent import UserAgent
+
+_T = TypeVar("_T")
 
 # Per-entry FCM ownership is private to this lifecycle module.
 _FCM_DATA: Final = f"{DOMAIN}_fcm_listeners"
@@ -87,6 +93,18 @@ PLATFORMS: list[Platform] = [
 ]
 
 
+async def _async_stop_fcm_listener(
+    listener: DoorbellFcmListener,
+    context: str,
+) -> bool:
+    """Stop an FCM listener without leaking dependency exception strings."""
+    try:
+        return bool(await listener.async_stop())
+    except Exception as err:  # noqa: BLE001
+        LOGGER.warning("FCM: %s (%s)", context, type(err).__name__)
+        return False
+
+
 async def _async_register_fcm_listener(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -96,15 +114,7 @@ async def _async_register_fcm_listener(
     registry = hass.data.setdefault(_FCM_DATA, {})
     previous = registry.get(entry.entry_id)
     if previous is not None and previous is not listener:
-        try:
-            stopped = await previous.async_stop()
-        except Exception as err:  # noqa: BLE001
-            LOGGER.warning(
-                "FCM: прежний listener не завершён (%s)",
-                type(err).__name__,
-            )
-            stopped = False
-        if not stopped:
+        if not await _async_stop_fcm_listener(previous, "прежний listener не завершён"):
             async_create_fcm_repair_issue(hass, entry)
             return False
         if registry.get(entry.entry_id) is previous:
@@ -148,33 +158,14 @@ async def async_setup_entry(
     entry.runtime_data = coordinator
 
     stream_manager: CameraStreamManager | None = None
-    use_go2rtc = entry.options.get(
-        CONF_USE_GO2RTC,
-        entry.data.get(CONF_USE_GO2RTC, False),
-    )
-    go2rtc_base_url = entry.options.get(
-        CONF_GO2RTC_BASE_URL,
-        entry.data.get(CONF_GO2RTC_BASE_URL),
-    )
-    go2rtc_rtsp_host = entry.options.get(
-        CONF_GO2RTC_RTSP_HOST,
-        entry.data.get(CONF_GO2RTC_RTSP_HOST),
-    )
-    if use_go2rtc and go2rtc_base_url and go2rtc_rtsp_host:
-        go2rtc_username = entry.options.get(
-            CONF_GO2RTC_USERNAME,
-            entry.data.get(CONF_GO2RTC_USERNAME),
-        )
-        go2rtc_password = entry.options.get(
-            CONF_GO2RTC_PASSWORD,
-            entry.data.get(CONF_GO2RTC_PASSWORD),
-        )
+    go2rtc_cfg = read_go2rtc_entry_settings(entry)
+    if go2rtc_cfg.use_go2rtc and go2rtc_cfg.base_url and go2rtc_cfg.rtsp_host:
         client = Go2RtcClient(
-            base_url=go2rtc_base_url,
-            rtsp_host=go2rtc_rtsp_host,
+            base_url=go2rtc_cfg.base_url,
+            rtsp_host=go2rtc_cfg.rtsp_host,
             session=async_get_clientsession(hass),
-            username=go2rtc_username,
-            password=go2rtc_password,
+            username=go2rtc_cfg.username,
+            password=go2rtc_cfg.password,
         )
         stream_manager = CameraStreamManager(
             hass=hass,
@@ -290,19 +281,13 @@ async def async_setup_entry(
 
 def _build_go2rtc_config(entry: ConfigEntry) -> Go2RtcConfig | None:
     """go2rtc-конфиг для аудио-моста (downlink) из entry. None если go2rtc выключен."""
-    use = entry.options.get(CONF_USE_GO2RTC, entry.data.get(CONF_USE_GO2RTC))
-    base = entry.options.get(CONF_GO2RTC_BASE_URL) or entry.data.get(CONF_GO2RTC_BASE_URL)
-    if not use or not base:
+    cfg = read_go2rtc_call_settings(entry)
+    if not cfg.use_go2rtc or not cfg.base_url:
         return None
-    user = entry.options.get(CONF_GO2RTC_USERNAME) or entry.data.get(CONF_GO2RTC_USERNAME)
-    pwd = entry.options.get(CONF_GO2RTC_PASSWORD) or entry.data.get(CONF_GO2RTC_PASSWORD)
-    rtsp_host = (
-        entry.options.get(CONF_GO2RTC_RTSP_HOST)
-        or entry.data.get(CONF_GO2RTC_RTSP_HOST)
-        or DEFAULT_GO2RTC_RTSP_HOST
-    )
     return Go2RtcConfig(
-        base_url=base, headers=go2rtc_auth_headers(user, pwd), rtsp_host=rtsp_host
+        base_url=cfg.base_url,
+        headers=go2rtc_auth_headers(cfg.username, cfg.password),
+        rtsp_host=cfg.rtsp_host or DEFAULT_GO2RTC_RTSP_HOST,
     )
 
 
@@ -318,6 +303,366 @@ def _resolve_call_camera_id(coordinator: Any, access_control_id: str) -> str | N
     return None
 
 
+def _loaded_controllers(hass: HomeAssistant) -> list[DoorbellCallController]:
+    """Контроллеры загруженных записей — либо внятный отказ.
+
+    Действие существует всегда (правило Bronze `action-setup`), поэтому
+    «интеграция не загружена» надо отличать от «сейчас никто не звонит»:
+    иначе человек ищет пропущенный вызов вместо выгруженной записи.
+    """
+    controllers = list(hass.data.get(_SIP_DATA, {}).values())
+    if not controllers:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="integration_not_loaded"
+        )
+    return controllers
+
+
+async def _service_answer(hass: HomeAssistant, _call: ServiceCall) -> None:
+    for controller in _loaded_controllers(hass):
+        if controller.current_call() is not None:
+            await controller.async_answer()
+            return
+    # Успешно завершиться, ничего не сделав, — значит соврать вызывающему.
+    # Автоматизация не отличит ответ на звонок от промаха по времени, а
+    # человек в интерфейсе не поймёт, почему кнопка молчит. Тот же случай,
+    # что кнопка «Закрыть» у замка (правило Silver `action-exceptions`).
+    raise ServiceValidationError(
+        translation_domain=DOMAIN, translation_key="no_active_call"
+    )
+
+
+async def _service_hangup(hass: HomeAssistant, _call: ServiceCall) -> None:
+    # Спрашиваем контроллер, было ли что снимать, а не «идёт ли вызов»:
+    # `current_call()` гаснет по истечении окна ответа, а разговор живёт
+    # дальше. Отбой по этому признаку отказывался завершать живой
+    # разговор с открытым микрофоном — он держался до страховки.
+    torn_down = False
+    for controller in _loaded_controllers(hass):
+        if await controller.async_hangup():
+            torn_down = True
+    if not torn_down:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="no_active_call"
+        )
+
+
+def _place_entry(
+    hass: HomeAssistant, device_id: str
+) -> tuple[ElektronnyGorodConfigEntry, str]:
+    """Найти загруженную запись и адрес по выбранному устройству.
+
+    Маршрутизация структурная, а не поисковая: устройство адреса создано
+    в реестре под конкретной записью, поэтому у двух аккаунтов их нельзя
+    перепутать. Искать адрес перебором записей было бы можно, но тогда
+    совпадение id в чужом аккаунте увело бы запрос под чужой токен.
+    """
+    device = dr.async_get(hass).async_get(device_id)
+    place_id = place_id_from_identifiers(device.identifiers if device else None)
+    if device is None or place_id is None:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="invite_not_a_place"
+        )
+
+    for entry_id in device.config_entries:
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if (
+            entry is not None
+            and entry.domain == DOMAIN
+            and entry.state is ConfigEntryState.LOADED
+        ):
+            return cast("ElektronnyGorodConfigEntry", entry), place_id
+
+    # Устройство в реестре переживает выгрузку записи. Без этой ветки
+    # человек получил бы «нет такого адреса» и пошёл искать адрес,
+    # а не выключенную интеграцию.
+    raise ServiceValidationError(
+        translation_domain=DOMAIN, translation_key="integration_not_loaded"
+    )
+
+
+async def _require_admin(
+    hass: HomeAssistant, call: ServiceCall, translation_key: str
+) -> None:
+    """Пропустить только администратора HA с живым контекстом вызова.
+
+    Одной «авторизации» в HA мало: действие выдаёт доступ к дому или к
+    дверям у оператора, и раздавать его автоматизации нельзя. Ядерный
+    `async_register_admin_service` тут не подходит намеренно: он
+    пропускает вызов без пользователя, а автоматизация стирает `user_id`
+    (`automation/__init__.py`, `Context(parent_id=...)`) — и любой
+    домочадец, дёрнув `automation.trigger`, чеканил бы ключ от подъезда.
+    Цена решения: из автоматизации действие недоступно, из скрипта от
+    администратора — работает (скрипт контекст вызывающего хранит).
+    """
+    user = (
+        await hass.auth.async_get_user(call.context.user_id)
+        if call.context.user_id
+        else None
+    )
+    if user is None or not user.is_admin:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key=translation_key
+        )
+
+
+async def _require_admin_place_entry(
+    hass: HomeAssistant,
+    call: ServiceCall,
+    admin_translation_key: str,
+) -> tuple[ElektronnyGorodConfigEntry, str]:
+    """Verify an admin call context and resolve the target loaded entry + place_id."""
+    await _require_admin(hass, call, admin_translation_key)
+    return _place_entry(hass, str(call.data[ATTR_DEVICE_ID]))
+
+
+def _temp_access_error(err: Exception) -> Exception:
+    """Перевести отказ `mh-temp-pass` во внятную ошибку.
+
+    404 — услуга `TEMP_PASS` на адресе не подключена оператором (A-118):
+    это не поломка, а ожидаемое состояние, пока услуги нет. Остальное —
+    сетевой отказ или битое тело на 200; сырой текст наружу нельзя, он
+    несёт URL с id адреса.
+    """
+    if error_status(err) == 404:
+        return ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="temp_access_not_connected"
+        )
+    return HomeAssistantError(
+        translation_domain=DOMAIN, translation_key="temp_access_request_failed"
+    )
+
+
+async def _run_temp_access(coro: Awaitable[_T]) -> _T:
+    """Await a `mh-temp-pass` request and normalize transport/body errors."""
+    try:
+        return await coro
+    except (ClientError, TimeoutError, ValueError) as err:
+        raise _temp_access_error(err) from err
+
+
+def _resolve_temp_access_ids(
+    controls: list[dict[str, Any]],
+    requested: Any,
+) -> list[int]:
+    """Validate requested access control IDs or fall back to all eligible controls."""
+    available_ids = [c["id"] for c in controls if isinstance(c.get("id"), int)]
+    if requested:
+        ids = [int(x) for x in requested]
+        if any(i not in available_ids for i in ids):
+            raise ServiceValidationError(
+                translation_domain=DOMAIN,
+                translation_key="temp_access_bad_control",
+            )
+    else:
+        # Без явного списка — все объекты адреса, которым доступ можно
+        # выдать: самый частый сценарий «пусти гостя во все двери».
+        ids = available_ids
+    if not ids:
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="temp_access_no_controls"
+        )
+    return ids
+
+
+def _summarize_access_control(obj: dict[str, Any]) -> dict[str, Any]:
+    """Project an access-control payload to its public service response fields."""
+    return {"id": obj.get("id"), "name": obj.get("name")}
+
+
+async def _service_create_home_invite(
+    hass: HomeAssistant, call: ServiceCall
+) -> ServiceResponse:
+    """Выдать вызывающему ссылку-приглашение в дом.
+
+    Ответ — действующее приглашение: принять его может кто угодно, кто
+    увидел ссылку. Поэтому `SupportsResponse.ONLY` — оно уходит
+    вызывающему и не оседает ни в сущности, ни в состоянии, ни в наших
+    логах. Инвариантом это назвать нельзя: ядро пишет исходящий кадр
+    целиком при `websocket_api: debug`, а `response_variable` кладёт
+    ответ в трассировку скрипта. Расширяя состав ответа, помни про эти
+    два стока — они вне нашего контроля (S-26). Про срок: отдельного
+    поля с TTL в ответе нет, а про 30 минут говорит сам текст, который
+    оператор кладёт в `message`. Что приглашённый получает после принятия и
+    насколько — решает оператор, интеграция об этом не знает.
+
+    Это приглашение **в дом**, а не временный доступ к дверям:
+    принявший становится абонентом адреса у оператора
+    (`PUT /rest/v1/subscriberinvites`) — член семьи или гость с правами
+    пользователя. Временный доступ по ссылке к выбранным дверям —
+    отдельная функция приложения и отдельный контракт (A-118), действие
+    `create_temporary_access`.
+
+    Поэтому и поле — устройство адреса (`model: Place`), родитель
+    домофонов и камер: запрос несёт только `placeId`, списка объектов
+    в нём нет. Выбирать адрес устройством, а не числовым id,
+    приходится потому, что id адреса в интерфейсе взять негде. Поле
+    одиночное, не `target`: ответ здесь один, а `target` разрешает
+    несколько устройств и целую область.
+    """
+    entry, place_id = await _require_admin_place_entry(
+        hass, call, "invite_requires_admin"
+    )
+
+    operator_id = str(entry.data.get(CONF_OPERATOR_ID) or "")
+    app_id = HOME_INVITE_APP_BY_OPERATOR.get(operator_id)
+    if app_id is None:
+        # Код бренда для этого оператора живым запросом не подтверждён.
+        # Подставить его наугад значило бы сходить к оператору от имени
+        # человека с непроверенным запросом.
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="invite_operator_unsupported",
+        )
+
+    try:
+        invite = await entry.runtime_data.api.create_home_invite(place_id, app_id)
+    except (ClientError, TimeoutError, ValueError) as err:
+        # Сетевой отказ наружу нельзя отдавать сырым: HA показал бы
+        # «Unknown error», а текст aiohttp содержит URL с id адреса.
+        #
+        # `TimeoutError` здесь не для полноты: общий бюджет запроса
+        # (`_REST_TIMEOUT.total`) aiohttp выражает именно им, а не
+        # `ClientError`, — из подклассов `ClientError` растут только
+        # connect- и sock-таймауты. Эту пару ловит и `lock.py`, и ровно
+        # на ней уже спотыкались отпирание замка и вход.
+        # `ValueError` — это битое тело на 200: и `JSONDecodeError`, и
+        # `UnicodeDecodeError`, если тело не декодируется объявленной
+        # кодировкой. Оба — `ValueError` и оба не `ClientError`.
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="invite_request_failed"
+        ) from err
+
+    link = invite.get("link")
+    if not link:
+        # 200 без ссылки — отказ, замаскированный под успех: человек
+        # отправил бы гостю пустоту, а узнал бы об этом у двери.
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="invite_empty"
+        )
+    return {"link": link, "message": invite.get("message")}
+
+
+async def _service_create_temporary_access(
+    hass: HomeAssistant, call: ServiceCall
+) -> ServiceResponse:
+    """Выдать ссылку временного доступа к выбранным дверям (A-118).
+
+    В отличие от приглашения в дом (`create_home_invite`, членство
+    абонента), это разовый доступ к конкретным объектам со сроком:
+    принявший открывает выбранные двери, пока ссылка жива. Поэтому в
+    действии есть `ttl` и список объектов, а ответ — `SupportsResponse.ONLY`
+    с той же гигиеной, что у приглашения: ссылка уходит вызывающему и не
+    оседает в сущностях/логах (поле `sharedLinkMessage` под редакцией).
+
+    static-only (ADR-0006): форма запроса из кода «Мой Дом»; создание
+    вживую не подтверждено, пока оператор не подключит услугу на адрес —
+    до этого сервер отвечает 404, и действие даёт внятный отказ
+    «услуга не подключена», а не «неизвестную ошибку».
+    """
+    entry, place_id = await _require_admin_place_entry(
+        hass, call, "temp_access_requires_admin"
+    )
+    api = entry.runtime_data.api
+    ttl = int(call.data[ATTR_TTL])
+
+    allowed_ttls = await _run_temp_access(api.query_temp_access_ttls(place_id))
+    controls = await _run_temp_access(api.query_temp_access_controls(place_id))
+
+    if ttl not in allowed_ttls:
+        # Срок задаёт сервер (`time-to-life`), а не клиент: чужое значение
+        # оператор отверг бы, а человек не понял бы, какие сроки можно.
+        raise ServiceValidationError(
+            translation_domain=DOMAIN,
+            translation_key="temp_access_bad_ttl",
+            translation_placeholders={
+                "allowed": ", ".join(str(t) for t in allowed_ttls)
+            },
+        )
+
+    ids = _resolve_temp_access_ids(controls, call.data.get(ATTR_ACCESS_CONTROL_IDS))
+    created = await _run_temp_access(api.create_temp_pass(place_id, ttl, ids))
+
+    message = created.get("sharedLinkMessage")
+    if not message:
+        # 200 без ссылки — отказ под видом успеха: человек отправил бы
+        # гостю пустоту, а узнал бы об этом у двери.
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="temp_access_empty"
+        )
+    return {
+        "message": message,
+        "expires_at": created.get("expiredAt"),
+        "status": created.get("status"),
+    }
+
+
+async def _service_list_temporary_access(
+    hass: HomeAssistant, call: ServiceCall
+) -> ServiceResponse:
+    """Показать выданные ссылки адреса и объекты, доступные для выдачи (A-118).
+
+    🔴 Ссылку (`sharedLinkMessage`) наружу НЕ отдаём: список нужен, чтобы
+    отозвать доступ по `id`, а не чтобы переслать ссылку заново. Отдаём
+    только состав: id, статус, срок и объекты. Отдельно — объекты адреса
+    с их id: только отсюда человек узнаёт значения `access_control_ids`
+    для выдачи. Admin-only — список раскрывает, кому открыт дом.
+    """
+    entry, place_id = await _require_admin_place_entry(
+        hass, call, "temp_access_requires_admin"
+    )
+    api = entry.runtime_data.api
+    passes = await _run_temp_access(api.query_temp_passes(place_id))
+    controls = await _run_temp_access(api.query_temp_access_controls(place_id))
+    return {
+        "available_access_controls": [
+            _summarize_access_control(obj) for obj in controls
+        ],
+        "passes": [
+            {
+                "id": item.get("id"),
+                "status": item.get("status"),
+                "expires_at": item.get("expiredAt"),
+                "access_controls": [
+                    _summarize_access_control(obj)
+                    for obj in (item.get("availableAccessControl") or [])
+                    if isinstance(obj, dict)
+                ],
+            }
+            for item in passes
+        ],
+    }
+
+
+async def _service_revoke_temporary_access(
+    hass: HomeAssistant, call: ServiceCall
+) -> None:
+    """Отозвать выданную ссылку по `pass_id` (A-118).
+
+    Отзыв подтверждается повторным чтением списка, а не кодом ответа:
+    один HTTP 200 не доказывает, что доступ закрыт. Если пропуск остался
+    в списке — это ошибка, а не тихий успех. Admin-only.
+    """
+    entry, place_id = await _require_admin_place_entry(
+        hass, call, "temp_access_requires_admin"
+    )
+    pass_id = int(call.data[ATTR_PASS_ID])
+    api = entry.runtime_data.api
+    issued = await _run_temp_access(api.query_temp_passes(place_id))
+    if not any(item.get("id") == pass_id for item in issued):
+        # Неизвестный id сервер отвергает 500 «технической ошибкой» (живая
+        # проба), и человек пошёл бы проверять связь вместо своего ввода.
+        raise ServiceValidationError(
+            translation_domain=DOMAIN, translation_key="temp_access_unknown_pass"
+        )
+    await _run_temp_access(api.delete_temp_pass(place_id, pass_id))
+    remaining = await _run_temp_access(api.query_temp_passes(place_id))
+    if any(item.get("id") == pass_id for item in remaining):
+        raise HomeAssistantError(
+            translation_domain=DOMAIN, translation_key="temp_access_revoke_failed"
+        )
+
+
 def _async_register_services(hass: HomeAssistant) -> None:
     """Зарегистрировать действия интеграции (один раз на интеграцию).
 
@@ -328,324 +673,23 @@ def _async_register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_ANSWER):
         return
 
-    def _loaded_controllers() -> list:
-        """Контроллеры загруженных записей — либо внятный отказ.
+    async def _answer(call: ServiceCall) -> None:
+        await _service_answer(hass, call)
 
-        Действие существует всегда (правило Bronze `action-setup`), поэтому
-        «интеграция не загружена» надо отличать от «сейчас никто не звонит»:
-        иначе человек ищет пропущенный вызов вместо выгруженной записи.
-        """
-        controllers = list(hass.data.get(_SIP_DATA, {}).values())
-        if not controllers:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="integration_not_loaded"
-            )
-        return controllers
-
-    async def _answer(_call: ServiceCall) -> None:
-        for controller in _loaded_controllers():
-            if controller.current_call() is not None:
-                await controller.async_answer()
-                return
-        # Успешно завершиться, ничего не сделав, — значит соврать вызывающему.
-        # Автоматизация не отличит ответ на звонок от промаха по времени, а
-        # человек в интерфейсе не поймёт, почему кнопка молчит. Тот же случай,
-        # что кнопка «Закрыть» у замка (правило Silver `action-exceptions`).
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="no_active_call"
-        )
-
-    async def _hangup(_call: ServiceCall) -> None:
-        # Спрашиваем контроллер, было ли что снимать, а не «идёт ли вызов»:
-        # `current_call()` гаснет по истечении окна ответа, а разговор живёт
-        # дальше. Отбой по этому признаку отказывался завершать живой
-        # разговор с открытым микрофоном — он держался до страховки.
-        torn_down = False
-        for controller in _loaded_controllers():
-            if await controller.async_hangup():
-                torn_down = True
-        if not torn_down:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="no_active_call"
-            )
-
-    def _place_entry(device_id: str) -> tuple[ElektronnyGorodConfigEntry, str]:
-        """Найти загруженную запись и адрес по выбранному устройству.
-
-        Маршрутизация структурная, а не поисковая: устройство адреса создано
-        в реестре под конкретной записью, поэтому у двух аккаунтов их нельзя
-        перепутать. Искать адрес перебором записей было бы можно, но тогда
-        совпадение id в чужом аккаунте увело бы запрос под чужой токен.
-        """
-        device = dr.async_get(hass).async_get(device_id)
-        place_id = place_id_from_identifiers(device.identifiers if device else None)
-        if device is None or place_id is None:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="invite_not_a_place"
-            )
-
-        for entry_id in device.config_entries:
-            entry = hass.config_entries.async_get_entry(entry_id)
-            if (
-                entry is not None
-                and entry.domain == DOMAIN
-                and entry.state is ConfigEntryState.LOADED
-            ):
-                return cast("ElektronnyGorodConfigEntry", entry), place_id
-
-        # Устройство в реестре переживает выгрузку записи. Без этой ветки
-        # человек получил бы «нет такого адреса» и пошёл искать адрес,
-        # а не выключенную интеграцию.
-        raise ServiceValidationError(
-            translation_domain=DOMAIN, translation_key="integration_not_loaded"
-        )
-
-    async def _require_admin(call: ServiceCall, translation_key: str) -> None:
-        """Пропустить только администратора HA с живым контекстом вызова.
-
-        Одной «авторизации» в HA мало: действие выдаёт доступ к дому или к
-        дверям у оператора, и раздавать его автоматизации нельзя. Ядерный
-        `async_register_admin_service` тут не подходит намеренно: он
-        пропускает вызов без пользователя, а автоматизация стирает `user_id`
-        (`automation/__init__.py`, `Context(parent_id=...)`) — и любой
-        домочадец, дёрнув `automation.trigger`, чеканил бы ключ от подъезда.
-        Цена решения: из автоматизации действие недоступно, из скрипта от
-        администратора — работает (скрипт контекст вызывающего хранит).
-        """
-        user = (
-            await hass.auth.async_get_user(call.context.user_id)
-            if call.context.user_id
-            else None
-        )
-        if user is None or not user.is_admin:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key=translation_key
-            )
+    async def _hangup(call: ServiceCall) -> None:
+        await _service_hangup(hass, call)
 
     async def _create_home_invite(call: ServiceCall) -> ServiceResponse:
-        """Выдать вызывающему ссылку-приглашение в дом.
-
-        Ответ — действующее приглашение: принять его может кто угодно, кто
-        увидел ссылку. Поэтому `SupportsResponse.ONLY` — оно уходит
-        вызывающему и не оседает ни в сущности, ни в состоянии, ни в наших
-        логах. Инвариантом это назвать нельзя: ядро пишет исходящий кадр
-        целиком при `websocket_api: debug`, а `response_variable` кладёт
-        ответ в трассировку скрипта. Расширяя состав ответа, помни про эти
-        два стока — они вне нашего контроля (S-26). Про срок: отдельного
-        поля с TTL в ответе нет, а про 30 минут говорит сам текст, который
-        оператор кладёт в `message`. Что приглашённый получает после принятия и
-        насколько — решает оператор, интеграция об этом не знает.
-
-        Это приглашение **в дом**, а не временный доступ к дверям:
-        принявший становится абонентом адреса у оператора
-        (`PUT /rest/v1/subscriberinvites`) — член семьи или гость с правами
-        пользователя. Временный доступ по ссылке к выбранным дверям —
-        отдельная функция приложения и отдельный контракт (A-118), будущее
-        действие `create_temporary_access`.
-
-        Поэтому и поле — устройство адреса (`model: Place`), родитель
-        домофонов и камер: запрос несёт только `placeId`, списка объектов
-        в нём нет. Выбирать адрес устройством, а не числовым id,
-        приходится потому, что id адреса в интерфейсе взять негде. Поле
-        одиночное, не `target`: ответ здесь один, а `target` разрешает
-        несколько устройств и целую область.
-        """
-        await _require_admin(call, "invite_requires_admin")
-        entry, place_id = _place_entry(str(call.data[ATTR_DEVICE_ID]))
-
-        operator_id = str(entry.data.get(CONF_OPERATOR_ID) or "")
-        app_id = HOME_INVITE_APP_BY_OPERATOR.get(operator_id)
-        if app_id is None:
-            # Код бренда для этого оператора живым запросом не подтверждён.
-            # Подставить его наугад значило бы сходить к оператору от имени
-            # человека с непроверенным запросом.
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="invite_operator_unsupported",
-            )
-
-        try:
-            invite = await entry.runtime_data.api.create_home_invite(place_id, app_id)
-        except (ClientError, TimeoutError, ValueError) as err:
-            # Сетевой отказ наружу нельзя отдавать сырым: HA показал бы
-            # «Unknown error», а текст aiohttp содержит URL с id адреса.
-            #
-            # `TimeoutError` здесь не для полноты: общий бюджет запроса
-            # (`_REST_TIMEOUT.total`) aiohttp выражает именно им, а не
-            # `ClientError`, — из подклассов `ClientError` растут только
-            # connect- и sock-таймауты. Эту пару ловит и `lock.py`, и ровно
-            # на ней уже спотыкались отпирание замка и вход.
-            # `ValueError` — это битое тело на 200: и `JSONDecodeError`, и
-            # `UnicodeDecodeError`, если тело не декодируется объявленной
-            # кодировкой. Оба — `ValueError` и оба не `ClientError`.
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="invite_request_failed"
-            ) from err
-
-        link = invite.get("link")
-        if not link:
-            # 200 без ссылки — отказ, замаскированный под успех: человек
-            # отправил бы гостю пустоту, а узнал бы об этом у двери.
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="invite_empty"
-            )
-        return {"link": link, "message": invite.get("message")}
-
-    def _temp_access_error(err: Exception) -> Exception:
-        """Перевести отказ `mh-temp-pass` во внятную ошибку.
-
-        404 — услуга `TEMP_PASS` на адресе не подключена оператором (A-118):
-        это не поломка, а ожидаемое состояние, пока услуги нет. Остальное —
-        сетевой отказ или битое тело на 200; сырой текст наружу нельзя, он
-        несёт URL с id адреса.
-        """
-        if error_status(err) == 404:
-            return ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="temp_access_not_connected"
-            )
-        return HomeAssistantError(
-            translation_domain=DOMAIN, translation_key="temp_access_request_failed"
-        )
+        return await _service_create_home_invite(hass, call)
 
     async def _create_temporary_access(call: ServiceCall) -> ServiceResponse:
-        """Выдать ссылку временного доступа к выбранным дверям (A-118).
-
-        В отличие от приглашения в дом (`create_home_invite`, членство
-        абонента), это разовый доступ к конкретным объектам со сроком:
-        принявший открывает выбранные двери, пока ссылка жива. Поэтому в
-        действии есть `ttl` и список объектов, а ответ — `SupportsResponse.ONLY`
-        с той же гигиеной, что у приглашения: ссылка уходит вызывающему и не
-        оседает в сущностях/логах (поле `sharedLinkMessage` под редакцией).
-
-        static-only (ADR-0006): форма запроса из кода «Мой Дом»; создание
-        вживую не подтверждено, пока оператор не подключит услугу на адрес —
-        до этого сервер отвечает 404, и действие даёт внятный отказ
-        «услуга не подключена», а не «неизвестную ошибку».
-        """
-        await _require_admin(call, "temp_access_requires_admin")
-        entry, place_id = _place_entry(str(call.data[ATTR_DEVICE_ID]))
-        api = entry.runtime_data.api
-        ttl = int(call.data[ATTR_TTL])
-
-        try:
-            allowed_ttls = await api.query_temp_access_ttls(place_id)
-            controls = await api.query_temp_access_controls(place_id)
-        except (ClientError, TimeoutError, ValueError) as err:
-            raise _temp_access_error(err) from err
-
-        if ttl not in allowed_ttls:
-            # Срок задаёт сервер (`time-to-life`), а не клиент: чужое значение
-            # оператор отверг бы, а человек не понял бы, какие сроки можно.
-            raise ServiceValidationError(
-                translation_domain=DOMAIN,
-                translation_key="temp_access_bad_ttl",
-                translation_placeholders={
-                    "allowed": ", ".join(str(t) for t in allowed_ttls)
-                },
-            )
-
-        available_ids = [c["id"] for c in controls if isinstance(c.get("id"), int)]
-        requested = call.data.get(ATTR_ACCESS_CONTROL_IDS)
-        if requested:
-            ids = [int(x) for x in requested]
-            if any(i not in available_ids for i in ids):
-                raise ServiceValidationError(
-                    translation_domain=DOMAIN,
-                    translation_key="temp_access_bad_control",
-                )
-        else:
-            # Без явного списка — все объекты адреса, которым доступ можно
-            # выдать: самый частый сценарий «пусти гостя во все двери».
-            ids = available_ids
-        if not ids:
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="temp_access_no_controls"
-            )
-
-        try:
-            created = await api.create_temp_pass(place_id, ttl, ids)
-        except (ClientError, TimeoutError, ValueError) as err:
-            raise _temp_access_error(err) from err
-
-        message = created.get("sharedLinkMessage")
-        if not message:
-            # 200 без ссылки — отказ под видом успеха: человек отправил бы
-            # гостю пустоту, а узнал бы об этом у двери.
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="temp_access_empty"
-            )
-        return {
-            "message": message,
-            "expires_at": created.get("expiredAt"),
-            "status": created.get("status"),
-        }
+        return await _service_create_temporary_access(hass, call)
 
     async def _list_temporary_access(call: ServiceCall) -> ServiceResponse:
-        """Показать выданные ссылки адреса и объекты, доступные для выдачи (A-118).
-
-        🔴 Ссылку (`sharedLinkMessage`) наружу НЕ отдаём: список нужен, чтобы
-        отозвать доступ по `id`, а не чтобы переслать ссылку заново. Отдаём
-        только состав: id, статус, срок и объекты. Отдельно — объекты адреса
-        с их id: только отсюда человек узнаёт значения `access_control_ids`
-        для выдачи. Admin-only — список раскрывает, кому открыт дом.
-        """
-        await _require_admin(call, "temp_access_requires_admin")
-        entry, place_id = _place_entry(str(call.data[ATTR_DEVICE_ID]))
-        api = entry.runtime_data.api
-        try:
-            passes = await api.query_temp_passes(place_id)
-            controls = await api.query_temp_access_controls(place_id)
-        except (ClientError, TimeoutError, ValueError) as err:
-            raise _temp_access_error(err) from err
-        return {
-            "available_access_controls": [
-                {"id": obj.get("id"), "name": obj.get("name")} for obj in controls
-            ],
-            "passes": [
-                {
-                    "id": item.get("id"),
-                    "status": item.get("status"),
-                    "expires_at": item.get("expiredAt"),
-                    "access_controls": [
-                        {"id": obj.get("id"), "name": obj.get("name")}
-                        for obj in (item.get("availableAccessControl") or [])
-                        if isinstance(obj, dict)
-                    ],
-                }
-                for item in passes
-            ]
-        }
+        return await _service_list_temporary_access(hass, call)
 
     async def _revoke_temporary_access(call: ServiceCall) -> None:
-        """Отозвать выданную ссылку по `pass_id` (A-118).
-
-        Отзыв подтверждается повторным чтением списка, а не кодом ответа:
-        один HTTP 200 не доказывает, что доступ закрыт. Если пропуск остался
-        в списке — это ошибка, а не тихий успех. Admin-only.
-        """
-        await _require_admin(call, "temp_access_requires_admin")
-        entry, place_id = _place_entry(str(call.data[ATTR_DEVICE_ID]))
-        pass_id = int(call.data[ATTR_PASS_ID])
-        api = entry.runtime_data.api
-        try:
-            issued = await api.query_temp_passes(place_id)
-        except (ClientError, TimeoutError, ValueError) as err:
-            raise _temp_access_error(err) from err
-        if not any(item.get("id") == pass_id for item in issued):
-            # Неизвестный id сервер отвергает 500 «технической ошибкой» (живая
-            # проба), и человек пошёл бы проверять связь вместо своего ввода.
-            raise ServiceValidationError(
-                translation_domain=DOMAIN, translation_key="temp_access_unknown_pass"
-            )
-        try:
-            await api.delete_temp_pass(place_id, pass_id)
-            remaining = await api.query_temp_passes(place_id)
-        except (ClientError, TimeoutError, ValueError) as err:
-            raise _temp_access_error(err) from err
-        if any(item.get("id") == pass_id for item in remaining):
-            raise HomeAssistantError(
-                translation_domain=DOMAIN, translation_key="temp_access_revoke_failed"
-            )
+        await _service_revoke_temporary_access(hass, call)
 
     hass.services.async_register(DOMAIN, SERVICE_ANSWER, _answer)
     hass.services.async_register(DOMAIN, SERVICE_HANGUP, _hangup)
@@ -777,6 +821,121 @@ def _migrate_legacy_disabled_state(
     return changed
 
 
+def _collect_visibility_targets(
+    data: dict[str, Any],
+) -> tuple[set[str], dict[str, str], set[str]]:
+    """Extract hidden entity unique_ids, uid->place mapping, and failed screens places."""
+    hidden_uids: set[str] = set()
+    uid_to_place: dict[str, str] = {}
+    failed_places: set[str] = {
+        str(place_id) for place_id in (data.get("screens_failed_places") or [])
+    }
+
+    for cam in data.get("cameras") or []:
+        cid = cam.get("id")
+        if not cid:
+            continue
+        uid = f"{DOMAIN}_camera_{cid}"
+        if cam.get("place_id") is not None:
+            uid_to_place[uid] = str(cam["place_id"])
+        if cam.get("hidden"):
+            hidden_uids.add(uid)
+
+    for lk in data.get("locks") or []:
+        uid = lock_unique_id(
+            lk.get("place_id"),
+            lk.get("access_control_id"),
+            lk.get("entrance_id"),
+        )
+        if lk.get("place_id") is not None:
+            uid_to_place[uid] = str(lk["place_id"])
+        if lk.get("hidden"):
+            hidden_uids.add(uid)
+
+    return hidden_uids, uid_to_place, failed_places
+
+
+def _next_visibility_opts(
+    entity: er.RegistryEntry,
+    api_hidden: bool,
+) -> tuple[dict[str, Any], dict[str, Any], bool]:
+    """Compute updated override-tracking options without writing registry entries."""
+    opts = dict(entity.options.get(DOMAIN) or {})
+    we_set_integration = bool(opts.get("we_set_integration"))
+    user_shown = bool(opts.get("user_shown"))
+    new_opts = dict(opts)
+
+    # Detect user-shown override: мы ранее set INTEGRATION, но registry уже None.
+    # Юзер кликнул «Показывать на панели» — сохраняем флаг.
+    if we_set_integration and entity.hidden_by is None and not user_shown:
+        new_opts["user_shown"] = True
+        user_shown = True
+        LOGGER.info(
+            "User override saved: %s (unique_id=%s) — пользователь включил "
+            "«Показывать на панели», не восстанавливаем INTEGRATION",
+            entity.entity_id,
+            entity.unique_id,
+        )
+
+    # Auto-clear user override если приложение тоже разрешило показ.
+    if not api_hidden and user_shown:
+        new_opts.pop("user_shown", None)
+        user_shown = False
+
+    return opts, new_opts, user_shown
+
+
+def _reconcile_entity_visibility(
+    ent_reg: er.EntityRegistry,
+    entity: er.RegistryEntry,
+    api_hidden: bool,
+) -> tuple[bool, int, int]:
+    """Apply visibility transition and option markers for one camera/lock entity."""
+    opts, new_opts, user_shown = _next_visibility_opts(entity, api_hidden)
+    current = entity.hidden_by
+    uid = entity.unique_id
+    registry_changed = False
+    hid = 0
+    shown = 0
+
+    if api_hidden and not user_shown:
+        # Должна быть скрыта по API и юзер не override.
+        if current is None:
+            LOGGER.debug(
+                "Hiding entity %s (unique_id=%s) — hidden in user app",
+                entity.entity_id,
+                uid,
+            )
+            ent_reg.async_update_entity(
+                entity.entity_id, hidden_by=er.RegistryEntryHider.INTEGRATION
+            )
+            hid = 1
+            registry_changed = True
+            new_opts["we_set_integration"] = True
+        elif current == er.RegistryEntryHider.INTEGRATION:
+            # Уже скрыто нами — поддерживаем флаг (важно для restart).
+            new_opts["we_set_integration"] = True
+    elif not api_hidden:
+        if current == er.RegistryEntryHider.INTEGRATION:
+            # API разрешил показ — снимаем INTEGRATION.
+            LOGGER.debug(
+                "Showing entity %s (unique_id=%s) — visible in user app",
+                entity.entity_id,
+                uid,
+            )
+            ent_reg.async_update_entity(entity.entity_id, hidden_by=None)
+            shown = 1
+            registry_changed = True
+        # API visible (или сняли INTEGRATION) — наш marker неактуален.
+        new_opts.pop("we_set_integration", None)
+
+    # Persist options только если изменились (не триггерит config_entry listener).
+    if new_opts != opts:
+        ent_reg.async_update_entity_options(entity.entity_id, DOMAIN, new_opts)
+
+    return registry_changed, hid, shown
+
+
 def _sync_visibility(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -812,33 +971,7 @@ def _sync_visibility(
     Returns True если что-то реально изменилось в hidden_by. Caller использует
     для logging — reload НЕ требуется (registry update live).
     """
-    hidden_uids: set[str] = set()
-    uid_to_place: dict[str, str] = {}
-    failed_places: set[str] = {
-        str(place_id) for place_id in (data.get("screens_failed_places") or [])
-    }
-
-    for cam in data.get("cameras") or []:
-        cid = cam.get("id")
-        if not cid:
-            continue
-        uid = f"{DOMAIN}_camera_{cid}"
-        if cam.get("place_id") is not None:
-            uid_to_place[uid] = str(cam["place_id"])
-        if cam.get("hidden"):
-            hidden_uids.add(uid)
-
-    for lk in data.get("locks") or []:
-        uid = lock_unique_id(
-            lk.get("place_id"),
-            lk.get("access_control_id"),
-            lk.get("entrance_id"),
-        )
-        if lk.get("place_id") is not None:
-            uid_to_place[uid] = str(lk["place_id"])
-        if lk.get("hidden"):
-            hidden_uids.add(uid)
-
+    hidden_uids, uid_to_place, failed_places = _collect_visibility_targets(data)
     ent_reg = er.async_get(hass)
     registry_changed = False
     hid = 0
@@ -854,62 +987,12 @@ def _sync_visibility(
             # Без валидного /settings/screens по этому месту (или если место
             # не сопоставлено при сбое экрана) не трогаем hidden_by и override-маркеры (A-116).
             continue
-        api_hidden = uid in hidden_uids
-        current = entity.hidden_by
-        opts = dict(entity.options.get(DOMAIN) or {})
-        we_set_integration = bool(opts.get("we_set_integration"))
-        user_shown = bool(opts.get("user_shown"))
-        new_opts = dict(opts)
-
-        # Detect user-shown override: мы ранее set INTEGRATION, но registry уже None.
-        # Юзер кликнул «Показывать на панели» — сохраняем флаг.
-        if we_set_integration and current is None and not user_shown:
-            new_opts["user_shown"] = True
-            user_shown = True
-            LOGGER.info(
-                "User override saved: %s (unique_id=%s) — пользователь включил "
-                "«Показывать на панели», не восстанавливаем INTEGRATION",
-                entity.entity_id, uid,
-            )
-
-        # Auto-clear user override если приложение тоже разрешило показ.
-        if not api_hidden and user_shown:
-            new_opts.pop("user_shown", None)
-            user_shown = False
-
-        if api_hidden and not user_shown:
-            # Должна быть скрыта по API и юзер не override.
-            if current is None:
-                LOGGER.debug(
-                    "Hiding entity %s (unique_id=%s) — hidden in user app",
-                    entity.entity_id, uid,
-                )
-                ent_reg.async_update_entity(
-                    entity.entity_id, hidden_by=er.RegistryEntryHider.INTEGRATION
-                )
-                hid += 1
-                registry_changed = True
-                new_opts["we_set_integration"] = True
-            elif current == er.RegistryEntryHider.INTEGRATION:
-                # Уже скрыто нами — поддерживаем флаг (важно для restart).
-                new_opts["we_set_integration"] = True
-        elif not api_hidden and current == er.RegistryEntryHider.INTEGRATION:
-            # API разрешил показ — снимаем INTEGRATION.
-            LOGGER.debug(
-                "Showing entity %s (unique_id=%s) — visible in user app",
-                entity.entity_id, uid,
-            )
-            ent_reg.async_update_entity(entity.entity_id, hidden_by=None)
-            shown += 1
-            registry_changed = True
-            new_opts.pop("we_set_integration", None)
-        elif not api_hidden:
-            # API visible и hidden_by не INTEGRATION — наш marker неактуален.
-            new_opts.pop("we_set_integration", None)
-
-        # Persist options только если изменились (не триггерит config_entry listener).
-        if new_opts != opts:
-            ent_reg.async_update_entity_options(entity.entity_id, DOMAIN, new_opts)
+        changed, hid_delta, shown_delta = _reconcile_entity_visibility(
+            ent_reg, entity, uid in hidden_uids
+        )
+        registry_changed = registry_changed or changed
+        hid += hid_delta
+        shown += shown_delta
 
     if hid or shown:
         LOGGER.info(
@@ -1001,20 +1084,10 @@ async def async_unload_entry(
 
     await async_stop_archive_streams(hass, entry.entry_id)
     fcm_listener = hass.data.get(_FCM_DATA, {}).get(entry.entry_id)
-    if fcm_listener is not None:
-        # Как и в двух других точках остановки: текст исключения зависимости
-        # наружу не выпускаем — HA положил бы `str(exc)` в `reason` записи и
-        # показал его пользователю (ADR-0004).
-        try:
-            stopped = await fcm_listener.async_stop()
-        except Exception as err:  # noqa: BLE001
-            LOGGER.warning(
-                "FCM: listener не завершён при выгрузке (%s)",
-                type(err).__name__,
-            )
-            stopped = False
-        if not stopped:
-            return False
+    if fcm_listener is not None and not await _async_stop_fcm_listener(
+        fcm_listener, "listener не завершён при выгрузке"
+    ):
+        return False
 
     stream_manager = hass.data.get(STREAM_MANAGER_DATA, {}).get(entry.entry_id)
     if stream_manager is not None:
@@ -1050,20 +1123,17 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """
     registry = hass.data.get(_FCM_DATA, {})
     listener = registry.get(entry.entry_id)
-    if listener is not None:
-        try:
-            stopped = await listener.async_stop()
-        except Exception as err:  # noqa: BLE001
-            LOGGER.warning(
-                "FCM: не удалось завершить listener при удалении entry (%s)",
-                type(err).__name__,
-            )
-        else:
-            # A failed ordinary unload makes HA report that restart is required.
-            # Keep ownership on another failed stop instead of orphaning a
-            # dependency receiver whose shutdown was not confirmed.
-            if stopped and registry.get(entry.entry_id) is listener:
-                registry.pop(entry.entry_id)
+    if (
+        listener is not None
+        and await _async_stop_fcm_listener(
+            listener, "не удалось завершить listener при удалении entry"
+        )
+        and registry.get(entry.entry_id) is listener
+    ):
+        # A failed ordinary unload makes HA report that restart is required.
+        # Keep ownership on another failed stop instead of orphaning a
+        # dependency receiver whose shutdown was not confirmed.
+        registry.pop(entry.entry_id)
 
     async_delete_fcm_repair_issue(hass, entry.entry_id)
     try:
