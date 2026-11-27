@@ -1,6 +1,6 @@
 # ADR-0004: Token redaction в логах
 
-- **Status:** proposed
+- **Status:** accepted
 - **Date:** 2026-05-22
 - **Owner:** Security & Privacy Agent
 
@@ -15,7 +15,7 @@
 - `entry.data` целиком ([`config_flow.py:283,291`](../../custom_components/elektronny_gorod/config_flow.py#L283)).
 - `go2rtc_password` хранится в `entry.data` plaintext (S-16).
 
-Это **P0**: любой пользователь с `logger: default: debug` сегодня сливает токены в `home-assistant.log`.
+На момент аудита это был **P0**: секреты попадали в `home-assistant.log` при `logger: default: debug`.
 
 ## Decision
 
@@ -105,12 +105,12 @@ fi
 
 ### Mitigation
 
-- Для локальной отладки разработчика — env var `EG_DEBUG_AUTH=1`, который явно отключает redaction. Никогда не коммитить с этим.
+- Для отладки используем коды ответа и синтетические данные. Редакция секретов применяется и на DEBUG.
 
 ## Alternatives considered
 
 1. **Просто удалить лог-строки.** Отклонено — теряем диагностику; redaction оставляет полезную информацию (status, длина).
-2. **Использовать HA `Store` с pin-кодом для токенов.** Отклонено как избыточное — HA core уже шифрует `.storage/*` per-install.
+2. **Использовать HA `Store` с pin-кодом для токенов.** Отклонено для этой интеграции. Данные могут храниться открытым текстом в хранилище HA и резервных копиях. Ограничение описано в S-16.
 3. **Не делать pre-commit hook.** Отклонено — это P0, регрессии слишком вероятны.
 
 ## Supersedes / Superseded by

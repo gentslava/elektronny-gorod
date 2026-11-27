@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-08-14 (4.0.1 published; release asset, manifest and Pages deployment verified)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-11-27 (backlog reconciled with master d4e0512)
 
 Source files:
 - `audit/project-audit.md` (источник find-ов)
@@ -23,6 +23,8 @@ Quality gates:
 
 Каждая задача в roadmap **ссылается на находку из аудита**. Без evidence — не roadmap, а вишлист.
 
+Текущий порядок исправлений и полевых проверок ведётся в [актуальной очереди](summary.md#актуальная-очередь). Ниже сохранены этапы проекта и их результаты.
+
 ## Итерация 1 — Hotfix P0 + AIDD MVP ✅ COMPLETED
 
 **Цель:** убрать утечки токенов из логов, исправить тихий баг, заложить AIDD-документацию.
@@ -39,7 +41,7 @@ Quality gates:
 - [x] **A-06** Исправить `c.get("ID")` → `c.get("id")` в [`coordinator.py:182`](../custom_components/elektronny_gorod/coordinator.py#L182).
 - [x] **A-07** Удалить `tests/test_config_flow.py` (или пометить `@pytest.mark.skip("rewrite per docs/testing/strategy.md")`).
 - [x] **A-43** Поднять `import base64` в top of file в [`camera.py`](../custom_components/elektronny_gorod/camera.py); рассмотреть `aiohttp.BasicAuth`.
-- [ ] **A-45** Добавить `go2rtc_username`/`go2rtc_password` в `TO_REDACT` (создаётся вместе с `diagnostics.py` в Итерации 2; в Итерации 1 — минимум зафиксировать в S-16 + не логировать).
+- [x] **A-45 / S-16** Отдельные поля `go2rtc_username` и `go2rtc_password` маскируются в diagnostics. URL — отдельная находка A-126. Хранение в HA остаётся платформенным ограничением.
 - [x] **AIDD-1** Full AIDD заложен (сделано в текущем цикле работы).
 - [x] **ADR-0001** записать «принятие AIDD».
 - [x] **Release** hotfix (patch-релиз) с changelog `security: redact tokens in logs`.
@@ -98,7 +100,7 @@ Quality gates:
 - [ ] **A-36** Создать `CONTRIBUTING.md` со ссылкой на `aidd/contributing.md`.
 - [x] **A-27..A-29** ✅ README links/install path и badge минимальной HA синхронизированы.
 - [x] **ADR-0002** ✅ CoordinatorEntity + update_interval — `accepted`.
-- [ ] **ADR-0004** «token redaction strategy» — proposed, требуется promote → accepted.
+- [x] **ADR-0004** Стратегия редакции применяется в логах и diagnostics.
 
 **Quality gates achieved:** `SECURITY_OK`, `REVIEW_OK`, `DOCS_UPDATED`. Integration Quality Scale: **Bronze**. `TESTS_PASS` — локально зелёный, CI follow-up в Итерации 3.
 
@@ -151,7 +153,7 @@ Quality gates:
 - [x] **A-64** ✅ Reload cascade + user override (PR #43). Migration flag в `entry.data`, sync через `entity.options[DOMAIN]` track per-entity user_shown override.
 - [x] **A-66** ✅ Historical HA Stream stale-source recovery (PR #46), позже расширено A-71. В stream-manager ветке camera больше не владеет write boundary; recovery делегирует PATCH-only manager'у.
 - [x] **A-65** ✅ Log throttling от broken cameras (PR #49). Per-entity `_consecutive_empty_count` counter в `ElektronnyGorodCamera`. 1й fail → WARNING, 2й+ подряд → DEBUG. Counter сбрасывается на первый success.
-- [ ] **A-119** Позднее появление camera ID после setup: candidate `fix/97-late-camera-discovery`, независимый review и beta-проверка автора #97. До подтверждения issue остаётся открытым.
+- [x] **A-125** Новые камеры появляются без перезагрузки записи (PR #99). Автор #97 подтвердил сущности и потоки на бете.
 
 #### Production-log polish (2026-05-27 — новые findings)
 
@@ -168,13 +170,13 @@ Quality gates:
 - [x] **Independent review lifecycle triage** — stop ждёт running reconcile и снимает pending preload после cancellation ambiguity; entity proactive timer не превращает preload consumers в синхронный 28:30 burst. Теоретические per-camera locks/attach lease/main-off polling/removed-snapshot cleanup не приняты без production evidence и дополнительной фоновой сети.
 - [x] **Startup-grid production follow-up** — live на `3a3ad02`: explicit hidden HA-open во время setup выполняет mint/PATCH вместо возврата незарегистрированного RTSP name; background gate сохранён. Proxied EOF recovery больше не вызывает `Stream.update_source()` с тем же URL и не оставляет worker через fast-restart/idle-stop race.
 - [x] **A-82** ✅ resolved в PR #71 (`bf5ba9b`): `camera.py` больше не владеет go2rtc HTTP transport/writes.
-- [ ] **A-84** 🟡 PATCH-only mitigation готова; после live cycles проверить, что repeated PATCH не раздувает persistent go2rtc YAML.
+- **A-84, полевая проверка.** Код PATCH-only в `master`. Сверить размер сохранённого конфига после повторных обновлений и рестарта go2rtc.
 - [x] **A-96 repeat production acceptance (4.0.0 release gate)** — затронутые streams получают active preload и переживают idle без HA-open; active consumer переживает refresh; restart restore ≤60s; disabled/hidden cleanup; concurrent reasons dedup; option-off удаляет idle registrations, unload снимает background consumers; main/hidden toggle не reload-ит integration, не обнуляет existing eligible producers и никогда даже кратковременно не добавляет excluded hidden names фоновым path; explicit hidden HA-open во время и после setup работает без persistent preload и cleanup-ится после viewer; закрытие HA UI не оставляет orphan consumer после EOF recovery.
 - [x] Live evidence записан в существующем feature design: владелец подтвердил восстановление после manual go2rtc restart, а обезличенный snapshot показал `3/3` active producer и preload consumer с растущим `bytes_recv`. Публикация 4.0.0 разблокирована. PR #71 merged, PR #61 закрыт как superseded.
 
 #### Code quality
 
-- [x] **A-30** `extra_state_attributes` — snake_case ключи с переводами; PR #95.
+- [x] **A-30** `extra_state_attributes` — snake_case ключи с переводами; PR #92.
 - [x] **A-31** UTC в `time.py` — метка входа была локальным временем с приписанным `Z` (у новосибирского абонента +7 часов к настоящему UTC). Приложение шлёт UTC, проверено по трём HAR-снимкам с устройств в разных зонах.
 - [x] **A-32** Заменить f-string в `LOGGER.*` на `%`-форматирование во всех местах.
 - [ ] **A-33** Magic strings → const.
@@ -197,7 +199,6 @@ Quality gates:
 
 - [ ] **A-48** Snapshot домофона: `GET /rest/v1/places/{p}/accesscontrols/{ac}/snapshots` — добавить отдельный snapshot для домофонов (не только для камер).
 - [ ] **A-51** Bootstrap config: `POST .../device-installations` — динамические URLs вместо hardcoded `BASE_API_URL`.
-- [ ] **A-52** Header `traceparent` — генерировать per-request для соответствия паттерну приложения.
 
 **Quality gates passed:** `READY_FOR_RELEASE` + Silver IQS.
 
