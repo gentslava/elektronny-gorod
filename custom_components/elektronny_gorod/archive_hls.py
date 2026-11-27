@@ -17,9 +17,10 @@ from __future__ import annotations
 
 import asyncio
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 import concurrent.futures
 import contextlib
+from dataclasses import dataclass
 import importlib
 import io
 import secrets
@@ -293,6 +294,214 @@ class _LimitedBytesWriter:
         return True
 
 
+def _select_flv_streams(inp: Any) -> tuple[Any, Any | None, tuple[Any, ...]]:
+    """Validate H.264 video and select demux streams from an open FLV container."""
+    video_streams = inp.streams.video
+    if not video_streams:
+        raise ValueError("Archive stream has no video")
+    vs = video_streams[0]
+    video_codec = _stream_codec_name(vs)
+    if video_codec != "h264":
+        raise ValueError(f"Unsupported archive video codec: {video_codec}")
+    audio_streams = inp.streams.audio
+    as_ = audio_streams[0] if audio_streams else None
+    if as_ is not None and not _is_supported_audio(as_):
+        as_ = None
+    streams_to_demux = (vs, as_) if as_ is not None else (vs,)
+    return vs, as_, streams_to_demux
+
+
+def _rebase_packet(pkt: Any, offset_sec: float, prev_dts: dict[int, int]) -> bool:
+    """Rebase packet timestamps from `offset_sec` and drop non-monotonic DTS."""
+    shift = int(round(offset_sec / float(pkt.time_base)))
+    dts = pkt.dts - shift
+    if dts < 0:
+        return False
+    stream_idx = pkt.stream.index
+    prev = prev_dts.get(stream_idx)
+    if prev is not None and dts <= prev:
+        return False
+    prev_dts[stream_idx] = dts
+    pkt.dts = dts
+    if pkt.pts is not None:
+        pkt.pts = max(dts, pkt.pts - shift)
+    return True
+
+
+@dataclass
+class _TsSegment:
+    """Open single-segment MPEG-TS muxer bound to a remaining byte budget."""
+
+    bio: io.BytesIO
+    out: Any
+    vs: Any
+    as_: Any | None
+
+    @classmethod
+    def open(cls, av: Any, vs: Any, as_: Any | None, remaining: int) -> _TsSegment:
+        """Open a fresh MPEG-TS muxer enforcing `remaining` bytes."""
+        if remaining <= 0:
+            raise _SegmentBudgetExceeded("Archive session byte budget exhausted")
+        bio = io.BytesIO()
+        writer = _LimitedBytesWriter(bio, remaining)
+        out = av.open(
+            writer,
+            mode="w",
+            format="mpegts",
+            container_options={"mpegts_copyts": "1"},
+        )
+        ovs = out.add_stream_from_template(vs)
+        oas = out.add_stream_from_template(as_) if as_ is not None else None
+        return cls(bio=bio, out=out, vs=ovs, as_=oas)
+
+    def close_and_take_bytes(self) -> bytes:
+        """Finalize muxer headers/trailers, extract bytes, and close buffer."""
+        self.out.close()
+        seg_bytes = self.bio.getvalue()
+        self.bio.close()
+        return seg_bytes
+
+    def discard(self) -> None:
+        """Close muxer and buffer while suppressing partial write errors."""
+        with contextlib.suppress(Exception):
+            self.out.close()
+        self.bio.close()
+
+
+class _FlvTsMuxer:
+    """Stateful FLV-to-MPEG-TS keyframe segmenter honoring byte and duration limits."""
+
+    def __init__(
+        self,
+        *,
+        av: Any,
+        vs: Any,
+        as_: Any | None,
+        on_segment: Callable[[float, bytes], bool],
+        segment_duration: float,
+        max_segment_duration: float,
+        max_bytes: int,
+    ) -> None:
+        self._av = av
+        self._vs = vs
+        self._as = as_
+        self._on_segment = on_segment
+        self._segment_duration = segment_duration
+        self._max_segment_duration = max_segment_duration
+        self._max_bytes = max_bytes
+        self._seg: _TsSegment | None = None
+        self._published_bytes = 0
+        self.emitted = 0
+        self._base_sec: float | None = None
+        self._seg_start_dts: int | None = None
+        self._last_v_dts: int | None = None
+        self._last_v_dur = 0
+        self._prev_dts: dict[int, int] = {}
+        self._aborted = False
+
+    def open_next_segment(self) -> None:
+        """Open the next bounded MPEG-TS output segment."""
+        self._seg = _TsSegment.open(
+            self._av,
+            self._vs,
+            self._as,
+            self._max_bytes - self._published_bytes,
+        )
+
+    def discard_current(self) -> None:
+        """Discard any open segment after an unhandled exception or budget overrun."""
+        if self._seg is not None:
+            self._seg.discard()
+            self._seg = None
+
+    def abort(self) -> None:
+        """Mark the muxer aborted and drop the active segment."""
+        self._aborted = True
+        self.discard_current()
+
+    def feed(self, pkt: Any) -> bool:
+        """Feed one demuxed packet; return True when muxing should stop."""
+        if pkt.dts is None:
+            return False
+        if self._base_sec is None:
+            if pkt.stream != self._vs or not pkt.is_keyframe:
+                return False
+            self._base_sec = float(pkt.dts * self._vs.time_base)
+        if pkt.stream == self._vs:
+            return self._feed_video(pkt)
+        if self._seg is not None and self._seg.as_ is not None:
+            self._mux_rebased(pkt, self._seg.as_)
+        return False
+
+    def _mux_rebased(self, pkt: Any, target_stream: Any) -> None:
+        assert self._base_sec is not None
+        assert self._seg is not None
+        if not _rebase_packet(pkt, self._base_sec, self._prev_dts):
+            return
+        pkt.stream = target_stream
+        self._seg.out.mux(pkt)
+
+    def _rotate_segment(self, elapsed: float) -> bool:
+        assert self._seg is not None
+        seg = self._seg
+        self._seg = None
+        seg_bytes = seg.close_and_take_bytes()
+        if seg_bytes:
+            if not self._on_segment(elapsed, seg_bytes):
+                return False
+            self._published_bytes += len(seg_bytes)
+            self.emitted += 1
+        self.open_next_segment()
+        return True
+
+    def _feed_video(self, pkt: Any) -> bool:
+        if self._seg_start_dts is None:
+            self._seg_start_dts = pkt.dts
+        elapsed = float((pkt.dts - self._seg_start_dts) * self._vs.time_base)
+        if elapsed > self._max_segment_duration:
+            self._aborted = True
+            return True
+        if pkt.is_keyframe and elapsed >= self._segment_duration:
+            if not self._rotate_segment(elapsed):
+                self._aborted = True
+                return True
+            self._seg_start_dts = pkt.dts
+        self._last_v_dts = pkt.dts
+        if pkt.duration:
+            self._last_v_dur = pkt.duration
+        assert self._seg is not None
+        self._mux_rebased(pkt, self._seg.vs)
+        return False
+
+    def finish(self) -> int:
+        """Flush and optionally emit the trailing segment, returning emitted count."""
+        seg = self._seg
+        self._seg = None
+        if seg is None:
+            return self.emitted
+        if self._aborted:
+            seg.discard()
+            return self.emitted
+        seg.out.close()
+        try:
+            if self._seg_start_dts is not None and self._last_v_dts is not None:
+                tail = max(
+                    float(
+                        ((self._last_v_dts - self._seg_start_dts) + self._last_v_dur)
+                        * self._vs.time_base
+                    ),
+                    0.1,
+                )
+                if tail <= self._max_segment_duration:
+                    tail_bytes = seg.bio.getvalue()
+                    if tail_bytes and self._on_segment(tail, tail_bytes):
+                        self._published_bytes += len(tail_bytes)
+                        self.emitted += 1
+        finally:
+            seg.bio.close()
+        return self.emitted
+
+
 def _remux_flv_to_mpegts(
     pipe: _BytePipe,
     on_segment: Callable[[float, bytes], bool],
@@ -307,151 +516,30 @@ def _remux_flv_to_mpegts(
     """
     av = _import_av()
     inp = av.open(pipe, mode="r", format="flv")
-    emitted = 0
-    published_bytes = 0
     try:
-        video_streams = inp.streams.video
-        if not video_streams:
-            raise ValueError("Archive stream has no video")
-        vs = video_streams[0]
-        video_codec = _stream_codec_name(vs)
-        if video_codec != "h264":
-            raise ValueError(f"Unsupported archive video codec: {video_codec}")
-        audio_streams = inp.streams.audio
-        as_ = audio_streams[0] if audio_streams else None
-        if as_ is not None and not _is_supported_audio(as_):
-            as_ = None
-        streams_to_demux = (vs, as_) if as_ is not None else (vs,)
-
-        def _open_segment() -> tuple[Any, Any, Any, Any]:
-            remaining = max_bytes - published_bytes
-            if remaining <= 0:
-                raise _SegmentBudgetExceeded("Archive session byte budget exhausted")
-            bio = io.BytesIO()
-            writer = _LimitedBytesWriter(bio, remaining)
-            out = av.open(
-                writer,
-                mode="w",
-                format="mpegts",
-                container_options={"mpegts_copyts": "1"},
-            )
-            ovs = out.add_stream_from_template(vs)
-            oas = out.add_stream_from_template(as_) if as_ is not None else None
-            return bio, out, ovs, oas
-
-        cur_bio: Any
-        cur_out: Any
-        cur_bio, cur_out, cur_vs, cur_as = _open_segment()
-        base_sec: float | None = None
-        seg_start_dts: int | None = None
-        last_v_dts: int | None = None
-        last_v_dur = 0
-        prev_dts: dict[int, int] = {}
-        aborted = False
-
-        def _rebase(pkt: Any, offset_sec: float) -> bool:
-            shift = int(round(offset_sec / float(pkt.time_base)))
-            dts = pkt.dts - shift
-            if dts < 0:
-                return False
-            stream_idx = pkt.stream.index
-            prev = prev_dts.get(stream_idx)
-            if prev is not None and dts <= prev:
-                return False
-            prev_dts[stream_idx] = dts
-            pkt.dts = dts
-            if pkt.pts is not None:
-                pkt.pts = max(dts, pkt.pts - shift)
-            return True
-
+        vs, as_, streams_to_demux = _select_flv_streams(inp)
+        muxer = _FlvTsMuxer(
+            av=av,
+            vs=vs,
+            as_=as_,
+            on_segment=on_segment,
+            segment_duration=segment_duration,
+            max_segment_duration=max_segment_duration,
+            max_bytes=max_bytes,
+        )
+        muxer.open_next_segment()
         try:
             for pkt in inp.demux(*streams_to_demux):
-                if pkt.dts is None:
-                    continue
-                if base_sec is None:
-                    if pkt.stream != vs or not pkt.is_keyframe:
-                        continue
-                    base_sec = float(pkt.dts * vs.time_base)
-                if pkt.stream == vs:
-                    if seg_start_dts is None:
-                        seg_start_dts = pkt.dts
-                    elapsed = float((pkt.dts - seg_start_dts) * vs.time_base)
-                    if elapsed > max_segment_duration:
-                        aborted = True
-                        break
-                    if pkt.is_keyframe and elapsed >= segment_duration:
-                        cur_out.close()
-                        seg_bytes = cur_bio.getvalue()
-                        cur_bio.close()
-                        cur_bio = None
-                        cur_out = None
-                        if seg_bytes:
-                            if not on_segment(elapsed, seg_bytes):
-                                aborted = True
-                                break
-                            published_bytes += len(seg_bytes)
-                            emitted += 1
-                        cur_bio, cur_out, cur_vs, cur_as = _open_segment()
-                        seg_start_dts = pkt.dts
-                    last_v_dts = pkt.dts
-                    if pkt.duration:
-                        last_v_dur = pkt.duration
-                    if not _rebase(pkt, base_sec):
-                        continue
-                    pkt.stream = cur_vs
-                    cur_out.mux(pkt)
-                elif cur_as is not None:
-                    if not _rebase(pkt, base_sec):
-                        continue
-                    pkt.stream = cur_as
-                    cur_out.mux(pkt)
+                if muxer.feed(pkt):
+                    break
         except _SegmentBudgetExceeded:
-            aborted = True
-            if cur_out is not None:
-                with contextlib.suppress(Exception):
-                    cur_out.close()
-                cur_out = None
-            if cur_bio is not None:
-                cur_bio.close()
-                cur_bio = None
+            muxer.abort()
         except BaseException:
-            if cur_out is not None:
-                with contextlib.suppress(Exception):
-                    cur_out.close()
-            if cur_bio is not None:
-                cur_bio.close()
+            muxer.discard_current()
             raise
-
-        if cur_out is not None:
-            if aborted:
-                with contextlib.suppress(Exception):
-                    cur_out.close()
-                if cur_bio is not None:
-                    cur_bio.close()
-                    cur_bio = None
-            else:
-                cur_out.close()
-
-        if (
-            not aborted
-            and cur_bio is not None
-            and seg_start_dts is not None
-            and last_v_dts is not None
-        ):
-            tail = max(
-                float(((last_v_dts - seg_start_dts) + last_v_dur) * vs.time_base),
-                0.1,
-            )
-            if tail <= max_segment_duration:
-                tail_bytes = cur_bio.getvalue()
-                if tail_bytes and on_segment(tail, tail_bytes):
-                    published_bytes += len(tail_bytes)
-                    emitted += 1
-        if cur_bio is not None:
-            cur_bio.close()
+        return muxer.finish()
     finally:
         inp.close()
-    return emitted
 
 
 def render_event_playlist(
@@ -707,35 +795,38 @@ class ArchiveHlsSession:
             else:
                 self._pipe.finish()
 
+    def _emit_segment_from_worker(self, duration: float, data: bytes) -> bool:
+        """Bridge one remuxed MPEG-TS segment onto the HA event loop."""
+        if self._closed or self.ended or self.failed:
+            return False
+        aborted = threading.Event()
+        fut = None
+        try:
+            fut = asyncio.run_coroutine_threadsafe(
+                self._async_emit(duration, data, aborted),
+                self.hass.loop,
+            )
+            return fut.result(timeout=5.0)
+        except (
+            RuntimeError,
+            TimeoutError,
+            concurrent.futures.CancelledError,
+        ):
+            aborted.set()
+            if fut is not None:
+                fut.cancel()
+            return False
+
     async def _run_worker(self) -> None:
         def _thread_main() -> int:
-            def _emit(duration: float, data: bytes) -> bool:
-                if self._closed or self.ended or self.failed:
-                    return False
-                aborted = threading.Event()
-                fut = None
-                try:
-                    fut = asyncio.run_coroutine_threadsafe(
-                        self._async_emit(duration, data, aborted),
-                        self.hass.loop,
-                    )
-                    return fut.result(timeout=5.0)
-                except (
-                    RuntimeError,
-                    TimeoutError,
-                    concurrent.futures.CancelledError,
-                ):
-                    aborted.set()
-                    if fut is not None:
-                        fut.cancel()
-                    return False
-
             remux_kwargs: dict[str, Any] = {}
             if self._max_bytes != _MAX_SESSION_BYTES:
                 remux_kwargs["max_bytes"] = self._max_bytes
             if self._max_segment_duration != float(_TARGET_DURATION_SEC):
                 remux_kwargs["max_segment_duration"] = self._max_segment_duration
-            return _remux_flv_to_mpegts(self._pipe, _emit, **remux_kwargs)
+            return _remux_flv_to_mpegts(
+                self._pipe, self._emit_segment_from_worker, **remux_kwargs
+            )
 
         try:
             emitted = await self.hass.async_add_executor_job(_thread_main)
@@ -870,15 +961,43 @@ def ensure_archive_stop_listener(hass: HomeAssistant) -> None:
     )
 
 
-async def async_stop_all_archive_sessions(hass: HomeAssistant) -> None:
-    """Idempotently stop all archive sessions and pending stop tasks on HA shutdown."""
+@contextlib.contextmanager
+def register_archive_in_flight(
+    hass: HomeAssistant, entry_id: str, event: asyncio.Event
+) -> Iterator[None]:
+    """Track an in-flight archive wait event per entry for unload cancellation."""
+    in_flight_map: dict[str, set[asyncio.Event]] = hass.data.setdefault(
+        ARCHIVE_IN_FLIGHT_KEY, {}
+    )
+    entry_in_flight = in_flight_map.setdefault(entry_id, set())
+    entry_in_flight.add(event)
+    try:
+        yield
+    finally:
+        entry_in_flight.discard(event)
+        if not entry_in_flight:
+            in_flight_map.pop(entry_id, None)
+
+
+def signal_archive_in_flight(
+    hass: HomeAssistant, entry_id: str | None = None
+) -> None:
+    """Wake in-flight archive resolvers for `entry_id` or across all entries."""
     in_flight: dict[str, set[asyncio.Event]] = (
         hass.data.get(ARCHIVE_IN_FLIGHT_KEY) or {}
     )
-    for events in in_flight.values():
+    event_sets = (
+        (in_flight.get(entry_id, ()),)
+        if entry_id is not None
+        else in_flight.values()
+    )
+    for events in event_sets:
         for fail_event in events:
             fail_event.set()
 
+
+def pop_all_sessions_to_stop(hass: HomeAssistant) -> list[Any]:
+    """Detach and collect every registered archive session for HA shutdown."""
     to_stop: list[Any] = []
     streams: dict[tuple[str, str, str], Any] = (
         hass.data.get(ARCHIVE_STREAMS_KEY) or {}
@@ -894,7 +1013,24 @@ async def async_stop_all_archive_sessions(hass: HomeAssistant) -> None:
         session = by_id.pop(sid, None)
         if session is not None and session not in to_stop:
             to_stop.append(session)
+    return to_stop
 
+
+def _pop_all_stop_tasks(hass: HomeAssistant) -> list[asyncio.Task[None]]:
+    """Pop all pending background session-stop tasks across entries."""
+    stop_tasks: dict[str, set[asyncio.Task[None]]] = (
+        hass.data.get(_ARCHIVE_STOP_TASKS_KEY) or {}
+    )
+    pending: list[asyncio.Task[None]] = []
+    for entry_id in list(stop_tasks):
+        pending.extend(stop_tasks.pop(entry_id, ()))
+    return pending
+
+
+async def async_stop_all_archive_sessions(hass: HomeAssistant) -> None:
+    """Idempotently stop all archive sessions and pending stop tasks on HA shutdown."""
+    signal_archive_in_flight(hass)
+    to_stop = pop_all_sessions_to_stop(hass)
     for session in to_stop:
         if hasattr(session, "_stop_upstream_only"):
             session._stop_upstream_only()
@@ -904,12 +1040,7 @@ async def async_stop_all_archive_sessions(hass: HomeAssistant) -> None:
             return_exceptions=True,
         )
 
-    stop_tasks: dict[str, set[asyncio.Task[None]]] = (
-        hass.data.get(_ARCHIVE_STOP_TASKS_KEY) or {}
-    )
-    pending: list[asyncio.Task[None]] = []
-    for entry_id in list(stop_tasks):
-        pending.extend(stop_tasks.pop(entry_id, ()))
+    pending = _pop_all_stop_tasks(hass)
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
 

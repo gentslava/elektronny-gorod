@@ -20,7 +20,7 @@ import secrets
 import time
 from typing import Any, Final, Literal
 
-from aiohttp import ClientError, ClientTimeout, web
+from aiohttp import ClientError, ClientResponse, ClientSession, ClientTimeout, web
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
@@ -347,31 +347,31 @@ class ClipProxyView(HomeAssistantView):
                     clip = clip_or_error
         return await self._serve(request, clip)
 
-    async def _download(
-        self, hass: HomeAssistant, coordinator: Any, entry_id: str, event_id: str
-    ) -> _CachedClip | web.Response:
-        """Mint once, wait for the operator, then fetch the whole file.
+    async def _sleep_before_retry(
+        self, attempt: int, deadline: float
+    ) -> web.Response | None:
+        """Sleep along the prepare backoff schedule or return 503 if budget expired."""
+        if time.monotonic() >= deadline:
+            return self.json_message(
+                "Recording is being prepared, try again shortly", 503
+            )
+        await asyncio.sleep(_prepare_delay(attempt))
+        return None
 
-        Так делает мобильное приложение (снимок 2026-05-25): один минт, затем
-        GET той же ссылки до готовности и скачивание целиком. Повторный минт
-        запускает подготовку заново, поэтому ссылка минтится ровно один раз.
-        """
-        session = async_get_clientsession(hass)
-        semaphore: asyncio.Semaphore = hass.data.setdefault(
-            _SEMAPHORE_KEY, asyncio.Semaphore(_MAX_CONCURRENT_DOWNLOADS)
-        )
-        deadline = time.monotonic() + _DOWNLOAD_PREPARE_BUDGET
+    async def _mint_clip_url(
+        self, coordinator: Any, event_id: str, deadline: float
+    ) -> str | web.Response:
+        """Mint one signed download URL, waiting through ErrorCode 102 preparation."""
         attempt = 0
         while True:
             try:
-                source_url = await coordinator.api.query_event_download(event_id)
+                return await coordinator.api.query_event_download(event_id)
             except ForpostDownloadError as err:
                 if err.error_code == _ERROR_PREPARING:
-                    if time.monotonic() >= deadline:
-                        return self.json_message(
-                            "Recording is being prepared, try again shortly", 503
-                        )
-                    await asyncio.sleep(_prepare_delay(attempt))
+                    if (
+                        expired := await self._sleep_before_retry(attempt, deadline)
+                    ) is not None:
+                        return expired
                     attempt += 1
                     continue
                 # Пользователь увидит лишь ошибку плеера: маппинг кода
@@ -392,46 +392,75 @@ class ClipProxyView(HomeAssistantView):
                     type(ex).__name__,
                 )
                 return self.json_message("Archive is temporarily unavailable", 502)
-            break
 
-        # source_url — подписанный операторский link; никогда не логируется.
-        # Range наверх не шлём: приложение его не использует, а storage не
-        # анонсирует Accept-Ranges — диапазоны нарезаем сами из кеша.
+    async def _read_bounded_clip(
+        self, upstream: ClientResponse, event_id: str
+    ) -> bytes | web.Response:
+        """Stream up to `_CLIP_MAX_BYTES` from `upstream` and close the response."""
+        buffer = bytearray()
+        try:
+            async for chunk in upstream.content.iter_chunked(_CHUNK_SIZE):
+                buffer.extend(chunk)
+                if len(buffer) > _CLIP_MAX_BYTES:
+                    LOGGER.debug(
+                        "Clip proxy aborted oversized event_id=%s", event_id
+                    )
+                    return self.json_message("Recording is too large to play", 502)
+        except (ClientError, ConnectionResetError) as ex:
+            LOGGER.debug(
+                "Clip proxy read failed for event_id=%s (%s)",
+                event_id,
+                type(ex).__name__,
+            )
+            return self.json_message("Archive is temporarily unavailable", 502)
+        finally:
+            upstream.close()
+        data = bytes(buffer)
+        if not data:
+            # Пустое тело нельзя кешировать: следующие 10 минут
+            # клип отдавался бы нулевой длины без пути к оператору.
+            LOGGER.debug(
+                "Clip proxy got an empty body for event_id=%s", event_id
+            )
+            return self.json_message("Archive is temporarily unavailable", 502)
+        return data
+
+    async def _fetch_upstream_clip(
+        self,
+        session: ClientSession,
+        source_url: str,
+        event_id: str,
+        deadline: float,
+    ) -> bytes | web.Response:
+        """Fetch upstream MP4 bytes, retrying 423 locks and incomplete `moov` files."""
         attempt = 0
-        async with semaphore:
-            while True:
-                try:
-                    upstream = await session.get(
-                        source_url, timeout=_UPSTREAM_TIMEOUT
-                    )
-                except (ClientError, ValueError) as ex:
-                    LOGGER.debug(
-                        "Clip proxy upstream failed for event_id=%s (%s)",
-                        event_id,
-                        type(ex).__name__,
-                    )
-                    return self.json_message("Archive is temporarily unavailable", 502)
-                if upstream.status == _HTTP_LOCKED:
-                    upstream.release()
-                    LOGGER.debug(
-                        "Clip proxy storage preparing event_id=%s — waiting",
-                        event_id,
-                    )
-                    if time.monotonic() >= deadline:
-                        return self.json_message(
-                            "Recording is being prepared, try again shortly", 503
-                        )
-                    await asyncio.sleep(_prepare_delay(attempt))
-                    attempt += 1
-                    continue
-                if upstream.status != 200:
-                    upstream.close()
-                    LOGGER.debug(
-                        "Clip proxy upstream rejected event_id=%s (status=%s)",
-                        event_id,
-                        upstream.status,
-                    )
-                    return self.json_message("Archive is temporarily unavailable", 502)
+        while True:
+            try:
+                upstream = await session.get(
+                    source_url, timeout=_UPSTREAM_TIMEOUT
+                )
+            except (ClientError, ValueError) as ex:
+                LOGGER.debug(
+                    "Clip proxy upstream failed for event_id=%s (%s)",
+                    event_id,
+                    type(ex).__name__,
+                )
+                return self.json_message("Archive is temporarily unavailable", 502)
+            if upstream.status == _HTTP_LOCKED:
+                upstream.release()
+                LOGGER.debug(
+                    "Clip proxy storage preparing event_id=%s — waiting",
+                    event_id,
+                )
+            elif upstream.status != 200:
+                upstream.close()
+                LOGGER.debug(
+                    "Clip proxy upstream rejected event_id=%s (status=%s)",
+                    event_id,
+                    upstream.status,
+                )
+                return self.json_message("Archive is temporarily unavailable", 502)
+            else:
                 declared = upstream.headers.get("Content-Length")
                 if declared and declared.isdigit() and int(declared) > _CLIP_MAX_BYTES:
                     upstream.close()
@@ -441,59 +470,59 @@ class ClipProxyView(HomeAssistantView):
                         declared,
                     )
                     return self.json_message("Recording is too large to play", 502)
-                # Читаем чанками с контролем размера: bare read() принял бы тело
-                # любой длины и раздул бы процесс до OOM.
-                buffer = bytearray()
-                try:
-                    async for chunk in upstream.content.iter_chunked(_CHUNK_SIZE):
-                        buffer.extend(chunk)
-                        if len(buffer) > _CLIP_MAX_BYTES:
-                            LOGGER.debug(
-                                "Clip proxy aborted oversized event_id=%s", event_id
-                            )
-                            return self.json_message(
-                                "Recording is too large to play", 502
-                            )
-                except (ClientError, ConnectionResetError) as ex:
-                    LOGGER.debug(
-                        "Clip proxy read failed for event_id=%s (%s)",
-                        event_id,
-                        type(ex).__name__,
-                    )
-                    return self.json_message("Archive is temporarily unavailable", 502)
-                finally:
-                    upstream.close()
-                data = bytes(buffer)
-                if not data:
-                    # Пустое тело нельзя кешировать: следующие 10 минут
-                    # клип отдавался бы нулевой длины без пути к оператору.
-                    LOGGER.debug(
-                        "Clip proxy got an empty body for event_id=%s", event_id
-                    )
-                    return self.json_message(
-                        "Archive is temporarily unavailable", 502
-                    )
-                if not _mp4_complete(data):
-                    # Оператор отдаёт файл, который ещё дописывает (нет moov):
-                    # кеш закрепил бы неиграемый клип на весь TTL (A-123).
-                    # Это то же «ещё готовится», что и 423.
-                    LOGGER.debug(
-                        "Clip proxy got an unfinished mp4 for event_id=%s "
-                        "(%s bytes) — waiting",
-                        event_id,
-                        len(data),
-                    )
-                    if time.monotonic() >= deadline:
-                        return self.json_message(
-                            "Recording is being prepared, try again shortly", 503
-                        )
-                    await asyncio.sleep(_prepare_delay(attempt))
-                    attempt += 1
-                    continue
+                body_or_error = await self._read_bounded_clip(upstream, event_id)
+                if isinstance(body_or_error, web.Response):
+                    return body_or_error
+                if _mp4_complete(body_or_error):
+                    return body_or_error
+                # Оператор отдаёт файл, который ещё дописывает (нет moov):
+                # кеш закрепил бы неиграемый клип на весь TTL (A-123).
+                # Это то же «ещё готовится», что и 423.
                 LOGGER.debug(
-                    "Clip proxy cached event_id=%s (%s bytes)", event_id, len(data)
+                    "Clip proxy got an unfinished mp4 for event_id=%s "
+                    "(%s bytes) — waiting",
+                    event_id,
+                    len(body_or_error),
                 )
-                return _cache_put(hass, entry_id, event_id, data)
+            if (
+                expired := await self._sleep_before_retry(attempt, deadline)
+            ) is not None:
+                return expired
+            attempt += 1
+
+    async def _download(
+        self, hass: HomeAssistant, coordinator: Any, entry_id: str, event_id: str
+    ) -> _CachedClip | web.Response:
+        """Mint once, wait for the operator, then fetch the whole file.
+
+        Так делает мобильное приложение (снимок 2026-05-25): один минт, затем
+        GET той же ссылки до готовности и скачивание целиком. Повторный минт
+        запускает подготовку заново, поэтому ссылка минтится ровно один раз.
+        """
+        session = async_get_clientsession(hass)
+        semaphore: asyncio.Semaphore = hass.data.setdefault(
+            _SEMAPHORE_KEY, asyncio.Semaphore(_MAX_CONCURRENT_DOWNLOADS)
+        )
+        deadline = time.monotonic() + _DOWNLOAD_PREPARE_BUDGET
+        source_or_error = await self._mint_clip_url(coordinator, event_id, deadline)
+        if isinstance(source_or_error, web.Response):
+            return source_or_error
+
+        # source_url — подписанный операторский link; никогда не логируется.
+        # Range наверх не шлём: приложение его не использует, а storage не
+        # анонсирует Accept-Ranges — диапазоны нарезаем сами из кеша.
+        async with semaphore:
+            data_or_error = await self._fetch_upstream_clip(
+                session, source_or_error, event_id, deadline
+            )
+            if isinstance(data_or_error, web.Response):
+                return data_or_error
+            LOGGER.debug(
+                "Clip proxy cached event_id=%s (%s bytes)",
+                event_id,
+                len(data_or_error),
+            )
+            return _cache_put(hass, entry_id, event_id, data_or_error)
 
     async def _serve(
         self, request: web.Request, clip: _CachedClip
