@@ -234,14 +234,23 @@ def _pkt(
 
 def test_remux_fake_av_rebases_grows_and_handles_audio_variants(hass) -> None:
     tb = Fraction(1, 1000)
-    vs = SimpleNamespace(index=0, type="video", name="h264", time_base=tb)
+    vs = SimpleNamespace(
+        index=0,
+        type="video",
+        name="h264",
+        codec_context=SimpleNamespace(codec=SimpleNamespace(canonical_name="h264")),
+        time_base=tb,
+    )
     as_aac = SimpleNamespace(
         index=1,
         type="audio",
         name="aac",
         profile="LC",
-        codec_descriptor=SimpleNamespace(name="aac"),
-        codec_context=SimpleNamespace(sample_rate=44100, extradata=b"\x12\x10"),
+        codec_context=SimpleNamespace(
+            codec=SimpleNamespace(canonical_name="aac"),
+            sample_rate=44100,
+            extradata=b"\x12\x10",
+        ),
         time_base=tb,
     )
     packets = [
@@ -278,14 +287,26 @@ def test_remux_fake_av_rebases_grows_and_handles_audio_variants(hass) -> None:
 
 def test_remux_fake_av_mp3_and_unsupported_codecs(hass) -> None:
     tb = Fraction(1, 1000)
-    vs = SimpleNamespace(index=0, type="video", name="h264", time_base=tb)
+    vs = SimpleNamespace(
+        index=0,
+        type="video",
+        name="h264",
+        codec_context=SimpleNamespace(codec=SimpleNamespace(canonical_name="h264")),
+        time_base=tb,
+    )
+    # PyAV 17.0.1 exposes MP3 as `name='mp3float'` without `codec_descriptor`;
+    # canonical name lives at `codec_context.codec.canonical_name == 'mp3'`.
     as_mp3 = SimpleNamespace(
         index=1,
         type="audio",
         name="mp3float",
         profile=None,
-        codec_descriptor=SimpleNamespace(name="mp3"),
-        codec_context=SimpleNamespace(sample_rate=44100, extradata=None),
+        codec_context=SimpleNamespace(
+            name="mp3float",
+            codec=SimpleNamespace(name="mp3float", canonical_name="mp3"),
+            sample_rate=44100,
+            extradata=None,
+        ),
         time_base=tb,
     )
     fake_av, _, _ = _fake_av_module(
@@ -311,8 +332,11 @@ def test_remux_fake_av_mp3_and_unsupported_codecs(hass) -> None:
             type="audio",
             name="pcm_alaw",
             profile=None,
-            codec_descriptor=SimpleNamespace(name="pcm_alaw"),
-            codec_context=SimpleNamespace(sample_rate=8000, extradata=None),
+            codec_context=SimpleNamespace(
+                codec=SimpleNamespace(canonical_name="pcm_alaw"),
+                sample_rate=8000,
+                extradata=None,
+            ),
             time_base=tb,
         ),
         SimpleNamespace(
@@ -320,8 +344,11 @@ def test_remux_fake_av_mp3_and_unsupported_codecs(hass) -> None:
             type="audio",
             name="aac",
             profile="LC",
-            codec_descriptor=SimpleNamespace(name="aac"),
-            codec_context=SimpleNamespace(sample_rate=0, extradata=b"\x12"),
+            codec_context=SimpleNamespace(
+                codec=SimpleNamespace(canonical_name="aac"),
+                sample_rate=0,
+                extradata=b"\x12",
+            ),
             time_base=tb,
         ),
         SimpleNamespace(
@@ -329,8 +356,11 @@ def test_remux_fake_av_mp3_and_unsupported_codecs(hass) -> None:
             type="audio",
             name="aac",
             profile=None,
-            codec_descriptor=SimpleNamespace(name="aac"),
-            codec_context=SimpleNamespace(sample_rate=44100, extradata=None),
+            codec_context=SimpleNamespace(
+                codec=SimpleNamespace(canonical_name="aac"),
+                sample_rate=44100,
+                extradata=None,
+            ),
             time_base=tb,
         ),
     ):
@@ -732,10 +762,12 @@ def _build_synthetic_flv(
     frame_times_ms: list[int],
     keyframe_ms: set[int],
     with_audio: bool = False,
+    audio_codec: str | None = None,
     width: int = 64,
     height: int = 64,
 ) -> bytes:
-    """Build a small reproducible FLV fixture in memory (H.264 + optional AAC)."""
+    """Build a small reproducible FLV fixture in memory (H.264 + optional AAC/MP3)."""
+    selected_audio = audio_codec if audio_codec is not None else ("aac" if with_audio else None)
     bio = io.BytesIO()
     out = av.open(bio, mode="w", format="flv")
     vs = out.add_stream("libx264", rate=10)
@@ -745,7 +777,7 @@ def _build_synthetic_flv(
     vs.time_base = Fraction(1, 1000)
     vs.options = {"g": "1000", "keyint_min": "1000", "tune": "zerolatency"}
 
-    as_ = out.add_stream("aac", rate=44100) if with_audio else None
+    as_ = out.add_stream(selected_audio, rate=44100) if selected_audio else None
 
     total_samples = 0
     for idx, ts_ms in enumerate(frame_times_ms):
@@ -767,15 +799,20 @@ def _build_synthetic_flv(
                 pkt.is_keyframe = True
             out.mux(pkt)
         if as_ is not None:
+            frame_samples = as_.codec_context.frame_size or (
+                1152 if selected_audio == "mp3" else 1024
+            )
             while total_samples * 1000 // 44100 <= ts_ms:
                 af = av.AudioFrame(
-                    format=as_.format.name, layout=as_.layout.name, samples=1024
+                    format=as_.format.name,
+                    layout=as_.layout.name,
+                    samples=frame_samples,
                 )
                 af.sample_rate = as_.sample_rate
                 af.pts = total_samples
                 for plane in af.planes:
                     plane.update(b"\x00" * plane.buffer_size)
-                total_samples += 1024
+                total_samples += frame_samples
                 for pkt in as_.encode(af):
                     out.mux(pkt)
 
@@ -1174,7 +1211,7 @@ async def test_async_ensure_archive_pyav_paths(hass) -> None:
             req_mock.assert_awaited_once_with(hass, "stream")
             assert "stream" not in hass.config.components
 
-        # 3) Requirement installation failure -> returns False safely.
+        # 3) Requirement installation failure -> returns False safely and clears key.
         with (
             patch(
                 "custom_components.elektronny_gorod.archive_hls._import_av",
@@ -1186,17 +1223,145 @@ async def test_async_ensure_archive_pyav_paths(hass) -> None:
             ),
         ):
             assert await async_ensure_archive_pyav(hass) is False
+        await asyncio.sleep(0)
+
+        # 4) Concurrent consumers + real HA RequirementsManager shared Future: canceling
+        # consumer 1 must NOT cancel bootstraps or HA's shared `stream` Future.
+        from homeassistant import requirements as ha_reqs
+        from custom_components.elektronny_gorod.archive_hls import (
+            _ARCHIVE_PYAV_BOOTSTRAP_KEY,
+        )
+
+        manager = ha_reqs._async_get_manager(hass)
+        ha_future = hass.loop.create_future()
+        manager.integrations_with_reqs["stream"] = ha_future
+        install_calls = 0
+        real_get_reqs = ha_reqs.async_get_integration_with_requirements
+
+        async def _spy_ha_get(target_hass, domain: str):
+            nonlocal install_calls
+            install_calls += 1
+            return await real_get_reqs(target_hass, domain)
+
+        av_ready = False
+
+        def _fake_import_when_ready():
+            if not av_ready:
+                raise ModuleNotFoundError("still installing")
+            return SimpleNamespace()
+
+        try:
+            with (
+                patch(
+                    "custom_components.elektronny_gorod.archive_hls._import_av",
+                    side_effect=_fake_import_when_ready,
+                ),
+                patch(
+                    "custom_components.elektronny_gorod.archive_hls.async_get_integration_with_requirements",
+                    side_effect=_spy_ha_get,
+                ),
+            ):
+                consumer_1 = asyncio.create_task(async_ensure_archive_pyav(hass))
+                consumer_2 = asyncio.create_task(async_ensure_archive_pyav(hass))
+                await asyncio.sleep(0)
+                bootstrap_task = hass.data.get(_ARCHIVE_PYAV_BOOTSTRAP_KEY)
+                assert bootstrap_task is not None and not bootstrap_task.done()
+                assert install_calls == 1
+
+                # Timeout/abort cancels consumer_1 only, not bootstrap or HA shared Future.
+                consumer_1.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await consumer_1
+                await asyncio.sleep(0)
+                assert not bootstrap_task.cancelled() and not bootstrap_task.done()
+                assert not ha_future.cancelled()
+
+                # Native stream / HA finishes installing requirements without InvalidStateError.
+                av_ready = True
+                ha_future.set_result(MagicMock())
+                assert await consumer_2 is True
+                await asyncio.sleep(0)
+                assert _ARCHIVE_PYAV_BOOTSTRAP_KEY not in hass.data
+        finally:
+            manager.integrations_with_reqs.pop("stream", None)
+
+        # 5) Integration-initiated stalled cold install: timeout of consumer_1 does NOT cancel
+        # pip install / bootstrap task; consumer_2 finishes cleanly when install resolves.
+        pip_started = asyncio.Event()
+        pip_release = asyncio.Event()
+
+        async def _slow_cold_install(_target_hass, _domain: str):
+            pip_started.set()
+            await pip_release.wait()
+            return MagicMock()
+
+        av_ready = False
+        with (
+            patch(
+                "custom_components.elektronny_gorod.archive_hls._import_av",
+                side_effect=_fake_import_when_ready,
+            ),
+            patch(
+                "custom_components.elektronny_gorod.archive_hls.async_get_integration_with_requirements",
+                side_effect=_slow_cold_install,
+            ) as slow_req_mock,
+        ):
+            first = asyncio.create_task(async_ensure_archive_pyav(hass))
+            await pip_started.wait()
+            with pytest.raises(TimeoutError):
+                await asyncio.wait_for(first, timeout=0.02)
+            bootstrap_task = hass.data.get(_ARCHIVE_PYAV_BOOTSTRAP_KEY)
+            assert bootstrap_task is not None and not bootstrap_task.done()
+            second = asyncio.create_task(async_ensure_archive_pyav(hass))
+            await asyncio.sleep(0)
+            assert slow_req_mock.await_count == 1
+            av_ready = True
+            pip_release.set()
+            assert await second is True
+            await asyncio.sleep(0)
+            assert _ARCHIVE_PYAV_BOOTSTRAP_KEY not in hass.data
     finally:
         if saved_av is not None:
             sys.modules["av"] = saved_av
 
 
-@pytest.mark.usefixtures("socket_enabled")
-@pytest.mark.parametrize("with_audio", [False, True])
-async def test_real_pyav_hermetic_flv_decodes_frames_and_pts(
-    hass, archive_client, with_audio: bool
+async def test_stop_releases_published_segments_before_joining_stalled_worker(
+    hass,
 ) -> None:
-    """Hermetic real-PyAV remuxing decodes actual video/audio frames and PTS from MPEG-TS."""
+    """`stop()` frees published segment bytes immediately before awaiting task join."""
+    entry = _loaded_entry(hass)
+    release_worker = asyncio.Event()
+    sess = ArchiveHlsSession(
+        hass,
+        entry_id=entry.entry_id,
+        camera_id=_CAMERA_ID,
+        event_id="early-free",
+        coordinator=entry.runtime_data,
+    )
+
+    async def _stalled_worker() -> None:
+        await release_worker.wait()
+
+    sess._worker_task = asyncio.create_task(_stalled_worker())
+    assert sess.add_segment(2.0, b"X" * 4096) is True
+    assert sess._total_bytes == 4096
+
+    stop_task = asyncio.create_task(sess.stop())
+    await asyncio.sleep(0)
+    assert not stop_task.done()
+    assert sess._segments == []
+    assert sess._total_bytes == 0
+
+    release_worker.set()
+    await stop_task
+
+
+@pytest.mark.usefixtures("socket_enabled")
+@pytest.mark.parametrize("audio_codec", [None, "aac", "mp3"])
+async def test_real_pyav_hermetic_flv_decodes_frames_and_pts(
+    hass, archive_client, audio_codec: str | None
+) -> None:
+    """Hermetic real-PyAV remuxing decodes actual video + AAC/MP3 audio frames and PTS."""
     av = pytest.importorskip("av")
 
     frame_times = [t * 200 for t in range(30)]  # 0..5.8s at 5fps
@@ -1204,8 +1369,17 @@ async def test_real_pyav_hermetic_flv_decodes_frames_and_pts(
         av,
         frame_times_ms=frame_times,
         keyframe_ms={0, 2000, 4000},
-        with_audio=with_audio,
+        audio_codec=audio_codec,
     )
+    if audio_codec == "mp3":
+        # Verify the fixture hits PyAV 17's `mp3float` / `canonical_name == 'mp3'` shape.
+        probe = av.open(io.BytesIO(flv_bytes), mode="r", format="flv")
+        try:
+            in_audio = probe.streams.audio[0]
+            assert in_audio.codec_context.codec.canonical_name == "mp3"
+            assert not hasattr(in_audio, "codec_descriptor")
+        finally:
+            probe.close()
 
     async def _fake_stream(request: web.Request) -> web.StreamResponse:
         resp = web.StreamResponse(headers={"Content-Type": "video/x-flv"})
@@ -1264,7 +1438,7 @@ async def test_real_pyav_hermetic_flv_decodes_frames_and_pts(
             c = av.open(io.BytesIO(seg_bytes), format="mpegts")
             streams = (
                 (c.streams.video[0], c.streams.audio[0])
-                if with_audio
+                if audio_codec is not None
                 else (c.streams.video[0],)
             )
             seg_v = 0
@@ -1281,14 +1455,16 @@ async def test_real_pyav_hermetic_flv_decodes_frames_and_pts(
                     assert decoded.samples > 0 and decoded.pts is not None
                     seg_a += 1
             assert seg_v > 0
-            if with_audio:
+            if audio_codec is not None:
                 assert seg_a > 0
+            else:
+                assert not c.streams.audio
             total_video_frames += seg_v
             total_audio_frames += seg_a
             c.close()
 
         assert total_video_frames == len(frame_times)
-        if with_audio:
+        if audio_codec is not None:
             assert total_audio_frames > 0
     finally:
         await sess.stop()

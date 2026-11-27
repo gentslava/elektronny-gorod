@@ -43,6 +43,7 @@ from .coordinator import async_get_coordinator
 
 _ARCHIVE_VIEW_REGISTERED = f"{DOMAIN}_archive_view_registered"
 _ARCHIVE_STOP_LISTENER_KEY = f"{DOMAIN}_archive_stop_listener"
+_ARCHIVE_PYAV_BOOTSTRAP_KEY = f"{DOMAIN}_archive_pyav_bootstrap"
 ARCHIVE_STREAMS_KEY = f"{DOMAIN}_archive_streams"
 _ARCHIVE_BY_ID_KEY = f"{DOMAIN}_archive_sessions_by_id"
 ARCHIVE_IN_FLIGHT_KEY = f"{DOMAIN}_archive_in_flight"
@@ -78,12 +79,8 @@ def _try_import_av() -> bool:
     return True
 
 
-async def async_ensure_archive_pyav(hass: HomeAssistant) -> bool:
-    """Ensure PyAV is available via HA `stream` requirements without setting up `stream`."""
-    if "av" in sys.modules:
-        return True
-    if await hass.async_add_executor_job(_try_import_av):
-        return True
+async def _bootstrap_archive_pyav(hass: HomeAssistant) -> bool:
+    """Resolve `stream` requirements through HA and import PyAV off the loop."""
     try:
         await async_get_integration_with_requirements(hass, "stream")
     except Exception as ex:  # noqa: BLE001 - optional dependency boundary
@@ -93,6 +90,29 @@ async def async_ensure_archive_pyav(hass: HomeAssistant) -> bool:
         )
         return False
     return await hass.async_add_executor_job(_try_import_av)
+
+
+async def async_ensure_archive_pyav(hass: HomeAssistant) -> bool:
+    """Ensure PyAV is available via a single shielded HA bootstrap task."""
+    if "av" in sys.modules:
+        return True
+    if await hass.async_add_executor_job(_try_import_av):
+        return True
+    task: asyncio.Task[bool] | None = hass.data.get(_ARCHIVE_PYAV_BOOTSTRAP_KEY)
+    if task is None or task.done():
+        task = hass.async_create_task(
+            _bootstrap_archive_pyav(hass),
+            name=f"{DOMAIN}_archive_pyav_bootstrap",
+        )
+        if not task.done():
+            hass.data[_ARCHIVE_PYAV_BOOTSTRAP_KEY] = task
+
+            def _clear_bootstrap(finished: asyncio.Task[bool]) -> None:
+                if hass.data.get(_ARCHIVE_PYAV_BOOTSTRAP_KEY) is finished:
+                    hass.data.pop(_ARCHIVE_PYAV_BOOTSTRAP_KEY, None)
+
+            task.add_done_callback(_clear_bootstrap)
+    return await asyncio.shield(task)
 
 
 def sign_archive_token(
@@ -216,10 +236,20 @@ class _BytePipe:
             return out
 
 
+def _stream_codec_name(stream: Any) -> str | None:
+    """Return canonical codec name via PyAV's `codec_context.codec.canonical_name`."""
+    codec_ctx = getattr(stream, "codec_context", None)
+    codec = getattr(codec_ctx, "codec", None) if codec_ctx is not None else None
+    canonical = getattr(codec, "canonical_name", None) if codec is not None else None
+    if canonical:
+        return str(canonical)
+    name = getattr(codec_ctx, "name", None) if codec_ctx is not None else None
+    return str(name) if name else getattr(stream, "name", None)
+
+
 def _is_supported_audio(stream: Any) -> bool:
     """Return True if the FLV audio stream can be remuxed into browser MPEG-TS."""
-    codec_desc = getattr(stream, "codec_descriptor", None)
-    codec_name = getattr(codec_desc, "name", None) or getattr(stream, "name", None)
+    codec_name = _stream_codec_name(stream)
     if codec_name not in _AUDIO_CODECS:
         return False
     codec_ctx = getattr(stream, "codec_context", None)
@@ -284,8 +314,9 @@ def _remux_flv_to_mpegts(
         if not video_streams:
             raise ValueError("Archive stream has no video")
         vs = video_streams[0]
-        if getattr(vs, "name", None) != "h264":
-            raise ValueError(f"Unsupported archive video codec: {getattr(vs, 'name', None)}")
+        video_codec = _stream_codec_name(vs)
+        if video_codec != "h264":
+            raise ValueError(f"Unsupported archive video codec: {video_codec}")
         audio_streams = inp.streams.audio
         as_ = audio_streams[0] if audio_streams else None
         if as_ is not None and not _is_supported_audio(as_):
@@ -741,7 +772,7 @@ class ArchiveHlsSession:
             return False
         return self.add_segment(duration, data)
 
-    async def _join_and_clear(self) -> None:
+    async def _join_tasks(self) -> None:
         tasks = [
             task
             for task in (self._upstream_task, self._worker_task)
@@ -749,25 +780,26 @@ class ArchiveHlsSession:
         ]
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-        self._segments.clear()
-        self._total_bytes = 0
 
     async def stop(self) -> None:
-        """Stop session idempotently, closing pipe and upstream before joining."""
+        """Stop session idempotently, releasing segments and closing upstream first."""
         if self._stop_task is None:
             self._closed = True
             self._cancel_idle_timer()
             self.fail_event.set()
             self._stop_upstream_only()
+            # Releasing published segment bytes before joining tasks avoids
+            # retaining multi-megabyte buffers while background tasks unwind;
+            # any active ArchiveSegmentView already holds its own chunk ref.
+            self._segments.clear()
+            self._total_bytes = 0
             if not any(
                 task is not None and not task.done()
                 for task in (self._upstream_task, self._worker_task)
             ):
-                self._segments.clear()
-                self._total_bytes = 0
                 return
             self._stop_task = asyncio.create_task(
-                self._join_and_clear(),
+                self._join_tasks(),
                 name=f"{DOMAIN}_archive_session_stop_{self.camera_id}",
             )
         await asyncio.shield(self._stop_task)

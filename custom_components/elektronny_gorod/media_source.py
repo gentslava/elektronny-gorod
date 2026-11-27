@@ -328,6 +328,46 @@ class ElektronnyGorodMediaSource(MediaSource):
                     task.cancel()
             await asyncio.gather(work_task, abort_task, return_exceptions=True)
 
+    async def _acquire_archive_lock_budgeted(
+        self,
+        lock: asyncio.Lock,
+        cancel_event: asyncio.Event,
+        deadline: float,
+    ) -> Literal["ok", "aborted", "timeout"]:
+        """Acquire per-entry lock within `deadline`, aborting cleanly on `cancel_event`."""
+        remaining = deadline - time.monotonic()
+        if cancel_event.is_set():
+            return "aborted"
+        if remaining <= 0:
+            return "timeout"
+        lock_task = asyncio.create_task(lock.acquire())
+        abort_task = asyncio.create_task(cancel_event.wait())
+        handed_off = False
+        try:
+            async with asyncio.timeout(remaining):
+                done, _ = await asyncio.wait(
+                    {lock_task, abort_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            if cancel_event.is_set() or abort_task in done:
+                return "aborted"
+            handed_off = lock_task in done and not lock_task.cancelled()
+            return "ok"
+        except TimeoutError:
+            return "timeout"
+        finally:
+            for task in (lock_task, abort_task):
+                if not task.done():
+                    task.cancel()
+            await asyncio.gather(lock_task, abort_task, return_exceptions=True)
+            if (
+                not handed_off
+                and lock_task.done()
+                and not lock_task.cancelled()
+                and lock_task.result() is True
+            ):
+                lock.release()
+
     async def _archive_play_media(
         self, coordinator: Any, entry_id: str, camera_id: str, event: Any
     ) -> PlayMedia | None:
@@ -340,40 +380,57 @@ class ElektronnyGorodMediaSource(MediaSource):
         фронтенд получает локальный `playlist.m3u8` с непрозрачным `session_id`
         и HMAC-токеном.
         """
+        deadline = time.monotonic() + _ARCHIVE_READY_TIMEOUT_SEC
+        if (
+            self._coordinator(entry_id) is not coordinator
+            or getattr(self._hass, "is_stopping", False)
+        ):
+            raise Unresolvable("Unknown media item")
         streams = archive_streams(self._hass)
         key = (entry_id, camera_id, event.id)
-        async with _archive_lock(self._hass, entry_id):
-            if (
+        cancel_event = asyncio.Event()
+        in_flight_map: dict[str, set[asyncio.Event]] = (
+            self._hass.data.setdefault(_ARCHIVE_IN_FLIGHT_KEY, {})
+        )
+        entry_in_flight = in_flight_map.setdefault(entry_id, set())
+        entry_in_flight.add(cancel_event)
+        lock = _archive_lock(self._hass, entry_id)
+        try:
+            lock_status = await self._acquire_archive_lock_budgeted(
+                lock, cancel_event, deadline
+            )
+            if lock_status == "aborted" or (
                 self._coordinator(entry_id) is not coordinator
                 or getattr(self._hass, "is_stopping", False)
             ):
                 raise Unresolvable("Unknown media item")
-            for stale_key in [
-                k
-                for k, found in streams.items()
-                if k[0] == entry_id and not found.alive
-            ]:
-                stale = streams.pop(stale_key)
-                detach_archive_session(self._hass, stale)
-            session = streams.get(key)
-            if session is not None and session.alive and session.ready:
-                session.touch()
-                return PlayMedia(
-                    url=session.playlist_url(self._hass),
-                    mime_type=_MIME_HLS_FRONTEND,
+            if lock_status != "ok":
+                LOGGER.debug(
+                    "Media source archive lock timed out for camera_id=%s "
+                    "event_id=%s; live view",
+                    camera_id,
+                    event.id,
                 )
-            if session is not None:
-                stop_archive_session_in_background(self._hass, session)
-                session = None
-
-            deadline = time.monotonic() + _ARCHIVE_READY_TIMEOUT_SEC
-            cancel_event = asyncio.Event()
-            in_flight_map: dict[str, set[asyncio.Event]] = (
-                self._hass.data.setdefault(_ARCHIVE_IN_FLIGHT_KEY, {})
-            )
-            entry_in_flight = in_flight_map.setdefault(entry_id, set())
-            entry_in_flight.add(cancel_event)
+                return None
             try:
+                for stale_key in [
+                    k
+                    for k, found in streams.items()
+                    if k[0] == entry_id and not found.alive
+                ]:
+                    stale = streams.pop(stale_key)
+                    detach_archive_session(self._hass, stale)
+                session = streams.get(key)
+                if session is not None and session.alive and session.ready:
+                    session.touch()
+                    return PlayMedia(
+                        url=session.playlist_url(self._hass),
+                        mime_type=_MIME_HLS_FRONTEND,
+                    )
+                if session is not None:
+                    stop_archive_session_in_background(self._hass, session)
+                    session = None
+
                 pyav_status, pyav_ok = await self._await_budgeted(
                     async_ensure_archive_pyav(self._hass), cancel_event, deadline
                 )
@@ -409,54 +466,56 @@ class ElektronnyGorodMediaSource(MediaSource):
                         event.id,
                     )
                     return None
-            finally:
-                entry_in_flight.discard(cancel_event)
-                if not entry_in_flight:
-                    in_flight_map.pop(entry_id, None)
 
-            enforce_active_session_limit(self._hass)
-            session = ArchiveHlsSession(
-                self._hass,
-                entry_id=entry_id,
-                camera_id=camera_id,
-                event_id=event.id,
-                coordinator=coordinator,
-            )
-            archive_sessions_by_id(self._hass)[session.session_id] = session
-            streams[key] = session
-            try:
-                session.start(source)
-                if not await self._wait_archive_session_ready(
-                    entry_id, session, deadline
-                ):
+                enforce_active_session_limit(self._hass)
+                session = ArchiveHlsSession(
+                    self._hass,
+                    entry_id=entry_id,
+                    camera_id=camera_id,
+                    event_id=event.id,
+                    coordinator=coordinator,
+                )
+                archive_sessions_by_id(self._hass)[session.session_id] = session
+                streams[key] = session
+                try:
+                    session.start(source)
+                    if not await self._wait_archive_session_ready(
+                        entry_id, session, deadline
+                    ):
+                        LOGGER.debug(
+                            "Media source archive stream not ready for "
+                            "camera_id=%s event_id=%s; live view",
+                            camera_id,
+                            event.id,
+                        )
+                        stop_archive_session_in_background(self._hass, session)
+                        return None
+                    if (
+                        self._coordinator(entry_id) is not coordinator
+                        or getattr(self._hass, "is_stopping", False)
+                    ):
+                        stop_archive_session_in_background(self._hass, session)
+                        raise Unresolvable("Unknown media item")
+                    url = session.playlist_url(self._hass)
+                except (HomeAssistantError, RuntimeError, ValueError) as ex:
                     LOGGER.debug(
-                        "Media source archive stream not ready for "
-                        "camera_id=%s event_id=%s; live view",
+                        "Media source archive stream failed to start for "
+                        "camera_id=%s event_id=%s (%s); live view",
                         camera_id,
                         event.id,
+                        type(ex).__name__,
                     )
                     stop_archive_session_in_background(self._hass, session)
                     return None
-                if (
-                    self._coordinator(entry_id) is not coordinator
-                    or getattr(self._hass, "is_stopping", False)
-                ):
+                except BaseException:
                     stop_archive_session_in_background(self._hass, session)
-                    raise Unresolvable("Unknown media item")
-                url = session.playlist_url(self._hass)
-            except (HomeAssistantError, RuntimeError, ValueError) as ex:
-                LOGGER.debug(
-                    "Media source archive stream failed to start for "
-                    "camera_id=%s event_id=%s (%s); live view",
-                    camera_id,
-                    event.id,
-                    type(ex).__name__,
-                )
-                stop_archive_session_in_background(self._hass, session)
-                return None
-            except BaseException:
-                stop_archive_session_in_background(self._hass, session)
-                raise
+                    raise
+            finally:
+                lock.release()
+        finally:
+            entry_in_flight.discard(cancel_event)
+            if not entry_in_flight:
+                in_flight_map.pop(entry_id, None)
         return PlayMedia(url=url, mime_type=_MIME_HLS_FRONTEND)
 
     async def _wait_archive_session_ready(

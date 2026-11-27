@@ -2093,6 +2093,159 @@ async def test_pyav_ensure_abort_and_budget_exhaustion(hass, monkeypatch) -> Non
     coordinator2.api.query_camera_archive_stream.assert_not_awaited()
 
 
+async def test_parallel_stalled_resolves_share_single_budget_without_queue_stacking(
+    hass, monkeypatch
+) -> None:
+    """Два параллельных stalled resolve на одной записи укладываются в один бюджет.
+
+    Ожидание per-entry lock учитывается в общем deadline; второй запрос не
+    вызывает минт после истечения бюджета и не держит lock при откате на эфир.
+    """
+    import asyncio
+    import time
+
+    from custom_components.elektronny_gorod.media_source import _archive_lock
+
+    budget_sec = 0.08
+    monkeypatch.setattr(
+        "custom_components.elektronny_gorod.media_source._ARCHIVE_READY_TIMEOUT_SEC",
+        budget_sec,
+    )
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    _register_camera_entity(hass, entry, camera_id=_PUBLIC_ID)
+
+    release = asyncio.Event()
+    minted_cameras: list[str] = []
+
+    async def _stalled_mint(camera_id: str, *_args):
+        minted_cameras.append(camera_id)
+        await release.wait()
+        return _ARCHIVE_URL
+
+    coordinator.api.query_camera_archive_stream = AsyncMock(side_effect=_stalled_mint)
+    source = _source(hass)
+
+    try:
+        with (
+            patch(
+                "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+                AsyncMock(return_value=True),
+            ),
+            _patch_camera_resolve() as camera_resolve,
+        ):
+            t0 = time.monotonic()
+            play_1, play_2 = await asyncio.gather(
+                source.async_resolve_media(
+                    _resolve_item(
+                        hass, entry, camera_id=_INTERCOM_ID, day_str=day_str
+                    )
+                ),
+                source.async_resolve_media(
+                    _resolve_item(
+                        hass, entry, camera_id=_PUBLIC_ID, day_str=day_str
+                    )
+                ),
+            )
+            elapsed = time.monotonic() - t0
+
+        assert play_1.url == _LIVE_PLAY_URL
+        assert play_2.url == _LIVE_PLAY_URL
+        # Bounded to ONE budget window (no linear 2x stacking).
+        assert elapsed < budget_sec * 1.9
+        # Only the first caller minted; the second never started mint after timeout.
+        assert len(minted_cameras) == 1
+        assert camera_resolve.await_count == 2
+        assert _archive_lock(hass, entry.entry_id).locked() is False
+    finally:
+        release.set()
+
+
+async def test_unload_during_archive_lock_wait_raises_unresolvable_without_live(
+    hass, monkeypatch
+) -> None:
+    """Выгрузка во время ожидания lock даёт `Unresolvable` без отката на эфир."""
+    import asyncio
+    import time
+
+    from custom_components.elektronny_gorod.media_source import _archive_lock
+
+    monkeypatch.setattr(
+        "custom_components.elektronny_gorod.media_source._ARCHIVE_READY_TIMEOUT_SEC",
+        0.04,
+    )
+    coordinator, entry, day_str = _realtime_archive_entry(hass)
+    lock = _archive_lock(hass, entry.entry_id)
+    await lock.acquire()
+    try:
+        with (
+            patch(
+                "custom_components.elektronny_gorod.media_source.async_ensure_archive_pyav",
+                AsyncMock(return_value=True),
+            ),
+            _patch_camera_resolve() as camera_resolve,
+        ):
+            resolve = asyncio.create_task(
+                _source(hass).async_resolve_media(
+                    _resolve_item(hass, entry, day_str=day_str)
+                )
+            )
+            await asyncio.sleep(0)
+            # Mark entry unloaded while the resolve is still queued on the lock.
+            entry.mock_state(hass, ConfigEntryState.UNLOAD_IN_PROGRESS)
+            t0 = time.monotonic()
+            with pytest.raises(Unresolvable, match="Unknown media item"):
+                await resolve
+            assert time.monotonic() - t0 < 0.25
+
+        coordinator.api.query_camera_archive_stream.assert_not_awaited()
+        camera_resolve.assert_not_awaited()
+    finally:
+        lock.release()
+
+
+async def test_acquire_archive_lock_budgeted_edge_cases(hass) -> None:
+    """Граничные ветки `_acquire_archive_lock_budgeted` и release на racing acquire."""
+    import asyncio
+    import time
+
+    source = _source(hass)
+
+    # Pre-set cancel_event returns 'aborted' immediately without touching lock.
+    lock = asyncio.Lock()
+    preset = asyncio.Event()
+    preset.set()
+    assert (
+        await source._acquire_archive_lock_budgeted(
+            lock, preset, time.monotonic() + 5.0
+        )
+        == "aborted"
+    )
+    assert lock.locked() is False
+
+    # Already expired deadline returns 'timeout' immediately without touching lock.
+    assert (
+        await source._acquire_archive_lock_budgeted(
+            lock, asyncio.Event(), time.monotonic() - 1.0
+        )
+        == "timeout"
+    )
+    assert lock.locked() is False
+
+    # If abort triggers concurrently right as lock is acquired, lock is released cleanly.
+    await lock.acquire()
+    cancel_ev = asyncio.Event()
+    task = asyncio.create_task(
+        source._acquire_archive_lock_budgeted(
+            lock, cancel_ev, time.monotonic() + 5.0
+        )
+    )
+    await asyncio.sleep(0)
+    cancel_ev.set()
+    lock.release()
+    assert await task == "aborted"
+    assert lock.locked() is False
+
+
 async def test_media_source_budget_helpers_stopping_and_by_id_cleanup(
     hass, freezer
 ) -> None:
