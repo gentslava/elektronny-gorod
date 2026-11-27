@@ -321,7 +321,8 @@ async def test_setup_does_not_use_deprecated_via_device(hass, mock_api, caplog) 
     deprecated = [
         record.getMessage()
         for record in caplog.records
-        if "via_device" in record.getMessage()
+        if record.name == "homeassistant.helpers.frame"
+        and "via_device" in record.getMessage()
         and "deprecated" in record.getMessage().lower()
     ]
 
