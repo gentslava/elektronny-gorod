@@ -12,6 +12,7 @@ import random
 import re
 import uuid
 from collections.abc import Callable
+from typing import Any
 
 from ..const import LOGGER
 from .dialog import (
@@ -107,37 +108,44 @@ class SipProtocol(asyncio.DatagramProtocol):
             if msg.start_line.startswith("SIP/2.0"):
                 self._on_response(msg)
                 return
-            method = msg.start_line.split(" ", 1)[0]
-            if method == "INVITE":
-                self._on_invite(msg, addr)
-            elif method == "BYE":
-                self._respond_200(msg, addr)
-                if self.on_bye is not None:
-                    self.on_bye()
-            elif method == "CANCEL":
-                # Отмена неотвеченного вызова: 200 на CANCEL + 487 на держимый INVITE.
-                # CANCEL, разминувшийся с нашим 200 OK, INVITE уже не отменяет —
-                # 487 на отвеченный INVITE не шлём.
-                self._respond_200(msg, addr)
-                if self.acked is None:
-                    self._send_487()
-                if self.on_cancel is not None:
-                    self.on_cancel()
-            elif method == "ACK":
-                # ACK на наш 200 OK — без ответа; до answer() игнорируем. ACK
-                # чужого диалога (другой Call-ID) ответ не подтверждает — иначе
-                # BYE ушёл бы раньше, чем панель узнала о нашем 200 OK.
-                if (
-                    self.acked is not None
-                    and not self.acked.done()
-                    and self.dialog is not None
-                    and msg.first("call-id") == self.dialog.call_id
-                ):
-                    self.acked.set_result(None)
-            elif method in ("OPTIONS", "NOTIFY", "INFO"):
-                self._respond_200(msg, addr)
+            self._handle_request(msg, addr)
         except Exception:  # noqa: BLE001 — не валим сокет на битом пакете
             LOGGER.exception("SIP: ошибка обработки datagram")
+
+    def _handle_request(self, msg: Any, addr: tuple) -> None:
+        method = msg.start_line.split(" ", 1)[0]
+        if method == "INVITE":
+            self._on_invite(msg, addr)
+        elif method == "BYE":
+            self._respond_200(msg, addr)
+            if self.on_bye is not None:
+                self.on_bye()
+        elif method == "CANCEL":
+            self._on_cancel(msg, addr)
+        elif method == "ACK":
+            self._on_ack(msg)
+        elif method in ("OPTIONS", "NOTIFY", "INFO"):
+            self._respond_200(msg, addr)
+
+    def _on_cancel(self, msg: Any, addr: tuple) -> None:
+        """Отмена неотвеченного вызова: 200 на CANCEL + 487 на держимый INVITE."""
+        # CANCEL, разминувшийся с нашим 200 OK, INVITE уже не отменяет —
+        # 487 на отвеченный INVITE не шлём.
+        self._respond_200(msg, addr)
+        if self.acked is None:
+            self._send_487()
+        if self.on_cancel is not None:
+            self.on_cancel()
+
+    def _on_ack(self, msg: Any) -> None:
+        """ACK на наш 200 OK — без ответа; ACK чужого диалога игнорируем."""
+        if (
+            self.acked is not None
+            and not self.acked.done()
+            and self.dialog is not None
+            and msg.first("call-id") == self.dialog.call_id
+        ):
+            self.acked.set_result(None)
 
     # ---- handlers ----
     def _on_response(self, msg) -> None:

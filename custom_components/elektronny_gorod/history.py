@@ -147,9 +147,8 @@ class HistoryPoller:
         self._emit = emit
         self._camera_enabled = camera_enabled or (lambda _camera_id: False)
 
-    async def async_poll(self) -> bool:
-        """Poll page zero and emit unseen whitelisted events chronologically."""
-        any_success = False
+    def _collect_place_ids(self) -> list[int]:
+        """Extract integer place IDs from the current coordinator snapshot."""
         place_ids: list[int] = []
         for subscriber_place in (self._coordinator.data or {}).get("places") or []:
             place_id = (subscriber_place.get("place") or {}).get("id")
@@ -159,93 +158,116 @@ class HistoryPoller:
                 place_ids.append(int(place_id))
             except (TypeError, ValueError):
                 continue
-        if place_ids:
-            try:
-                page = await self._coordinator.api.query_events(place_ids, page=0)
-            except Exception as ex:  # noqa: BLE001
-                LOGGER.debug(
-                    "General history fetch failed (%s)",
-                    type(ex).__name__,
-                )
-            else:
-                any_success = True
-                by_source: dict[str, list[str]] = {}
-                for event in page.events:
-                    stream = _general_stream_key(event)
-                    by_source.setdefault(stream, []).append(event.id)
-                new_events = {
-                    (stream, event_id)
-                    for stream, event_ids in by_source.items()
-                    for event_id in self._watermark.ingest(stream, event_ids)
-                }
-                for event in reversed(page.events):
-                    mapped_type = map_general_event_type(event.event_type)
-                    if (
-                        (_general_stream_key(event), event.id) not in new_events
-                        or mapped_type is None
-                    ):
-                        continue
-                    self._emit(
-                        {
-                            "event_type": mapped_type,
-                            "event_id": event.id,
-                            "occurred_at": event.timestamp,
-                            "place_id": event.place_id,
-                            "source_type": event.source_type,
-                            "source_id": event.source_id,
-                        }
-                    )
+        return place_ids
 
+    async def _async_poll_general(self) -> bool:
+        """Poll place-wide access/call history events and emit unseen whitelisted types."""
+        place_ids = self._collect_place_ids()
+        if not place_ids:
+            return False
+        try:
+            page = await self._coordinator.api.query_events(place_ids, page=0)
+        except Exception as ex:  # noqa: BLE001
+            LOGGER.debug("General history fetch failed (%s)", type(ex).__name__)
+            return False
+
+        by_source: dict[str, list[str]] = {}
+        for event in page.events:
+            stream = _general_stream_key(event)
+            by_source.setdefault(stream, []).append(event.id)
+        new_events = {
+            (stream, event_id)
+            for stream, event_ids in by_source.items()
+            for event_id in self._watermark.ingest(stream, event_ids)
+        }
+        for event in reversed(page.events):
+            mapped_type = map_general_event_type(event.event_type)
+            if (
+                (_general_stream_key(event), event.id) not in new_events
+                or mapped_type is None
+            ):
+                continue
+            self._emit(
+                {
+                    "event_type": mapped_type,
+                    "event_id": event.id,
+                    "occurred_at": event.timestamp,
+                    "place_id": event.place_id,
+                    "source_type": event.source_type,
+                    "source_id": event.source_id,
+                }
+            )
+        return True
+
+    async def _async_poll_camera(
+        self, camera_id: str, *, lower_date: str, upper_date: str
+    ) -> bool:
+        """Poll one camera's forpost motion events and emit unseen detections."""
+        try:
+            camera_events = await self._coordinator.api.query_camera_events(
+                camera_id,
+                lower_date=lower_date,
+                upper_date=upper_date,
+            )
+        except Exception as ex:  # noqa: BLE001
+            LOGGER.debug(
+                "Camera history fetch failed for camera_id=%s (%s)",
+                camera_id,
+                type(ex).__name__,
+            )
+            return False
+
+        new_camera_ids = set(
+            self._watermark.ingest(
+                f"camera:{camera_id}",
+                (event.id for event in camera_events),
+            )
+        )
+        for event in reversed(camera_events):
+            if (
+                event.id not in new_camera_ids
+                or event.event_subject_id != _CAMERA_MOTION_EVENT_SUBJECT_ID
+            ):
+                continue
+            self._emit(
+                {
+                    "event_type": "motion",
+                    "event_id": event.id,
+                    "occurred_at": event.timestamp,
+                    "camera_id": event.camera_id,
+                    "duration": event.duration,
+                    "recording_available": (
+                        event.available and event.goto_enabled
+                    ),
+                }
+            )
+        return True
+
+    async def _async_poll_cameras(self) -> bool:
+        """Poll enabled intercom/public cameras in sequence; return True if any succeeded."""
         upper = datetime.now(UTC).replace(microsecond=0)
         lower = upper - _CAMERA_LOOKBACK
         lower_date = lower.isoformat().replace("+00:00", "Z")
         upper_date = upper.isoformat().replace("+00:00", "Z")
+        any_success = False
         for camera in (self._coordinator.data or {}).get("cameras") or []:
             camera_id = camera.get("id")
             if not camera_id or camera.get("source") not in ("intercom", "public"):
                 continue
-            camera_id = str(camera_id)
-            if not self._camera_enabled(camera_id):
+            cid = str(camera_id)
+            if not self._camera_enabled(cid):
                 continue
-            try:
-                camera_events = await self._coordinator.api.query_camera_events(
-                    camera_id,
-                    lower_date=lower_date,
-                    upper_date=upper_date,
-                )
-            except Exception as ex:  # noqa: BLE001
-                LOGGER.debug(
-                    "Camera history fetch failed for camera_id=%s (%s)",
-                    camera_id,
-                    type(ex).__name__,
-                )
-                continue
-            any_success = True
-            new_camera_ids = set(
-                self._watermark.ingest(
-                    f"camera:{camera_id}",
-                    (event.id for event in camera_events),
-                )
-            )
-            for event in reversed(camera_events):
-                if (
-                    event.id not in new_camera_ids
-                    or event.event_subject_id != _CAMERA_MOTION_EVENT_SUBJECT_ID
-                ):
-                    continue
-                self._emit(
-                    {
-                        "event_type": "motion",
-                        "event_id": event.id,
-                        "occurred_at": event.timestamp,
-                        "camera_id": event.camera_id,
-                        "duration": event.duration,
-                        "recording_available": (
-                            event.available and event.goto_enabled
-                        ),
-                    }
-                )
+            if await self._async_poll_camera(
+                cid, lower_date=lower_date, upper_date=upper_date
+            ):
+                any_success = True
         return any_success
+
+    async def async_poll(self) -> bool:
+        """Poll page zero and emit unseen whitelisted events chronologically."""
+        general_ok = await self._async_poll_general()
+        cameras_ok = await self._async_poll_cameras()
+        return general_ok or cameras_ok
 
 
 class HistoryManager:
