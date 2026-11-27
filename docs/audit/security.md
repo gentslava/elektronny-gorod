@@ -46,7 +46,7 @@ Quality gates:
 | S-08 | ✅ RESOLVED | `diagnostics.py` redacts secrets/PII; coordinator snapshot — counters-only |
 | S-09 | ✅ RESOLVED | REST/binary `ClientTimeout` на GET/POST/DELETE operator API |
 | S-10 | 🟡 OPEN | ограниченные повторы идемпотентных GET (A-21) |
-| S-30 | 🟡 REMEDIATION-IN-REVIEW | `go2rtc_base_url` в diagnostics маскирует userinfo/query/fragment (`6e70b43`, pending merge) |
+| S-30 | 🟡 REMEDIATION-IN-REVIEW | `CONF_GO2RTC_BASE_URL` внесён в `TO_REDACT` для `diagnostics` (pending merge) |
 | S-16 | 🟡 MITIGATED P3 | отдельные поля логина и пароля go2rtc маскируются; секреты в URL см. S-30 |
 | S-17/S-18 | 🟡 OPEN P3 | сырое логирование body/err в go2rtc.py (не активная утечка) |
 | S-19 | 🟢 ACCEPTED-by-design | uplink AuthZ (любой auth HA-юзер) + AudioBridge `0.0.0.0:40020` LAN-exposure (ADR-0013/A-85) |
@@ -171,9 +171,9 @@ Quality gates:
 
 ### S-30. Учётные данные в URL go2rtc попадают в diagnostics
 
-- **Status:** 🟡 **REMEDIATION-IN-REVIEW** (`6e70b43` в ветке `fix/backlog-a126-a122-a121-a116`, pending merge; переводится в `✅ RESOLVED` после merge в `master`). Исходно P1. Условие — секрет введён в URL go2rtc и пользователь выгружает диагностику. В проверке использовались только синтетические данные.
-- **Evidence:** `normalize_base_url()` сохраняет userinfo в URL. Config Flow и OptionsFlow записывают URL; ранее `async_get_config_entry_diagnostics()` маскировала отдельные поля логина и пароля, а URL оставляла целиком.
-- **Remediation & Verification:** `async_get_config_entry_diagnostics()` санитизирует `go2rtc_base_url` через `yarl.URL` в `entry.data` и `entry.options` (маскируя inline userinfo в `***`, удаляя query/fragment и заменяя невалидные/не-HTTP URL на `REDACTED`, сохраняя чистые URL подключения без изменений). Подтверждено `tests/test_diagnostics.py` и `test_backlog_go2rtc_diagnostics_probe.py`.
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** (в ветке `fix/backlog-a126-a122-a121-a116`, pending merge; переводится в `✅ RESOLVED` после merge в `master`). Исходно P1. Условие — секрет введён в URL go2rtc и пользователь выгружает диагностику. В проверке использовались только синтетические данные.
+- **Evidence:** `normalize_base_url()` сохраняет userinfo/path/query в URL. Config Flow и OptionsFlow записывают URL; ранее `async_get_config_entry_diagnostics()` маскировала отдельные поля логина и пароля, а URL оставляла целиком.
+- **Remediation & Verification:** `CONF_GO2RTC_BASE_URL` добавлен в `TO_REDACT` в `diagnostics.py`, поэтому `async_redact_data()` полностью редактирует `go2rtc_base_url` в `entry.data` и `entry.options` (включая inline userinfo, токены в reverse-proxy path, query/fragment и malformed punycode `xn--`) без изменения сохранённых настроек подключения и config flow. Подтверждено `tests/test_diagnostics.py` и `test_backlog_go2rtc_diagnostics_probe.py`.
 - **Acceptance:** sentinel в userinfo или query не встречается в выгрузке из обоих хранилищ. Покрыть существующие записи, сохранив рабочий URL подключения. См. [A-126](project-audit.md#a-126-diagnostics-выгружает-учётные-данные-из-url-go2rtc).
 
 ## P2 — желательно

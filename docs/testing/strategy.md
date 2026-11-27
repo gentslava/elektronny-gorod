@@ -38,10 +38,10 @@ Quality gates:
 | Frontend | Vitest, `tsc --noEmit` и production bundle build |
 | Product website | Vitest, `tsc --noEmit` и Vite production build (`website/`) |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
-| Security / crypto | redaction including production-format config-entry title, diagnostics (в т.ч. userinfo/query/fragment в `go2rtc_base_url`, A-126/S-30), HTTP no-leak, golden vectors helpers, deterministic secret-log scanner |
+| Security / crypto | redaction including production-format config-entry title, diagnostics (в т.ч. полная маска `CONF_GO2RTC_BASE_URL` в `TO_REDACT`, A-126/S-30), HTTP no-leak, golden vectors helpers, deterministic secret-log scanner |
 | AIDD gates | Canonical secret/reconciliation hooks; Claude/Codex adapters; candidate-SHA CI, stacked target-ref, role/command/rule parity, thin adapters и path-fence contracts |
-| Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink, cleanup при отмене/`OSError` в `answer`/`accept`/`register_and_hold` (A-122) и сброс `call_state` вытесненной панели в `idle` (A-121) |
-| Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown; сохранение `user_shown`/`we_set_integration` при отказе `/settings/screens` по месту без блокировки соседних мест (A-116) |
+| Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink, cleanup при отмене/`OSError` в `answer`/`accept`/`register_and_hold` без go2rtc `DELETE` для непубликованного моста (A-122) и сброс `call_state` вытесненной панели в `idle` с `(place_id, access_control_id, call_id)` dedup (A-121) |
+| Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown; сохранение `user_shown`/`we_set_integration` через реальный API и единый разбор `/settings/screens` при сбое/дрейфе по месту без блокировки соседних мест (A-116) |
 | Camera discovery (#97 / A-125) | новые camera IDs после setup, привязка к существующему Intercom, повторные обновления без дублей, сохранение disabled/hidden и пользовательского выбора, unload listener; реальный registry event с loop-bound prompt reconcile |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
 | Эмуляция клиента | `user_agent`: идентификаторы устройства переживают перезагрузку, версия приложения следует за константой (A-119) |

@@ -89,14 +89,14 @@ async def test_diagnostics_redacts_options(hass: HomeAssistant) -> None:
 
 
 async def test_diagnostics_keeps_non_sensitive(hass: HomeAssistant) -> None:
-    """Несекретные поля сохраняются — diagnostics должна быть полезной."""
+    """Несекретные поля сохраняются, а go2rtc_base_url маскируется (A-126/S-30)."""
     entry = _make_entry()
     entry.add_to_hass(hass)
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     data = diag["entry"]["data"]
     assert data["use_go2rtc"] is True
-    assert data["go2rtc_base_url"] == "http://127.0.0.1:1984"
+    assert data["go2rtc_base_url"] == REDACTED
 
 
 async def test_diagnostics_coordinator_snapshot_is_counts_only(
@@ -217,47 +217,31 @@ async def test_diagnostics_exposes_last_waf_block_alongside_counts(
 
 @pytest.mark.parametrize("location", ["data", "options"])
 @pytest.mark.parametrize(
-    ("raw_url", "secret_sentinels", "expected"),
+    ("raw_url", "privacy_sentinels"),
     [
         (
             "http://unit-user:unit-pass@go2rtc.invalid:1984",
-            ("unit-user", "unit-pass"),
-            "http://***:***@go2rtc.invalid:1984",
+            ("unit-user", "unit-pass", "go2rtc.invalid"),
         ),
         (
-            "https://only-user@go2rtc.invalid:1984/api",
-            ("only-user",),
-            "https://***@go2rtc.invalid:1984/api",
+            "https://proxy.invalid/secret-proxy-token/go2rtc?token=query-secret#frag-secret",
+            ("proxy.invalid", "secret-proxy-token", "query-secret", "frag-secret"),
         ),
         (
-            "http://:only-pass@go2rtc.invalid:1984",
-            ("only-pass",),
-            "http://:***@go2rtc.invalid:1984",
+            "http://xn--abc.invalid:1984",
+            ("xn--abc.invalid",),
         ),
         (
-            "https://u:p@go2rtc.invalid:1984/?token=query-secret#frag-secret",
-            ("query-secret", "frag-secret"),
-            "https://***:***@go2rtc.invalid:1984/",
+            "http://xn--",
+            ("xn--",),
         ),
         (
-            "ftp://bad-user:bad-pass@go2rtc.invalid:1984",
-            ("bad-user", "bad-pass"),
-            REDACTED,
-        ),
-        (
-            "not-a-url-secret",
-            ("not-a-url-secret",),
-            REDACTED,
-        ),
-        (
-            "http://[broken-secret",
-            ("broken-secret",),
-            REDACTED,
+            "http://127.0.0.1:1984",
+            ("127.0.0.1", "1984"),
         ),
         (
             12345,
             ("12345",),
-            REDACTED,
         ),
     ],
 )
@@ -265,10 +249,9 @@ async def test_diagnostics_redacts_go2rtc_base_url_secrets(
     hass: HomeAssistant,
     location: str,
     raw_url: str | int,
-    secret_sentinels: tuple[str, ...],
-    expected: str,
+    privacy_sentinels: tuple[str, ...],
 ) -> None:
-    """A-126/S-30: inline userinfo и query/fragment секреты в go2rtc_base_url редактируются."""
+    """A-126/S-30: go2rtc_base_url полностью редактируется через TO_REDACT в data и options."""
     data: dict[str, str | int] = {"access_token": "supersecret-access"}
     options: dict[str, str | int] = {}
     if location == "data":
@@ -281,35 +264,6 @@ async def test_diagnostics_redacts_go2rtc_base_url_secrets(
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     blob = json.dumps(diag, default=str, ensure_ascii=False)
-    for sentinel in secret_sentinels:
+    for sentinel in privacy_sentinels:
         assert sentinel not in blob
-    assert diag["entry"][location]["go2rtc_base_url"] == expected
-
-
-async def test_diagnostics_preserves_clean_go2rtc_base_url_in_data_and_options(
-    hass: HomeAssistant,
-) -> None:
-    """A-126/S-30: валидный go2rtc_base_url без секретов и пустые значения остаются нетронутыми."""
-    clean_url = "https://127.0.0.1:1984"
-    entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="t",
-        data={"go2rtc_base_url": clean_url},
-        options={"go2rtc_base_url": "http://192.168.1.5:1984/"},
-    )
-    entry.add_to_hass(hass)
-
-    diag = await async_get_config_entry_diagnostics(hass, entry)
-    assert diag["entry"]["data"]["go2rtc_base_url"] == clean_url
-    assert diag["entry"]["options"]["go2rtc_base_url"] == "http://192.168.1.5:1984/"
-
-    empty_entry = MockConfigEntry(
-        domain=DOMAIN,
-        title="t",
-        data={"go2rtc_base_url": ""},
-        options={"go2rtc_base_url": None},
-    )
-    empty_entry.add_to_hass(hass)
-    empty_diag = await async_get_config_entry_diagnostics(hass, empty_entry)
-    assert empty_diag["entry"]["data"]["go2rtc_base_url"] == ""
-    assert empty_diag["entry"]["options"]["go2rtc_base_url"] is None
+    assert diag["entry"][location]["go2rtc_base_url"] == REDACTED

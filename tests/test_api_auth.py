@@ -338,22 +338,17 @@ async def test_screens_settings_return_user_preferences(hass) -> None:
     )
 
 
-async def test_screens_settings_degrade_to_everything_visible(hass) -> None:
-    """Пустой ответ — считаем, что скрытого нет.
+@pytest.mark.parametrize("payload", [{}, None, []])
+async def test_screens_settings_degrade_to_everything_visible(hass, payload) -> None:
+    """query_screens_settings возвращает сырой разобранный JSON без подмены null/[] на {}.
 
-    Иначе отсутствие настроек прятало бы у пользователя камеры, которые он не
-    прятал. А вот отказ оператора пустотой не притворяется: различить их
-    может только вызывающий, и координатор говорит о нём одной строкой.
-
-    Осторожно: на отказе координатор подставляет то же «ничего не скрыто»,
-    а не прежнюю видимость. Если это совпадёт с загрузкой записи,
-    восстановление видимости снимет скрытие, выставленное интеграцией. Так
-    было и до проброса отказа; вынесено хвостом в A-112.
+    Координатор различает валидное «ничего не настроено» (`{}`) и непригодные
+    `None`/`[]`, чтобы не стирать user_shown override (A-116).
     """
     api = _api(hass)
-    api.http.get = AsyncMock(return_value=_response(200, None))
+    api.http.get = AsyncMock(return_value=_response(200, payload))
 
-    assert await api.query_screens_settings("PLACE") == {}
+    assert await api.query_screens_settings("PLACE") == payload
 
 
 async def test_dnd_unwraps_its_own_key(hass) -> None:

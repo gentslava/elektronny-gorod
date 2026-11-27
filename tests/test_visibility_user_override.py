@@ -455,3 +455,92 @@ async def test_screens_failure_in_place_a_does_not_block_verified_place_b(
     assert registry.async_get(eid_pa_102).options.get(DOMAIN, {}).get("we_set_integration") is True
     assert registry.async_get(eid_pb_201).hidden_by == er.RegistryEntryHider.INTEGRATION
     assert registry.async_get(eid_pb_202).hidden_by is None
+
+
+@pytest.mark.parametrize(
+    "raw_payload",
+    [
+        None,
+        [],
+        {"screens": None},
+        {"screens": [{}]},
+        {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": "drift"}]},
+        {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": None}]},
+        {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": [{}]}]},
+        {"screens": [{"type": "PUBLIC_CAMERAS", "hidden": [{"cameraId": HIDDEN_CAMERA_ID}]}]},
+        {"screens": [{"type": "ACCESS_CONTROLS", "hidden": "drift"}, {"type": "PUBLIC_CAMERAS", "hidden": [{"id": 222}]}]},
+    ],
+)
+async def test_real_api_malformed_screens_preserves_override_without_writes(
+    hass: HomeAssistant, mock_api, raw_payload
+):
+    """A-116: реальный ElektronnyGorodAPI.query_screens_settings с null/[]/вложенным drift сохраняет override."""
+    from aiohttp import ClientResponse
+    from unittest.mock import MagicMock
+    from custom_components.elektronny_gorod.api import ElektronnyGorodAPI
+
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    hidden_eid = registry.async_get_entity_id(
+        "camera", DOMAIN, f"{DOMAIN}_camera_{HIDDEN_CAMERA_ID}"
+    )
+    registry.async_update_entity(hidden_eid, hidden_by=None)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert registry.async_get(hidden_eid).options.get(DOMAIN, {}).get("user_shown") is True
+
+    inst = mock_api.return_value
+    response = MagicMock(spec=ClientResponse)
+    response.json = AsyncMock(return_value=raw_payload)
+    inst.http.get = AsyncMock(return_value=response)
+    inst.query_screens_settings = ElektronnyGorodAPI.query_screens_settings.__get__(inst)
+
+    with (
+        patch.object(registry, "async_update_entity", wraps=registry.async_update_entity) as upd_ent,
+        patch.object(
+            registry,
+            "async_update_entity_options",
+            wraps=registry.async_update_entity_options,
+        ) as upd_opts,
+    ):
+        assert await hass.config_entries.async_reload(entry.entry_id)
+        await hass.async_block_till_done()
+
+    assert upd_ent.call_count == 0
+    assert upd_opts.call_count == 0
+    assert registry.async_get(hidden_eid).options.get(DOMAIN, {}).get("user_shown") is True
+    assert registry.async_get(hidden_eid).hidden_by is None
+
+
+async def test_valid_mixed_known_unknown_sections_and_empty_hidden_sync_cleanly(
+    hass: HomeAssistant, mock_api
+):
+    """A-116: смешанные известные/неизвестные секции, пустые hidden и ID='0' валидны."""
+    entry = _make_config_entry()
+    entry.add_to_hass(hass)
+    mock_api.return_value.query_public_cameras = AsyncMock(return_value=[
+        {"id": 900, "externalCameraId": "0", "name": "Zero Cam"},
+        {"id": int(VISIBLE_CAMERA_ID), "externalCameraId": None, "name": "Visible"},
+    ])
+    mock_api.return_value.query_screens_settings = AsyncMock(return_value={
+        "screens": [
+            {"type": "FUTURE_UNKNOWN_SECTION", "hidden": [{"customKey": "x"}]},
+            {"type": "PUBLIC_CAMERAS", "hidden": [{"id": 0}]},
+            {"type": "ACCESS_CONTROLS", "hidden": []},
+        ]
+    })
+
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+
+    registry = er.async_get(hass)
+    zero_eid = registry.async_get_entity_id("camera", DOMAIN, f"{DOMAIN}_camera_0")
+    visible_eid = registry.async_get_entity_id(
+        "camera", DOMAIN, f"{DOMAIN}_camera_{VISIBLE_CAMERA_ID}"
+    )
+    assert registry.async_get(zero_eid).hidden_by == er.RegistryEntryHider.INTEGRATION
+    assert registry.async_get(visible_eid).hidden_by is None

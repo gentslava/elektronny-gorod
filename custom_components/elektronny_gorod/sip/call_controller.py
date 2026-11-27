@@ -26,6 +26,7 @@ import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import inspect
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
@@ -402,13 +403,31 @@ class DoorbellCallController:
                 # авто-переход в `ended` намеренно отложен до появления потребителя.
                 self._emit_call_state(CALL_STATE_ERROR)
                 self._clear_uplink_sink()
-                await self._teardown_audio_bridge(bridge)
+                await self._stop_unpublished_bridge(bridge)
                 return False
             except BaseException:
-                if accept_started and self._manager is held_manager:
+                # Отмена задачи ответа: снимаем только ресурсы этой прерванной
+                # попытки (непубликованный мост локально без go2rtc DELETE, sink,
+                # ещё-наш held_manager) и выводим фазу из `connecting`.
+                mgr_to_release = (
+                    held_manager
+                    if held_manager is not None and self._manager is held_manager
+                    else None
+                )
+                if mgr_to_release is not None:
                     self._manager = None
+                    mgr_to_release.detach()
                 self._clear_uplink_sink()
-                await self._teardown_audio_bridge(bridge)
+                if self._active is call:
+                    self._emit_call_state(CALL_STATE_ERROR)
+                    self._active = None
+                elif self._call_state == CALL_STATE_CONNECTING:
+                    self._emit_call_state(CALL_STATE_ERROR)
+                try:
+                    await self._stop_unpublished_bridge(bridge)
+                finally:
+                    if mgr_to_release is not None:
+                        await self._release_aborted_manager(mgr_to_release)
                 raise
 
             if ok:
@@ -421,7 +440,7 @@ class DoorbellCallController:
                     self._manager = None
                 self._emit_call_state(CALL_STATE_ERROR)
                 self._clear_uplink_sink()
-                await self._teardown_audio_bridge(bridge)
+                await self._stop_unpublished_bridge(bridge)
             return ok
 
     @callback
@@ -556,7 +575,12 @@ class DoorbellCallController:
         sensor нового домофона (фильтр по своим ac/place) не получит событие.
         """
         if state == self._call_state and (
-            self._active is None or self._active.call_id == self._last_call_id
+            self._active is None
+            or (
+                self._active.place_id == self._last_place_id
+                and self._active.access_control_id == self._last_ac
+                and self._active.call_id == self._last_call_id
+            )
         ):
             return
         call = self._active
@@ -732,6 +756,17 @@ class DoorbellCallController:
             raise
         LOGGER.info("Аудио-мост поднят (стрим вызова соберёт camera.intercom_call)")
         return bridge, bridge.feed_downlink
+
+    async def _stop_unpublished_bridge(self, bridge: AudioBridge | None) -> None:
+        """Локально остановить непубликованный в go2rtc мост (без remote DELETE)."""
+        if bridge is not None:
+            await bridge.stop()
+
+    async def _release_aborted_manager(self, manager: SipManager) -> None:
+        """Тихо освободить SIP-плечо прерванного answer (поддержка mock и SipManager)."""
+        hangup = manager.async_hangup()
+        if inspect.isawaitable(hangup):
+            await hangup
 
     async def _teardown_audio_bridge(self, bridge: AudioBridge | None) -> None:
         """Остановить мост + снять go2rtc-стрим вызова (best-effort)."""

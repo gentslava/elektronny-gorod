@@ -263,8 +263,10 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             # строке на запрошенный раздел на каждый цикл, дедупа там нет.
             try:
                 screens = await self._api.query_screens_settings(place_id)
-                hidden_cam_ids = self._extract_hidden_ids(screens, "PUBLIC_CAMERAS")
-                hidden_entrance_ids = self._extract_hidden_ids(
+                hidden_cam_ids, cam_usable = self._extract_hidden_ids(
+                    screens, "PUBLIC_CAMERAS"
+                )
+                hidden_entrance_ids, ent_usable = self._extract_hidden_ids(
                     screens, "ACCESS_CONTROLS"
                 )
             except Exception as ex:  # noqa: BLE001
@@ -273,7 +275,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 hidden_cam_ids, hidden_entrance_ids = set(), set()
             else:
                 self._note_success("Настройки экранов", place_id)
-                if not self._screens_snapshot_usable(screens):
+                if not (cam_usable and ent_usable):
                     screens_failed_places.add(str(place_id))
             try:
                 access_controls = await self._api.query_access_controls(place_id)
@@ -539,52 +541,48 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         return cameras
 
     @staticmethod
-    def _screens_snapshot_usable(screens: Any) -> bool:
-        """Вернуть True, если `/settings/screens` пригоден как снимок видимости (в т.ч. `{}`)."""
-        if not isinstance(screens, dict):
-            return False
-        if not screens:
-            return True
-        if "screens" not in screens:
-            return False
-        return isinstance(screens.get("screens"), list)
+    def _extract_hidden_ids(screens: Any, screen_type: str) -> tuple[set[str], bool]:
+        """Из ответа `/settings/screens` достать id-шки скрытых entities и признак валидности снимка.
 
-    @staticmethod
-    def _extract_hidden_ids(screens: Any, screen_type: str) -> set[str]:
-        """Из ответа `/settings/screens` достать id-шки скрытых entities.
+        Возвращает `(hidden_ids, usable)`. Если ответ `{}` — пустой set и `usable=True`
+        (пользователь ничего не скрывал). Берём то, что разобралось, а любой дрейф
+        формы (включая корень не-dict, `screens: null`, раздел без `type`, `hidden` не
+        список или элемент без корректного `id`) отмечаем на `debug` и помечаем
+        `usable=False`, чтобы `_sync_visibility` не стирал пользовательские override.
+        Неизвестные `type` разделов (непустые строки) игнорируются без потери валидности.
 
-        Возвращает set строковых id. Если screen-тип не найден — пустой set
-        (значит ничего не скрыто). Берём то, что разобралось, а о непонятом
-        говорим на `debug`: молчание сделало бы дрейф схемы неотличимым от
-        «пользователь ничего не прятал», и скрытые сущности молча вернулись
-        бы в панель.
-
-        Неитерируемое вместо списка бросает — и это намеренно: такой ответ
-        разобрать нечем, и садиться он должен на фронт «Настройки экранов»,
-        который этим ответом владеет. Вызов стоит под его `try`.
-
-        `screens` намеренно `Any`, а не `dict`: это разобранный JSON от
-        оператора, и обещать его форму в аннотации значит выдать желаемое за
-        действительное — проверка формы ниже стала бы «недостижимым кодом».
+        Неитерируемое вместо списка `screens` бросает `TypeError` — и это намеренно:
+        такой ответ садится на фронт «Настройки экранов» под его `try`.
         """
         result: set[str] = set()
-        # Что именно не так, а не «тип контейнера»: на вложенных уровнях
-        # контейнер всегда `dict`, и такой токен ничего не различал бы. Пусто
-        # — форма штатная: `{}` означает «пользователь ничего не настраивал».
         drift: set[str] = set()
+        raw_screens: Any
         if not isinstance(screens, dict):
             drift.add(f"корень {type(screens).__name__}")
-            screens = {}
-        elif screens and "screens" not in screens:
-            # Непустой ответ без ключа `screens` — то же переименование поля,
-            # что и элемент без `id`, и последствие то же. Пустой словарь при
-            # этом штатен: он значит «пользователь ничего не настраивал».
+            raw_screens = []
+        elif not screens:
+            return result, True
+        elif "screens" not in screens:
             drift.add("нет ключа screens")
-        for screen in screens.get("screens") or []:
+            raw_screens = []
+        else:
+            raw_screens = screens["screens"]
+            if raw_screens is None:
+                drift.add("поле screens null")
+                raw_screens = []
+
+        for screen in raw_screens:
             if not isinstance(screen, dict):
                 drift.add("запись раздела не словарь")
                 continue
-            if screen.get("type") != screen_type:
+            stype = screen.get("type")
+            if not isinstance(stype, str) or not stype:
+                drift.add("раздел без type")
+                continue
+            if stype != screen_type:
+                continue
+            if "hidden" in screen and not isinstance(screen["hidden"], list):
+                drift.add("hidden не список")
                 continue
             for item in screen.get("hidden") or []:
                 if not isinstance(item, dict):
@@ -597,6 +595,9 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                     # последствие у него то же: скрытое вернётся в панель.
                     drift.add("элемент без id")
                     continue
+                if isinstance(iid, bool) or not isinstance(iid, (int, str)) or iid == "":
+                    drift.add("элемент с некорректным id")
+                    continue
                 result.add(str(iid))
         if drift:
             # Молчать нельзя: иначе дрейф схемы оператора неотличим от
@@ -608,7 +609,7 @@ class ElektronnyGorodUpdateCoordinator(DataUpdateCoordinator[dict[str, Any]]):
                 screen_type,
                 ", ".join(sorted(drift)),
             )
-        return result
+        return result, not drift
 
     def _collect_locks_for_place(
         self,

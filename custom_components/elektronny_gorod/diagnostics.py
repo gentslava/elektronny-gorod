@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from homeassistant.components.diagnostics import REDACTED, async_redact_data
+from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from yarl import URL
 
 from ._logging import SENSITIVE_KEYS
 from .coordinator import async_get_coordinator
@@ -29,62 +28,20 @@ from .const import (
 from .http import redact_request_id
 
 # Источник правды по секретам — SENSITIVE_KEYS из _logging.py (ADR-0004).
-# Дополняем PII-идентификаторами, которые не секреты, но не должны утекать в
-# публично расшаренную diagnostics-выгрузку.
+# Дополняем PII-идентификаторами и CONF_GO2RTC_BASE_URL (URL может содержать
+# userinfo, токен в path reverse proxy или query-параметрах и не требуется в
+# публичном контракте diagnostics — A-126 / S-30).
 TO_REDACT: frozenset[str] = SENSITIVE_KEYS | {
     CONF_PHONE,
     CONF_CONTRACT,
     CONF_OPERATOR_ID,
     CONF_ACCOUNT_ID,
     CONF_SUBSCRIBER_ID,
+    CONF_GO2RTC_BASE_URL,
     "title",
     "name",
     "address",
 }
-
-
-def _sanitize_url_credentials(value: Any) -> Any:
-    """Mask inline userinfo and strip query/fragment secrets from URL strings."""
-    if value is None or value == "" or value == REDACTED:
-        return value
-    if not isinstance(value, str):
-        return REDACTED
-    try:
-        parsed = URL(value)
-    except ValueError:
-        return REDACTED
-    if parsed.scheme.lower() not in ("http", "https") or not parsed.host:
-        return REDACTED
-    if (
-        parsed.raw_user is None
-        and parsed.raw_password is None
-        and not parsed.raw_query_string
-        and not parsed.raw_fragment
-    ):
-        return value
-    cleaned = (
-        parsed.with_user("***" if parsed.raw_user is not None else None)
-        .with_password("***" if parsed.raw_password is not None else None)
-        .with_query(None)
-        .with_fragment(None)
-    )
-    return str(cleaned)
-
-
-def _redact_entry_urls(value: Any) -> Any:
-    """Recursively sanitize CONF_GO2RTC_BASE_URL in serialized entry dicts."""
-    if isinstance(value, dict):
-        return {
-            key: (
-                _sanitize_url_credentials(item)
-                if key == CONF_GO2RTC_BASE_URL
-                else _redact_entry_urls(item)
-            )
-            for key, item in value.items()
-        }
-    if isinstance(value, list):
-        return [_redact_entry_urls(item) for item in value]
-    return value
 
 
 async def async_get_config_entry_diagnostics(
@@ -92,7 +49,7 @@ async def async_get_config_entry_diagnostics(
 ) -> dict[str, Any]:
     """Вернуть redact-нутую диагностику config entry."""
     diagnostics: dict[str, Any] = {
-        "entry": _redact_entry_urls(async_redact_data(entry.as_dict(), TO_REDACT)),
+        "entry": async_redact_data(entry.as_dict(), TO_REDACT),
     }
 
     # Снимок coordinator — только счётчики (без значений/PII) и безопасная WAF-сводка.
