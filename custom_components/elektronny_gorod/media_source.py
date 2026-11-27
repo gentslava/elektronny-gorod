@@ -428,12 +428,15 @@ class ElektronnyGorodMediaSource(MediaSource):
         streams[key] = session
         try:
             session.start(source)
-            if not await self._wait_archive_session_ready(
-                entry_id, session, deadline
-            ):
+            ready = await self._wait_archive_session_ready(entry_id, session, deadline)
+            if archive_sessions_by_id(self._hass).get(session.session_id) is not session:
+                # Another entry may have evicted the session while we waited.
+                # Eviction already scheduled its stop.
+                return None
+            if self._is_inactive(entry_id, coordinator):
+                raise Unresolvable("Unknown media item")
+            if not ready:
                 stop_archive_session_in_background(self._hass, session)
-                if self._is_inactive(entry_id, coordinator):
-                    raise Unresolvable("Unknown media item")
                 LOGGER.debug(
                     "Media source archive stream not ready for "
                     "camera_id=%s event_id=%s; live view",
@@ -441,9 +444,6 @@ class ElektronnyGorodMediaSource(MediaSource):
                     event.id,
                 )
                 return None
-            if self._is_inactive(entry_id, coordinator):
-                stop_archive_session_in_background(self._hass, session)
-                raise Unresolvable("Unknown media item")
             return PlayMedia(
                 url=session.playlist_url(self._hass),
                 mime_type=_MIME_HLS_FRONTEND,

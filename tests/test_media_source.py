@@ -1488,6 +1488,74 @@ async def test_resolve_archive_waits_for_first_segment_and_handles_failure(
     assert not (hass.data.get("elektronny_gorod_archive_streams") or {})
 
 
+async def test_resolve_archive_evicted_during_ready_cleanup_falls_back_to_live(
+    hass, monkeypatch
+) -> None:
+    """Another entry can evict a session while its resolver cleans up waiters."""
+    import asyncio
+
+    from custom_components.elektronny_gorod import archive_hls
+    from custom_components.elektronny_gorod.media_source import async_stop_archive_streams
+
+    monkeypatch.setattr(archive_hls, "_MAX_ACTIVE_SESSIONS", 1)
+    _coordinator_a, entry_a, day = _realtime_archive_entry(hass)
+    _coordinator_b, entry_b, day_b = _realtime_archive_entry(hass)
+    source = _source(hass)
+    cleaning_up = asyncio.Event()
+    release_cleanup = asyncio.Event()
+    created: list = []
+
+    class PausedFailEvent(asyncio.Event):
+        async def wait(self) -> bool:
+            try:
+                return await super().wait()
+            except asyncio.CancelledError:
+                cleaning_up.set()
+                await release_cleanup.wait()
+                raise
+
+    def _produce_first_segment(session, _url):
+        if session.entry_id == entry_a.entry_id:
+            session.fail_event = PausedFailEvent()
+        hass.loop.call_soon(session.add_segment, 2.0, b"SEG0")
+
+    with (
+        _patch_archive_start(side_effect=_produce_first_segment, created=created),
+        _patch_camera_resolve() as camera_resolve,
+        patch.object(
+            archive_hls.ArchiveHlsSession,
+            "stop",
+            autospec=True,
+            side_effect=archive_hls.ArchiveHlsSession.stop,
+        ) as stop,
+    ):
+        resolve_a = asyncio.create_task(
+            source.async_resolve_media(_resolve_item(hass, entry_a, day_str=day))
+        )
+        try:
+            await asyncio.wait_for(cleaning_up.wait(), timeout=1.0)
+            play_b = await asyncio.wait_for(
+                source.async_resolve_media(_resolve_item(hass, entry_b, day_str=day_b)),
+                timeout=1.0,
+            )
+            session_a, session_b = (session for session, _ in created)
+            assert archive_hls.archive_sessions_by_id(hass) == {
+                session_b.session_id: session_b
+            }
+            assert play_b.url.split("?", 1)[0].endswith(
+                f"/{session_b.session_id}/playlist.m3u8"
+            )
+        finally:
+            release_cleanup.set()
+            play_a = await resolve_a
+            await async_stop_archive_streams(hass, entry_a.entry_id)
+            await async_stop_archive_streams(hass, entry_b.entry_id)
+
+    camera_resolve.assert_awaited_once()
+    assert play_a.url == _LIVE_PLAY_URL
+    assert sum(call.args == (session_a,) for call in stop.await_args_list) == 1
+
+
 def _observe_archive_timeouts(monkeypatch, observe) -> None:
     """Observe real timeout handles only in the archive resolver."""
     import asyncio

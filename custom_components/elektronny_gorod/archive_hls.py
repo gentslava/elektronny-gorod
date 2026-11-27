@@ -343,16 +343,26 @@ class _TsSegment:
         if remaining <= 0:
             raise _SegmentBudgetExceeded("Archive session byte budget exhausted")
         bio = io.BytesIO()
-        writer = _LimitedBytesWriter(bio, remaining)
-        out = av.open(
-            writer,
-            mode="w",
-            format="mpegts",
-            container_options={"mpegts_copyts": "1"},
-        )
-        ovs = out.add_stream_from_template(vs)
-        oas = out.add_stream_from_template(as_) if as_ is not None else None
-        return cls(bio=bio, out=out, vs=ovs, as_=oas)
+        out = None
+        try:
+            out = av.open(
+                _LimitedBytesWriter(bio, remaining),
+                mode="w",
+                format="mpegts",
+                container_options={"mpegts_copyts": "1"},
+            )
+            ovs = out.add_stream_from_template(vs)
+            oas = out.add_stream_from_template(as_) if as_ is not None else None
+            return cls(bio=bio, out=out, vs=ovs, as_=oas)
+        except BaseException:
+            try:
+                if out is not None:
+                    # Preserve the setup error if closing the incomplete output fails.
+                    with contextlib.suppress(Exception):
+                        out.close()
+            finally:
+                bio.close()
+            raise
 
     def close(self, *, take_bytes: bool) -> bytes:
         """Finalize the muxer and release the buffer even if its trailer fails."""
@@ -428,16 +438,10 @@ class _FlvTsMuxer:
         if pkt.stream == self._vs:
             return self._feed_video(pkt)
         if self._seg is not None and self._seg.as_ is not None:
-            self._mux_rebased(pkt, self._seg.as_)
+            if _rebase_packet(pkt, self._base_sec, self._prev_dts):
+                pkt.stream = self._seg.as_
+                self._seg.out.mux(pkt)
         return False
-
-    def _mux_rebased(self, pkt: Any, target_stream: Any) -> None:
-        assert self._base_sec is not None
-        assert self._seg is not None
-        if not _rebase_packet(pkt, self._base_sec, self._prev_dts):
-            return
-        pkt.stream = target_stream
-        self._seg.out.mux(pkt)
 
     def _emit_current(self, duration: float | None) -> bool:
         seg_bytes = self._close_current(take_bytes=duration is not None)
@@ -456,9 +460,14 @@ class _FlvTsMuxer:
         return True
 
     def _feed_video(self, pkt: Any) -> bool:
+        # Keep the source timestamp for segment timing after rebasing the packet.
+        source_dts = pkt.dts
+        assert self._base_sec is not None
+        if not _rebase_packet(pkt, self._base_sec, self._prev_dts):
+            return False
         if self._seg_start_dts is None:
-            self._seg_start_dts = pkt.dts
-        elapsed = float((pkt.dts - self._seg_start_dts) * self._vs.time_base)
+            self._seg_start_dts = source_dts
+        elapsed = float((source_dts - self._seg_start_dts) * self._vs.time_base)
         if elapsed > self._max_segment_duration:
             self._aborted = True
             return True
@@ -466,12 +475,13 @@ class _FlvTsMuxer:
             if not self._rotate_segment(elapsed):
                 self._aborted = True
                 return True
-            self._seg_start_dts = pkt.dts
-        self._last_v_dts = pkt.dts
+            self._seg_start_dts = source_dts
+        self._last_v_dts = source_dts
         if pkt.duration:
             self._last_v_dur = pkt.duration
         assert self._seg is not None
-        self._mux_rebased(pkt, self._seg.vs)
+        pkt.stream = self._seg.vs
+        self._seg.out.mux(pkt)
         return False
 
     def finish(self) -> int:
