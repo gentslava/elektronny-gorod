@@ -315,3 +315,120 @@ async def test_end_releases_held_call_when_answer_raises() -> None:
 
     held.release.assert_called_once()
     assert mgr.holding is False
+
+
+@pytest.mark.parametrize("stage", ["registered", "invite"])
+async def test_register_and_hold_cancelled_closes_sip_and_reraises(stage: str) -> None:
+    """A-122: отмена register_and_hold закрывает SipProtocol/transport и не течёт порт."""
+    loop = asyncio.get_running_loop()
+    registered = loop.create_future()
+    invite = loop.create_future()
+    if stage == "invite":
+        registered.set_result(True)
+    protocol = MagicMock(registered=registered, invite=invite)
+    transport = MagicMock()
+    opened = asyncio.Event()
+
+    async def _open_endpoint(factory, **_kwargs):
+        factory()
+        opened.set()
+        return transport, protocol
+
+    mgr = SipManager(fcm_token="FCM")
+    with (
+        patch(f"{_MGR}.socket.gethostbyname", return_value="192.0.2.1"),
+        patch(f"{_MGR}._outbound_ip", return_value="192.0.2.2"),
+        patch(f"{_MGR}.SipProtocol", return_value=protocol),
+        patch.object(loop, "create_datagram_endpoint", AsyncMock(side_effect=_open_endpoint)),
+    ):
+        task = asyncio.create_task(
+            mgr.register_and_hold(
+                AsyncMock(return_value={"login": "u", "password": "p", "realm": "sip.test"}),
+                fcm_call_id="c1",
+            )
+        )
+        await asyncio.wait_for(opened.wait(), 1.0)
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    protocol.close.assert_called_once()
+    transport.close.assert_called_once()
+    assert mgr.holding is False
+    assert mgr._held is None
+
+
+@pytest.mark.parametrize("error", [asyncio.CancelledError, OSError])
+async def test_accept_partial_open_error_or_cancel_releases_held(
+    error: type[BaseException],
+) -> None:
+    """A-122: отмена или OSError при открытии RTP отпускает _held и пробрасывает ошибку."""
+    sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 7078 RTP/AVP 0\r\n"
+    mgr, held = _manager_holding(sdp)
+    loop = asyncio.get_running_loop()
+
+    with patch.object(loop, "create_datagram_endpoint", AsyncMock(side_effect=error)):
+        with pytest.raises(error):
+            await mgr.accept()
+
+    assert mgr._held is None
+    assert mgr._active is None
+    held.release.assert_called_once()
+
+    # Следующий hold/accept на том же менеджере не заблокирован.
+    held2 = _held_with_body(sdp)
+    mgr._held = held2
+    rtp_transport = MagicMock()
+    rtp_session = MagicMock()
+    rtp_session.run_uplink = AsyncMock(return_value=None)
+    with patch.object(
+        loop, "create_datagram_endpoint", AsyncMock(return_value=(rtp_transport, rtp_session))
+    ):
+        assert await mgr.accept() is True
+    await mgr.async_hangup()
+
+
+async def test_accept_answer_failure_closes_opened_rtp_transport_and_releases_held() -> None:
+    """A-122: сбой sip.answer() после создания RTP-сокета закрывает RTP и held."""
+    mgr, held = _manager_holding("v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 7078 RTP/AVP 0\r\n")
+    held.sip.answer.side_effect = OSError("tx fail")
+    rtp_transport = MagicMock()
+    rtp_session = MagicMock()
+    loop = asyncio.get_running_loop()
+
+    with patch.object(
+        loop, "create_datagram_endpoint", AsyncMock(return_value=(rtp_transport, rtp_session))
+    ):
+        with pytest.raises(OSError):
+            await mgr.accept()
+
+    rtp_transport.close.assert_called_once()
+    held.release.assert_called_once()
+    assert mgr._active is None
+    assert mgr._held is None
+
+
+async def test_async_answer_fallback_cancel_releases_held() -> None:
+    """A-122: отмена fallback async_answer после register_and_hold не теряет _held."""
+    sdp = "v=0\r\nc=IN IP4 192.0.2.1\r\nm=audio 7078 RTP/AVP 0\r\n"
+    mgr = SipManager(fcm_token="FCM")
+    held = _held_with_body(sdp)
+
+    async def _hold(*_a, **_k):
+        mgr._held = held
+        return True
+
+    with (
+        patch.object(mgr, "register_and_hold", AsyncMock(side_effect=_hold)),
+        patch.object(
+            asyncio.get_running_loop(),
+            "create_datagram_endpoint",
+            AsyncMock(side_effect=asyncio.CancelledError),
+        ),
+    ):
+        with pytest.raises(asyncio.CancelledError):
+            await mgr.async_answer(AsyncMock(return_value={}))
+
+    assert mgr._held is None
+    held.release.assert_called_once()

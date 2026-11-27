@@ -1552,3 +1552,120 @@ async def test_ring_after_cancelled_answer_is_not_ignored():
     assert len(tasks) == 1, "звонок B после прерванного ответа проигнорирован"
     _drop_tasks(tasks)
     assert c.current_call().call_id == "c2"
+
+
+async def test_answer_cancel_during_bridge_start_stops_bridge_and_clears_sink():
+    """A-122: отмена async_answer во время bridge.start() останавливает мост и сбрасывает sink."""
+    c, tasks = _collecting_controller()
+    c._go2rtc = MagicMock(base_url="http://127.0.0.1:1984", headers={})
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+
+    started = asyncio.Event()
+    never = asyncio.Event()
+
+    async def _hang():
+        started.set()
+        await never.wait()
+
+    with (
+        patch(f"{_CC}.detect_lan_ip", return_value="192.0.2.10"),
+        patch(f"{_CC}.AudioBridge") as BridgeCls,
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock(side_effect=_hang)
+        bridge.stop = AsyncMock()
+
+        answer = asyncio.create_task(c.async_answer())
+        await asyncio.wait_for(started.wait(), 1.0)
+        answer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await answer
+
+    bridge.stop.assert_awaited_once()
+    assert c._bridge is None
+    assert c._uplink_sink is None
+    assert not c._answer_lock.locked()
+
+
+async def test_answer_cancel_during_held_accept_cleans_bridge_manager_and_allows_next_call():
+    """A-122: отмена accept() на держимом вызове гасит мост, sink, manager и пускает новый звонок."""
+    c, tasks = _collecting_controller()
+    c._go2rtc = MagicMock(base_url="http://127.0.0.1:1984", headers={})
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+
+    accepting = asyncio.Event()
+    never = asyncio.Event()
+
+    async def _accept(**_k):
+        accepting.set()
+        await never.wait()
+
+    held = _manager_mock(holding=True, in_call=False)
+    held.accept = AsyncMock(side_effect=_accept)
+    c._manager = held
+
+    with (
+        patch(f"{_CC}.detect_lan_ip", return_value="192.0.2.10"),
+        patch(f"{_CC}.AudioBridge") as BridgeCls,
+        patch(f"{_CC}.remove_audio_stream", new=AsyncMock()) as remove_stream,
+        patch(f"{_CC}.async_get_clientsession"),
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock()
+        bridge.stop = AsyncMock()
+
+        answer = asyncio.create_task(c.async_answer())
+        await asyncio.wait_for(accepting.wait(), 1.0)
+        answer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await answer
+
+        bridge.stop.assert_awaited_once()
+        remove_stream.assert_awaited_once()
+        assert c._bridge is None
+        assert c._uplink_sink is None
+        assert c._manager is None
+        assert not c._answer_lock.locked()
+
+        # Следующий вызов и ответ на этом же контроллере проходят без блокировок.
+        c.handle_signal(_ring(ac="B", call_id="c2"))
+        _drop_tasks(tasks)
+        next_mgr = _manager_mock(holding=True, in_call=False)
+        next_mgr.accept = AsyncMock(return_value=True)
+        c._manager = next_mgr
+        assert await c.async_answer() is True
+        assert c._bridge is bridge
+
+
+@pytest.mark.parametrize("with_held_manager", [True, False])
+async def test_switch_caller_resets_displaced_panel_to_idle_without_ended(
+    with_held_manager: bool,
+):
+    """A-121: при смене звонящего вытесненная панель уходит в `idle`, не в `ended`."""
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(place="P1", ac="A", call_id="c1"))
+    if with_held_manager:
+        c._manager = _manager_mock(holding=True, in_call=False)
+
+    c.handle_signal(_ring(place="P1", ac="B", call_id="c2"))
+    _drop_tasks(tasks)
+
+    payloads = _call_state_payloads(c._hass)
+    a_states = [p for p in payloads if p["access_control_id"] == "A"]
+    b_states = [p for p in payloads if p["access_control_id"] == "B"]
+    assert [p["state"] for p in a_states] == [CALL_STATE_RINGING, CALL_STATE_IDLE]
+    assert a_states[-1]["call_id"] is None
+    assert a_states[-1]["started_at"] is None
+    assert all(p["state"] != CALL_STATE_ENDED for p in payloads)
+    assert [p["state"] for p in b_states] == [CALL_STATE_RINGING]
+
+    # Повторный звонок на панель A даёт свежий переход в ringing.
+    if with_held_manager:
+        c._manager = _manager_mock(holding=True, in_call=False)
+    c.handle_signal(_ring(place="P1", ac="A", call_id="c3"))
+    _drop_tasks(tasks)
+    assert [
+        p["state"] for p in _call_state_payloads(c._hass) if p["access_control_id"] == "A"
+    ] == [CALL_STATE_RINGING, CALL_STATE_IDLE, CALL_STATE_RINGING]

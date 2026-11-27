@@ -197,39 +197,41 @@ class SipManager:
             ),
             local_addr=("0.0.0.0", SIP_LOCAL_PORT), remote_addr=(registrar_ip, SIP_PORT),
         )
-        # connection_made уже отработал к этому моменту и создал оба future;
-        # проверка нужна, чтобы отказ транспорта не превращался в AttributeError
-        # посреди ожидания.
-        if sip.registered is None or sip.invite is None:
-            LOGGER.warning("SIP: транспорт не инициализировал ожидания — отмена hold")
-            sip.close()
-            sip_transport.close()
-            return False
-        registered, invite = sip.registered, sip.invite
-
-        # Узкий except: единственный реальный исход wait_for здесь — timeout (протокол
-        # резолвит future только set_result, не set_exception); OSError — на случай
-        # сбоя datagram-транспорта. Программные ошибки (KeyError на creds и т.п.) НЕ
-        # глотаем — пусть всплывают в контроллер (P2-1).
+        committed = False
         try:
-            await asyncio.wait_for(registered, timeout=REGISTER_TIMEOUT)
-        except (asyncio.TimeoutError, OSError):
-            LOGGER.warning("SIP: REGISTER не подтверждён за %.0fs — отмена hold", REGISTER_TIMEOUT)
-            sip.close()
-            sip_transport.close()
-            return False
-        try:
-            invite_msg, addr = await asyncio.wait_for(invite, timeout=INVITE_TIMEOUT)
-        except (asyncio.TimeoutError, OSError):
-            LOGGER.warning("SIP: INVITE не пришёл за %.0fs после REGISTER — отмена hold", INVITE_TIMEOUT)
-            sip.close()
-            sip_transport.close()
-            return False
+            # connection_made уже отработал к этому моменту и создал оба future;
+            # проверка нужна, чтобы отказ транспорта не превращался в AttributeError
+            # посреди ожидания.
+            if sip.registered is None or sip.invite is None:
+                LOGGER.warning("SIP: транспорт не инициализировал ожидания — отмена hold")
+                return False
+            registered, invite = sip.registered, sip.invite
 
-        sip.send_trying()  # 100 Trying — держим вызов «звонящим», без авто-ответа
-        self._held = HeldCall(sip, sip_transport, invite_msg, addr, local_ip)
-        LOGGER.info("SIP: вызов держится (100 Trying) — ждём «Ответить» или CANCEL")
-        return True
+            # Узкий except: единственный реальный исход wait_for здесь — timeout (протокол
+            # резолвит future только set_result, не set_exception); OSError — на случай
+            # сбоя datagram-транспорта. Программные ошибки (KeyError на creds и т.п.) НЕ
+            # глотаем — пусть всплывают в контроллер (P2-1). Отмена (CancelledError) закрывает
+            # транспорт в finally перед пробросом наверх (A-122).
+            try:
+                await asyncio.wait_for(registered, timeout=REGISTER_TIMEOUT)
+            except (asyncio.TimeoutError, OSError):
+                LOGGER.warning("SIP: REGISTER не подтверждён за %.0fs — отмена hold", REGISTER_TIMEOUT)
+                return False
+            try:
+                invite_msg, addr = await asyncio.wait_for(invite, timeout=INVITE_TIMEOUT)
+            except (asyncio.TimeoutError, OSError):
+                LOGGER.warning("SIP: INVITE не пришёл за %.0fs после REGISTER — отмена hold", INVITE_TIMEOUT)
+                return False
+
+            sip.send_trying()  # 100 Trying — держим вызов «звонящим», без авто-ответа
+            self._held = HeldCall(sip, sip_transport, invite_msg, addr, local_ip)
+            committed = True
+            LOGGER.info("SIP: вызов держится (100 Trying) — ждём «Ответить» или CANCEL")
+            return True
+        finally:
+            if not committed:
+                sip.close()
+                sip_transport.close()
 
     async def accept(self, on_downlink: Callable[[bytes], None] | None = None) -> bool:
         """На «Ответить»: 200 OK на держимый INVITE → RTP latching. True при успехе."""
@@ -238,29 +240,37 @@ class SipManager:
             LOGGER.warning("SIP: accept без держимого вызова — игнор")
             return False
         loop = asyncio.get_running_loop()
-        # SDP-offer — untrusted network input (INVITE body): пустой fmts / отсутствие
-        # audio — валидный SDP без payload → degrade (release + False), а не краш →
-        # утечка моста в контроллере (P1-1).
-        media = _media_from_offer(held.invite_msg.body)
-        if media is None:
-            LOGGER.warning("SIP: SDP-offer без пригодного audio/payload — degrade")
-            held.release()
-            return False
-        pt, codec, door_ip, door_port = media
+        rtp_transport: asyncio.BaseTransport | None = None
+        committed = False
+        try:
+            # SDP-offer — untrusted network input (INVITE body): пустой fmts / отсутствие
+            # audio — валидный SDP без payload → degrade (release + False), а не краш →
+            # утечка моста в контроллере (P1-1).
+            media = _media_from_offer(held.invite_msg.body)
+            if media is None:
+                LOGGER.warning("SIP: SDP-offer без пригодного audio/payload — degrade")
+                return False
+            pt, codec, door_ip, door_port = media
 
-        rtp_transport, rtp = await loop.create_datagram_endpoint(
-            lambda: RtpSession(pt, on_downlink=on_downlink),
-            local_addr=("0.0.0.0", RTP_LOCAL_PORT),
-        )
-        # 200 OK мгновенно (локальный SDP → latching), затем сразу RTP uplink.
-        held.sip.answer(held.invite_msg, held.addr, held.local_ip, RTP_LOCAL_PORT, pt, codec)
-        stop = asyncio.Event()
-        uplink_task = loop.create_task(
-            rtp.run_uplink(door_ip, door_port, self._frame_provider, stop)
-        )
-        self._active = ActiveCall(held.sip, held.sip_transport, rtp_transport, uplink_task, stop)
-        LOGGER.info("SIP: вызов принят (PT=%s %s), latching uplink запущен", pt, codec)
-        return True
+            rtp_transport, rtp = await loop.create_datagram_endpoint(
+                lambda: RtpSession(pt, on_downlink=on_downlink),
+                local_addr=("0.0.0.0", RTP_LOCAL_PORT),
+            )
+            # 200 OK мгновенно (локальный SDP → latching), затем сразу RTP uplink.
+            held.sip.answer(held.invite_msg, held.addr, held.local_ip, RTP_LOCAL_PORT, pt, codec)
+            stop = asyncio.Event()
+            uplink_task = loop.create_task(
+                rtp.run_uplink(door_ip, door_port, self._frame_provider, stop)
+            )
+            self._active = ActiveCall(held.sip, held.sip_transport, rtp_transport, uplink_task, stop)
+            committed = True
+            LOGGER.info("SIP: вызов принят (PT=%s %s), latching uplink запущен", pt, codec)
+            return True
+        finally:
+            if not committed:
+                if rtp_transport is not None:
+                    rtp_transport.close()
+                held.release()
 
     async def async_answer(
         self,
@@ -272,7 +282,15 @@ class SipManager:
         """Fallback register-on-answer: hold+accept одним вызовом (если held-фазы не было)."""
         if not await self.register_and_hold(mint_creds, fcm_call_id=fcm_call_id):
             return False
-        return await self.accept(on_downlink)
+        committed = False
+        try:
+            ok = await self.accept(on_downlink)
+            committed = True
+            return ok
+        finally:
+            if not committed and self._held is not None:
+                held, self._held = self._held, None
+                held.release()
 
     async def async_hangup(self) -> None:
         """Завершить активный (BYE) или снять держимый вызов + cleanup."""

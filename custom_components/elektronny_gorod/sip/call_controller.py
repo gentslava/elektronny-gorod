@@ -222,7 +222,25 @@ class DoorbellCallController:
             else:
                 # register-on-ring: держим SIP сразу (зеркало приложения, ADR-0012).
                 task = self._async_hold_current()
+            prev_active = self._active
             self._active = active
+            if (
+                prev_active is not None
+                and (prev_active.place_id, prev_active.access_control_id)
+                != (active.place_id, active.access_control_id)
+            ):
+                # Вытесняемый домофон сходит с `ringing` в `idle` (не `ended`, чтобы
+                # общая карточка переключилась на новый вызов без экрана «Завершён», A-121).
+                self._hass.bus.async_fire(
+                    EVENT_CALL_STATE,
+                    {
+                        "place_id": prev_active.place_id,
+                        "access_control_id": prev_active.access_control_id,
+                        "state": CALL_STATE_IDLE,
+                        "call_id": None,
+                        "started_at": None,
+                    },
+                )
             self._emit_call_state(CALL_STATE_RINGING)
             self._schedule_ring_timeout()  # страховка залипшего ringing (нет `ended`)
             self._hass.async_create_task(task)
@@ -335,16 +353,25 @@ class DoorbellCallController:
                 return False
 
             self._emit_call_state(CALL_STATE_CONNECTING)
-            bridge, on_downlink = await self._setup_audio_bridge(call)
+            bridge: AudioBridge | None = None
             self.downlink_packets = 0
             self._cancel_hold_timeout()
+            held_manager = (
+                self._manager
+                if self._manager is not None and self._manager.holding
+                else None
+            )
+            accept_started = False
 
             # accept/async_answer парсят SDP-offer из сети (untrusted). Если accept
             # регрессирует и кинет — мост (ffmpeg + HTTP-сервер) обязан быть снят,
-            # иначе течёт (P1-1). Зеркалим teardown ниже на любом исходе.
+            # иначе течёт (P1-1). При отмене задачи (CancelledError) тоже снимаем
+            # мост, uplink_sink и потреблённый held-менеджер, затем пробрасываем отмену (A-122).
             try:
-                if self._manager is not None and self._manager.holding:
-                    ok = await self._manager.accept(on_downlink=on_downlink)  # быстрый путь
+                bridge, on_downlink = await self._setup_audio_bridge(call)
+                if held_manager is not None:
+                    accept_started = True
+                    ok = await held_manager.accept(on_downlink=on_downlink)  # быстрый путь
                 else:
                     # Fallback: held не поднялся → register-on-answer (приём не регрессирует).
                     manager = SipManager(
@@ -367,6 +394,8 @@ class DoorbellCallController:
             except Exception:  # noqa: BLE001 — degrade: мост снять, экран живёт от FCM
                 LOGGER.warning("SIP answer: accept/register упал — снимаю мост (degrade)",
                                exc_info=True)
+                if accept_started and self._manager is held_manager:
+                    self._manager = None
                 # Контракт `error` (review P2): терминальное состояние неудачного
                 # ответа. Естественно сбрасывается следующим `ended`/CANCEL/новым
                 # `ring`; карточка вызова (Slice 3b) сама гасит error по таймеру —
@@ -375,6 +404,12 @@ class DoorbellCallController:
                 self._clear_uplink_sink()
                 await self._teardown_audio_bridge(bridge)
                 return False
+            except BaseException:
+                if accept_started and self._manager is held_manager:
+                    self._manager = None
+                self._clear_uplink_sink()
+                await self._teardown_audio_bridge(bridge)
+                raise
 
             if ok:
                 self._bridge = bridge
@@ -382,6 +417,8 @@ class DoorbellCallController:
                 self._fire_call_state(True)
                 self._schedule_call_timeout()
             else:
+                if accept_started and self._manager is held_manager:
+                    self._manager = None
                 self._emit_call_state(CALL_STATE_ERROR)
                 self._clear_uplink_sink()
                 await self._teardown_audio_bridge(bridge)
@@ -690,6 +727,9 @@ class DoorbellCallController:
             LOGGER.warning("Аудио-мост не поднялся — медиа недоступно (degrade)")
             await bridge.stop()
             return None, self._on_downlink
+        except BaseException:
+            await bridge.stop()
+            raise
         LOGGER.info("Аудио-мост поднят (стрим вызова соберёт camera.intercom_call)")
         return bridge, bridge.feed_downlink
 
