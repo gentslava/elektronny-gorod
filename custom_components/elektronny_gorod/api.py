@@ -488,7 +488,7 @@ class ElektronnyGorodAPI:
         if not isinstance(response, ClientResponse):
             raise TypeError(f"Unexpected response type: {type(response)!r}")
         data = await response.json()
-        return data or {}
+        return data
 
     async def query_dnd_settings(self, place_id: str) -> list[dict[str, Any]]:
         """Get Do Not Disturb settings for a place.

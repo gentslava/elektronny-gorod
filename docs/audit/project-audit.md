@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-11-26 (A-92 merged in PR #108)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-11-27 (backlog reconciled with master d4e0512)
 
 Source files:
 - `custom_components/elektronny_gorod/**`
@@ -179,6 +179,7 @@ Quality gates:
 
 ### A-19. Широкий `except Exception` в API + `e.args[0]`
 
+- **Status:** 🟡 ЧАСТИЧНО ЗАКРЫТО — чтение HTTP-статуса через `e.args[0]` заменили на `http.error_status()`. Остаток — сужение исключений в API вместе с A-20.
 - **Area:** Robustness
 - **Evidence:** [`api.py:61-66`](../../custom_components/elektronny_gorod/api.py#L61-L66), [`api.py:88-91`](../../custom_components/elektronny_gorod/api.py#L88-L91) и пр.
 - **Impact:** `e.args[0]` может бросить `IndexError` для исключений без args.
@@ -213,6 +214,7 @@ Quality gates:
 
 ### A-24. Нет workflow для pytest
 
+- **Status:** ✅ **RESOLVED** — workflow Python Tests проверяет минимальную и текущую HA (`51fd3fb`).
 - **Area:** CI
 - **Evidence:** `.github/workflows/` содержит только hassfest, hacs, release.
 - **Recommended fix:** см. [`testing/strategy.md`](../testing/strategy.md).
@@ -245,11 +247,13 @@ Quality gates:
 
 ### A-30. `extra_state_attributes` ключи `Title Case`
 
+- **Status:** ✅ **RESOLVED** — ключи в snake_case с переводами (PR #92, `6142672`).
 - **Evidence:** [`lock.py:62-71`](../../custom_components/elektronny_gorod/lock.py#L62-L71), [`sensor.py:75-80`](../../custom_components/elektronny_gorod/sensor.py#L75-L80)
 - **Recommended fix:** snake_case (`place_id`, `access_control_id`, ...).
 
 ### A-31. `time.py` использует local time
 
+- **Status:** ✅ **RESOLVED** — используется UTC (`56aa225`). Доказательства в A-117.
 - **Evidence:** [`time.py:8`](../../custom_components/elektronny_gorod/time.py#L8)
 - **Recommended fix:** UTC или явный timezone.
 
@@ -275,11 +279,13 @@ Quality gates:
 
 ### A-37. `parallel_updates` не задан
 
+- **Status:** ✅ **RESOLVED** — платформы объявляют `PARALLEL_UPDATES` (PR #96, `8106437`).
 - **Area:** HA-compat / IQS Silver
 - **Recommended fix:** атрибут на entity-классах.
 
 ### A-38. Нет обработки unavailable / log-when-unavailable
 
+- **Status:** ✅ **RESOLVED** — координатор сообщает о недоступности и восстановлении (PR #96, `8106437`).
 - **Area:** HA-compat / IQS Silver
 - **Recommended fix:** см. правила IQS.
 
@@ -305,7 +311,7 @@ Quality gates:
 
 ### A-42. Camera availability частично закрыт (улучшение)
 
-- **Status:** PARTIALLY RESOLVED в PR #27.
+- **Status:** АРХИВ — историческое улучшение из PR #27. CameraEntity уже перешла на координатор в A-09/A-44.
 - **Evidence:** [`camera.py:197-225`](../../custom_components/elektronny_gorod/camera.py#L197-L225) — `_attr_available`/`_attr_is_on` устанавливаются по факту наличия stream_url.
 - **Что осталось:** logic находится в `async_update` и `stream_source`, а не идёт через coordinator — связано с A-09 (CoordinatorEntity). Полный fix требует перехода на coordinator pattern.
 
@@ -384,6 +390,7 @@ Quality gates:
 ### A-52. Header `traceparent` не отправляется
 
 - **Severity:** P3
+- **Status:** ⏸ ОТЛОЖЕНО — влияния отсутствия `traceparent` на работу интеграции не наблюдали. Вернуться при подтверждённом требовании API.
 - **Evidence:** в HAR каждый запрос приложения содержит W3C trace context: `traceparent: 00-<32hex>-<16hex>-01`. У нас этого нет.
 - **Impact:** теоретически мог бы помочь оператору при поддержке — но в нашем случае это просто **отклонение от паттерна приложения**.
 - **Recommended fix:** генерировать `traceparent` per-request в `http.py` (uuid4 → 32 hex для trace, 16 hex для span). Не критично, но облегчает «зеркалирование».
@@ -404,6 +411,7 @@ Quality gates:
 
 ### A-55. Unread response body в `request_sms_code`
 
+- **Status:** 🔴 OPEN — проверить освобождение ответа SMS на success-path с длинным телом. Один пакет работ с A-19/A-20.
 - **Severity:** P2 (выявлен code-reviewer-ом во время review ветки `feat/shared-client-session`).
 - **Evidence:** [`api.py:request_sms_code`](../../custom_components/elektronny_gorod/api.py) (около строк 93-117) — после `await self.http.post(...)` метод просто `return` без чтения body. С прежним per-request `ClientSession` connection закрывался автоматически при exit `async with`. С shared session (после ADR-0008) — connection возвращается в pool только после consume body или GC.
 - **Impact:** под нагрузкой может удерживать connection в "in-use" состоянии дольше необходимого. Не блокер, но slightly менее эффективно.
@@ -561,6 +569,7 @@ Quality gates:
 
 ### A-67. Cold-start go2rtc state mismatch
 
+- **Status:** ⏸ ОТЛОЖЕНО — старые прогревы не устранили видимую паузу. Принятый opt-in сценарий внешнего RTSP подтверждён отдельно в A-96.
 - **Severity:** P2 (UX — 30-60 sec lag после HA restart до восстановления стримов).
 - **Area:** HA Stream lifecycle / go2rtc integration.
 - **Evidence (2026-05-27 12:57 log):**
@@ -863,7 +872,7 @@ Quality gates:
 
 ### A-84. go2rtc config bloat — стрим дописывается, а не мёржится (unbounded)
 
-- **Status:** 🟡 **PARTIALLY RESOLVED in `feat/go2rtc-stream-manager`; live config-persistence check remains.**
+- **Status:** 🟡 **MITIGATED** — PATCH-only в `master` (PR #71, `bf5ba9b`). Проверить размер сохранённого конфига после повторного обновления источника и рестарта go2rtc.
 - **Severity:** **P2 (real bug + security-smell)** — не косметика: конфиг растёт безгранично, протухшие operator-токены копятся на диске.
 - **Area:** `go2rtc.py:Go2RtcClient.async_patch_stream` (+ `upsert_audio_stream` для call stream), go2rtc config-persist.
 - **Evidence (прод, 2026-06-23, найдено пользователем):** в `go2rtc_homekit.yml` **сотни** повторяющихся блоков `streams:`, каждый — одна камера со свежим operator-RTSP вида `ffmpeg:https://forpost-NN.novotelecom.ru:18081/rtsp/<accId>/<TOKEN>/d=1#video=copy#audio=aac#audio=opus` (TOKEN ротируется per-fetch). Симптом в логах: `go2rtc cleanup failed: 400 yaml: path not exist` (DELETE не находит стрим в дублирующемся YAML).
@@ -944,7 +953,7 @@ Quality gates:
 
 ### A-93. Guest invitation есть в приложении, но нет HA action
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `feat/guest-invite`, pending merge.
+- **Status:** ✅ **RESOLVED** — действие `create_home_invite` в `master` (PR #100, `05bc922`). Подтверждён NTK-контракт. ERTH остаётся static-only.
 - **Severity:** P2 feature gap; **security-sensitive**.
 - **Evidence:** AVD «Мой Дом» 9.9.0: People → Add guest показывает QR и share-link. APK Retrofit/DTO: `POST /api/mh-auth/mobile/v1/guests/link` с query `placeId`, `app`; response `{data:{link,message}}`. NTK `app=2`, ERTH `app=4`. Decrypted runtime capture подтвердил NTK POST без body, HTTP 200 response и HTTP 401 non-JSON при отсутствующем Authorization. Runtime link не сохранён, потому что это access credential.
 - **Current behavior:** `query_places(place_id)` уже может получить people relations, но action создания приглашения отсутствует.
@@ -955,9 +964,9 @@ Quality gates:
 - **Non-goal:** принимать invitation за гостя или публиковать people names/ account IDs в entity attributes.
 - **Plan:** [`features/mobile-app-parity`](../features/mobile-app-parity/README.md).
 
-### A-118. Временный доступ по выбранным объектам (resolved-in-branch)
+### A-118. Временный доступ по выбранным объектам
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `feat/temporary-access`, pending merge. Путь A (`mh-temp-pass` на `myhome.proptech.ru`, наш текущий токен). Действия `create_temporary_access` / `list_temporary_access` / `revoke_temporary_access`, admin-only, ссылка под редакцией. Чтение и отзыв подтверждены живой пробой; создание static-only (ADR-0006) — подтвердится у первого пользователя с подключённой услугой `TEMP_PASS`.
+- **Status:** ✅ **RESOLVED** — действия временного доступа в `master` (PR #101, `cfc69c7`). Успешную выдачу и отзыв действующего пропуска ещё предстоит проверить на адресе с `TEMP_PASS`.
 - **Severity:** P2 feature gap; **security-sensitive** (выдача доступа к физическим точкам входа).
 - **Живая проба 2026-10-05** (`research/scripts/probe-temp-pass.py`, наш текущий токен «Мой Дом», только чтение; значения маскированы, S-25): чтение `mh-temp-pass` работает нашим токеном без новой авторизации. `time-to-life` → `[3600, 14400, 43200, 86400]` — **сроки в секундах: 1 ч, 4 ч, 12 ч, 24 ч** (единицы раньше были неизвестны). `access-controls` → список объектов с полями `{id, name, roleName, externalId}` (в статике было `{id, name}`). Список выданных пропусков — пуст. `POST` создания → **404** (услуга `TEMP_PASS` на адресе не подключена: в перехваченном `available-features` аккаунта её нет). `DELETE /{id}` → 500 на несуществующем id (маршрут существует и доходит до сервиса), `GET /{id}` → 405 (путь известен только для DELETE). Вывод: читающая часть и маршруты отзыва доступны нашим токеном; блокирует только провижининг услуги оператором, и это не задача интеграции.
 - **Путь B (гостевой доступ ЭГ) отклонён как дорогой.** Живая проба (`research/scripts/probe-eg-guests.py`): Keycloak `api.novotelecom.ru/auth/realms/weblk` выдаёт токен по тем же логину/паролю владельца (аккаунт общий), но этот токен `myhome.proptech.ru` отвергает (401), а `my.2090000.ru` закрыт anti-MITM WAF (403 вне зависимости от токена). Три сторонние интеграции (`lolmaxlevel/domru-ha`, `moleus/domru`, `ad/domru`) работают только через `myhome.proptech.ru` с собственной auth proptech (SHA1+MD5 / SMS); Keycloak, `2090000` и гостевой доступ не трогает ни одна. Итог: ЭГ-путь требует второй авторизации + обход WAF + второй бэкенд; `mh-temp-pass` даёт ту же функцию одним нашим токеном.
@@ -980,7 +989,7 @@ Quality gates:
 
 ### A-119. Поднятие `APP_VERSION` не доходило до уже настроенных записей
 
-- **Status:** 🟢 **resolved-in-branch** — ветка `feat/guest-invite`, pending merge.
+- **Status:** ✅ **RESOLVED** — версия приложения обновляется и у существующих записей (PR #100, `05bc922`).
 - **Severity:** P2; расхождение с ADR-0006 (mirror app behavior).
 - **Evidence:** `user_agent.py:from_json` восстанавливал `app_version` из `entry.data[CONF_USER_AGENT]`, а записывался этот ключ только при создании записи, reauth и миграции v1→v2. Пути «освежить версию у существующей записи» не было. Проба на записи v3 с сохранённым `9.9.0`: `str(user_agent)` давал `… | 9.9.0 (90900020) | …` при константе 9.10.0; то же значение уходило в `appVersion`/`appVersionCode` при регистрации push.
 - **Почему это класс, а не разовая ошибка:** так же не доехали все прошлые бампы — версия фиксировалась в момент настройки аккаунта и жила вечно.
@@ -1047,15 +1056,15 @@ Quality gates:
 
 ### A-98. PR Pre-Release падал с 403 для PR из форка
 
-- **Status:** 🟡 REMEDIATION-IN-REVIEW — фикс в `master`, acceptance ждёт первого fork-PR.
+- **Status:** ✅ **RESOLVED** — PR #82 и `c9f7590` в `master`. Повторный прогон внешнего PR #81 действительно опубликовал `pr-81` с ZIP.
 - **Severity:** P2 CI/release.
+- **Сверка:** `approval_policy=all_external_contributors` подтверждена через GitHub API. [Публикация pr-81](https://github.com/gentslava/elektronny-gorod/actions/runs/33657307307/job/100338951541) и [cleanup после merge](https://github.com/gentslava/elektronny-gorod/actions/runs/33657563396) прошли.
 - **Area:** `.github/workflows/prerelease.yaml`, `prerelease-publish.yaml`, `prerelease-cleanup.yaml`.
 - **Evidence (2026-09-01):** run [33506288560](https://github.com/gentslava/elektronny-gorod/actions/runs/33506288560) на PR #81 — `Resource not accessible by integration` (HTTP 403) при создании релиза `pr-81`; первый прогон того же PR получил статус `action_required`. Настройка репозитория при этом `default_workflow_permissions: write`, а прогоны с веток самого репозитория (`release/4.0.1`, `fix/fcm-circuit-breaker`) успешны.
 - **Root cause:** для события `pull_request` из форка GitHub всегда выдаёт read-only `GITHUB_TOKEN`; это не переопределяется ни настройкой репозитория, ни блоком `permissions:` в workflow. Прежняя одностадийная схема создавала релиз прямо из прогона на коде PR и потому работала только для веток внутри репозитория.
 - **Fix:** сборка zip отделена от публикации. Публикация выполняется на событии `workflow_run` в контексте base-репозитория, где токен может иметь `contents: write`. Номер PR не берётся из артефакта (он подконтролен автору fork-PR и позволял бы перезаписать пререлиз чужого PR), а резолвится по доверенному `workflow_run.head_sha` через API. Публикацию для форков гейтит штатное одобрение прогона мейнтейнером (`approval_policy: all_external_contributors`), которое GitHub требует заново на каждый push: без него сборка не доходит до `conclusion == success`. Cleanup переведён на `pull_request_target`, поскольку при закрытии fork-PR токен точно так же read-only.
 - **Known limitations:** гейт публикации живёт **вне репозитория** — это настройка Actions `approval_policy`, которая должна иметь значение `all_external_contributors`; проверяется через `gh api repos/gentslava/elektronny-gorod/actions/permissions/fork-pr-contributor-approval`. Ни один файл репозитория не сломается и не предупредит, если её понизят: при дефолтном для публичных репозиториев `first_time_contributors` возвращающийся внешний контрибьютор получает прогон без одобрения, тот доходит до `conclusion: success`, и сборка публикуется автоматически. Одобрение прогона — общая кнопка на все workflow PR, поэтому решение «прогнать тесты» и решение «раздать сборку пользователям HACS» не разделены. Состояние PR перепроверяется непосредственно перед созданием релиза. Экшены закреплены мажорными тегами, а не SHA: решение владельца, поскольку пины без ручного обслуживания фиксируют и будущие уязвимости; цена — доверие к переносимому тегу в job с `contents: write`. Релиз пересоздаётся (delete + create), поэтому при сбое создания PR временно остаётся без пререлиза.
-- **Follow-up:** `permissions` не заданы в `hacs.yaml`, `hassfest.yaml`, `python-tests.yaml` — при `default_workflow_permissions: write` они получают write-токен и запускают сторонние экшены с mutable-ref (`hacs/action@main`, `hassfest@master`). Отдельно стоит завести `.github/dependabot.yml` для экосистемы `github-actions`: остальные workflow всё ещё сидят на `actions/checkout@v4` и `actions/upload-artifact@v4` при актуальных `v7`, а `hacs/action@main` и `hassfest@master` вообще не версионированы.
-- **Acceptance:** первый fork-PR после merge проверяется вручную — `workflow_run` и `pull_request_target` читаются GitHub только из default-ветки, поэтому до merge схема непроверяема.
+- **Связанный долг CI:** Python Tests уже имеет `contents: read`. HACS и hassfest наследуют `write` из настроек репозитория. Для них отдельно сузить права до требуемого минимума и проверить пины сторонних actions.
 
 ### A-109. Заявка Silver была поднята и отозвана в тот же день
 
@@ -1135,6 +1144,14 @@ Quality gates:
 - **Промежуточная попытка была неверной и отозвана.** Сначала я завёл жалобу по фронту прямо в транспорте — `warning` на первый отказ пары «путь + статус». `ha-expert` и `security-auditor` независимо показали, что ключ по пути не работает в обе стороны: места, различающиеся только query-строкой (`finance?placeId=`), схлопываются в один ключ, и при двух местах успех одного чистит отметку другого — те же 288 записей в сутки; а на endpoint-ах с идентификатором в пути (архивная запись) ключ, наоборот, размножается, и `warning` приходит на каждый штатный «клип старше срока хранения». Транспорт вернулся к `debug`.
 - **Как закрыто на самом деле (для данных координатора; история — отдельный хвост, записан в [A-112](project-audit.md)):** отказ перестали глотать в `query_cameras`, `query_public_cameras`, `query_screens_settings` и `query_dnd_settings` — пустой ответ оператора и его молчание разные вещи, и различить их может только вызывающий. Координатор уже логировал по фронту с правильной гранулярностью «вид данных + место», просто до него отказ не доходил. Источники камер разведены под отдельные фронты, чтобы отказ по общедомовым не уносил камеру домофона у двери.
 
+### A-126. Diagnostics выгружает учётные данные из URL go2rtc
+
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — ремедиация на ревью в ветке `fix/backlog-a126-a122-a121-a116` (pending merge). Семантическое закрытие в `✅ RESOLVED` — после merge в `master`.
+- **Severity:** **P1** — если URL содержит учётные данные, они попадут в выгрузку diagnostics, которой пользователь может поделиться.
+- **Evidence:** OptionsFlow сохраняет нормализованный `go2rtc_base_url`, включая userinfo. Diagnostics применяет редакцию по ключам к `entry.as_dict()`. Ключ URL отсутствует в `TO_REDACT`. Две изолированные пробы с синтетическим URL воспроизвели дефект в `entry.data` и `entry.options`.
+- **Ремедиация (в ветке, pending merge):** `CONF_GO2RTC_BASE_URL` добавлен в `TO_REDACT` в `diagnostics.py`, поэтому `async_redact_data` полностью маскирует значение в `entry.data` и `entry.options` (защищая userinfo, reverse-proxy path tokens, query/fragment и не падая на битом punycode `xn--`), сохраняя сохранённые настройки подключения и config flow без изменений. Регрессии в `tests/test_diagnostics.py` и `test_backlog_go2rtc_diagnostics_probe.py` зелёные.
+- **Acceptance:** выгрузка маскирует URL в обоих хранилищах, включая уже настроенные записи. Настройки подключения сохраняются. См. [S-30](security.md#s-30-учётные-данные-в-url-go2rtc-попадают-в-diagnostics).
+
 ### A-124. Идущее событие в медиабраузере бесконечно грузится вместо просмотра
 
 - **Status:** ✅ **RESOLVED** — шаг 2 в `master` (`665b40c`, [PR #106](https://github.com/gentslava/elektronny-gorod/pull/106)). Старт с первого кадра подтверждён на синтетическом FLV через HA Media Source.
@@ -1167,25 +1184,26 @@ Quality gates:
 
 ### A-122. Отменённый ответ на вызов не освобождает SIP/RTP-порты и аудиомост
 
-- **Status:** 🔴 OPEN.
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — ремедиация на ревью в ветке `fix/backlog-a126-a122-a121-a116` (`f95284d`, pending merge). Семантическое закрытие в `✅ RESOLVED` — после merge в `master`.
 - **Severity:** **P1** — надёжность: после отменённого ответа следующие вызовы могут не подняться, пока HA не перезапущен. Триггер узкий (только внешняя отмена вызова `answer`; карточка вызывает его без ожидания), но последствие тяжёлое.
-- **Area:** `sip/call_controller.py:async_answer` (fallback register-on-answer и `_setup_audio_bridge`), `sip/manager.py:accept`.
+- **Area:** `sip/call_controller.py:async_answer` (fallback register-on-answer и `_setup_audio_bridge`), `sip/manager.py:register_and_hold` / `accept` / `async_answer`.
 - **Evidence (2026-10-26):** чтение кода при ревью PR #103. `async_answer` ловит `except Exception`, но не `CancelledError`. Если задачу ответа отменить (скрипт остановлен, автоматизация в `mode: restart`), уже поднятый `AudioBridge` остаётся на 40020 и не попадает в `self._bridge`. Fallback-путь: локальный `SipManager` при отмене внутри `register_and_hold` держит SIP-порт 5066 (RTP 40016 занимается только в `accept`) и не попадает в `self._manager`. Путь держимого вызова: `accept` первым делом забирает `_held`, поэтому отмена на `create_datagram_endpoint` оставляет SIP-транспорт на 5066, который `async_hangup` этого менеджера уже не видит.
+- **Сверка на текущем master:** синтетическая отмена держимого `accept` оставляет мост, а отмена или `OSError` при создании RTP-сокета оставляет держимый SIP-вызов без освобождения.
+- **Ремедиация (в ветке, pending merge):** `SipManager.register_and_hold`, `SipManager.accept` и `SipManager.async_answer` защищены `try/finally` до фиксации результата — закрывают `sip`/`sip_transport`/`rtp_transport` и освобождают потреблённый `_held` при `CancelledError`, `OSError` или некорректном SDP с пробросом отмены/исключения. В `DoorbellCallController` `_setup_audio_bridge` останавливает мост при `BaseException`; `async_answer` через единый `_rollback_aborted_answer` при `Exception`, `CancelledError` или `not ok` локально останавливает непубликованный мост (без remote go2rtc `DELETE` и риска `TimeoutError`), очищает `_uplink_sink`, тихо отвязывает и освобождает принадлежащее этой попытке held-плечо (`async_hangup`) и выводит фазу из `connecting` в `error` без вмешательства в другой вызов (штатный `hangup`/BYE для опубликованного моста по-прежнему чистит go2rtc stream через `_teardown_audio_bridge`). Регрессии в `tests/test_sip_manager.py`, `tests/test_sip_call_controller.py` и пробах зелёные.
 - **Следствие:** следующий REGISTER или мост получают `OSError` на занятом порту и деградируют до отказа. `sensor.*_call_state` остаётся в `connecting`: ring-таймаут выходит, если фаза не `ringing`.
-- **Граница:** не исправлено. Гвард ответа из A-120 смотрит на занятость `_answer_lock`, поэтому после отмены он не залипает навсегда; но пока лок держит другой владелец (hold-таймаут, поставленный в очередь hold) при устаревшей фазе `connecting`, звонок может быть кратко отброшен.
+- **Граница:** гвард ответа из A-120 смотрит на занятость `_answer_lock`, поэтому после отмены он не залипает навсегда; поведение проброса `CancelledError` и деградации при `Exception` сохранено.
 
 ### A-121. После смены звонящего сенсор вытесненной панели остаётся в `ringing`
 
-- **Status:** 🔴 OPEN.
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — ремедиация на ревью в ветке `fix/backlog-a126-a122-a121-a116` (`f95284d`, pending merge). Семантическое закрытие в `✅ RESOLVED` — после merge в `master`.
 - **Severity:** **P2** — UX: автоматизации на `to: ringing` у вытесненной панели не срабатывают на её следующий звонок; экран вызова не страдает.
 - **Area:** `sip/call_controller.py:handle_signal` (ветка смены звонящего A-89), `_on_idle_reset`, `sensor.py:_handle_call_state`.
 - **Evidence (2026-10-26):** чтение кода `code-reviewer` при ревью PR #103. При смене звонящего (A-89) контроллер намеренно не эмитит `ended` за вытесненный вызов, чтобы единая карточка не мигала «Завершён», и сразу публикует `ringing` нового вызова. `sensor.*_call_state` фильтрует `EVENT_CALL_STATE` по своим `access_control_id`/`place_id`, поэтому сенсор вытесненной панели ни одного события больше не получает; `_on_idle_reset` эмитит `idle` с идентификаторами нового вызова и его тоже не возвращает.
-- **Следствие:** сенсор вытесненной панели остаётся `ringing` до её следующего события; её следующий звонок даёт переход `ringing` → `ringing` без смены состояния, и state-триггер `to: ringing` не срабатывает.
-- **Граница:** не исправлено; фикс должен закрыть фазу сенсора вытесненной панели, не возвращая мигание «Завершён» на карточке.
+- **Ремедиация (в ветке, pending merge):** при переключении `handle_signal` на другой `(place_id, access_control_id)` контроллер отправляет адресный `EVENT_CALL_STATE` со state `idle` (`call_id=None`, `started_at=None`) для вытесненной панели до публикации `ringing` нового вызова, а дедуп в `_emit_call_state` учитывает `(place_id, access_control_id, call_id)` (чтобы переключение при `call_id=None` не подавлялось по `None == None`). `eg-intercom-call-card.ts` переходит сразу к новому звонящему без `_enterEnded`, а сенсор первой панели выходит в `idle` и снова переходит `idle → ringing` на следующем звонке. Регрессии в `tests/test_sip_call_controller.py`, `tests/test_sensor_call_state.py` и пробах зелёные.
 
 ### A-120. Открытие двери и «Отклонить» без ответа не завершают вызов на панели
 
-- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — фикс в `master` (`dadbef4`, PR #103, [#98](https://github.com/gentslava/elektronny-gorod/issues/98)); acceptance ждёт живой проверки на проде и подтверждения автора #98.
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — фикс в `master` (PR #103, `dadbef4`). [#98](https://github.com/gentslava/elektronny-gorod/issues/98) закрыт до фикса. Отбой на панели при открытии двери и «Отклонить» ещё предстоит подтвердить на живом HA.
 - **Severity:** **P2** — панель, трубка в квартире и телефоны семьи звонят до таймаута (~30 с) после того, как дверь уже открыта или вызов отклонён в HA.
 - **Area:** `lock.py:async_unlock` (только REST `accessControlOpen`, SIP не затрагивается), `sip/manager.py:HeldCall.release` / `SipManager.async_hangup` (держимый вызов снимается закрытием сокетов без финального ответа), `sip/call_controller.py:async_hangup`.
 - **Diagnostic evidence (2026-10-26, до изменения production-кода):** Android PCAP штатного приложения синхронно с DEBUG-логом HA на семи звонках; разбор — [call-answer-model.md](../features/intercom-two-way-audio/call-answer-model.md) §6a. Открытие через HA без ответа: в логе HA `100 Trying` без финального ответа, вызов звонит до +30 с. Ответ в приложении → «Открыть»: `200 OK` → REST-открытие → `BYE` от приложения, панель отпускает сразу, HA получает `CANCEL`. Приложение `200 OK` → `BYE` через 0,8 с без RTP — тоже немедленное завершение.
@@ -1195,9 +1213,9 @@ Quality gates:
 - **Граница:** когда регистратор оператора не отвечает и HA не держит вызов (4 из 7 звонков сеанса), сбросить панель нечем; это не регрессия и закрывается отдельно, если будет доказан путь.
 - **Как закрыто (PR #103, `dadbef4`, план [plan-end-call-on-open.md](../features/intercom-two-way-audio/plan-end-call-on-open.md) `issue-98/r1`):** `SipProtocol` различает `ACK` и засчитывает только `ACK` с Call-ID своего диалога; `SipManager.async_end` завершает держимый вызов `200 OK` → `ACK` → `BYE` (`200 OK` повторяется, пока не придёт `ACK`: первый интервал T1 = 0,5 с, далее удваивается, общий предел 2 с; без `ACK` — `BYE` по пределу) без RTP и моста, активный — `BYE`; освобождение держимого вызова гарантировано и при отмене; `CANCEL` после нашего `200 OK` подтверждается без `487`. Сервис `hangup` идёт через `async_end`; замок после успешного открытия шлёт `SIGNAL_DOOR_OPENED`, контроллер завершает вызов только той же панели. Выгрузка записи, FCM `ended`, hold-таймаут и смена звонящего по-прежнему снимают держимый вызов тихо — на вызов, завершённый в другом месте, интеграция не отвечает; держимое плечо без активного вызова и `hangup` отпускает тихо. Экран гаснет до ожидания `ACK`, сбой сети его не оставляет звонить; звонок другой панели, пришедший во время ожидания, отбой не трогает. Открытие двери несёт вызов своей панели: если, пока оно ждало лок, позвонила другая панель, отбой ничего не трогает; повторный `ring` снимаемого вызова игнорируется и вызов не оживляет. Hold ставит SIP-плечо только для всё ещё активного вызова: если за время REGISTER/INVITE позвонила другая панель или пришёл FCM `ended`, устаревшее плечо отпускается тихо, и «Принять» не может ответить чужой панели; разговор, поднятый fallback-ответом, остаётся за принятым вызовом. Пока идёт ответ, `ring` игнорируется (как во время разговора), поэтому звонок другой панели не уходит в смену звонящего и не снимает принимаемое плечо; прерванный ответ этот гвард не оставляет. Строки 199/201 `call-card-ux-spec.md` приведены к этому поведению.
 
-### A-119. Камера, появившаяся после setup, есть в архиве, но не получает сущность
+### A-125. Камера, появившаяся после setup, есть в архиве, но не получает сущность
 
-- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — candidate `fix/97-late-camera-discovery`; подтверждение на установке автора [#97](https://github.com/gentslava/elektronny-gorod/issues/97) ожидается после PR pre-release.
+- **Status:** ✅ **RESOLVED** — PR #99 в `master` (`8ba7734`). Автор [#97 подтвердил](https://github.com/gentslava/elektronny-gorod/issues/97#issuecomment-5960419286) появление камер и работу потоков в go2rtc/Frigate на `pr-99`. Номер прежнего дубликата A-119 сохранён за обновлением версии приложения.
 - **Severity:** **P2** — камера не появляется в HA и исключена из публикации go2rtc до reload записи.
 - **Area:** `camera.py:async_setup_entry`, `media_source.py:_camera_visible`, `stream_manager.py:_enabled_registry_entry` / `_handle_registry_update`.
 - **Diagnostic evidence (2026-10-02, до изменения production-кода):** в изолированной копии `648d055` выполнена активная PHC-проба на синтетическом API. Сначала setup получает дверь без camera ID, затем refresh — ту же дверь с camera ID. Снимок после refresh: `coordinator camera=yes`, `archive=yes`, `entity registry=no`, `go2rtc publishable=no`; после reload: `entity registry=yes`, `publishable=yes`. Три диагностических проверки прошли на HA 2026.9.0b6; дополнительно проверены отключённая сущность и camera ID только на уровне AC. Эти пробы доказывают механизмы кода, а не фактическую причину у автора issue.
@@ -1208,7 +1226,7 @@ Quality gates:
 - **Plan revision:** `issue-97/r3`, approved scope by repository owner gentslava, 2026-10-02: исправление, PR, связанный beta release и просьба автору проверить результат. `r2` уточняет связанный callback-дефект; `r3` включает явно одобренное владельцем удаление дублирующего `audioop-lts` из manifest после CI-отказа hassfest. Execution mode: subagent-driven.
 - **Ownership / identities:** `camera_implementer` — `camera.py`, минимальная callback-правка `stream_manager.py` и `tests/test_camera_discovery.py`; root — manifest cleanup, docs, проверки и публикация. Independent read-only reviewer matrix: `code_reviewer` (5 осей), `ha_reviewer` (entity/coordinator/lifecycle), `qa_reviewer` (регрессии/tests), `security_reviewer` (hidden/disabled, privacy и отсутствие утечек). Финальные verdicts привязываются к clean committed base/head/tree; evidence публикуется в PR comment вне candidate tree.
 - **Acceptance:** новый непустой ID получает ровно одну camera-сущность на обновлении без reload, с привязкой к существующему entrance; повторные обновления и временная пропажа не создают дублей и не удаляют entity; disabled/hidden и пользовательский выбор сохраняются; unload снимает discovery listener. Registry create позволяет существующему stream manager обработать новую камеру по прежней политике.
-- **Verification / rollout:** RED regression до fix, focused GREEN и полный suite, security/reconciliation prechecks, clean freeze, независимые reviews, PR CI и проверка ассета `pr-N`. После установки беты автор сообщает отдельно о camera-сущности внутри Intercom и о потоке go2rtc; если проблема остаётся — нужны версии и состояние отсутствующей сущности. Issue остаётся открытым до подтверждения.
+- **Verification / rollout:** targeted regression, полный прогон, независимое ревью и CI PR #99 прошли. После проверки беты автор закрыл [#97](https://github.com/gentslava/elektronny-gorod/issues/97#issuecomment-5966314171).
 
 ### A-117. Метка времени при входе была местным временем с подписью `Z`
 
@@ -1223,10 +1241,11 @@ Quality gates:
 
 ### A-116. Отказ настроек видимости на старте стирает пользовательский выбор
 
-- **Status:** 🔴 OPEN.
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** — ремедиация на ревью в ветке `fix/backlog-a126-a122-a121-a116` (pending merge). Семантическое закрытие в `✅ RESOLVED` — после merge в `master`.
 - **Severity:** **P3** — потеря настройки, которую нечем восстановить.
 - **Area:** `__init__.py:_sync_visibility`, `coordinator.py` (фронт «Настройки экранов»).
 - **Evidence (2026-09-07):** найдено `ha-expert` при аттестации PR #96, механизм перепроверен по коду. Если `/settings/screens` недоступен в момент загрузки записи, фронт подставляет пустые множества скрытого, и для каждой сущности `api_hidden` становится `False`. Дальше в `_sync_visibility` за **один проход** срабатывают две ветки подряд: `not api_hidden and user_shown` снимает флаг `user_shown`, а следующая `elif not api_hidden` снимает `we_set_integration`. Оба признака стёрты.
+- **Ремедиация (в ветке, pending merge):** `api.py:query_screens_settings` возвращает сырой JSON без подмены `null`/`[]` на `{}`; единый разбор `_extract_hidden_ids` в `coordinator.py` возвращает `(hidden_ids, usable)` без дублирующих поверхностных проверок, отмечая `usable=False` при корне не-`dict`, отсутствии ключа `screens`, значении `screens` не-`list` (включая `None`, `{}` и `""`/`str`), разделе без `type`, `hidden` не-`list` или некорректном/отсутствующем `id` в нужной секции — при невалидном снимке фронт не помечается восстановленным (`_note_success` не вызывается), при этом сохраняются `{}` empty dict, пустые `hidden`, валидные ID (вкл. `0`) и mixed known/unknown типы разделов. `screens_failed_places` передаётся только при сбое/дрейфе, и `_sync_visibility` в `__init__.py` пропускает registry-записи для неверифицированных мест (и несопоставленных сущностей при сбое), не блокируя соседние места и сохраняя `hidden_by=USER` и снятие `hidden_by=INTEGRATION` на `{}`. Регрессии в `tests/test_visibility_user_override.py` (включая реальный `ElektronnyGorodAPI`), `tests/test_api_auth.py` и пробах зелёные.
 - **Почему это дефект:** `user_shown` — это записанный факт «человек нажал «Показывать на панели» у сущности, которую спрятала интеграция». После стирания он неотличим от «никогда не нажимал»: когда настройки вернутся и оператор снова отдаст сущность скрытой, интеграция спрячет её заново. Выбор человека восстановить нечем — он нигде больше не хранится.
 - **Смежная половина, записанная раньше:** сущности, скрытые интеграцией и **не** переопределённые человеком, на том же проходе показываются снова. Это заметно, но само чинится следующим успешным обновлением; потеря override — нет.
 - **Чего это не касается:** скрытие, выставленное человеком вручную (`hidden_by=USER`), не трогается — снимается только своё.

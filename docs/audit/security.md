@@ -1,4 +1,4 @@
-Status: Active Owner: Security & Privacy Agent Last reviewed: 2026-11-26 (A-92 ServicePipe / WAF no-leak and diagnostics redaction synced)
+Status: Active Owner: Security & Privacy Agent Last reviewed: 2026-11-27 (security backlog reconciled with master d4e0512)
 
 Source files:
 - `custom_components/elektronny_gorod/config_flow.py`
@@ -33,7 +33,7 @@ Quality gates:
 > чужой access_token в логах. **По состоянию на 2026-05-30 утечки нет** —
 > верифицировано по коду независимым security-аудитом (см. статусы S-01..S-06).
 
-## Сводка по состоянию на 2026-08-11
+## Сводка
 
 Проверка по текущему `master`: grep всех `LOGGER.*` в чувствительных файлах, построчный разбор `_logging.py`/`http.py`/`config_flow.py`/`api.py`/ `camera.py`/`go2rtc.py`/`diagnostics.py`, а также поиск credential-like значений в документации перед релизом.
 
@@ -45,8 +45,9 @@ Quality gates:
 | S-A71-01 | ✅ RESOLVED (new) | operator-токен в traceback при go2rtc PUT — оборван `from None` |
 | S-08 | ✅ RESOLVED | `diagnostics.py` redacts secrets/PII; coordinator snapshot — counters-only |
 | S-09 | ✅ RESOLVED | REST/binary `ClientTimeout` на GET/POST/DELETE operator API |
-| S-10 | 🟡 OPEN P1 | retry/backoff для идемпотентных GET пока не реализован |
-| S-16 | 🟡 MITIGATED P3 | go2rtc credentials redacted в diagnostics; plaintext HA storage остаётся |
+| S-10 | 🟡 OPEN | ограниченные повторы идемпотентных GET (A-21) |
+| S-30 | 🟡 REMEDIATION-IN-REVIEW | `CONF_GO2RTC_BASE_URL` внесён в `TO_REDACT` для `diagnostics` (pending merge) |
+| S-16 | 🟡 MITIGATED P3 | отдельные поля логина и пароля go2rtc маскируются; секреты в URL см. S-30 |
 | S-17/S-18 | 🟡 OPEN P3 | сырое логирование body/err в go2rtc.py (не активная утечка) |
 | S-19 | 🟢 ACCEPTED-by-design | uplink AuthZ (любой auth HA-юзер) + AudioBridge `0.0.0.0:40020` LAN-exposure (ADR-0013/A-85) |
 | S-20 | ✅ RESOLVED | production credential-like literal удалён из audit evidence; текущие production credentials не совпадают |
@@ -153,7 +154,7 @@ Quality gates:
 
 ### S-21. Mobile-app parity credential surfaces
 
-- **Status:** 🟡 **DESIGN GATE** для archive/guest/key/private-camera slices; durable history poll + browse boundary реализованы в `feat/durable-event-history`.
+- **Status:** 🟡 **DESIGN GATE** для будущих ключей доступа и личных камер. История, архив (включая EVENT HLS), приглашения и временный доступ уже в `master`.
 - **Scope:** [mobile-app-parity](../features/mobile-app-parity/README.md): archive/media, guest invitations, access keys and private-camera controls.
 - **Credential classes:**
   - guest `link`/invite UUID grants household access;
@@ -167,6 +168,13 @@ Quality gates:
 - **Guest residual — websocket_api на debug:** `homeassistant/components/websocket_api/http.py` пишет на DEBUG весь исходящий кадр целиком, а ответ действия лежит внутри кадра `call_service`. Человек, включивший `logger: default: debug` (или адресно `websocket_api: debug`) и создавший приглашение из «Инструментов разработчика», получает действующую ссылку в `home-assistant.log`. Интеграция на это повлиять не может: response-only действие обязано вернуть значение, а writer принадлежит ядру. Найдено `security-auditor`-ом при аттестации кандидата и воспроизведено через настоящий WS-клиент; наши sentinel-тесты этот сток увидеть не могут — они зовут `hass.services.async_call` и слой WS не проходят.
 - **Guest residual — трассировки HA:** ответ действия покидает интеграцию и попадает в трассировку скрипта, если вызывающий положил его в `response_variable`; трассировки HA хранит на диске. Интеграция на это повлиять не может, поэтому формулировка в `strings.json` ограничена интеграцией, а не HA целиком, и наружу отдаются только `link` и `message` — всё прочее, что прислал оператор (например `uuid` приглашения), отбрасывается до возврата.
 - **Merge gate:** static-only write paths реализуются по ADR-0006 — с пометкой «static-only», внятным отказом оператора и приёмкой по первому живому подтверждению. Пути, выдающие физический доступ, — временный доступ (A-118, `mh-temp-pass`) и ключи (A-94), — проходят каждый отдельную аттестацию `security-auditor`; записи в настройки камеры (A-95) — общую матрицу ревью.
+
+### S-30. Учётные данные в URL go2rtc попадают в diagnostics
+
+- **Status:** 🟡 **REMEDIATION-IN-REVIEW** (в ветке `fix/backlog-a126-a122-a121-a116`, pending merge; переводится в `✅ RESOLVED` после merge в `master`). Исходно P1. Условие — секрет введён в URL go2rtc и пользователь выгружает диагностику. В проверке использовались только синтетические данные.
+- **Evidence:** `normalize_base_url()` сохраняет userinfo/path/query в URL. Config Flow и OptionsFlow записывают URL; ранее `async_get_config_entry_diagnostics()` маскировала отдельные поля логина и пароля, а URL оставляла целиком.
+- **Remediation & Verification:** `CONF_GO2RTC_BASE_URL` добавлен в `TO_REDACT` в `diagnostics.py`, поэтому `async_redact_data()` полностью редактирует `go2rtc_base_url` в `entry.data` и `entry.options` (включая inline userinfo, токены в reverse-proxy path, query/fragment и malformed punycode `xn--`) без изменения сохранённых настроек подключения и config flow. Подтверждено `tests/test_diagnostics.py` и `test_backlog_go2rtc_diagnostics_probe.py`.
+- **Acceptance:** sentinel в userinfo или query не встречается в выгрузке из обоих хранилищ. Покрыть существующие записи, сохранив рабочий URL подключения. См. [A-126](project-audit.md#a-126-diagnostics-выгружает-учётные-данные-из-url-go2rtc).
 
 ## P2 — желательно
 
@@ -188,7 +196,7 @@ Quality gates:
 
 ### S-29. `apk-cert.py` не проверял подпись, а документация утверждала обратное
 
-- **Status:** ✅ **RESOLVED** — в ветке `feat/guest-invite`.
+- **Status:** ✅ **RESOLVED** — проверка подписи APK в `master` (PR #100, `05bc922`).
 - **Что было:** скрипт сверял отпечаток сертификата, а плейбук и разбор называли это проверкой подписи. Отпечаток не меняется, если у подлинного APK перевернуть байт в середине, не тронув блок подписи, — то есть подменённый пакет с зеркала проходил как подлинный.
 - **Fix:** скрипт стал верификатором схемы v2: подпись над `signed data` открытым ключом подписанта, соответствие сертификата ключу, пересчёт дайджеста содержимого. Блок подписи ищется по якорю спецификации — вплотную перед central directory, — а не поиском по файлу: иначе у XAPK находился блок вложенного APK, а вставка байтов между блоком и central directory проходила.
 - **Найдено:** `security-auditor` при аттестации кандидата `feat/guest-invite`; второй круг (якорь блока) — `security-auditor` и `code-reviewer`.
@@ -196,11 +204,11 @@ Quality gates:
 ### S-22. Frontend dev-toolchain advisories
 
 - **Status:** 🟡 **OPEN** (pre-existing; not shipped in the HACS runtime).
-- **Severity:** P2 effective project risk; `npm audit` rates the dependency chain as 3 moderate / 1 high / 1 critical.
+- **Severity:** P2 for developers using local development servers.
 - **Area:** Development dependencies.
-- **Evidence (2026-07-15):** `vitest@2.1.9` pulls vulnerable Vite/Vitest server code (`GHSA-5xrq-8626-4rwp`, `GHSA-fx2h-pf6j-xcff` and related advisories), while direct `esbuild@0.24.2` is affected by `GHSA-67mh-4wv8-2f99`.
+- **Evidence:** The frontend lockfile has direct `esbuild@0.28.1`. `vitest@2.1.9` and `vite@5.4.21` still pull advisories (`GHSA-5xrq-8626-4rwp`, `GHSA-fx2h-pf6j-xcff`), including nested `esbuild@0.21.5` (`GHSA-67mh-4wv8-2f99`).
 - **Impact:** production/HACS receives only the prebuilt static JS bundle and none of these packages. Repository scripts use `vitest run`, not the Vitest UI server, so the critical server path is not exposed by the documented workflow. A developer who exposes a Vite/Vitest dev server to an untrusted network remains at risk.
-- **Recommended fix:** separate dependency-only change to supported `vitest@4` and current esbuild, followed by all 56 frontend tests, TypeScript check, production build and bundle diff review. Do not use `npm audit fix --force` without reviewing the major-version migration.
+- **Recommended fix:** separate dependency-only change to supported `vitest@4` and current esbuild, followed by the full frontend test suite, TypeScript check, production build and bundle diff review. Do not use `npm audit fix --force` without reviewing the major-version migration.
 - **First step:** approve the dependency upgrade as its own focused task/commit.
 
 ### S-11. Логирование `Failed to fetch balance: %s` f-string

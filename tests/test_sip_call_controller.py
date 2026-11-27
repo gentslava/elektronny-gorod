@@ -332,9 +332,7 @@ async def test_answer_tears_down_bridge_when_accept_returns_false():
     # accept держимого вернул False (malformed SDP degrade) → мост закрыт, не течёт.
     c = _go2rtc_controller()
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(return_value=False)
     c._manager = held
 
@@ -359,9 +357,7 @@ async def test_answer_tears_down_bridge_when_accept_raises():
     # контроллер не должен утечь ffmpeg + HTTP-сервер AudioBridge.
     c = _go2rtc_controller()
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(side_effect=ValueError("malformed SDP"))
     c._manager = held
 
@@ -459,9 +455,7 @@ async def test_answer_accepts_held_invite_without_reregister():
     api.mint_sip_device = AsyncMock(return_value={"login": "l", "password": "p", "realm": "r"})
     c = DoorbellCallController(_hass(), api, lambda: "TOK")
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(return_value=True)
     c._manager = held  # имитируем поднятый hold
     ok = await c.async_answer()
@@ -633,9 +627,7 @@ async def test_uplink_sink_cleared_when_accept_fails():
     # accept вернул False → sink снят (не течёт в следующий вызов).
     c = _go2rtc_controller()
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(return_value=False)
     c._manager = held
 
@@ -701,9 +693,7 @@ async def test_call_state_ended_on_hangup(controller):
 async def test_call_state_error_emitted_when_accept_raises():
     c = _go2rtc_controller()
     c.handle_signal(_ring())
-    held = MagicMock()
-    held.holding = True
-    held.in_call = False
+    held = _manager_mock(holding=True, in_call=False)
     held.accept = AsyncMock(side_effect=ValueError("malformed SDP"))
     c._manager = held
     with patch(f"{_CC}.AudioBridge") as BridgeCls, patch(
@@ -1534,9 +1524,9 @@ async def test_stale_hold_leg_released_after_ring_expiry():
 
 
 async def test_ring_after_cancelled_answer_is_not_ignored():
-    """Прерванный ответ (отмена задачи сервиса) не глушит следующие звонки.
+    """Прерванный ответ (отмена задачи сервиса) не глушит следующие звонки и сбрасывает `connecting`.
 
-    Фаза остаётся `connecting`, но лок отпущен — гвард «идёт ответ» снят.
+    После отмены фаза выходит из `connecting` в `error`, а лок отпущен.
     """
     gate = asyncio.Event()
     c, tasks, _held = _answering_controller(gate, "accept")
@@ -1545,10 +1535,204 @@ async def test_ring_after_cancelled_answer_is_not_ignored():
     answer.cancel()
     with pytest.raises(asyncio.CancelledError):
         await answer
-    assert _call_states(c._hass)[-1] == CALL_STATE_CONNECTING, "предпосылка"
+    assert _call_states(c._hass)[-1] == CALL_STATE_ERROR, "фаза вышла из connecting"
 
     c.handle_signal(_ring(ac="B", call_id="c2"))
 
     assert len(tasks) == 1, "звонок B после прерванного ответа проигнорирован"
     _drop_tasks(tasks)
     assert c.current_call().call_id == "c2"
+
+
+async def test_answer_cancel_during_bridge_start_stops_bridge_and_clears_sink():
+    """A-122: отмена async_answer во время bridge.start() останавливает мост, sink и выходит из connecting."""
+    c, tasks = _collecting_controller()
+    c._go2rtc = MagicMock(base_url="http://127.0.0.1:1984", headers={})
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+
+    started = asyncio.Event()
+    never = asyncio.Event()
+
+    async def _hang():
+        started.set()
+        await never.wait()
+
+    with (
+        patch(f"{_CC}.detect_lan_ip", return_value="192.0.2.10"),
+        patch(f"{_CC}.AudioBridge") as BridgeCls,
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock(side_effect=_hang)
+        bridge.stop = AsyncMock()
+
+        answer = asyncio.create_task(c.async_answer())
+        await asyncio.wait_for(started.wait(), 1.0)
+        answer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await answer
+
+    bridge.stop.assert_awaited_once()
+    assert c._bridge is None
+    assert c._uplink_sink is None
+    assert c._active is None
+    assert _call_states(c._hass)[-1] == CALL_STATE_ERROR
+    assert not c._answer_lock.locked()
+
+
+async def test_answer_cancel_during_bridge_setup_releases_held_manager_and_watchdogs():
+    """A-122: отмена до accept_started освобождает уже held-менеджер, снимает watchdogs и не держит connecting."""
+    c, tasks = _collecting_controller()
+    c._go2rtc = MagicMock(base_url="http://127.0.0.1:1984", headers={})
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    held = _manager_mock(holding=True, in_call=False)
+    c._manager = held
+    c._schedule_hold_timeout()
+    assert c._hold_timeout is not None
+    assert c._ring_timeout is not None
+
+    started = asyncio.Event()
+    never = asyncio.Event()
+
+    async def _hang(_call):
+        started.set()
+        await never.wait()
+
+    with patch.object(c, "_setup_audio_bridge", side_effect=_hang):
+        answer = asyncio.create_task(c.async_answer())
+        await asyncio.wait_for(started.wait(), 1.0)
+        answer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await answer
+
+    held.detach.assert_called_once()
+    held.async_hangup.assert_awaited_once()
+    assert c._manager is None
+    assert c._hold_timeout is None
+    assert c._ring_timeout is None
+    assert c._active is None
+    assert _call_states(c._hass)[-1] == CALL_STATE_ERROR
+    assert not c._answer_lock.locked()
+
+
+async def test_answer_bridge_oserror_releases_held_manager_and_returns_false():
+    """A-122: OSError в _setup_audio_bridge до accept освобождает held_manager и не делает remote DELETE."""
+    c, tasks = _collecting_controller()
+    c._go2rtc = MagicMock(base_url="http://127.0.0.1:1984", headers={})
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+    held = _manager_mock(holding=True, in_call=False)
+    c._manager = held
+    c._schedule_hold_timeout()
+    assert c._hold_timeout is not None
+
+    with (
+        patch(f"{_CC}.detect_lan_ip", side_effect=OSError("no udp socket")),
+        patch(f"{_CC}.remove_audio_stream", new=AsyncMock()) as remove_stream,
+    ):
+        assert await c.async_answer() is False
+
+    held.detach.assert_called_once()
+    held.async_hangup.assert_awaited_once()
+    remove_stream.assert_not_awaited()
+    assert c._manager is None
+    assert c._hold_timeout is None
+    assert c._uplink_sink is None
+    assert _call_states(c._hass)[-1] == CALL_STATE_ERROR
+    assert not c._answer_lock.locked()
+
+
+async def test_answer_cancel_during_held_accept_cleans_bridge_manager_and_allows_next_call():
+    """A-122: отмена accept() локально стопит непубликованный мост (без go2rtc DELETE) и пускает новый звонок."""
+    c, tasks = _collecting_controller()
+    c._go2rtc = MagicMock(base_url="http://127.0.0.1:1984", headers={})
+    c.handle_signal(_ring(ac="A", call_id="c1"))
+    _drop_tasks(tasks)
+
+    accepting = asyncio.Event()
+    never = asyncio.Event()
+
+    async def _accept(**_k):
+        accepting.set()
+        await never.wait()
+
+    held = _manager_mock(holding=True, in_call=False)
+    held.accept = AsyncMock(side_effect=_accept)
+    c._manager = held
+
+    session = MagicMock()
+    session.delete.return_value.__aenter__.side_effect = TimeoutError
+
+    with (
+        patch(f"{_CC}.detect_lan_ip", return_value="192.0.2.10"),
+        patch(f"{_CC}.AudioBridge") as BridgeCls,
+        patch(f"{_CC}.remove_audio_stream", new=AsyncMock()) as remove_stream,
+        patch(f"{_CC}.async_get_clientsession", return_value=session),
+    ):
+        bridge = BridgeCls.return_value
+        bridge.start = AsyncMock()
+        bridge.stop = AsyncMock()
+
+        answer = asyncio.create_task(c.async_answer())
+        await asyncio.wait_for(accepting.wait(), 1.0)
+        answer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await answer
+
+        bridge.stop.assert_awaited_once()
+        remove_stream.assert_not_awaited()
+        session.delete.assert_not_called()
+        held.detach.assert_called_once()
+        held.async_hangup.assert_awaited_once()
+        assert c._bridge is None
+        assert c._uplink_sink is None
+        assert c._manager is None
+        assert not c._answer_lock.locked()
+
+        # Следующий вызов и ответ на этом же контроллере проходят без блокировок,
+        # а штатный hangup опубликованного моста по-прежнему чистит go2rtc stream.
+        c.handle_signal(_ring(ac="B", call_id="c2"))
+        _drop_tasks(tasks)
+        next_mgr = _manager_mock(holding=True, in_call=False)
+        next_mgr.accept = AsyncMock(return_value=True)
+        c._manager = next_mgr
+        assert await c.async_answer() is True
+        assert c._bridge is bridge
+        assert await c.async_hangup() is True
+        remove_stream.assert_awaited_once()
+
+
+@pytest.mark.parametrize("call_ids", [("c1", "c2", "c3"), (None, None, None)])
+@pytest.mark.parametrize("with_held_manager", [True, False])
+async def test_switch_caller_resets_displaced_panel_to_idle_without_ended(
+    with_held_manager: bool,
+    call_ids: tuple[str | None, str | None, str | None],
+):
+    """A-121: при смене звонящего (с call_id или None) вытесненная панель уходит в `idle`, не в `ended`."""
+    id1, id2, id3 = call_ids
+    c, tasks = _collecting_controller()
+    c.handle_signal(_ring(place="P1", ac="A", call_id=id1))
+    if with_held_manager:
+        c._manager = _manager_mock(holding=True, in_call=False)
+
+    c.handle_signal(_ring(place="P1", ac="B", call_id=id2))
+    _drop_tasks(tasks)
+
+    payloads = _call_state_payloads(c._hass)
+    a_states = [p for p in payloads if p["access_control_id"] == "A"]
+    b_states = [p for p in payloads if p["access_control_id"] == "B"]
+    assert [p["state"] for p in a_states] == [CALL_STATE_RINGING, CALL_STATE_IDLE]
+    assert a_states[-1]["call_id"] is None
+    assert a_states[-1]["started_at"] is None
+    assert all(p["state"] != CALL_STATE_ENDED for p in payloads)
+    assert [p["state"] for p in b_states] == [CALL_STATE_RINGING]
+
+    # Повторный звонок на панель A даёт свежий переход в ringing.
+    if with_held_manager:
+        c._manager = _manager_mock(holding=True, in_call=False)
+    c.handle_signal(_ring(place="P1", ac="A", call_id=id3))
+    _drop_tasks(tasks)
+    assert [
+        p["state"] for p in _call_state_payloads(c._hass) if p["access_control_id"] == "A"
+    ] == [CALL_STATE_RINGING, CALL_STATE_IDLE, CALL_STATE_RINGING]

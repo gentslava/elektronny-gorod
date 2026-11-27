@@ -145,3 +145,59 @@ async def test_other_ac_ignored(hass: HomeAssistant, mock_api):
     })
     await hass.async_block_till_done()
     assert hass.states.get(entity_id).state == before
+
+
+async def test_displaced_ringing_sensor_transitions_idle_then_can_ring_again(
+    hass: HomeAssistant, mock_api
+):
+    """A-121: смена звонящего A→B снимает ringing с A (в idle), а следующий звонок A снова ringing."""
+    from datetime import timedelta
+    from homeassistant.util import dt as dt_util
+    from custom_components.elektronny_gorod.sip.call_controller import DoorbellCallController
+
+    mock_api.return_value.query_access_controls = AsyncMock(return_value=[
+        {
+            "id": "AC1",
+            "name": "Door 1",
+            "entrances": [{"id": "E1", "externalCameraId": 100, "name": "Вход 1", "allowOpen": True}],
+        },
+        {
+            "id": "AC2",
+            "name": "Door 2",
+            "entrances": [{"id": "E2", "externalCameraId": 200, "name": "Вход 2", "allowOpen": True}],
+        },
+    ])
+    eid_a = await _setup(hass)
+    ent_reg = er.async_get(hass)
+    eid_b = ent_reg.async_get_entity_id("sensor", DOMAIN, "elektronny_gorod_call_state_P1_AC2")
+    assert eid_a is not None and eid_b is not None
+
+    controller = DoorbellCallController(hass, mock_api.return_value, lambda: "FCMTOK")
+
+    def _sig(ac: str, call_id: str) -> dict:
+        deadline = (dt_util.utcnow() + timedelta(seconds=30)).isoformat()
+        return {
+            "event_type": "ring",
+            "place_id": "P1",
+            "access_control_id": ac,
+            "attributes": {"call_id": call_id, "call_invalidated": deadline},
+        }
+
+    with patch(
+        "custom_components.elektronny_gorod.sip.manager.SipManager.register_and_hold",
+        AsyncMock(return_value=False),
+    ):
+        controller.handle_signal(_sig("AC1", "c1"))
+        await hass.async_block_till_done()
+        assert hass.states.get(eid_a).state == "ringing"
+
+        controller.handle_signal(_sig("AC2", "c2"))
+        await hass.async_block_till_done()
+        assert hass.states.get(eid_a).state == "idle"
+        assert hass.states.get(eid_b).state == "ringing"
+
+        controller.handle_signal(_sig("AC1", "c3"))
+        await hass.async_block_till_done()
+        assert hass.states.get(eid_a).state == "ringing"
+        assert hass.states.get(eid_b).state == "idle"
+        controller._cancel_ring_timeout()

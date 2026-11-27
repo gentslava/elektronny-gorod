@@ -66,7 +66,6 @@
 
 ## Открытые вопросы
 
-- [ ] Делать ли redaction опциональным через `EG_DEBUG_AUTH=1` env var (ADR-0004 предлагает) — нужен feedback owner.
 
 ## Quality gate
 

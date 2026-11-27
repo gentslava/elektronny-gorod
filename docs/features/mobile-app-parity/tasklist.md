@@ -15,9 +15,9 @@ No task below authorizes code changes by itself; implementation starts after the
 
 ## Slice 0 — API/transport
 
-- [ ] **T-010** Add additive HTTP PUT support and unit tests. _Acceptance:_ JSON content type, timeout, auth and redacted logging match POST. _Plan:_ Slice 0.
+- **T-010 deferred.** Add PUT if a verified endpoint for keys or private-camera controls requires it.
 - [x] **T-011** Add typed, sanitized history API methods. _Acceptance:_ exact general/forpost URL, query/body and ID mapping pass; backend message is absent from DTO. Archive/11005 methods remain T-031. _Audit:_ A-50/A-58.
-- [ ] **T-012** Add guest/key/settings methods only when T-001/T-002/T-003 exists. _Acceptance:_ no guessed request field. _Audit:_ A-93..A-95.
+- **T-012 prerequisite.** Guest actions merged in PR #100/#101. Key and private-camera methods depend on T-002/T-003.
 
 ## Slice 1 — history events
 
@@ -71,7 +71,7 @@ No task below authorizes code changes by itself; implementation starts after the
 
 ```text
 T-004 ─► T-011 ─► T-020..T-033
-T-001 ─► T-012 ─► T-040..T-042
+T-001 ─► T-040..T-042
 T-002 ─► T-012 ─► T-050..T-052
 T-003 ─► T-012 ─► T-060..T-064
 all implemented slices ─► T-070..T-072
@@ -79,11 +79,7 @@ all implemented slices ─► T-070..T-072
 
 ## Progress
 
-| Status | Count |
-|---|---:|
-| done | 13 |
-| in progress | 0 |
-| pending | 20 |
+History, archive and guest actions have merged. Remaining implementation depends on captures T-002/T-003. Temporary access has a separate on-site check for a successful issue and revocation with `TEMP_PASS`.
 
 ## Quality gates
 

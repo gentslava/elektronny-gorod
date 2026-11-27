@@ -89,14 +89,14 @@ async def test_diagnostics_redacts_options(hass: HomeAssistant) -> None:
 
 
 async def test_diagnostics_keeps_non_sensitive(hass: HomeAssistant) -> None:
-    """Несекретные поля сохраняются — diagnostics должна быть полезной."""
+    """Несекретные поля сохраняются, а go2rtc_base_url маскируется (A-126/S-30)."""
     entry = _make_entry()
     entry.add_to_hass(hass)
 
     diag = await async_get_config_entry_diagnostics(hass, entry)
     data = diag["entry"]["data"]
     assert data["use_go2rtc"] is True
-    assert data["go2rtc_base_url"] == "http://127.0.0.1:1984"
+    assert data["go2rtc_base_url"] == REDACTED
 
 
 async def test_diagnostics_coordinator_snapshot_is_counts_only(
@@ -213,3 +213,57 @@ async def test_diagnostics_exposes_last_waf_block_alongside_counts(
             "request_id": "sp-r...90ab",
         },
     }
+
+
+@pytest.mark.parametrize("location", ["data", "options"])
+@pytest.mark.parametrize(
+    ("raw_url", "privacy_sentinels"),
+    [
+        (
+            "http://unit-user:unit-pass@go2rtc.invalid:1984",
+            ("unit-user", "unit-pass", "go2rtc.invalid"),
+        ),
+        (
+            "https://proxy.invalid/secret-proxy-token/go2rtc?token=query-secret#frag-secret",
+            ("proxy.invalid", "secret-proxy-token", "query-secret", "frag-secret"),
+        ),
+        (
+            "http://xn--abc.invalid:1984",
+            ("xn--abc.invalid",),
+        ),
+        (
+            "http://xn--",
+            ("xn--",),
+        ),
+        (
+            "http://127.0.0.1:1984",
+            ("127.0.0.1", "1984"),
+        ),
+        (
+            12345,
+            ("12345",),
+        ),
+    ],
+)
+async def test_diagnostics_redacts_go2rtc_base_url_secrets(
+    hass: HomeAssistant,
+    location: str,
+    raw_url: str | int,
+    privacy_sentinels: tuple[str, ...],
+) -> None:
+    """A-126/S-30: go2rtc_base_url полностью редактируется через TO_REDACT в data и options."""
+    data: dict[str, str | int] = {"access_token": "supersecret-access"}
+    options: dict[str, str | int] = {}
+    if location == "data":
+        data["go2rtc_base_url"] = raw_url
+    else:
+        options["go2rtc_base_url"] = raw_url
+
+    entry = MockConfigEntry(domain=DOMAIN, title="t", data=data, options=options)
+    entry.add_to_hass(hass)
+
+    diag = await async_get_config_entry_diagnostics(hass, entry)
+    blob = json.dumps(diag, default=str, ensure_ascii=False)
+    for sentinel in privacy_sentinels:
+        assert sentinel not in blob
+    assert diag["entry"][location]["go2rtc_base_url"] == REDACTED

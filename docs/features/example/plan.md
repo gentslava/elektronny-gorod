@@ -100,7 +100,6 @@ Hotfix-релиз patch+1 с revert при критическом регресс
 ## Open questions
 
 - [ ] Финальный список `SENSITIVE_KEYS`: `operator_id` включать или нет?
-- [ ] `EG_DEBUG_AUTH=1` env var override — нужен или нет?
 
 ## Quality gate
 

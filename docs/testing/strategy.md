@@ -33,16 +33,16 @@ Quality gates:
 
 | Область | Состояние |
 |---|---|
-| Локальный suite | Зелёный на обоих пинах матрицы CI: `PYTHONPATH=. .venv/bin/pytest tests/ -q`. `.venv` собран под пин CI `PHC_CURRENT`; минимальный пин (HA и PHC заданы в матрице `python-tests.yaml`, отдельной переменной под него нет) воспроизводится только в отдельном окружении — `.venv` для этого не годится. На минимальном пине пропускаются только тесты FCM, требующие `firebase-messaging`: пакет там не ставится. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
+| Локальный suite | Зелёный на обоих пинах матрицы CI: `PYTHONPATH=. .venv/bin/pytest tests/ -q`. `.venv` собран под пин CI `PHC_CURRENT`; минимальный пин (HA и PHC заданы в матрице `python-tests.yaml`, отдельной переменной под него нет) воспроизводится только в отдельном окружении — `.venv` для этого не годится. Тесты FCM пропускаются, если отсутствует `firebase-messaging`. Тесты с реальным ремультиплексированием пропускаются в окружениях без PyAV. Статический анализ — `.venv/bin/pyright` без флагов: `pyrightconfig.json` указывает на `.venv`, поэтому типы берутся из того же ядра, что и тесты. Без этого pyright молча резолвит первый `python` в PATH и выдаёт ошибки чужого окружения — на этом уже терялся круг ревью. |
 | Test modules | `tests/test_*.py`; общие fixtures в `tests/conftest.py` |
 | Frontend | Vitest, `tsc --noEmit` и production bundle build |
 | Product website | Vitest, `tsc --noEmit` и Vite production build (`website/`) |
 | Config flow / migrations | Реальные PHC-тесты трёх auth-веток, reauth/abort и v1→v2→v3 (A-73 закрыт) |
-| Security / crypto | redaction including production-format config-entry title, diagnostics, HTTP no-leak, golden vectors helpers, deterministic secret-log scanner |
+| Security / crypto | redaction including production-format config-entry title, diagnostics (в т.ч. полная маска `CONF_GO2RTC_BASE_URL` в `TO_REDACT`, A-126/S-30), HTTP no-leak, golden vectors helpers, deterministic secret-log scanner |
 | AIDD gates | Canonical secret/reconciliation hooks; Claude/Codex adapters; candidate-SHA CI, stacked target-ref, role/command/rule parity, thin adapters и path-fence contracts |
-| Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink |
-| Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown |
-| Camera discovery (#97 / A-119 candidate) | новые camera IDs после setup, привязка к существующему Intercom, повторные обновления без дублей, сохранение disabled/hidden и пользовательского выбора, unload listener; реальный registry event с loop-bound prompt reconcile |
+| Realtime intercom | FCM, SIP message/register/protocol/dialog/RTP, controller, audio bridge/uplink, cleanup при отмене/`OSError` в `answer`/`accept`/`register_and_hold` без go2rtc `DELETE` для непубликованного моста (A-122) и сброс `call_state` вытесненной панели в `idle` с `(place_id, access_control_id, call_id)` dedup (A-121) |
+| Camera / go2rtc | lifecycle, auto-recovery, PATCH-only stream + preload client, manager scheduling/reconcile/dedup, producer health, credential-free diagnostics, call-stream teardown; сохранение `user_shown`/`we_set_integration` через реальный API и единый разбор `/settings/screens` при сбое/дрейфе по месту без блокировки соседних мест (A-116) |
+| Camera discovery (#97 / A-125) | новые camera IDs после setup, привязка к существующему Intercom, повторные обновления без дублей, сохранение disabled/hidden и пользовательского выбора, unload listener; реальный registry event с loop-bound prompt reconcile |
 | Durable history | exact captured wire contracts, PII-safe DTO, per-source silent baseline, bounded restart dedup, config-entry EventEntity routing, entity authorization и on-demand previous-page browse |
 | Эмуляция клиента | `user_agent`: идентификаторы устройства переживают перезагрузку, версия приложения следует за константой (A-119) |
 | Home invitation | приглашение в дом (`create_home_invite`): контракт запроса против приложения, экранирование query, отказ на 401 через настоящий `http.py` без разбора тела как JSON, admin-гейт и отказ вызову без пользователя, маршрут к записи-владельцу адреса, отказ не-адресу и выгруженной записи, `SupportsResponse.ONLY`, проекция `{link,message}`, отказ на пустую ссылку и на ответ не той формы сквозь настоящий разбор, пин ключа `link` в редакции, sentinel по журналу на транспорте и на действии |
@@ -133,13 +133,9 @@ External RTSP options (`test_config_flow_keep_warm.py`): both flags default fals
 
 С mocked `ElektronnyGorodAPI`:
 
-- `test_first_refresh_loads_places`.
-- `test_get_cameras_info_dedupes_by_id`.
-- `test_get_locks_info_handles_no_entrances`.
-- `test_get_balances_info_skips_empty_finance`.
-- `test_update_balance_state_returns_dict`.
-- `test_update_camera_state_finds_by_id` — этот тест **поймает баг** `c.get("ID")` (см. PROJECT_AUDIT P0 #5).
-- `test_update_lock_state_handles_missing_access_control`.
+- `test_query_screens_settings_called_once_per_refresh`.
+- `test_query_access_controls_called_once_per_refresh`.
+- `test_data_still_correct_after_dedup`.
 
 ### 5. API / HTTP (`test_http.py`, `test_api_push.py`, `test_api_history.py`, `test_api_sip.py`)
 

@@ -1,4 +1,4 @@
-Status: Active Owner: Lead Architect Agent Last reviewed: 2026-11-26 (A-92 merged in PR #108)
+Status: Active Owner: Lead Architect Agent Last reviewed: 2026-11-27 (backlog reconciled with master d4e0512)
 
 Source files:
 - весь репозиторий — это сжатый обзор
@@ -31,7 +31,7 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - **Опция:** прокси видео через [go2rtc](https://github.com/AlexxIT/go2rtc) и default-off публикация enabled камер по stable external RTSP (A-96/ADR-0014); go2rtc API/RTSP Basic Auth поддерживается.
 - **Версия:** см. [`manifest.json`](../custom_components/elektronny_gorod/manifest.json).
 - **Codeowner:** [@gentslava](https://github.com/gentslava).
-- **PR pre-release:** [`prerelease.yaml`](../.github/workflows/prerelease.yaml) собирает zip в артефакт, [`prerelease-publish.yaml`](../.github/workflows/prerelease-publish.yaml) публикует его как pre-release `pr-N`. Для PR из форка публикация требует метки `prerelease` — токен такого PR read-only, а его zip недоверенный.
+- **PR pre-release:** [`prerelease.yaml`](../.github/workflows/prerelease.yaml) собирает zip в артефакт, [`prerelease-publish.yaml`](../.github/workflows/prerelease-publish.yaml) публикует его как pre-release `pr-N`. Внешний fork-PR требует одобрения запуска. Публикация выполняется отдельным workflow из основного репозитория.
 
 ## Состояние (на 2026-08-14)
 
@@ -68,46 +68,28 @@ Home Assistant **custom integration** [`elektronny_gorod`](../custom_components/
 - **FCM reliability hotfix (4.0.1):** production-формат `Crypto-Key: dh=…; p256ecdsa=…` нормализуется до чтения зависимостью; конечный dependency fuse исключает горячий цикл на мёртвом socket, а per-entry circuit breaker ограничивает повторные подключения и публикует Repairs (A-80/A-86, PR #78).
 - **External RTSP track:** PATCH-only registration провалилась live на пяти lazy streams. Revised per-entry manager делает initial mint→PATCH→preload, проверяет stream/preload/active producer, сохраняет 28:30 non-disruptive PATCH и снимает preloads при cleanup/unload. Pre-mint publication gate не даёт excluded hidden cameras кратковременно попадать в go2rtc и убирает их setup-time operator requests. Publication checkbox changes применяются к живому manager без config-entry reload и массового producer churn; ручное включение запускает missing cameras коротким 0.5s ramp вместо jitter до 60s. Background gate не мешает явному открытию enabled hidden camera в HA даже во время setup: она лениво регистрируется без preload. Для proxy recovery manager обновляет upstream PATCH-ем, не вызывая `Stream.update_source()` с тем же стабильным URL и не оставляя orphan HA worker. Stop дожидается running reconcile и снимает pending preload; manager-eligible streams не дублируют 28:30 entity proactive timer (A-82/A-96, ADR-0014). Повторный production checklist и релиз 4.0.0 завершены 2026-07-16.
 
-## Главные риски (на 2026-08-14)
+## Актуальная очередь
 
-> Все исторические P0 token-leaks **закрыты** (verified по коду). Текущие
-> открытые риски — reliability + test-debt, не утечки секретов.
+По итогам сверки `master` и [аудита](audit/project-audit.md) известных открытых P0 нет. Исторические исправления и принятые ограничения описаны в [аудите безопасности](audit/security.md).
 
-### P1 — важные
+1. **P1 · A-126 / S-30.** Маскировать URL go2rtc в diagnostics. Секрет подтвердили в синтетической выгрузке из `data` и `options`.
+2. **P1 · A-122.** Освобождать SIP/RTP и аудиомост при отмене `answer`. После отмены следующий вызов должен подключаться без перезапуска HA.
+3. **P2 · A-121.** Сбрасывать сенсор вытесненной панели при звонке с другой панели. Повторный звонок первой должен снова дать переход в `ringing`.
+4. **A-116.** Сохранять пользовательский выбор видимости при отказе `/settings/screens` на старте. Обновлять реестр, когда пришёл достоверный ответ.
+5. **A-21 / S-10.** Оценить короткий retry/backoff для выбранных идемпотентных чтений. Ограничить бюджет и сохранить штатную обработку 401/403; таймауты уже есть.
 
-1. 🟡 **`ClientTimeout` на operator API — timeout закрыт, retry остаётся.** `http.py` теперь шлёт явный `ClientTimeout` (REST 30с / binary 60с, connect 10с) — commit `3885bb0`. Осталось: retry/backoff для идемпотентных GET (follow-up, POST/login/open_lock не идемпотентны — ADR-0006). (A-21 / S-09)
-2. ✅ **config_flow + миграции v1→2→3 — покрыты тестами** (`3a60b15`): `test_config_flow.py` (3 ветки auth + go2rtc + abort/reauth) + `test_init.py` (миграции). Bronze config-flow gate закрыт. (A-73)
-3. ✅ **`helpers.py` crypto — golden vectors добавлены** (`362237b`, `test_helpers.py`): регрессия ловит тихий breakage формулы. (A-74)
-4. **Reconfigure flow отсутствует** (A-26 — Gold) — остаётся открытым. Native reauth (A-25) сделан: при 401 HA запускает reauth-flow.
-5. ✅ **External RTSP after idle (A-96)** — preload revision, regression suite и live acceptance завершены. После manual go2rtc restart обезличенный snapshot подтвердил `3/3` active producer/preload consumer и рост входящих данных; предыдущие toggle/startup/hidden/orphan-consumer сценарии также пройдены.
+## Проверки на установке и в GitHub
 
-✅ Закрыто в 3.3.0: `diagnostics.py` с redaction (A-23 / S-08; S-16 mitigated) — SECURITY_OK разблокирован.
+- **A-120.** Проверить отбой звонка при открытии двери и действии «Отклонить» на реальной панели. Код в `master`.
+- **A-124.** Проверить первый кадр идущей записи в медиабраузере на реальном потоке оператора. Старт через HA Media Source подтверждён на синтетическом FLV.
+- **A-118 и A-84.** Для временного доступа требуется аккаунт с `TEMP_PASS`; для go2rtc — проверка сохранённого конфига после нескольких обновлений URL и рестарта.
+- **A-125.** Обнаружение камер уже проверено автором #97 на бете. Фикс входит в следующий стабильный релиз.
 
-### P2 — желательно
+## Отложенные задачи
 
-- FCM остаётся на приватных Google API и неофициальном operator push-контракте. Зафиксированный production-дефект исправлен локальной нормализацией и bounded recovery, но долгосрочная совместимость внешней зависимости не гарантируется (A-80).
-- go2rtc persistent-config bloat частично mitigated PATCH-only path, но требует live persistence check (A-84).
-- `api.py` — `e.args[0]` antipattern + широкий `except Exception` (A-19/A-20).
-- ✅ **Обработка блокировок ServicePipe (A-92)** — интеграция показывает `waf_blocked` при входе и сохраняет `last_waf_block` в диагностике. Изменения вошли в `master` с PR #108.
-- Cold-start go2rtc warmup (A-67), lock fake-state cosmetic-cycle (A-15 — `asyncio.sleep` уже убран).
-
-### Mobile-app parity backlog
-
-AVD/HAR/APK analysis оформлен в отдельный [`feature package`](features/mobile-app-parity/README.md). Durable event history реализована в PR #70, archive/Media Source (A-50/A-59) — в PR #81 и выпуске 4.1.0; приглашение в дом (A-93) — response action `create_home_invite`; в backlog остаются ключи доступа (A-94), настройки личных камер (A-95) и временный доступ (A-118). Write paths подтверждаются HAR или живой пробой, иначе идут static-only по ADR-0006; enum — только из наблюдённых значений. Guest links, key codes and signed media URLs не допускаются в entity state, recorder, diagnostics или логи.
-
-Полный список — в [`audit/project-audit.md`](audit/project-audit.md).
-
-## Первое, что нужно сделать
-
-Оставшийся reliability / quality-долг (по убыванию ценности):
-
-1. Retry/backoff helper для идемпотентных operator GET (5xx / connection errors) — остаток A-21.
-2. Узкие исключения в `api.py` вместо `e.args[0]`/`except Exception` (A-19/A-20).
-3. Reconfigure flow (A-26 — Gold).
-
-Feature backlog независим от reliability queue; порядок зафиксирован в [`mobile-app-parity/tasklist.md`](features/mobile-app-parity/tasklist.md): history/archive → guest invite → enabled-account keys → private-camera hardware.
-
-✅ Сделано в этом цикле: `http.py` ClientTimeout (A-21 timeout, `3885bb0`), `test_config_flow.py` + `test_init.py` (A-73, `3a60b15`), `test_helpers.py` golden vectors (A-74, `362237b`). `diagnostics.py` (A-23) закрыт ещё в 3.3.0.
+- **A-22 / S-07.** Native reauth уже работает. Автообновление токена зависит от подтверждения момента refresh в официальном приложении.
+- **A-19/A-20/A-55, A-26, A-83.** HTTP-исключения и освобождение ответа SMS, reconfigure и рефакторинг восстановления потока остаются техническим долгом.
+- **A-94/A-95.** Ключи доступа и настройки личных камер зависят от подтверждения API на подходящем аккаунте или устройстве. План в [mobile-app parity](features/mobile-app-parity/tasklist.md).
 
 ## AIDD-структура
 

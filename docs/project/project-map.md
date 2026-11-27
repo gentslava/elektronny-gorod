@@ -234,7 +234,7 @@ elektronny-gorod/
 |---|---|---|
 | [`helpers.py`](../../custom_components/elektronny_gorod/helpers.py) | `find`, `dedupe_by_id`, `hash_password` (SHA1+base64), `hash_password_timestamp` (MD5 с reverse-engineered prefix/secret) | ⚠️ hardcoded «соль» |
 | [`user_agent.py`](../../custom_components/elektronny_gorod/user_agent.py) | эмуляция Android (Pixel 6-10) — выбирается случайно | ⚠️ ToS-зона серого |
-| [`time.py`](../../custom_components/elektronny_gorod/time.py) | timestamp для auth | ⚠️ local time, не UTC |
+| [`time.py`](../../custom_components/elektronny_gorod/time.py) | timestamp для auth | UTC (A-31/A-117) |
 | [`const.py`](../../custom_components/elektronny_gorod/const.py) | константы, APP_VERSION, ANDROID_DEVICES | — |
 
 ### Локализация
@@ -301,7 +301,7 @@ elektronny-gorod/
 | [`hacs.yaml`](../../.github/workflows/hacs.yaml) | push / PR / dispatch | HACS validation |
 | [`python-tests.yaml`](../../.github/workflows/python-tests.yaml) | push / PR | pytest matrix: минимальная и текущая HA |
 | [`prerelease.yaml`](../../.github/workflows/prerelease.yaml) | PR opened / sync | сборка pre-release ZIP в артефакт; релиз не создаёт (для форка токен read-only) |
-| [`prerelease-publish.yaml`](../../.github/workflows/prerelease-publish.yaml) | завершение `PR Pre-Release` | публикует pre-release `pr-N`; PR из форка — только по метке `prerelease` |
+| [`prerelease-publish.yaml`](../../.github/workflows/prerelease-publish.yaml) | завершение `PR Pre-Release` | публикует pre-release `pr-N`; запуск для внешнего fork-PR требует одобрения |
 | [`prerelease-cleanup.yaml`](../../.github/workflows/prerelease-cleanup.yaml) | PR closed | удаляет pre-release и тег `pr-N` |
 | [`release.yaml`](../../.github/workflows/release.yaml) | release published | zip + GH release + автокоммит версии |
 | [`website.yml`](../../.github/workflows/website.yml) | push `master` с `website/**` / dispatch | typecheck + Vitest + Vite build → GitHub Pages |
@@ -319,7 +319,7 @@ Backend, integration frontend и website checks настроены; состав
 **Python-зависимости:**
 - из HA core (`aiohttp`, `voluptuous`, `yarl`);
 - `manifest.json:requirements` — `firebase-messaging>=0.4.5` (FCM-приём события вызова, ADR-0011; проверенный minimum для shared `aiohttp` session; новые версии разрешены при следующей установке или повторном разрешении зависимости, но существующая `0.4.5` проактивно не обновляется; тянет protobuf / http_ece / cryptography);
-- HA core предоставляет `audioop-lts` уже в минимальной HA 2026.8.1; `sip/audio.py` использует его для G.711-транскода (A-81). В manifest интеграции он не повторяется: hassfest запрещает дублировать зависимости ядра (A-119).
+- HA core предоставляет `audioop-lts` уже в минимальной HA 2026.8.1; `sip/audio.py` использует его для G.711-транскода (A-81). В manifest интеграции он не повторяется: hassfest запрещает дублировать зависимости ядра (PR #99 / A-125).
 
 ## Maintenance rules
 

@@ -19,6 +19,7 @@ from .coordinator import async_get_coordinator
 from .const import (
     CONF_ACCOUNT_ID,
     CONF_CONTRACT,
+    CONF_GO2RTC_BASE_URL,
     CONF_OPERATOR_ID,
     CONF_PHONE,
     CONF_SUBSCRIBER_ID,
@@ -27,14 +28,16 @@ from .const import (
 from .http import redact_request_id
 
 # Источник правды по секретам — SENSITIVE_KEYS из _logging.py (ADR-0004).
-# Дополняем PII-идентификаторами, которые не секреты, но не должны утекать в
-# публично расшаренную diagnostics-выгрузку.
+# Дополняем PII-идентификаторами и CONF_GO2RTC_BASE_URL (URL может содержать
+# userinfo, токен в path reverse proxy или query-параметрах и не требуется в
+# публичном контракте diagnostics — A-126 / S-30).
 TO_REDACT: frozenset[str] = SENSITIVE_KEYS | {
     CONF_PHONE,
     CONF_CONTRACT,
     CONF_OPERATOR_ID,
     CONF_ACCOUNT_ID,
     CONF_SUBSCRIBER_ID,
+    CONF_GO2RTC_BASE_URL,
     "title",
     "name",
     "address",
